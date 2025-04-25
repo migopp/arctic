@@ -28,21 +28,26 @@ impl Art {
 
             match walk.load() {
                 Some(Walk::Leaf(_)) => unreachable!(),
-                Some(Walk::Node { header, node }) => {
+                Some(Walk::Node { header: _, node }) => {
                     let Some((next, key_)) = key.split_first() else {
                         unreachable!()
                     };
 
-                    key = key_;
-                    walk = node
-                        .get_or_insert(*next)
-                        .expect("Expansion not implemented");
+                    match node.get_or_insert(*next) {
+                        None => {
+                            walk.store(node.expand());
+                        }
+                        Some(walk_) => {
+                            key = key_;
+                            walk = walk_;
+                        }
+                    }
                 }
                 None => {
-                    let node = Box::<(Header, Node4)>::new((
+                    let node = Box::new((
                         Header {
                             kind: Kind::N4,
-                            _pad: [0; 3],
+                            _pad: [0; 7],
                         },
                         Node4::default(),
                     ));
@@ -90,6 +95,13 @@ impl<'a> NodeRef<'a> {
             NodeRef::N256(node) => node.get(byte),
         }
     }
+
+    fn expand(&self) -> *mut Header {
+        match self {
+            NodeRef::N4(node) => node.expand(),
+            NodeRef::N256(_) => unreachable!(),
+        }
+    }
 }
 
 #[repr(C)]
@@ -108,7 +120,7 @@ impl Node4 {
         self.keys
             .iter()
             .zip(&self.pointers)
-            .find(|(key, pointer)| key.load(Ordering::Relaxed) == 0 && pointer.load().is_none())
+            .find(|(_, pointer)| pointer.is_null())
             .map(|(key, pointer)| {
                 key.store(byte, Ordering::Relaxed);
                 pointer
@@ -124,9 +136,37 @@ impl Node4 {
                 false => None,
             })
     }
+
+    fn expand(&self) -> *mut Header {
+        let node = Box::new((
+            Header {
+                kind: Kind::N256,
+                _pad: [0; 7],
+            },
+            Node256::default(),
+        ));
+
+        self.keys
+            .iter()
+            .zip(&self.pointers)
+            .filter(|(_, pointer)| !pointer.is_null())
+            .for_each(|(key, pointer)| {
+                Ptr::copy(pointer, &node.1 .0[key.load(Ordering::Relaxed) as usize])
+            });
+
+        let node = Box::leak(node);
+        node as *mut _ as _
+    }
 }
 
+#[repr(C)]
 struct Node256([Ptr; 256]);
+
+impl Default for Node256 {
+    fn default() -> Self {
+        Self(std::array::from_fn(|_| Ptr::default()))
+    }
+}
 
 impl Node256 {
     fn get_or_insert(&self, byte: u8) -> Option<&Ptr> {
@@ -159,20 +199,14 @@ enum Kind {
 #[repr(C)]
 struct Header {
     kind: Kind,
-    _pad: [u8; 3],
+    _pad: [u8; 7],
 }
 
-const _: () = assert!(size_of::<Header>() == 4);
+const _: () = assert!(size_of::<Header>() == 8);
 
 impl Ptr {
     const LEAF: u64 = 1 << 63;
-    const MASK_KIND: u64 = 0b11 << 61;
-
-    // fn leaf(pointer: *mut T) -> Self {
-    //     Self(AtomicPtr::new(
-    //         pointer.map_addr(|address| address | Self::LEAF),
-    //     ))
-    // }
+    // const MASK_KIND: u64 = 0b11 << 61;
 
     fn is_null(&self) -> bool {
         self.0.load(Ordering::Relaxed).is_null()
@@ -181,6 +215,11 @@ impl Ptr {
     fn store_leaf(&self, next: u64) {
         self.0
             .store((next | Self::LEAF) as *mut _, Ordering::Relaxed)
+    }
+
+    fn copy(source: &Ptr, dest: &Ptr) {
+        dest.0
+            .store(source.0.load(Ordering::Relaxed), Ordering::Relaxed);
     }
 
     fn store(&self, next: *mut Header) {
@@ -240,12 +279,44 @@ mod tests {
     fn node4_full() {
         let art = Art::default();
 
-        for key in [1, 2, 3, 4] {
+        const KEYS: [u8; 4] = [1, 2, 3, 4];
+
+        for key in KEYS {
             art.insert(&[key], key as u64);
             assert_eq!(art.get(&[key]), Some(key as u64));
         }
 
-        for key in [1, 2, 3, 4] {
+        for key in KEYS {
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
+    }
+
+    #[test]
+    fn node4_expand() {
+        let art = Art::default();
+
+        const KEYS: [u8; 5] = [1, 2, 3, 4, 5];
+
+        for key in KEYS {
+            art.insert(&[key], key as u64);
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
+
+        for key in KEYS {
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
+    }
+
+    #[test]
+    fn node256_full() {
+        let art = Art::default();
+
+        for key in 0..=255 {
+            art.insert(&[key], key as u64);
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
+
+        for key in 0..=255 {
             assert_eq!(art.get(&[key]), Some(key as u64));
         }
     }
