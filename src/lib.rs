@@ -1,12 +1,11 @@
 use core::sync::atomic::AtomicPtr;
+use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 
 #[derive(Default)]
 pub struct Art {
     root: Ptr,
 }
-
-struct Node256([Ptr; 256]);
 
 impl Art {
     pub fn new() -> Self {
@@ -21,7 +20,7 @@ impl Art {
                 let old = walk.load();
                 walk.store_leaf(value);
                 return match old {
-                    Some(Walk::Node(_)) => unreachable!(),
+                    Some(Walk::Node { .. }) => unreachable!(),
                     Some(Walk::Leaf(old)) => Some(old),
                     None => None,
                 };
@@ -29,20 +28,27 @@ impl Art {
 
             match walk.load() {
                 Some(Walk::Leaf(_)) => unreachable!(),
-                Some(Walk::Node(Header { node })) => {
+                Some(Walk::Node { header, node }) => {
                     let Some((next, key_)) = key.split_first() else {
                         unreachable!()
                     };
 
                     key = key_;
-                    walk = &node.0[*next as usize];
+                    walk = node
+                        .get_or_insert(*next)
+                        .expect("Expansion not implemented");
                 }
                 None => {
-                    let header = Box::<Header>::new(Header {
-                        node: Node256(std::array::from_fn(|_| Ptr::default())),
-                    });
-                    let header = Box::leak(header);
-                    walk.store(header);
+                    let node = Box::<(Header, Node4)>::new((
+                        Header {
+                            kind: Kind::N4,
+                            _pad: [0; 3],
+                        },
+                        Node4::default(),
+                    ));
+
+                    let node = Box::leak(node);
+                    walk.store(node as *mut _ as _);
                 }
             }
         }
@@ -53,10 +59,10 @@ impl Art {
 
         loop {
             match walk {
-                Walk::Node(Header { node }) => {
+                Walk::Node { header: _, node } => {
                     let (next, key_) = key.split_first()?;
                     key = key_;
-                    walk = node.0[*next as usize].load()?;
+                    walk = node.get(*next)?.load()?;
                 }
                 Walk::Leaf(value) if key.is_empty() => break Some(value),
                 Walk::Leaf(_) => break None,
@@ -65,26 +71,86 @@ impl Art {
     }
 }
 
-// enum NodeRef<'a> {
-//     N4(&'a ()),
-// }
+enum NodeRef<'a> {
+    N4(&'a Node4),
+    N256(&'a Node256),
+}
 
-// #[repr(C)]
-// struct Node4 {
-//     keys: [u8; 4],
-//     pointers: [Ptr; 4],
-// }
+impl<'a> NodeRef<'a> {
+    fn get_or_insert(&self, byte: u8) -> Option<&'a Ptr> {
+        match self {
+            NodeRef::N4(node) => node.get_or_insert(byte),
+            NodeRef::N256(node) => node.get_or_insert(byte),
+        }
+    }
+
+    fn get(&self, byte: u8) -> Option<&'a Ptr> {
+        match self {
+            NodeRef::N4(node) => node.get(byte),
+            NodeRef::N256(node) => node.get(byte),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct Node4 {
+    keys: [AtomicU8; 4],
+    pointers: [Ptr; 4],
+}
+
+impl Node4 {
+    fn get_or_insert(&self, byte: u8) -> Option<&Ptr> {
+        if let Some(pointer) = self.get(byte) {
+            return Some(pointer);
+        }
+
+        self.keys
+            .iter()
+            .zip(&self.pointers)
+            .find(|(key, pointer)| key.load(Ordering::Relaxed) == 0 && pointer.load().is_none())
+            .map(|(key, pointer)| {
+                key.store(byte, Ordering::Relaxed);
+                pointer
+            })
+    }
+
+    fn get(&self, byte: u8) -> Option<&Ptr> {
+        self.keys
+            .iter()
+            .zip(&self.pointers)
+            .find_map(|(key, pointer)| match key.load(Ordering::Relaxed) == byte {
+                true => Some(pointer),
+                false => None,
+            })
+    }
+}
+
+struct Node256([Ptr; 256]);
+
+impl Node256 {
+    fn get_or_insert(&self, byte: u8) -> Option<&Ptr> {
+        self.get(byte)
+    }
+
+    fn get(&self, byte: u8) -> Option<&Ptr> {
+        Some(&self.0[byte as usize])
+    }
+}
 
 #[derive(Default)]
 struct Ptr(AtomicPtr<Header>);
 
 enum Walk<'a> {
-    Node(&'a Header),
+    Node {
+        header: &'a Header,
+        node: NodeRef<'a>,
+    },
     Leaf(u64),
 }
 
 enum Kind {
-    // N4,
+    N4,
     // N16,
     // N48,
     N256,
@@ -92,9 +158,11 @@ enum Kind {
 
 #[repr(C)]
 struct Header {
-    // kind: Kind,
-    node: Node256,
+    kind: Kind,
+    _pad: [u8; 3],
 }
+
+const _: () = assert!(size_of::<Header>() == 4);
 
 impl Ptr {
     const LEAF: u64 = 1 << 63;
@@ -112,7 +180,7 @@ impl Ptr {
 
     fn store_leaf(&self, next: u64) {
         self.0
-            .store(dbg!((next | Self::LEAF) as *mut _), Ordering::Relaxed)
+            .store((next | Self::LEAF) as *mut _, Ordering::Relaxed)
     }
 
     fn store(&self, next: *mut Header) {
@@ -123,10 +191,19 @@ impl Ptr {
         let tagged = self.0.load(Ordering::Relaxed);
         let untagged = Self::untag(tagged);
 
-        match Self::is_leaf(tagged) {
-            true => Some(Walk::Leaf(untagged as u64)),
-            false => unsafe { untagged.as_ref() }.map(Walk::Node),
+        if Self::is_leaf(tagged) {
+            return Some(Walk::Leaf(untagged as u64));
         }
+
+        let header = unsafe { untagged.as_ref() }?;
+        let node = match header.kind {
+            Kind::N4 => NodeRef::N4(unsafe { untagged.add(1).cast::<Node4>().as_ref().unwrap() }),
+            Kind::N256 => {
+                NodeRef::N256(unsafe { untagged.add(1).cast::<Node256>().as_ref().unwrap() })
+            }
+        };
+
+        Some(Walk::Node { header, node })
     }
 
     fn untag(address: *mut Header) -> *mut Header {
@@ -135,5 +212,41 @@ impl Ptr {
 
     fn is_leaf(address: *mut Header) -> bool {
         address.addr() as u64 & Self::LEAF > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Art;
+
+    #[test]
+    fn smoke() {
+        let art = Art::default();
+        art.insert(b"abcd", 1);
+        assert_eq!(art.get(b"abcd"), Some(1));
+    }
+
+    #[test]
+    fn node4_overwrite() {
+        let art = Art::default();
+
+        for value in [1, 2, 3, 4] {
+            art.insert(&[1], value as u64);
+            assert_eq!(art.get(&[1]), Some(value as u64));
+        }
+    }
+
+    #[test]
+    fn node4_full() {
+        let art = Art::default();
+
+        for key in [1, 2, 3, 4] {
+            art.insert(&[key], key as u64);
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
+
+        for key in [1, 2, 3, 4] {
+            assert_eq!(art.get(&[key]), Some(key as u64));
+        }
     }
 }
