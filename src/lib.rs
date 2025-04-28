@@ -44,13 +44,7 @@ impl Art {
                     }
                 }
                 None => {
-                    let node = Box::new((
-                        Header {
-                            kind: Kind::N4,
-                            _pad: [0; 7],
-                        },
-                        Node4::default(),
-                    ));
+                    let node = Box::new((Header::new_4(), Node4::default()));
 
                     let node = Box::leak(node);
                     walk.store(node as *mut _ as _);
@@ -138,13 +132,7 @@ impl Node4 {
     }
 
     fn expand(&self) -> *mut Header {
-        let node = Box::new((
-            Header {
-                kind: Kind::N256,
-                _pad: [0; 7],
-            },
-            Node256::default(),
-        ));
+        let node = Box::new((Header::new_256(), Node256::default()));
 
         self.keys
             .iter()
@@ -198,11 +186,39 @@ enum Kind {
 
 #[repr(C)]
 struct Header {
+    prefix: Prefix,
+    level: u8,
     kind: Kind,
-    _pad: [u8; 7],
+    _pad: [u8; 6],
 }
 
-const _: () = assert!(size_of::<Header>() == 8);
+impl Header {
+    pub fn new_4() -> Self {
+        Self {
+            prefix: Prefix::default(),
+            level: 0,
+            kind: Kind::N4,
+            _pad: [0; 6],
+        }
+    }
+    pub fn new_256() -> Self {
+        Self {
+            prefix: Prefix::default(),
+            level: 0,
+            kind: Kind::N256,
+            _pad: [0; 6],
+        }
+    }
+}
+
+#[ribbit::pack(size = 64)]
+#[derive(Default)]
+struct Prefix {
+    len: u8,
+    bytes: u56,
+}
+
+const _: () = assert!(size_of::<Header>() == 16);
 
 impl Ptr {
     const LEAF: u64 = 1 << 63;
