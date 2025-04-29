@@ -1,6 +1,16 @@
-use core::sync::atomic::AtomicPtr;
-use core::sync::atomic::AtomicU8;
-use core::sync::atomic::Ordering;
+#[cfg(not(feature = "loom"))]
+mod sync {
+    pub(crate) use core::sync::*;
+}
+
+#[cfg(feature = "loom")]
+mod sync {
+    pub(crate) use loom::sync::*;
+}
+
+use sync::atomic::AtomicPtr;
+use sync::atomic::AtomicU8;
+use sync::atomic::Ordering;
 
 #[derive(Default)]
 pub struct Art {
