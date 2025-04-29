@@ -27,13 +27,7 @@ impl Art {
 
         loop {
             if key.is_empty() {
-                let old = walk.load();
-                walk.store_leaf(value);
-                return match old {
-                    Some(Walk::Node { .. }) => unreachable!(),
-                    Some(Walk::Leaf(old)) => Some(old),
-                    None => None,
-                };
+                return walk.compare_exchange_leaf(value);
             }
 
             match walk.load() {
@@ -45,7 +39,13 @@ impl Art {
 
                     match node.get_or_insert(*next) {
                         None => {
-                            walk.store(node.expand());
+                            let expand = node.expand();
+                            match walk.compare_exchange_n256(expand) {
+                                Ok(()) => (),
+                                Err(_) => unsafe {
+                                    drop(Box::from_raw(expand.cast::<(Header, Node256)>()));
+                                },
+                            }
                         }
                         Some(walk_) => {
                             key = key_;
@@ -57,7 +57,12 @@ impl Art {
                     let node = Box::new((Header::new_4(), Node4::default()));
 
                     let node = Box::leak(node);
-                    walk.store(node as *mut _ as _);
+                    match walk.compare_exchange_n4(node as *mut _ as _) {
+                        Ok(()) => (),
+                        Err(_) => unsafe {
+                            drop(Box::from_raw(node as *mut (Header, Node4)));
+                        },
+                    }
                 }
             }
         }
@@ -238,22 +243,96 @@ impl Ptr {
         self.0.load(Ordering::Relaxed).is_null()
     }
 
-    fn store_leaf(&self, next: u64) {
-        self.0
-            .store((next | Self::LEAF) as *mut _, Ordering::Relaxed)
-    }
-
     fn copy(source: &Ptr, dest: &Ptr) {
         dest.0
             .store(source.0.load(Ordering::Relaxed), Ordering::Relaxed);
     }
 
     fn store(&self, next: *mut Header) {
-        self.0.store(next, Ordering::Relaxed)
+        self.0.store(next, Ordering::Release)
     }
 
     fn load(&self) -> Option<Walk> {
-        let tagged = self.0.load(Ordering::Relaxed);
+        let tagged = self.0.load(Ordering::Acquire);
+        self.translate(tagged)
+    }
+
+    fn compare_exchange_n4(&self, new: *mut Header) -> Result<(), (&Header, NodeRef)> {
+        let old = match self.load() {
+            None => core::ptr::null_mut(),
+            Some(Walk::Leaf(_)) => unreachable!(),
+            Some(Walk::Node { header, node }) => return Err((header, node)),
+        };
+
+        loop {
+            match dbg!(self
+                .0
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire))
+            {
+                Ok(_) => return Ok(()),
+                Err(conflict) => match self.translate(conflict) {
+                    None => todo!(),
+                    Some(Walk::Leaf(_)) => unreachable!(),
+                    Some(Walk::Node { header, node }) => return Err((header, node)),
+                },
+            }
+        }
+    }
+
+    fn compare_exchange_n256(&self, new: *mut Header) -> Result<(), (&Header, NodeRef)> {
+        let old = match self.load() {
+            None | Some(Walk::Leaf(_)) => unreachable!(),
+            Some(Walk::Node { header, node }) => match header.kind {
+                Kind::N4 => header as *const _ as *mut _,
+                Kind::N256 => return Err((header, node)),
+            },
+        };
+
+        loop {
+            match dbg!(self
+                .0
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire))
+            {
+                Ok(_) => return Ok(()),
+                Err(conflict) => match self.translate(conflict) {
+                    None => todo!(),
+                    Some(Walk::Leaf(_)) => unreachable!(),
+                    Some(Walk::Node { header, node }) => return Err((header, node)),
+                },
+            }
+        }
+    }
+
+    fn compare_exchange_leaf(&self, new: u64) -> Option<u64> {
+        let mut old = match self.load() {
+            None => 0,
+            Some(Walk::Leaf(old)) => old | Self::LEAF,
+            Some(Walk::Node { .. }) => unreachable!(),
+        };
+
+        let new = (new | Self::LEAF) as *mut _;
+
+        loop {
+            match self
+                .0
+                .compare_exchange(old as *mut _, new, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(old) if old.is_null() => return None,
+                Ok(old) => return Some(Self::untag(old) as u64),
+                Err(conflict) => match self.translate(conflict) {
+                    None => old = 0,
+                    Some(Walk::Leaf(conflict)) => old = conflict | Self::LEAF,
+                    Some(Walk::Node { .. }) => unreachable!(),
+                },
+            }
+        }
+    }
+
+    fn translate(&self, tagged: *mut Header) -> Option<Walk> {
+        if tagged.is_null() {
+            return None;
+        }
+
         let untagged = Self::untag(tagged);
 
         if Self::is_leaf(tagged) {
