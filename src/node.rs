@@ -52,47 +52,56 @@ impl Slot {
 
         assert!(slot_len <= 8);
 
-        let match_len = slot_key
+        let prefix_len = slot_key
             .iter()
             .take(slot_len)
             .zip(search_key)
             .take_while(|(slot_byte, search_byte)| slot_byte == search_byte)
             .count();
 
-        *key = &key[match_len..];
+        *key = &key[prefix_len..];
 
         // Fast path: successful traversal
-        if search_len >= slot_len && slot_len == match_len {
-            return Traverse::Child(self.child());
+        if search_len >= slot_len && slot_len == prefix_len {
+            return Traverse::Walk(self.child());
         }
 
         assert!(
-            search_len >= slot_len || slot_len != match_len,
+            search_len >= slot_len || slot_len != prefix_len,
             "Precondition: no key is a prefix of another key",
         );
 
         // Split out matching prefix
         let mut split = slot_key;
-        split[match_len..].fill(0);
+        split[prefix_len..].fill(0);
         Traverse::Split(u64::from_be_bytes(split))
     }
 
-    fn child(&self) -> Option<Ref> {
+    fn child(&self) -> Tree {
         let pointer = self.next().value();
 
         match self.kind().unpack() {
-            <unpack![Kind]>::Null => None,
-            <unpack![Kind]>::Value => Some(Ref::Value(pointer as *mut u64 as *mut ())),
-            <unpack![Kind]>::Node3 => Some(Ref::Node3(pointer as *mut Node3)),
-            <unpack![Kind]>::Node256 => Some(Ref::Node256(pointer as *mut Node256)),
+            <unpack![Kind]>::Null => Tree::Leaf(None),
+            <unpack![Kind]>::Value => Tree::Leaf(Some(pointer as *mut u64 as *mut ())),
+            <unpack![Kind]>::Node3 => Tree::Node(Ref::Node3(pointer as *mut Node3)),
+            <unpack![Kind]>::Node256 => Tree::Node(Ref::Node256(pointer as *mut Node256)),
         }
     }
 }
 
 pub(crate) enum Ref {
-    Value(*mut ()),
     Node3(*mut Node3),
     Node256(*mut Node256),
+}
+
+impl Ref {
+    // FIXME: how to express lifetimes?
+    pub(crate) unsafe fn as_node<'art>(&self) -> &'art dyn Node {
+        match self {
+            Ref::Node3(node) => unsafe { node.as_ref().unwrap() },
+            Ref::Node256(node) => unsafe { node.as_ref().unwrap() },
+        }
+    }
 }
 
 #[ribbit::pack(size = 3)]
@@ -103,7 +112,12 @@ pub(crate) enum Kind {
     Node256,
 }
 
+pub(crate) enum Tree {
+    Leaf(Option<*mut ()>),
+    Node(Ref),
+}
+
 pub(crate) enum Traverse {
-    Child(Option<Ref>),
+    Walk(Tree),
     Split(u64),
 }

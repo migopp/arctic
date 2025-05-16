@@ -34,21 +34,17 @@ impl Art {
 
         loop {
             match slot.load(Ordering::Relaxed).traverse(&mut key) {
-                node::Traverse::Child(Some(node::Ref::Value(value))) if key.is_empty() => {
-                    break Some(value)
-                }
-                node::Traverse::Child(None | Some(node::Ref::Value(_))) => break None,
+                node::Traverse::Walk(node::Tree::Leaf(leaf)) if key.is_empty() => break leaf,
+                node::Traverse::Walk(node::Tree::Leaf(_)) => break None,
 
-                node::Traverse::Child(Some(node::Ref::Node3(node))) => todo!(),
-
-                node::Traverse::Child(Some(node::Ref::Node256(node))) => {
+                node::Traverse::Walk(node::Tree::Node(node)) => {
                     let (head, tail) = key.split_first()?;
-                    let node = unsafe { node.as_ref().unwrap() };
-                    slot = node.get(*head).unwrap();
+                    let node = unsafe { node.as_node() };
+                    slot = node.get(*head)?;
                     key = tail;
                 }
 
-                node::Traverse::Split(_) => todo!(),
+                node::Traverse::Split(prefix) => todo!(),
             }
         }
     }
