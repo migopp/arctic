@@ -1,25 +1,4 @@
-use ribbit::u48;
-
-#[ribbit::pack(size = 128)]
-struct Slot {
-    key: u64,
-    len: u8,
-
-    freeze: bool,
-    value: bool,
-    #[ribbit(size = 2)]
-    kind: Kind,
-    grow: bool,
-
-    #[ribbit(offset = 80)]
-    next: u48,
-}
-
-#[ribbit::pack(size = 2)]
-enum Kind {
-    N4,
-    N256,
-}
+mod node;
 
 #[derive(Default)]
 pub struct Art {
@@ -38,21 +17,6 @@ impl Art {
     pub fn get(&self, mut key: &[u8]) -> Option<u64> {
         todo!()
     }
-}
-
-#[repr(C)]
-struct Node256([Slot; 256]);
-
-enum Match<'a> {
-    Full {
-        slot: &'a Slot,
-    },
-
-    Partial {
-        slot: &'a Slot,
-        prefix: u8,
-        suffix: u8,
-    },
 }
 
 #[cfg(test)]
