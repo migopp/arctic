@@ -10,6 +10,8 @@ use node3::Node3;
 
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
+
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ()>;
 }
 
 #[ribbit::pack(size = 128)]
