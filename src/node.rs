@@ -29,6 +29,19 @@ pub(crate) struct Slot {
     next: u48,
 }
 
+impl Default for Slot {
+    fn default() -> Self {
+        Self::new(
+            0,
+            0,
+            false,
+            Kind::new(<unpack![Kind]>::Null),
+            false,
+            u48::new(0),
+        )
+    }
+}
+
 impl Slot {
     pub(crate) fn traverse(&self, key: &mut &[u8]) -> Traverse {
         let search_len = key.len();
@@ -70,16 +83,16 @@ impl Slot {
         match self.kind().unpack() {
             <unpack![Kind]>::Null => None,
             <unpack![Kind]>::Value => Some(Ref::Value(pointer as *mut u64 as *mut ())),
-            <unpack![Kind]>::Node3 => Some(Ref::Node3(unsafe { &*(pointer as *mut Node3) })),
-            <unpack![Kind]>::Node256 => Some(Ref::Node256(unsafe { &*(pointer as *mut Node256) })),
+            <unpack![Kind]>::Node3 => Some(Ref::Node3(pointer as *mut Node3)),
+            <unpack![Kind]>::Node256 => Some(Ref::Node256(pointer as *mut Node256)),
         }
     }
 }
 
-pub(crate) enum Ref<'a> {
+pub(crate) enum Ref {
     Value(*mut ()),
-    Node3(&'a Node3),
-    Node256(&'a Node256),
+    Node3(*mut Node3),
+    Node256(*mut Node256),
 }
 
 #[ribbit::pack(size = 3)]
@@ -90,7 +103,7 @@ pub(crate) enum Kind {
     Node256,
 }
 
-pub(crate) enum Traverse<'a> {
-    Child(Option<Ref<'a>>),
+pub(crate) enum Traverse {
+    Child(Option<Ref>),
     Split(u64),
 }
