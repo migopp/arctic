@@ -22,7 +22,6 @@ name = "art"
 version = "0.1.0"
 dependencies = [
  "lincheck",
- "loom",
  "proptest",
  "ribbit",
 ]
@@ -434,7 +433,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 [[package]]
 name = "ribbit"
 version = "0.1.0"
-source = "git+https://github.com/nwtnni/ribbit.git#159e0f5cfd79afbdf3c0c057706a43a080fa05fc"
+source = "git+https://github.com/nwtnni/ribbit.git#58893170467ffab7d0c5f57fd7a6b20a57bd6459"
 dependencies = [
  "arbitrary-int",
  "const_panic",
@@ -445,7 +444,7 @@ dependencies = [
 [[package]]
 name = "ribbit-derive"
 version = "0.1.0"
-source = "git+https://github.com/nwtnni/ribbit.git#159e0f5cfd79afbdf3c0c057706a43a080fa05fc"
+source = "git+https://github.com/nwtnni/ribbit.git#58893170467ffab7d0c5f57fd7a6b20a57bd6459"
 dependencies = [
  "bitvec",
  "darling",

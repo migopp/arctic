@@ -5,11 +5,9 @@ edition = "2021"
 
 [features]
 default = []
-loom = ["dep:loom"]
 
 [dependencies]
 ribbit.git = "https://github.com/nwtnni/ribbit.git"
-loom = { version = "0.7", optional = true }
 
 [dev-dependencies]
 lincheck.path = "lincheck"
