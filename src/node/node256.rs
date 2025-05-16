@@ -1,7 +1,8 @@
 use ribbit::atomic::A128;
 
-use crate::node::GetError;
+use crate::node;
 use crate::node::GrowError;
+use crate::node::ReserveError;
 use crate::node::Slot;
 use crate::Node;
 
@@ -13,11 +14,11 @@ impl Node for Node256 {
         Some(&self.0[key as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetError> {
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
         Ok(&self.0[key as usize])
     }
 
-    fn grow(&self, _parent: &A128<Slot>) -> Result<(), GrowError> {
+    fn grow(&self, _parent: &A128<Slot>) -> Result<node::Ref, GrowError> {
         unreachable!()
     }
 

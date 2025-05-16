@@ -13,7 +13,7 @@ pub(crate) trait Node {
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError>;
 
-    fn grow(&self, parent: &A128<Slot>) -> Result<(), GrowError>;
+    fn grow(&self, parent: &A128<Slot>) -> Result<Ref, GrowError>;
 
     fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
 }

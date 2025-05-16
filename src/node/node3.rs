@@ -5,6 +5,8 @@ use ribbit::atomic::A32;
 use ribbit::u24;
 use ribbit::u3;
 
+use crate::node;
+use crate::node::GrowError;
 use crate::node::ReserveError;
 use crate::node::Slot;
 use crate::Node;
@@ -68,7 +70,44 @@ impl Node for Node3 {
         }
     }
 
-    fn grow(&self, parent: &A128<Slot>) -> Result<(), super::GrowError> {
+    fn grow(&self, parent: &A128<Slot>) -> Result<node::Ref, GrowError> {
+        let mut old = self.header.load(Ordering::Relaxed);
+
+        if !old.freeze() {
+            match self.header.compare_exchange(
+                old,
+                old.with_freeze(true).with_grow(true),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => (),
+                Err(header) => {
+                    assert!(header.freeze());
+                    old = header;
+                }
+            }
+        }
+
+        for slot in &self.slots {
+            let old = slot.load(Ordering::Relaxed);
+
+            if old.freeze() {
+                continue;
+            }
+
+            // Safe to ignore result here
+            let _ = slot.compare_exchange(
+                old,
+                old.with_freeze(true),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            );
+        }
+
+        for (i, slot) in self.slots.iter().enumerate() {
+            let slot = slot.load(Ordering::Relaxed);
+        }
+
         todo!()
     }
 
@@ -104,9 +143,5 @@ impl Header {
         }
 
         Err(None)
-    }
-
-    fn is_full(&self) -> bool {
-        self.valid().count_ones() == 3
     }
 }
