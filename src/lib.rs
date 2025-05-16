@@ -8,8 +8,10 @@ mod sync {
     pub(crate) use loom::sync::*;
 }
 
+use core::fmt::Debug;
+
 use sync::atomic::AtomicPtr;
-use sync::atomic::AtomicU8;
+use sync::atomic::AtomicU64;
 use sync::atomic::Ordering;
 
 #[derive(Default)]
@@ -23,41 +25,39 @@ impl Art {
     }
 
     pub fn insert(&self, mut key: &[u8], value: u64) -> Option<u64> {
-        let mut walk = &self.root;
+        let mut prev = &self.root;
 
         loop {
-            if key.is_empty() {
-                return walk.compare_exchange_leaf(value);
-            }
+            let (head, tail) = match key {
+                [] => return prev.compare_exchange_leaf(value),
+                [head, tail @ ..] => (*head, tail),
+            };
 
-            match walk.load() {
+            match prev.load() {
                 Some(Walk::Leaf(_)) => unreachable!(),
-                Some(Walk::Node { header: _, node }) => {
-                    let Some((next, key_)) = key.split_first() else {
-                        unreachable!()
-                    };
-
-                    match node.get_or_insert(*next) {
-                        None => {
-                            let expand = node.expand();
-                            match walk.compare_exchange_n256(expand) {
-                                Ok(()) => (),
-                                Err(_) => unsafe {
-                                    drop(Box::from_raw(expand.cast::<(Header, Node256)>()));
-                                },
-                            }
-                        }
-                        Some(walk_) => {
-                            key = key_;
-                            walk = walk_;
+                Some(Walk::Node { header: _, node }) => match node.get(head) {
+                    Ok(prev_) => {
+                        key = tail;
+                        prev = prev_;
+                    }
+                    Err(true) => {
+                        let node = node.expand();
+                        match prev.compare_exchange_n256(node) {
+                            Ok(()) => (),
+                            Err(_) => unsafe {
+                                drop(Box::from_raw(node.cast::<(Header, Node256)>()));
+                            },
                         }
                     }
-                }
+                    Err(false) => {
+                        let _ = node.reserve(head);
+                    }
+                },
                 None => {
                     let node = Box::new((Header::new_4(), Node4::default()));
-
                     let node = Box::leak(node);
-                    match walk.compare_exchange_n4(node as *mut _ as _) {
+
+                    match prev.compare_exchange_n4(node as *mut _ as _) {
                         Ok(()) => (),
                         Err(_) => unsafe {
                             drop(Box::from_raw(node as *mut (Header, Node4)));
@@ -69,6 +69,7 @@ impl Art {
     }
 
     pub fn get(&self, mut key: &[u8]) -> Option<u64> {
+        eprintln!("GET {:x?}", &self.root as *const _);
         let mut walk = self.root.load()?;
 
         loop {
@@ -76,7 +77,7 @@ impl Art {
                 Walk::Node { header: _, node } => {
                     let (next, key_) = key.split_first()?;
                     key = key_;
-                    walk = node.get(*next)?.load()?;
+                    walk = node.get(*next).ok()?.load()?;
                 }
                 Walk::Leaf(value) if key.is_empty() => break Some(value),
                 Walk::Leaf(_) => break None,
@@ -85,23 +86,24 @@ impl Art {
     }
 }
 
+#[derive(Copy, Clone)]
 enum NodeRef<'a> {
     N4(&'a Node4),
     N256(&'a Node256),
 }
 
 impl<'a> NodeRef<'a> {
-    fn get_or_insert(&self, byte: u8) -> Option<&'a Ptr> {
+    fn reserve(&self, byte: u8) -> Result<(), ()> {
         match self {
-            NodeRef::N4(node) => node.get_or_insert(byte),
-            NodeRef::N256(node) => node.get_or_insert(byte),
+            NodeRef::N4(node) => node.reserve(byte),
+            NodeRef::N256(_) => Ok(()),
         }
     }
 
-    fn get(&self, byte: u8) -> Option<&'a Ptr> {
+    fn get(&self, byte: u8) -> Result<&'a Ptr, bool> {
         match self {
             NodeRef::N4(node) => node.get(byte),
-            NodeRef::N256(node) => node.get(byte),
+            NodeRef::N256(node) => node.get(byte).ok_or(false),
         }
     }
 
@@ -116,49 +118,74 @@ impl<'a> NodeRef<'a> {
 #[repr(C)]
 #[derive(Default)]
 struct Node4 {
-    keys: [AtomicU8; 4],
-    pointers: [Ptr; 4],
+    keys: AtomicU64,
+    pointers: [Ptr; Self::LEN],
 }
 
-impl Node4 {
-    fn get_or_insert(&self, byte: u8) -> Option<&Ptr> {
-        if let Some(pointer) = self.get(byte) {
-            return Some(pointer);
-        }
+const _: () = assert!(size_of::<Node4>() == 40);
 
-        self.keys
-            .iter()
-            .zip(&self.pointers)
-            .find(|(_, pointer)| pointer.is_null())
-            .map(|(key, pointer)| {
-                key.store(byte, Ordering::Relaxed);
-                pointer
-            })
+impl Node4 {
+    const LEN: usize = 4;
+
+    fn reserve(&self, byte: u8) -> Result<(), ()> {
+        let mut old = self.keys.load(Ordering::Acquire);
+
+        loop {
+            let array = old.to_le_bytes();
+            let new = match array[Self::LEN].count_ones() as usize {
+                Self::LEN => return Err(()),
+                index => {
+                    let mut new = array;
+                    new[Self::LEN] |= 1 << index;
+                    new[index] = byte;
+                    u64::from_le_bytes(new)
+                }
+            };
+
+            match self
+                .keys
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return Ok(()),
+                Err(conflict) => old = conflict,
+            }
+        }
     }
 
-    fn get(&self, byte: u8) -> Option<&Ptr> {
-        self.keys
-            .iter()
+    fn get(&self, byte: u8) -> Result<&Ptr, bool> {
+        let keys = self.keys.load(Ordering::Acquire).to_le_bytes();
+
+        let next = keys
+            .into_iter()
             .zip(&self.pointers)
-            .find_map(|(key, pointer)| match key.load(Ordering::Relaxed) == byte {
+            .enumerate()
+            .filter(|(i, _)| (keys[Self::LEN] >> i) & 1 > 0)
+            .find_map(|(_, (key, pointer))| match key == byte {
                 true => Some(pointer),
                 false => None,
-            })
+            });
+
+        next.ok_or_else(|| keys[Self::LEN].count_ones() as usize == Self::LEN)
     }
 
     fn expand(&self) -> *mut Header {
         let node = Box::new((Header::new_256(), Node256::default()));
 
-        self.keys
-            .iter()
-            .zip(&self.pointers)
-            .filter(|(_, pointer)| !pointer.is_null())
-            .for_each(|(key, pointer)| {
-                Ptr::copy(pointer, &node.1 .0[key.load(Ordering::Relaxed) as usize])
-            });
+        self.iter()
+            .for_each(|(key, pointer)| Ptr::copy(pointer, &node.1 .0[key as usize]));
 
         let node = Box::leak(node);
         node as *mut _ as _
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (u8, &Ptr)> {
+        let keys = self.keys.load(Ordering::Acquire).to_le_bytes();
+
+        keys.into_iter()
+            .zip(&self.pointers)
+            .enumerate()
+            .filter(move |(i, _)| (keys[Self::LEN] >> i) & 1 > 0)
+            .map(|(_, (key, pointer))| (key, pointer))
     }
 }
 
@@ -172,10 +199,6 @@ impl Default for Node256 {
 }
 
 impl Node256 {
-    fn get_or_insert(&self, byte: u8) -> Option<&Ptr> {
-        self.get(byte)
-    }
-
     fn get(&self, byte: u8) -> Option<&Ptr> {
         Some(&self.0[byte as usize])
     }
@@ -192,6 +215,16 @@ enum Walk<'a> {
     Leaf(u64),
 }
 
+impl Debug for Walk<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Walk::Node { header, node: _ } => write!(f, "N{:x?}", *header as *const _),
+            Walk::Leaf(value) => write!(f, "L{}", value),
+        }
+    }
+}
+
+#[derive(Debug)]
 enum Kind {
     N4,
     // N16,
@@ -200,6 +233,7 @@ enum Kind {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct Header {
     prefix: Prefix,
     level: u8,
@@ -226,7 +260,7 @@ impl Header {
     }
 }
 
-#[ribbit::pack(size = 64)]
+#[ribbit::pack(size = 64, debug)]
 #[derive(Default)]
 struct Prefix {
     len: u8,
@@ -253,7 +287,7 @@ impl Ptr {
     }
 
     fn load(&self) -> Option<Walk> {
-        let tagged = self.0.load(Ordering::Acquire);
+        let tagged = dbg!(self.0.load(Ordering::Acquire));
         self.translate(tagged)
     }
 
@@ -265,11 +299,18 @@ impl Ptr {
         };
 
         loop {
-            match dbg!(self
+            match self
                 .0
-                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire))
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
             {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    let out = self.0.load(Ordering::Relaxed);
+                    eprintln!(
+                        "N4 {:x?} {:x?} {:x?} = {:x?}",
+                        &self.0 as *const _, old, new, out
+                    );
+                    return Ok(());
+                }
                 Err(conflict) => match self.translate(conflict) {
                     None => todo!(),
                     Some(Walk::Leaf(_)) => unreachable!(),
@@ -289,11 +330,14 @@ impl Ptr {
         };
 
         loop {
-            match dbg!(self
+            match self
                 .0
-                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire))
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
             {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    // eprintln!("N256 {:x?} {:x?}", old, new);
+                    return Ok(());
+                }
                 Err(conflict) => match self.translate(conflict) {
                     None => todo!(),
                     Some(Walk::Leaf(_)) => unreachable!(),
@@ -313,6 +357,7 @@ impl Ptr {
         let new = (new | Self::LEAF) as *mut _;
 
         loop {
+            eprintln!("LEAF {:x?} {:x?}", old, new);
             match self
                 .0
                 .compare_exchange(old as *mut _, new, Ordering::AcqRel, Ordering::Acquire)
