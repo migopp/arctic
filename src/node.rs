@@ -3,11 +3,13 @@ use ribbit::u48;
 use ribbit::unpack;
 
 mod node256;
+mod node3;
 
-pub(crate) use node256::Node256;
+use node256::Node256;
+use node3::Node3;
 
 pub(crate) trait Node {
-    fn get(&self, key: &mut &[u8]) -> Option<&A128<Slot>>;
+    fn get(&self, key: u8) -> Option<&A128<Slot>>;
 }
 
 #[ribbit::pack(size = 128)]
@@ -66,6 +68,7 @@ impl Slot {
         match self.kind().unpack() {
             <unpack![Kind]>::Null => None,
             <unpack![Kind]>::Value => Some(Ref::Value(pointer as *mut u64 as *mut ())),
+            <unpack![Kind]>::Node3 => Some(Ref::Node3(unsafe { &*(pointer as *mut Node3) })),
             <unpack![Kind]>::Node256 => Some(Ref::Node256(unsafe { &*(pointer as *mut Node256) })),
         }
     }
@@ -73,6 +76,7 @@ impl Slot {
 
 pub(crate) enum Ref<'a> {
     Value(*mut ()),
+    Node3(&'a Node3),
     Node256(&'a Node256),
 }
 
@@ -80,6 +84,7 @@ pub(crate) enum Ref<'a> {
 pub(crate) enum Kind {
     Null,
     Value,
+    Node3,
     Node256,
 }
 

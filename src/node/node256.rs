@@ -7,9 +7,7 @@ use crate::Node;
 pub(crate) struct Node256([A128<Slot>; 256]);
 
 impl Node for Node256 {
-    fn get(&self, key: &mut &[u8]) -> Option<&A128<Slot>> {
-        let (head, tail) = key.split_first()?;
-        *key = tail;
-        Some(&self.0[*head as usize])
+    fn get(&self, key: u8) -> Option<&A128<Slot>> {
+        Some(&self.0[key as usize])
     }
 }
