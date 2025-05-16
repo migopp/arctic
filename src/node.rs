@@ -7,7 +7,7 @@ mod node256;
 pub(crate) use node256::Node256;
 
 pub(crate) trait Node {
-    fn get(&self, key: &[u8]) -> Option<&A128<Slot>>;
+    fn get(&self, key: &mut &[u8]) -> Option<&A128<Slot>>;
 }
 
 #[ribbit::pack(size = 128)]
@@ -37,7 +37,7 @@ impl Slot {
 
         let match_len = slot_key
             .iter()
-            .take(slot_len as usize)
+            .take(slot_len)
             .zip(search_key)
             .take_while(|(slot_byte, search_byte)| slot_byte == search_byte)
             .count();
@@ -60,7 +60,7 @@ impl Slot {
         Traverse::Split(u64::from_be_bytes(split))
     }
 
-    pub(crate) fn child(&self) -> Option<Ref> {
+    fn child(&self) -> Option<Ref> {
         let pointer = self.next().value();
 
         match self.kind().unpack() {

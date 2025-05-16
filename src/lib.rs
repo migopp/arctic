@@ -1,5 +1,7 @@
 mod node;
 
+pub(crate) use node::Node;
+
 #[derive(Default)]
 pub struct Art {
     // root: Ptr,
