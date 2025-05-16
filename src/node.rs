@@ -11,7 +11,27 @@ use node3::Node3;
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ()>;
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError>;
+
+    fn grow(&self, parent: &A128<Slot>) -> Result<(), GrowError>;
+
+    fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
+}
+
+pub(crate) enum ReserveError {
+    /// Encountered SMO operation in current node
+    Freeze { grow: bool },
+
+    /// Initiate grow SMO in current node
+    Grow,
+}
+
+pub(crate) enum GrowError {
+    /// Encountered SMO operation in parent
+    Freeze { grow: bool },
+
+    /// Reparent due to path expansion
+    Expand,
 }
 
 #[ribbit::pack(size = 128)]

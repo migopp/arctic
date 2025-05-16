@@ -5,6 +5,7 @@ use ribbit::atomic::A32;
 use ribbit::u24;
 use ribbit::u3;
 
+use crate::node::ReserveError;
 use crate::node::Slot;
 use crate::Node;
 
@@ -40,36 +41,39 @@ impl Node for Node3 {
         None
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ()> {
-        let old = self.header.load(Ordering::Relaxed);
-        let valid = old.valid().value();
-        let keys = old.keys().value();
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
+        let mut old = self.header.load(Ordering::Relaxed);
+        loop {
+            let index = match old.get(key) {
+                Ok(index) => return Ok(&self.slots[index]),
+                Err(None) => return Err(ReserveError::Grow),
+                Err(Some(index)) => index,
+            };
 
-        let mut index = 0;
-        for i in 0..3 {
-            // Find first invalid index
-            if valid & (1u8 << i) != 1 {
-                index = i;
-                break;
+            let keys = old.keys().value() | ((key as u32) << (index * 8));
+            let new = old.with_keys(u24::new(keys));
+
+            match self
+                .header
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Relaxed)
+            {
+                Ok(_) => return Ok(&self.slots[index]),
+                Err(header) if header.freeze() => {
+                    return Err(ReserveError::Freeze {
+                        grow: header.grow(),
+                    })
+                }
+                Err(header) => old = header,
             }
-
-            if (keys >> (i * 8)) as u8 != key {
-                continue;
-            }
-
-            return Ok(&self.slots[i]);
         }
+    }
 
-        let keys = keys | ((key as u32) << (index * 8));
-        let new = old.with_keys(u24::new(keys));
+    fn grow(&self, parent: &A128<Slot>) -> Result<(), super::GrowError> {
+        todo!()
+    }
 
-        match self
-            .header
-            .compare_exchange(old, new, Ordering::AcqRel, Ordering::Relaxed)
-        {
-            Ok(_) => Ok(&self.slots[index]),
-            Err(_conflict) => todo!(),
-        }
+    fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()> {
+        todo!()
     }
 }
 
@@ -80,4 +84,29 @@ struct Header {
     grow: bool,
     #[ribbit(offset = 8)]
     keys: u24,
+}
+
+impl Header {
+    /// Return `Ok(index)` if the key is mapped, `Err(Some(index))`
+    /// if there is an available slot, or `Err(None)` otherwise.
+    fn get(&self, key: u8) -> Result<usize, Option<usize>> {
+        let valid = self.valid().value();
+        let keys = self.keys().value();
+
+        for i in 0..3 {
+            if valid & (1u8 << i) != 1 {
+                return Err(Some(i));
+            }
+
+            if (keys >> (i * 8)) as u8 == key {
+                return Ok(i);
+            }
+        }
+
+        Err(None)
+    }
+
+    fn is_full(&self) -> bool {
+        self.valid().count_ones() == 3
+    }
 }
