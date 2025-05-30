@@ -15,6 +15,8 @@ pub(crate) trait Node {
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError>;
 
+    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, ReserveError>;
+
     fn grow(&self, parent: &A128<Slot>) -> Result<Ref, GrowError>;
 
     fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
@@ -96,7 +98,21 @@ impl Slot {
             "Precondition: no key is a prefix of another key",
         );
 
-        Traverse::Split { len: prefix_len }
+        let mut start = [0u8; 8];
+        start[..prefix_len].copy_from_slice(&slot_key[..prefix_len]);
+
+        let middle = slot_key[prefix_len];
+
+        let mut end = [0u8; 8];
+        end[..slot_len - prefix_len - 1].copy_from_slice(&slot_key[prefix_len + 1..slot_len]);
+
+        Traverse::Split {
+            start_len: prefix_len,
+            end_len: slot_len - prefix_len - 1,
+            start: u64::from_be_bytes(start),
+            middle,
+            end: u64::from_be_bytes(end),
+        }
     }
 
     fn child(&self) -> Child {
@@ -155,6 +171,15 @@ pub(crate) enum Child {
 
 #[derive(Debug)]
 pub(crate) enum Traverse {
-    Walk { len: usize, child: Child },
-    Split { len: usize },
+    Walk {
+        len: usize,
+        child: Child,
+    },
+    Split {
+        start_len: usize,
+        end_len: usize,
+        start: u64,
+        middle: u8,
+        end: u64,
+    },
 }

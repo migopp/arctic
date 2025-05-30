@@ -27,12 +27,14 @@ impl Art {
     }
 
     pub fn insert(&self, mut key: &[u8], value: u64) -> Option<u64> {
+        eprintln!("insert {:?} = {}", key, value);
         let mut slot = &self.root;
 
         loop {
             let snapshot = slot.load(Ordering::Relaxed);
 
-            match snapshot.traverse(key) {
+            eprintln!("traverse key {:?}", key);
+            match dbg!(snapshot.traverse(key)) {
                 node::Traverse::Walk {
                     len,
                     child: node::Child::Uninit,
@@ -46,7 +48,7 @@ impl Art {
                             let node = Box::leak(node) as *mut Node3;
 
                             slot.compare_exchange(
-                                snapshot,
+                                snapshot.with_freeze(false),
                                 snapshot
                                     .with_key(u64::from_be_bytes(*head))
                                     .with_len(8)
@@ -64,7 +66,7 @@ impl Art {
                             let prefix = u64::from_be_bytes(prefix);
 
                             slot.compare_exchange(
-                                snapshot,
+                                snapshot.with_freeze(false),
                                 snapshot
                                     .with_key(prefix)
                                     .with_len(key.len() as u8)
@@ -88,7 +90,7 @@ impl Art {
                     assert_eq!(key.len(), len);
 
                     slot.compare_exchange(
-                        snapshot,
+                        snapshot.with_freeze(false),
                         snapshot.with_freeze(false).with_next(u48::new(value)),
                         Ordering::AcqRel,
                         Ordering::Acquire,
@@ -109,23 +111,61 @@ impl Art {
                     key = tail;
                 }
 
-                node::Traverse::Split { len } => todo!(),
+                node::Traverse::Split {
+                    start_len,
+                    end_len,
+                    start,
+                    middle,
+                    end,
+                } => {
+                    let mut node = Box::new(Node3::new());
+
+                    let old = node.reserve(middle).unwrap();
+                    old.store(
+                        Slot::new(
+                            end,
+                            end_len as u8,
+                            false,
+                            false,
+                            snapshot.kind(),
+                            snapshot.next(),
+                        ),
+                        Ordering::Relaxed,
+                    );
+
+                    let node = Box::leak(node) as *mut Node3;
+
+                    slot.compare_exchange(
+                        snapshot.with_freeze(false),
+                        Slot::new(
+                            start,
+                            start_len as u8,
+                            false,
+                            false,
+                            node::Kind::new(<unpack![node::Kind]>::Node3),
+                            u48::new(node as u64),
+                        ),
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .unwrap();
+                }
             }
         }
     }
 
     pub fn get(&self, mut key: &[u8]) -> Option<u64> {
-        // let mut path = Vec::new();
-        // let mut node;
         let mut slot = &self.root;
+        eprintln!("get {:?}", key);
 
         loop {
-            match slot.load(Ordering::Acquire).traverse(key) {
+            eprintln!("traverse key {:?}", key);
+            match dbg!(slot.load(Ordering::Acquire).traverse(key)) {
                 node::Traverse::Walk {
                     len: _,
                     child: node::Child::Uninit,
                 }
-                | node::Traverse::Split { len: _ } => break None,
+                | node::Traverse::Split { .. } => break None,
 
                 node::Traverse::Walk {
                     len,

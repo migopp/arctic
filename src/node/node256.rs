@@ -19,6 +19,10 @@ impl Node for Node256 {
         Ok(&self.0[key as usize])
     }
 
+    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, ReserveError> {
+        Ok(&mut self.0[key as usize])
+    }
+
     fn grow(&self, _parent: &A128<Slot>) -> Result<node::Ref, GrowError> {
         unreachable!()
     }

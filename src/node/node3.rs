@@ -36,21 +36,14 @@ impl Node3 {
 
 impl Node for Node3 {
     fn get(&self, key: u8) -> Option<&A128<Slot>> {
-        let index = self.header.load(Ordering::Acquire).get(key).ok()?;
+        let index = self.header.load(Ordering::Acquire).get(key)?;
         Some(&self.slots[index as usize])
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
         let mut old = self.header.load(Ordering::Relaxed);
         loop {
-            let index = match old.get(key) {
-                Ok(index) => return Ok(&self.slots[index as usize]),
-                Err(None) => return Err(ReserveError::Grow),
-                Err(Some(index)) => index,
-            };
-
-            let keys = old.keys().value() | ((key as u32) << (index * 8));
-            let new = old.with_keys(u24::new(keys));
+            let (new, index) = old.get_or_reserve(key).unwrap();
 
             match self
                 .header
@@ -65,6 +58,14 @@ impl Node for Node3 {
                 Err(header) => old = header,
             }
         }
+    }
+
+    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, ReserveError> {
+        // FIXME: shouldn't need atomics with &mut
+        let header = self.header.load(Ordering::Relaxed);
+        let (header, index) = header.get_or_reserve(key).unwrap();
+        self.header.store(header, Ordering::Relaxed);
+        Ok(&mut self.slots[index as usize])
     }
 
     fn grow(&self, parent: &A128<Slot>) -> Result<node::Ref, GrowError> {
@@ -129,21 +130,27 @@ impl Default for Header {
 }
 
 impl Header {
-    /// Return `Ok(index)` if the key is mapped, `Err(Some(index))`
-    /// if there is an available slot, or `Err(None)` otherwise.
-    fn get(&self, key: u8) -> Result<u8, Option<u8>> {
+    fn get(&self, key: u8) -> Option<u8> {
         let keys = self.keys().value();
         let len = self.len().value();
+        (0..len).find(|i| (keys >> (i * 8)) as u8 == key)
+    }
 
-        for i in 0..len {
-            if (keys >> (i * 8)) as u8 == key {
-                return Ok(i);
-            }
+    fn get_or_reserve(&self, key: u8) -> Option<(Self, u8)> {
+        if let Some(index) = self.get(key) {
+            return Some((*self, index));
         }
 
+        let keys = self.keys().value();
+        let len = self.len().value();
         match len {
-            0..3 => Err(Some(len)),
-            _ => Err(None),
+            0..3 => Some((
+                self.with_len(u2::new(len + 1))
+                    .with_freeze(false)
+                    .with_keys(u24::new(keys | ((key as u32) << (len * 8)))),
+                len,
+            )),
+            _ => None,
         }
     }
 }
