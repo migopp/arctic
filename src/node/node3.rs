@@ -2,8 +2,8 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::A128;
 use ribbit::atomic::A32;
+use ribbit::u2;
 use ribbit::u24;
-use ribbit::u3;
 
 use crate::node;
 use crate::node::GrowError;
@@ -22,32 +22,27 @@ pub(crate) struct Node3 {
 
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
 
+impl Node3 {
+    pub(crate) fn new() -> Self {
+        Self {
+            header: A32::new(Header::default()),
+            _pad: [0; 3],
+            slots: core::array::from_fn(|_| A128::new(Slot::default())),
+        }
+    }
+}
+
 impl Node for Node3 {
     fn get(&self, key: u8) -> Option<&A128<Slot>> {
-        let header = self.header.load(Ordering::Relaxed);
-        let keys = header.keys().value();
-        let valid = header.valid().value();
-
-        for i in 0..3 {
-            if valid & (1u8 << i) != 1 {
-                continue;
-            }
-
-            if (keys >> (i * 8)) as u8 != key {
-                continue;
-            }
-
-            return Some(&self.slots[i]);
-        }
-
-        None
+        let index = self.header.load(Ordering::Acquire).get(key).ok()?;
+        return Some(&self.slots[index as usize]);
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
         let mut old = self.header.load(Ordering::Relaxed);
         loop {
             let index = match old.get(key) {
-                Ok(index) => return Ok(&self.slots[index]),
+                Ok(index) => return Ok(&self.slots[index as usize]),
                 Err(None) => return Err(ReserveError::Grow),
                 Err(Some(index)) => index,
             };
@@ -59,7 +54,7 @@ impl Node for Node3 {
                 .header
                 .compare_exchange(old, new, Ordering::AcqRel, Ordering::Relaxed)
             {
-                Ok(_) => return Ok(&self.slots[index]),
+                Ok(_) => return Ok(&self.slots[index as usize]),
                 Err(header) if header.freeze() => {
                     return Err(ReserveError::Freeze {
                         grow: header.grow(),
@@ -118,30 +113,35 @@ impl Node for Node3 {
 
 #[ribbit::pack(size = 32)]
 struct Header {
-    valid: u3,
+    len: u2,
     freeze: bool,
     grow: bool,
     #[ribbit(offset = 8)]
     keys: u24,
 }
 
+impl Default for Header {
+    fn default() -> Self {
+        Self::new(u2::new(0), false, false, u24::new(0))
+    }
+}
+
 impl Header {
     /// Return `Ok(index)` if the key is mapped, `Err(Some(index))`
     /// if there is an available slot, or `Err(None)` otherwise.
-    fn get(&self, key: u8) -> Result<usize, Option<usize>> {
-        let valid = self.valid().value();
+    fn get(&self, key: u8) -> Result<u8, Option<u8>> {
         let keys = self.keys().value();
+        let len = self.len().value();
 
-        for i in 0..3 {
-            if valid & (1u8 << i) != 1 {
-                return Err(Some(i));
-            }
-
+        for i in 0..len {
             if (keys >> (i * 8)) as u8 == key {
                 return Ok(i);
             }
         }
 
-        Err(None)
+        match len {
+            0..3 => Err(Some(len)),
+            _ => Err(None),
+        }
     }
 }

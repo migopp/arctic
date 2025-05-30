@@ -5,8 +5,8 @@ use ribbit::unpack;
 mod node256;
 mod node3;
 
-use node256::Node256;
-use node3::Node3;
+pub(crate) use node256::Node256;
+pub(crate) use node3::Node3;
 
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
@@ -34,19 +34,19 @@ pub(crate) enum GrowError {
     Expand,
 }
 
-#[ribbit::pack(size = 128)]
+#[ribbit::pack(size = 128, debug)]
 pub(crate) struct Slot {
-    key: u64,
-    len: u8,
+    pub(crate) key: u64,
+    pub(crate) len: u8,
 
-    freeze: bool,
+    pub(crate) freeze: bool,
+    pub(crate) grow: bool,
 
     #[ribbit(size = 3)]
-    kind: Kind,
-    grow: bool,
+    pub(crate) kind: Kind,
 
     #[ribbit(offset = 80)]
-    next: u48,
+    pub(crate) next: u48,
 }
 
 impl Default for Slot {
@@ -55,17 +55,17 @@ impl Default for Slot {
             0,
             0,
             false,
-            Kind::new(<unpack![Kind]>::Null),
             false,
+            Kind::new(<unpack![Kind]>::Uninit),
             u48::new(0),
         )
     }
 }
 
 impl Slot {
-    pub(crate) fn traverse(&self, key: &mut &[u8]) -> Traverse {
+    pub(crate) fn traverse(&self, key: &[u8]) -> Traverse {
         let search_len = key.len();
-        let search_key = *key;
+        let search_key = key;
 
         let slot_len = self.len() as usize;
         let slot_key = self.key().to_be_bytes();
@@ -79,11 +79,12 @@ impl Slot {
             .take_while(|(slot_byte, search_byte)| slot_byte == search_byte)
             .count();
 
-        *key = &key[prefix_len..];
-
         // Fast path: successful traversal
         if search_len >= slot_len && slot_len == prefix_len {
-            return Traverse::Walk(self.child());
+            return Traverse::Walk {
+                len: prefix_len,
+                child: self.child(),
+            };
         }
 
         assert!(
@@ -91,20 +92,19 @@ impl Slot {
             "Precondition: no key is a prefix of another key",
         );
 
-        // Split out matching prefix
-        let mut split = slot_key;
-        split[prefix_len..].fill(0);
-        Traverse::Split(u64::from_be_bytes(split))
+        Traverse::Split { len: prefix_len }
     }
 
-    fn child(&self) -> Tree {
-        let pointer = self.next().value();
+    fn child(&self) -> Child {
+        let leaf = self.next();
+        let pointer = leaf.value();
 
         match self.kind().unpack() {
-            <unpack![Kind]>::Null => Tree::Leaf(None),
-            <unpack![Kind]>::Value => Tree::Leaf(Some(pointer as *mut u64 as *mut ())),
-            <unpack![Kind]>::Node3 => Tree::Node(Ref::Node3(pointer as *mut Node3)),
-            <unpack![Kind]>::Node256 => Tree::Node(Ref::Node256(pointer as *mut Node256)),
+            <unpack![Kind]>::Uninit => Child::Uninit,
+            <unpack![Kind]>::Invalid => Child::Leaf(None),
+            <unpack![Kind]>::Valid => Child::Leaf(Some(leaf)),
+            <unpack![Kind]>::Node3 => Child::Node(Ref::Node3(pointer as *mut Node3)),
+            <unpack![Kind]>::Node256 => Child::Node(Ref::Node256(pointer as *mut Node256)),
         }
     }
 }
@@ -124,20 +124,22 @@ impl Ref {
     }
 }
 
-#[ribbit::pack(size = 3)]
+#[ribbit::pack(size = 3, debug)]
 pub(crate) enum Kind {
-    Null,
-    Value,
+    Uninit,
+    Valid,
+    Invalid,
     Node3,
     Node256,
 }
 
-pub(crate) enum Tree {
-    Leaf(Option<*mut ()>),
+pub(crate) enum Child {
+    Uninit,
+    Leaf(Option<u48>),
     Node(Ref),
 }
 
 pub(crate) enum Traverse {
-    Walk(Tree),
-    Split(u64),
+    Walk { len: usize, child: Child },
+    Split { len: usize },
 }
