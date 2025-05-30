@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
@@ -18,6 +20,7 @@ pub(crate) trait Node {
     fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
 }
 
+#[derive(Debug)]
 pub(crate) enum ReserveError {
     /// Encountered SMO operation in current node
     Freeze { grow: bool },
@@ -26,6 +29,7 @@ pub(crate) enum ReserveError {
     Grow,
 }
 
+#[derive(Debug)]
 pub(crate) enum GrowError {
     /// Encountered SMO operation in parent
     Freeze { grow: bool },
@@ -124,6 +128,15 @@ impl Ref {
     }
 }
 
+impl Debug for Ref {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Ref::Node3(node3) => unsafe { node3.as_ref().unwrap() }.fmt(fmt),
+            Ref::Node256(node256) => unsafe { node256.as_ref().unwrap() }.fmt(fmt),
+        }
+    }
+}
+
 #[ribbit::pack(size = 3, debug)]
 pub(crate) enum Kind {
     Uninit,
@@ -133,12 +146,14 @@ pub(crate) enum Kind {
     Node256,
 }
 
+#[derive(Debug)]
 pub(crate) enum Child {
     Uninit,
     Leaf(Option<u48>),
     Node(Ref),
 }
 
+#[derive(Debug)]
 pub(crate) enum Traverse {
     Walk { len: usize, child: Child },
     Split { len: usize },

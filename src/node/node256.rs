@@ -7,6 +7,7 @@ use crate::node::Slot;
 use crate::Node;
 
 #[repr(C)]
+#[derive(Debug)]
 pub(crate) struct Node256([A128<Slot>; 256]);
 
 impl Node for Node256 {

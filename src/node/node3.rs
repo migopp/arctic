@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::A128;
@@ -12,6 +13,7 @@ use crate::node::Slot;
 use crate::Node;
 
 #[repr(C)]
+#[derive(Debug)]
 pub(crate) struct Node3 {
     header: A32<Header>,
 
@@ -35,7 +37,7 @@ impl Node3 {
 impl Node for Node3 {
     fn get(&self, key: u8) -> Option<&A128<Slot>> {
         let index = self.header.load(Ordering::Acquire).get(key).ok()?;
-        return Some(&self.slots[index as usize]);
+        Some(&self.slots[index as usize])
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
@@ -111,7 +113,7 @@ impl Node for Node3 {
     }
 }
 
-#[ribbit::pack(size = 32)]
+#[ribbit::pack(size = 32, debug)]
 struct Header {
     len: u2,
     freeze: bool,

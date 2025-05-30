@@ -39,8 +39,26 @@ impl Art {
                 } => {
                     assert_eq!(len, 0);
 
-                    let prefix = match key.split_first_chunk::<8>() {
-                        None => {
+                    match key.split_first_chunk::<8>() {
+                        // Only create intermediate node if necessary
+                        Some((head, tail)) if !tail.is_empty() => {
+                            let node = Box::new(Node3::new());
+                            let node = Box::leak(node) as *mut Node3;
+
+                            slot.compare_exchange(
+                                snapshot,
+                                snapshot
+                                    .with_key(u64::from_be_bytes(*head))
+                                    .with_len(8)
+                                    .with_freeze(false)
+                                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
+                                    .with_next(u48::new(node as u64)),
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .unwrap();
+                        }
+                        Some(_) | None => {
                             let mut prefix = [0u8; 8];
                             prefix[..key.len()].copy_from_slice(key);
                             let prefix = u64::from_be_bytes(prefix);
@@ -60,24 +78,7 @@ impl Art {
 
                             return None;
                         }
-                        Some((prefix, _)) => u64::from_be_bytes(*prefix),
                     };
-
-                    let node = Box::new(Node3::new());
-                    let node = Box::leak(node) as *mut Node3;
-
-                    slot.compare_exchange(
-                        snapshot,
-                        snapshot
-                            .with_key(prefix)
-                            .with_len(8)
-                            .with_freeze(false)
-                            .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
-                            .with_next(u48::new(node as u64)),
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    )
-                    .unwrap();
                 }
 
                 node::Traverse::Walk {
@@ -104,7 +105,7 @@ impl Art {
                     key = &key[len..];
                     let (head, tail) = key.split_first()?;
                     let node = unsafe { node.as_node() };
-                    slot = node.get(*head)?;
+                    slot = node.get_or_reserve(*head).unwrap();
                     key = tail;
                 }
 
@@ -158,6 +159,14 @@ mod tests {
         let art = Art::default();
         art.insert(b"abcd", 1);
         assert_eq!(art.get(b"abcd"), Some(1));
+    }
+
+    #[test]
+    fn smoke_u64_key() {
+        let art = Art::default();
+        let key = 0xdeadbeefu64.to_be_bytes();
+        art.insert(&key, 1);
+        assert_eq!(art.get(&key), Some(1));
     }
 
     #[test]
