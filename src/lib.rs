@@ -210,20 +210,20 @@ mod tests {
     }
 
     #[test]
-    fn node4_overwrite() {
+    fn node3_overwrite() {
         let art = Art::default();
 
-        for value in [1, 2, 3, 4] {
+        for value in [1, 2, 3] {
             art.insert(&[1], value as u64);
             assert_eq!(art.get(&[1]), Some(value as u64));
         }
     }
 
     #[test]
-    fn node4_full() {
+    fn node3_full() {
         let art = Art::default();
 
-        const KEYS: [u8; 4] = [1, 2, 3, 4];
+        const KEYS: [u8; 3] = [1, 2, 3];
 
         for key in KEYS {
             art.insert(&[key], key as u64);
@@ -236,10 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn node4_expand() {
+    fn node3_expand() {
         let art = Art::default();
 
-        const KEYS: [u8; 5] = [1, 2, 3, 4, 5];
+        const KEYS: [u8; 4] = [1, 2, 3, 4];
 
         for key in KEYS {
             art.insert(&[key], key as u64);
