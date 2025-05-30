@@ -13,17 +13,17 @@ pub(crate) use node3::Node3;
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError>;
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError>;
 
-    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, ReserveError>;
+    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError>;
 
-    fn grow(&self, parent: &A128<Slot>) -> Result<Ref, GrowError>;
+    fn grow(&self, parent: &A128<Slot>, snapshot: &Slot) -> Result<Ref, GrowError>;
 
     fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
 }
 
 #[derive(Debug)]
-pub(crate) enum ReserveError {
+pub(crate) enum GetOrReserveError {
     /// Encountered SMO operation in current node
     Freeze { grow: bool },
 

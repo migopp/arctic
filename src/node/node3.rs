@@ -5,12 +5,16 @@ use ribbit::atomic::A128;
 use ribbit::atomic::A32;
 use ribbit::u2;
 use ribbit::u24;
+use ribbit::u48;
+use ribbit::unpack;
 
 use crate::node;
+use crate::node::GetOrReserveError;
 use crate::node::GrowError;
-use crate::node::ReserveError;
 use crate::node::Slot;
 use crate::Node;
+
+use super::Node256;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -40,10 +44,12 @@ impl Node for Node3 {
         Some(&self.slots[index as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, ReserveError> {
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError> {
         let mut old = self.header.load(Ordering::Relaxed);
         loop {
-            let (new, index) = old.get_or_reserve(key).unwrap();
+            let Some((new, index)) = old.get_or_reserve(key) else {
+                return Err(GetOrReserveError::Grow);
+            };
 
             match self
                 .header
@@ -51,7 +57,7 @@ impl Node for Node3 {
             {
                 Ok(_) => return Ok(&self.slots[index as usize]),
                 Err(header) if header.freeze() => {
-                    return Err(ReserveError::Freeze {
+                    return Err(GetOrReserveError::Freeze {
                         grow: header.grow(),
                     })
                 }
@@ -60,7 +66,7 @@ impl Node for Node3 {
         }
     }
 
-    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, ReserveError> {
+    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError> {
         // FIXME: shouldn't need atomics with &mut
         let header = self.header.load(Ordering::Relaxed);
         let (header, index) = header.get_or_reserve(key).unwrap();
@@ -68,7 +74,7 @@ impl Node for Node3 {
         Ok(&mut self.slots[index as usize])
     }
 
-    fn grow(&self, parent: &A128<Slot>) -> Result<node::Ref, GrowError> {
+    fn grow(&self, parent: &A128<Slot>, snapshot: &Slot) -> Result<node::Ref, GrowError> {
         let mut old = self.header.load(Ordering::Relaxed);
 
         if !old.freeze() {
@@ -102,11 +108,38 @@ impl Node for Node3 {
             );
         }
 
+        let mut node = Box::new(Node256::new());
+        let header = self.header.load(Ordering::Relaxed);
+        let keys = header.keys().value();
+
         for (i, slot) in self.slots.iter().enumerate() {
             let slot = slot.load(Ordering::Relaxed);
+            let key = (keys >> (i * 8)) as u8;
+
+            if matches!(
+                slot.kind().unpack(),
+                <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid
+            ) {
+                continue;
+            }
+
+            node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
         }
 
-        todo!()
+        let node = Box::leak(node) as *mut Node256;
+
+        parent
+            .compare_exchange(
+                snapshot.with_freeze(false),
+                snapshot
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
+                    .with_next(u48::new(node as u64)),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .unwrap();
+
+        Ok(node::Ref::Node256(node))
     }
 
     fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()> {

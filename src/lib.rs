@@ -2,6 +2,7 @@ mod node;
 
 use core::sync::atomic::Ordering;
 
+use node::GetOrReserveError;
 pub(crate) use node::Node;
 use node::Node3;
 use node::Slot;
@@ -21,27 +22,38 @@ impl Default for Art {
     }
 }
 
+#[derive(Debug)]
+struct Segment<'a> {
+    slot: &'a A128<Slot>,
+    index: Option<usize>,
+    len: usize,
+}
+
 impl Art {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn insert(&self, mut key: &[u8], value: u64) -> Option<u64> {
+    pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
         eprintln!("insert {:?} = {}", key, value);
         let mut slot = &self.root;
+        let mut index: Option<usize> = None;
+
+        let mut path = Vec::new();
 
         loop {
             let snapshot = slot.load(Ordering::Relaxed);
+            let here = &key[index.unwrap_or(0)..];
 
-            eprintln!("traverse key {:?}", key);
-            match dbg!(snapshot.traverse(key)) {
+            eprintln!("traverse key {:?}", here);
+            match dbg!(snapshot.traverse(here)) {
                 node::Traverse::Walk {
                     len,
                     child: node::Child::Uninit,
                 } => {
                     assert_eq!(len, 0);
 
-                    match key.split_first_chunk::<8>() {
+                    match here.split_first_chunk::<8>() {
                         // Only create intermediate node if necessary
                         Some((head, tail)) if !tail.is_empty() => {
                             let node = Box::new(Node3::new());
@@ -62,14 +74,14 @@ impl Art {
                         }
                         Some(_) | None => {
                             let mut prefix = [0u8; 8];
-                            prefix[..key.len()].copy_from_slice(key);
+                            prefix[..here.len()].copy_from_slice(here);
                             let prefix = u64::from_be_bytes(prefix);
 
                             slot.compare_exchange(
                                 snapshot.with_freeze(false),
                                 snapshot
                                     .with_key(prefix)
-                                    .with_len(key.len() as u8)
+                                    .with_len(here.len() as u8)
                                     .with_freeze(false)
                                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Valid))
                                     .with_next(u48::new(value)),
@@ -87,7 +99,7 @@ impl Art {
                     len,
                     child: node::Child::Leaf(leaf),
                 } => {
-                    assert_eq!(key.len(), len);
+                    assert_eq!(here.len(), len);
 
                     slot.compare_exchange(
                         snapshot.with_freeze(false),
@@ -104,11 +116,27 @@ impl Art {
                     len,
                     child: node::Child::Node(node),
                 } => {
-                    key = &key[len..];
-                    let (head, tail) = key.split_first()?;
+                    path.push(Segment { slot, index, len });
+
+                    // If `index` is None, then we are traversing from the root,
+                    // and there is no byte for the node. Otherwise, we are
+                    // traversing from the previous node, which takes one byte.
+                    let index_node = index.map_or(0, |index| index + 1) + len;
+                    let index_slot = index_node + 1;
+
+                    let byte = key[index_node];
                     let node = unsafe { node.as_node() };
-                    slot = node.get_or_reserve(*head).unwrap();
-                    key = tail;
+
+                    match node.get_or_reserve(byte) {
+                        Ok(next) => {
+                            slot = next;
+                            index = Some(index_slot);
+                        }
+                        Err(GetOrReserveError::Grow) => {
+                            node.grow(path.last().unwrap().slot, &snapshot).unwrap();
+                        }
+                        Err(GetOrReserveError::Freeze { grow: _ }) => todo!(),
+                    }
                 }
 
                 node::Traverse::Split {
