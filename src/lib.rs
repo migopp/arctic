@@ -98,6 +98,11 @@ impl Art {
     pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
         eprintln!("insert {:?} = {}", key, value);
 
+        // TODO: implement optimistic version of `insert`
+        //
+        // Insert operations that don't CAS into a frozen
+        // parent slot can complete without tracking any
+        // path history.
         let mut cursor = Cursor::new(self);
         let mut direction = Direction::Descend;
 
