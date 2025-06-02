@@ -76,7 +76,6 @@ impl Node for Node3 {
     }
 
     fn freeze(&self, grow: bool) {
-        eprintln!("freeze {:?}", self as *const _);
         let mut old = self.header.load(Ordering::Relaxed);
 
         while !old.freeze() {
@@ -118,7 +117,12 @@ impl Node for Node3 {
                     <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid
                 )
             })
-            .map(|(index, slot)| ((keys >> (index * 8)) as u8, slot))
+            .map(|(index, slot)| {
+                (
+                    (keys >> (index * 8)) as u8,
+                    slot.with_frozen(false).with_grow(false),
+                )
+            })
             .zip(&mut slots)
             .for_each(|(slot, save)| {
                 *save = slot;
@@ -131,8 +135,6 @@ impl Node for Node3 {
             [] => (
                 Op::Destroy,
                 snapshot
-                    .with_frozen(false)
-                    .with_grow(false)
                     .with_key(key::Array::default())
                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
             ),
@@ -161,8 +163,6 @@ impl Node for Node3 {
                 (
                     node::Op::Grow,
                     snapshot
-                        .with_frozen(false)
-                        .with_grow(true)
                         .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
                         .with_next(u48::new(node as u64)),
                 )
@@ -181,8 +181,6 @@ impl Node for Node3 {
                 (
                     node::Op::Replace,
                     snapshot
-                        .with_frozen(false)
-                        .with_grow(false)
                         .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
                         .with_next(u48::new(node as u64)),
                 )

@@ -221,14 +221,10 @@ impl Art {
             ) {
                 Ok(_) => break,
                 Err(conflict) if conflict.frozen() => {
-                    eprintln!("frozen {:?}", slot as *const _);
-                    eprintln!("expected {:?}", snapshot.with_frozen(false));
-                    eprintln!("found {:?}", conflict);
                     todo!()
                 }
                 Err(conflict) if conflict.key() != snapshot.key() => todo!(),
                 Err(conflict) => {
-                    unreachable!();
                     snapshot = conflict;
                 }
             }
@@ -258,7 +254,6 @@ impl Art {
                 Err(conflict) if conflict.frozen() => todo!(),
                 Err(conflict) if conflict.key() != snapshot.key() => todo!(),
                 Err(conflict) => {
-                    unreachable!();
                     snapshot = conflict;
                 }
             }
