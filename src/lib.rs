@@ -10,7 +10,6 @@ use node::Slot;
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
-use ribbit::Pack as _;
 
 pub struct Art {
     root: A128<Slot>,
@@ -32,7 +31,6 @@ struct Segment<'a> {
 }
 
 struct Cursor<'a> {
-    art: &'a Art,
     index: usize,
     slot: &'a A128<Slot>,
     path: Vec<Segment<'a>>,
@@ -47,7 +45,6 @@ enum Direction {
 impl<'a> Cursor<'a> {
     fn new(art: &'a Art) -> Self {
         Self {
-            art,
             index: 0,
             slot: &art.root,
             path: Vec::new(),
@@ -92,8 +89,8 @@ impl<'a> Cursor<'a> {
 
 enum Step {
     Descend { len: key::Len, node: node::Ref },
-    Replace { slot: Slot },
-    Stop,
+    Replace { op: node::Op, slot: Slot },
+    Insert,
 }
 
 impl Art {
@@ -112,7 +109,7 @@ impl Art {
 
             eprintln!("traverse key {:?}", key);
 
-            let (replace, leaf) = match &cursor.direction {
+            let (op, slot) = match &cursor.direction {
                 Direction::Descend => match self.get_or_insert(key, &snapshot) {
                     Step::Descend { len, node } => {
                         let byte = key[len.to_usize()];
@@ -129,10 +126,10 @@ impl Art {
 
                         let node = unsafe { node.as_node() };
                         node.freeze(grow);
-                        (node.replace(&snapshot), false)
+                        node.replace(&snapshot)
                     }
-                    Step::Replace { slot } => (slot, false),
-                    Step::Stop => (
+                    Step::Insert => (
+                        node::Op::Insert,
                         Slot::new(
                             key::Array::from_slice(key),
                             false,
@@ -140,24 +137,23 @@ impl Art {
                             node::Kind::new(<unpack![node::Kind]>::Valid),
                             u48::new(value),
                         ),
-                        true,
                     ),
+                    Step::Replace { op, slot } => (op, slot),
                 },
                 Direction::Ascend { node, grow } => {
                     let node = unsafe { node.as_node() };
                     node.freeze(*grow);
-                    (node.replace(&snapshot), false)
+                    node.replace(&snapshot)
                 }
             };
 
             let conflict = match cursor.slot().compare_exchange(
                 snapshot.with_frozen(false),
-                replace,
+                slot,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Err(conflict) => conflict,
-                Ok(old) if leaf => {
+                Ok(old) if matches!(op, node::Op::Insert) => {
                     return match old.kind().unpack() {
                         <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
                         <unpack![node::Kind]>::Valid => Some(u64::from(old.next())),
@@ -168,10 +164,15 @@ impl Art {
                     cursor.direction = Direction::Descend;
                     continue;
                 }
+                Err(conflict) => conflict,
             };
 
-            // TODO: free allocations within `replace`
-            // Split, grow, initialize operations can allocate
+            match op {
+                node::Op::Insert | node::Op::Compress | node::Op::Remove => (),
+                node::Op::Expand | node::Op::Grow | node::Op::Shrink | node::Op::Replace => unsafe {
+                    slot.deallocate()
+                },
+            }
 
             // Conflicts can be due to:
             // - Freeze
@@ -225,9 +226,12 @@ impl Art {
                             u48::new(node as u64),
                         );
 
-                        Step::Replace { slot }
+                        Step::Replace {
+                            op: node::Op::Expand,
+                            slot,
+                        }
                     }
-                    Some(_) | None => Step::Stop,
+                    Some(_) | None => Step::Insert,
                 }
             }
 
@@ -236,8 +240,7 @@ impl Art {
                 child: node::Child::Leaf(_),
             } => {
                 assert_eq!(key.len(), len.to_usize());
-
-                Step::Stop
+                Step::Insert
             }
 
             node::Traverse::Split { start, middle, end } => {
@@ -258,7 +261,10 @@ impl Art {
                     u48::new(node as u64),
                 );
 
-                Step::Replace { slot }
+                Step::Replace {
+                    op: node::Op::Expand,
+                    slot,
+                }
             }
         }
     }

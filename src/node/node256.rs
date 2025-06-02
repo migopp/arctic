@@ -1,6 +1,7 @@
 use ribbit::atomic::A128;
 
 use crate::node::GetOrReserveError;
+use crate::node::Op;
 use crate::node::Slot;
 use crate::Node;
 
@@ -33,7 +34,7 @@ impl Node for Node256 {
         }
     }
 
-    fn replace(&self, _snapshot: &Slot) -> Slot {
+    fn replace(&self, _snapshot: &Slot) -> (Op, Slot) {
         todo!()
     }
 }

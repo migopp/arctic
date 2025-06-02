@@ -11,6 +11,7 @@ use ribbit::unpack;
 use crate::key;
 use crate::node;
 use crate::node::GetOrReserveError;
+use crate::node::Op;
 use crate::node::Slot;
 use crate::Node;
 
@@ -95,7 +96,7 @@ impl Node for Node3 {
         }
     }
 
-    fn replace(&self, snapshot: &Slot) -> Slot {
+    fn replace(&self, snapshot: &Slot) -> (Op, Slot) {
         let header = self.header.load(Ordering::Relaxed);
         let keys = header.keys().value();
 
@@ -125,17 +126,23 @@ impl Node for Node3 {
 
         match len {
             // Delete
-            0 => snapshot
-                .with_key(key::Array::default())
-                .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
+            0 => (
+                Op::Remove,
+                snapshot
+                    .with_key(key::Array::default())
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
+            ),
 
             // Compress
-            1 if key::Array::can_compress(&snapshot.key(), &slots[0].1.key()) => Slot::new(
-                key::Array::compress(&snapshot.key(), slots[0].0, &slots[0].1.key()),
-                false,
-                false,
-                slots[0].1.kind(),
-                slots[0].1.next(),
+            1 if key::Array::can_compress(&snapshot.key(), &slots[0].1.key()) => (
+                Op::Compress,
+                Slot::new(
+                    key::Array::compress(&snapshot.key(), slots[0].0, &slots[0].1.key()),
+                    false,
+                    false,
+                    slots[0].1.kind(),
+                    slots[0].1.next(),
+                ),
             ),
 
             // Grow
@@ -148,9 +155,12 @@ impl Node for Node3 {
 
                 let node = Box::leak(node) as *mut Node256;
 
-                snapshot
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
-                    .with_next(u48::new(node as u64))
+                (
+                    node::Op::Grow,
+                    snapshot
+                        .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
+                        .with_next(u48::new(node as u64)),
+                )
             }
 
             // Replace
@@ -163,9 +173,12 @@ impl Node for Node3 {
 
                 let node = Box::leak(node) as *mut Node3;
 
-                snapshot
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
-                    .with_next(u48::new(node as u64))
+                (
+                    node::Op::Replace,
+                    snapshot
+                        .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
+                        .with_next(u48::new(node as u64)),
+                )
             }
         }
     }

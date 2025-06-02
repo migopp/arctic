@@ -22,7 +22,7 @@ pub(crate) trait Node {
 
     fn freeze(&self, grow: bool);
 
-    fn replace(&self, snapshot: &Slot) -> Slot;
+    fn replace(&self, snapshot: &Slot) -> (Op, Slot);
 }
 
 #[derive(Debug)]
@@ -32,6 +32,16 @@ pub(crate) enum GetOrReserveError {
 
     /// Initiate grow SMO in current node
     Grow,
+}
+
+pub(crate) enum Op {
+    Compress,
+    Expand,
+    Grow,
+    Replace,
+    Shrink,
+    Insert,
+    Remove,
 }
 
 #[ribbit::pack(size = 128, debug)]
@@ -111,6 +121,17 @@ impl Slot {
             <unpack![Kind]>::Valid => Child::Leaf(Some(leaf)),
             <unpack![Kind]>::Node3 => Child::Node(Ref::Node3(pointer as *mut Node3)),
             <unpack![Kind]>::Node256 => Child::Node(Ref::Node256(pointer as *mut Node256)),
+        }
+    }
+
+    pub(crate) unsafe fn deallocate(self) {
+        let pointer = self.next().value();
+        match self.kind().unpack() {
+            <unpack![Kind]>::Uninit | <unpack![Kind]>::Invalid | <unpack![Kind]>::Valid => {
+                unreachable!()
+            }
+            <unpack![Kind]>::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
+            <unpack![Kind]>::Node256 => drop(Box::from_raw(pointer as *mut Node256)),
         }
     }
 }
