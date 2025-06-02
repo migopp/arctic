@@ -11,6 +11,8 @@ mod node3;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 
+use crate::key;
+
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
 
@@ -34,8 +36,8 @@ pub(crate) enum GetOrReserveError {
 
 #[ribbit::pack(size = 128, debug)]
 pub(crate) struct Slot {
-    pub(crate) key: u64,
-    pub(crate) len: u8,
+    #[ribbit(size = 72)]
+    pub(crate) key: key::Array,
 
     pub(crate) frozen: bool,
     pub(crate) grow: bool,
@@ -50,8 +52,7 @@ pub(crate) struct Slot {
 impl Default for Slot {
     fn default() -> Self {
         Self::new(
-            0,
-            0,
+            key::Array::default(),
             false,
             false,
             Kind::new(<unpack![Kind]>::Uninit),
@@ -62,23 +63,13 @@ impl Default for Slot {
 
 impl Slot {
     pub(crate) fn traverse(&self, key: &[u8]) -> Traverse {
-        let search_len = key.len();
-        let search_key = key;
-
-        let slot_len = self.len() as usize;
-        let slot_key = self.key().to_be_bytes();
-
-        assert!(slot_len <= 8);
-
-        let prefix_len = slot_key
-            .iter()
-            .take(slot_len)
-            .zip(search_key)
-            .take_while(|(slot_byte, search_byte)| slot_byte == search_byte)
-            .count();
+        let search_key = key::Array::from_slice(key);
+        let slot_key = self.key();
+        let prefix_len = key::Array::prefix(&search_key, &slot_key);
+        eprintln!("{:?} {:?} {:?}", search_key, slot_key, prefix_len);
 
         // Fast path: successful traversal
-        if search_len >= slot_len && slot_len == prefix_len {
+        if search_key.len() >= slot_key.len() && slot_key.len() == prefix_len {
             return Traverse::Walk {
                 len: prefix_len,
                 child: self.child(),
@@ -86,25 +77,12 @@ impl Slot {
         }
 
         assert!(
-            search_len >= slot_len || slot_len != prefix_len,
+            search_key.len() >= slot_key.len() || slot_key.len() != prefix_len,
             "Precondition: no key is a prefix of another key",
         );
 
-        let mut start = [0u8; 8];
-        start[..prefix_len].copy_from_slice(&slot_key[..prefix_len]);
-
-        let middle = slot_key[prefix_len];
-
-        let mut end = [0u8; 8];
-        end[..slot_len - prefix_len - 1].copy_from_slice(&slot_key[prefix_len + 1..slot_len]);
-
-        Traverse::Split {
-            start_len: prefix_len,
-            end_len: slot_len - prefix_len - 1,
-            start: u64::from_be_bytes(start),
-            middle,
-            end: u64::from_be_bytes(end),
-        }
+        let (start, middle, end) = slot_key.expand(prefix_len);
+        Traverse::Split { start, middle, end }
     }
 
     pub(crate) fn freeze(slot: &A128<Self>, grow: bool) {
@@ -137,6 +115,7 @@ impl Slot {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum Ref {
     Node3(*mut Node3),
     Node256(*mut Node256),
@@ -181,14 +160,12 @@ pub(crate) enum Child {
 #[derive(Debug)]
 pub(crate) enum Traverse {
     Walk {
-        len: usize,
+        len: key::Len,
         child: Child,
     },
     Split {
-        start_len: usize,
-        end_len: usize,
-        start: u64,
+        start: key::Array,
         middle: u8,
-        end: u64,
+        end: key::Array,
     },
 }

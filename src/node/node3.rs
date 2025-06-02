@@ -8,6 +8,7 @@ use ribbit::u24;
 use ribbit::u48;
 use ribbit::unpack;
 
+use crate::key;
 use crate::node;
 use crate::node::GetOrReserveError;
 use crate::node::Slot;
@@ -125,27 +126,17 @@ impl Node for Node3 {
         match len {
             // Delete
             0 => snapshot
-                .with_len(0)
+                .with_key(key::Array::default())
                 .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
 
             // Compress
-            1 if snapshot.len() + 1 + slots[0].1.len() <= 8 => {
-                let mut key = [0u8; 8];
-                key[..snapshot.len() as usize].copy_from_slice(&snapshot.key().to_be_bytes());
-                key[snapshot.len() as usize] = slots[0].0;
-                key[snapshot.len() as usize..][..slots[0].1.len() as usize]
-                    .copy_from_slice(&slots[0].1.key().to_be_bytes());
-                let key = u64::from_be_bytes(key);
-
-                Slot::new(
-                    key,
-                    snapshot.len() + 1 + slots[0].1.len(),
-                    false,
-                    false,
-                    slots[0].1.kind(),
-                    slots[0].1.next(),
-                )
-            }
+            1 if key::Array::can_compress(&snapshot.key(), &slots[0].1.key()) => Slot::new(
+                key::Array::compress(&snapshot.key(), slots[0].0, &slots[0].1.key()),
+                false,
+                false,
+                slots[0].1.kind(),
+                slots[0].1.next(),
+            ),
 
             // Grow
             3.. if header.grow() => {
@@ -185,7 +176,7 @@ struct Header {
     len: u2,
     freeze: bool,
     grow: bool,
-    #[ribbit(offset = 8)]
+    #[ribbit(offset = 8, debug(format = "{:#08x}"))]
     keys: u24,
 }
 

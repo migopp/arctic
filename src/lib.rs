@@ -1,3 +1,4 @@
+mod key;
 mod node;
 
 use core::sync::atomic::Ordering;
@@ -9,6 +10,7 @@ use node::Slot;
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
+use ribbit::Pack as _;
 
 pub struct Art {
     root: A128<Slot>,
@@ -24,9 +26,15 @@ impl Default for Art {
 
 #[derive(Debug)]
 struct Segment<'a> {
-    slot: &'a A128<Slot>,
     index: Option<usize>,
-    len: usize,
+    slot: &'a A128<Slot>,
+    node: node::Ref,
+}
+
+enum Step {
+    Descend { len: key::Len, node: node::Ref },
+    Replace { slot: Slot },
+    Stop,
 }
 
 impl Art {
@@ -37,171 +45,158 @@ impl Art {
     pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
         eprintln!("insert {:?} = {}", key, value);
         let mut slot = &self.root;
-        let mut index: Option<usize> = None;
+        let mut snapshot = slot.load(Ordering::Relaxed);
 
+        let mut index: Option<usize> = None;
         let mut path = Vec::new();
 
         loop {
-            let snapshot = slot.load(Ordering::Relaxed);
-            let here = &key[index.unwrap_or(0)..];
+            let key = &key[index.unwrap_or(0)..];
 
-            eprintln!("traverse key {:?}", here);
-            match dbg!(snapshot.traverse(here)) {
-                node::Traverse::Walk {
-                    len,
-                    child: node::Child::Uninit,
-                } => {
-                    assert_eq!(len, 0);
+            eprintln!("traverse key {:?}", key);
 
-                    match here.split_first_chunk::<8>() {
-                        // Only create intermediate node if necessary
-                        Some((head, tail)) if !tail.is_empty() => {
-                            let node = Box::new(Node3::new());
-                            let node = Box::leak(node) as *mut Node3;
-
-                            slot.compare_exchange(
-                                snapshot.with_frozen(false),
-                                snapshot
-                                    .with_key(u64::from_be_bytes(*head))
-                                    .with_len(8)
-                                    .with_frozen(false)
-                                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
-                                    .with_next(u48::new(node as u64)),
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            )
-                            .unwrap();
-                        }
-                        Some(_) | None => {
-                            let mut prefix = [0u8; 8];
-                            prefix[..here.len()].copy_from_slice(here);
-                            let prefix = u64::from_be_bytes(prefix);
-
-                            slot.compare_exchange(
-                                snapshot.with_frozen(false),
-                                snapshot
-                                    .with_key(prefix)
-                                    .with_len(here.len() as u8)
-                                    .with_frozen(false)
-                                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Valid))
-                                    .with_next(u48::new(value)),
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            )
-                            .unwrap();
-
-                            return None;
-                        }
-                    };
-                }
-
-                node::Traverse::Walk {
-                    len,
-                    child: node::Child::Leaf(leaf),
-                } => {
-                    assert_eq!(here.len(), len);
-
-                    match slot.compare_exchange(
-                        snapshot.with_frozen(false),
-                        snapshot.with_frozen(false).with_next(u48::new(value)),
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    ) {
-                        // Success
-                        Ok(_) => return leaf.map(u48::value),
-
-                        // Frozen: recurse upward, help
-                        Err(conflict) if conflict.frozen() => todo!(),
-
-                        // Key is different: len must be strictly smaller, update snapshot and continue traversal
-                        Err(conflict) if conflict.key() != snapshot.key() => {
-                            assert!(conflict.len() < snapshot.len());
-                            continue;
-                        }
-
-                        // Next is different: concurrent update, retry
-                        Err(conflict) => {
-                            assert_eq!(conflict.kind(), snapshot.kind());
-                            assert_ne!(conflict.next(), snapshot.next());
-                            continue;
-                        }
-                    }
-                }
-
-                node::Traverse::Walk {
-                    len,
-                    child: node::Child::Node(node),
-                } => {
-                    path.push(Segment { slot, index, len });
+            let (replace, leaf) = match self.get_or_insert(key, &snapshot) {
+                Step::Descend { len, node } => {
+                    path.push(Segment {
+                        index,
+                        slot,
+                        node: node.clone(),
+                    });
 
                     // If `index` is None, then we are traversing from the root,
                     // and there is no byte for the node. Otherwise, we are
                     // traversing from the previous node, which takes one byte.
-                    let index_node = index.map_or(0, |index| index + 1) + len;
+                    let index_node = index.map_or(0, |index| index + 1) + len.to_usize();
                     let index_slot = index_node + 1;
 
                     let byte = key[index_node];
                     let node = unsafe { node.as_node() };
 
-                    match node.get_or_reserve(byte) {
+                    let grow = match node.get_or_reserve(byte) {
+                        // Fast path: no need to replace
                         Ok(next) => {
                             slot = next;
+                            snapshot = slot.load(Ordering::Relaxed);
                             index = Some(index_slot);
+                            continue;
                         }
-                        Err(GetOrReserveError::Grow) => {
-                            node.freeze(true);
-                            let replace = node.replace(&snapshot);
-                            slot.compare_exchange(
-                                snapshot.with_frozen(false),
-                                replace,
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            )
-                            .unwrap();
-                        }
-                        Err(GetOrReserveError::Freeze { grow: _ }) => todo!(),
+                        Err(GetOrReserveError::Grow) => true,
+                        Err(GetOrReserveError::Freeze { grow }) => grow,
+                    };
+
+                    node.freeze(grow);
+                    (node.replace(&snapshot), false)
+                }
+                Step::Replace { slot } => (slot, false),
+                Step::Stop => (
+                    Slot::new(
+                        key::Array::from_slice(key),
+                        false,
+                        false,
+                        node::Kind::new(<unpack![node::Kind]>::Valid),
+                        u48::new(value),
+                    ),
+                    true,
+                ),
+            };
+
+            match slot.compare_exchange(
+                snapshot.with_frozen(false),
+                replace,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(old) if leaf => {
+                    return match old.kind().unpack() {
+                        <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+                        <unpack![node::Kind]>::Valid => Some(u64::from(old.next())),
+                        _ => unreachable!(),
                     }
                 }
+                Ok(_) => {
+                    // Optimistic, can also reload from slot
+                    snapshot = replace;
+                }
 
-                node::Traverse::Split {
-                    start_len,
-                    end_len,
-                    start,
-                    middle,
-                    end,
-                } => {
-                    let mut node = Box::new(Node3::new());
+                Err(conflict) if conflict.frozen() => {
+                    todo!()
+                }
 
-                    let old = node.reserve(middle).unwrap();
-                    old.store(
-                        Slot::new(
-                            end,
-                            end_len as u8,
-                            false,
-                            false,
-                            snapshot.kind(),
-                            snapshot.next(),
-                        ),
-                        Ordering::Relaxed,
+                Err(conflict) => {
+                    assert!(
+                        conflict.key() != snapshot.key()
+                            && conflict.key().len() <= snapshot.key().len()
+                            || conflict.kind() != snapshot.kind()
                     );
 
-                    let node = Box::leak(node) as *mut Node3;
+                    snapshot = conflict;
 
-                    slot.compare_exchange(
-                        snapshot.with_frozen(false),
-                        Slot::new(
-                            start,
-                            start_len as u8,
+                    // Clean up and retry
+                }
+            }
+        }
+    }
+
+    fn get_or_insert(&self, key: &[u8], snapshot: &Slot) -> Step {
+        match snapshot.traverse(key) {
+            node::Traverse::Walk {
+                len,
+                child: node::Child::Node(child),
+            } => Step::Descend { len, node: child },
+
+            node::Traverse::Walk {
+                len,
+                child: node::Child::Uninit,
+            } => {
+                assert_eq!(len, key::Len::ZERO);
+
+                match key.split_first_chunk::<8>() {
+                    // Only create intermediate node if necessary
+                    Some((head, tail)) if !tail.is_empty() => {
+                        let node = Box::new(Node3::new());
+                        let node = Box::leak(node) as *mut Node3;
+                        let slot = Slot::new(
+                            key::Array::from_slice(head),
                             false,
                             false,
                             node::Kind::new(<unpack![node::Kind]>::Node3),
                             u48::new(node as u64),
-                        ),
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    )
-                    .unwrap();
+                        );
+
+                        Step::Replace { slot }
+                    }
+                    Some(_) | None => Step::Stop,
                 }
+            }
+
+            node::Traverse::Walk {
+                len,
+                child: node::Child::Leaf(_),
+            } => {
+                assert_eq!(key.len(), len.to_usize());
+
+                Step::Stop
+            }
+
+            node::Traverse::Split { start, middle, end } => {
+                let mut node = Box::new(Node3::new());
+
+                let old = node.reserve(middle).unwrap();
+                old.store(
+                    Slot::new(end, false, false, snapshot.kind(), snapshot.next()),
+                    Ordering::Relaxed,
+                );
+
+                let node = Box::leak(node) as *mut Node3;
+                let slot = Slot::new(
+                    start,
+                    false,
+                    false,
+                    node::Kind::new(<unpack![node::Kind]>::Node3),
+                    u48::new(node as u64),
+                );
+
+                Step::Replace { slot }
             }
         }
     }
@@ -223,7 +218,7 @@ impl Art {
                     len,
                     child: node::Child::Leaf(leaf),
                 } => {
-                    assert_eq!(key.len(), len);
+                    assert_eq!(key.len(), len.to_usize());
                     break leaf.map(u48::value);
                 }
 
@@ -231,7 +226,7 @@ impl Art {
                     len,
                     child: node::Child::Node(node),
                 } => {
-                    key = &key[len..];
+                    key = &key[len.to_usize()..];
                     let (head, tail) = key.split_first()?;
                     let node = unsafe { node.as_node() };
                     slot = node.get(*head)?;
