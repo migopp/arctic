@@ -101,15 +101,31 @@ impl Art {
                 } => {
                     assert_eq!(here.len(), len);
 
-                    slot.compare_exchange(
+                    match slot.compare_exchange(
                         snapshot.with_frozen(false),
                         snapshot.with_frozen(false).with_next(u48::new(value)),
                         Ordering::AcqRel,
                         Ordering::Acquire,
-                    )
-                    .unwrap();
+                    ) {
+                        // Success
+                        Ok(_) => return leaf.map(u48::value),
 
-                    return leaf.map(u48::value);
+                        // Frozen: recurse upward, help
+                        Err(conflict) if conflict.frozen() => todo!(),
+
+                        // Key is different: len must be strictly smaller, update snapshot and continue traversal
+                        Err(conflict) if conflict.key() != snapshot.key() => {
+                            assert!(conflict.len() < snapshot.len());
+                            continue;
+                        }
+
+                        // Next is different: concurrent update, retry
+                        Err(conflict) => {
+                            assert_eq!(conflict.kind(), snapshot.kind());
+                            assert_ne!(conflict.next(), snapshot.next());
+                            continue;
+                        }
+                    }
                 }
 
                 node::Traverse::Walk {
