@@ -23,11 +23,23 @@ impl CollectionHandle for Art {
     type Key = u64;
 
     fn get(&mut self, key: &Self::Key) -> bool {
-        self.0.get(&key.to_be_bytes()).is_some()
+        match self.0.get(&key.to_be_bytes()) {
+            Some(value) => {
+                assert_eq!(key >> 16, value);
+                true
+            }
+            None => false,
+        }
     }
 
     fn insert(&mut self, key: &Self::Key) -> bool {
-        self.0.insert(&key.to_be_bytes(), 0).is_none()
+        match self.0.insert(&key.to_be_bytes(), key >> 16) {
+            None => true,
+            Some(value) => {
+                assert_eq!(key >> 16, value);
+                false
+            }
+        }
     }
 
     fn remove(&mut self, key: &Self::Key) -> bool {
