@@ -76,6 +76,7 @@ impl Node for Node3 {
     }
 
     fn freeze(&self, grow: bool) {
+        eprintln!("freeze {:?}", self as *const _);
         let mut old = self.header.load(Ordering::Relaxed);
 
         while !old.freeze() {
@@ -124,31 +125,35 @@ impl Node for Node3 {
                 len += 1;
             });
 
-        match len {
-            0 => (
+        let slots = &slots[..len];
+
+        match slots {
+            [] => (
                 Op::Destroy,
                 snapshot
+                    .with_frozen(false)
+                    .with_grow(false)
                     .with_key(key::Array::default())
                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
             ),
 
-            1 if key::Array::can_compress(&snapshot.key(), &slots[0].1.key()) => (
+            [(key, child)] if key::Array::can_compress(&snapshot.key(), &child.key()) => (
                 Op::Compress,
                 Slot::new(
-                    key::Array::compress(&snapshot.key(), slots[0].0, &slots[0].1.key()),
+                    key::Array::compress(&snapshot.key(), *key, &child.key()),
                     false,
                     false,
-                    slots[0].1.kind(),
-                    slots[0].1.next(),
+                    child.kind(),
+                    child.next(),
                 ),
             ),
 
             // Grow
-            3.. if header.grow() => {
+            slots if slots.len() == 3 && header.grow() => {
                 let mut node = Box::new(Node256::new());
 
                 for (key, slot) in slots {
-                    node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
+                    node.reserve(*key).unwrap().store(*slot, Ordering::Relaxed);
                 }
 
                 let node = Box::leak(node) as *mut Node256;
@@ -156,6 +161,8 @@ impl Node for Node3 {
                 (
                     node::Op::Grow,
                     snapshot
+                        .with_frozen(false)
+                        .with_grow(true)
                         .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
                         .with_next(u48::new(node as u64)),
                 )
@@ -166,7 +173,7 @@ impl Node for Node3 {
                 let mut node = Box::new(Node3::new());
 
                 for (key, slot) in slots {
-                    node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
+                    node.reserve(*key).unwrap().store(*slot, Ordering::Relaxed);
                 }
 
                 let node = Box::leak(node) as *mut Node3;
@@ -174,6 +181,8 @@ impl Node for Node3 {
                 (
                     node::Op::Replace,
                     snapshot
+                        .with_frozen(false)
+                        .with_grow(false)
                         .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
                         .with_next(u48::new(node as u64)),
                 )

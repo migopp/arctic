@@ -85,6 +85,7 @@ enum Op {
     Slot(slot::Op),
 }
 
+#[derive(Debug)]
 enum Step {
     Descend { len: key::Len, node: node::Ref },
     Replace { op: slot::Op, slot: Slot },
@@ -96,8 +97,6 @@ impl Art {
     }
 
     pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
-        eprintln!("insert {:?} = {}", key, value);
-
         // TODO: implement optimistic version of `insert`
         //
         // Insert operations that don't CAS into a frozen
@@ -110,10 +109,8 @@ impl Art {
             let key = cursor.key_partial(key);
             let snapshot = cursor.slot().load(Ordering::Relaxed);
 
-            eprintln!("match key {:?}", key);
-
             let (op, slot) = match &direction {
-                Direction::Descend => match self.get_or_replace(&snapshot, key, value) {
+                Direction::Descend => match self.step(&snapshot, key, value) {
                     Step::Replace { op, slot } => (Op::Slot(op), slot),
                     Step::Descend { len, node } => {
                         let byte = key[len.to_usize()];
@@ -201,7 +198,80 @@ impl Art {
         }
     }
 
-    fn get_or_replace(&self, snapshot: &Slot, key: &[u8], value: u64) -> Step {
+    pub fn get(&self, key: &[u8]) -> Option<u64> {
+        let (_, snapshot) = self.walk(key)?;
+        match snapshot.kind().unpack() {
+            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn remove(&self, key: &[u8]) -> Option<u64> {
+        let (slot, mut snapshot) = self.walk(key)?;
+
+        loop {
+            match slot.compare_exchange(
+                snapshot.with_frozen(false),
+                snapshot
+                    .with_frozen(false)
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Invalid)),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(conflict) if conflict.frozen() => {
+                    eprintln!("frozen {:?}", slot as *const _);
+                    eprintln!("expected {:?}", snapshot.with_frozen(false));
+                    eprintln!("found {:?}", conflict);
+                    todo!()
+                }
+                Err(conflict) if conflict.key() != snapshot.key() => todo!(),
+                Err(conflict) => {
+                    unreachable!();
+                    snapshot = conflict;
+                }
+            }
+        }
+
+        match snapshot.kind().unpack() {
+            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
+        let (slot, mut snapshot) = self.walk(key)?;
+
+        loop {
+            match slot.compare_exchange(
+                snapshot.with_frozen(false),
+                snapshot
+                    .with_frozen(false)
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Valid))
+                    .with_next(u48::new(value)),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(conflict) if conflict.frozen() => todo!(),
+                Err(conflict) if conflict.key() != snapshot.key() => todo!(),
+                Err(conflict) => {
+                    unreachable!();
+                    snapshot = conflict;
+                }
+            }
+        }
+
+        match snapshot.kind().unpack() {
+            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            _ => unreachable!(),
+        }
+    }
+
+    fn step(&self, snapshot: &Slot, key: &[u8], value: u64) -> Step {
         match snapshot.r#match(key) {
             slot::Match::Full {
                 len,
@@ -275,25 +345,24 @@ impl Art {
         }
     }
 
-    pub fn get(&self, mut key: &[u8]) -> Option<u64> {
+    fn walk(&self, mut key: &[u8]) -> Option<(&A128<Slot>, Slot)> {
         let mut slot = &self.root;
-        eprintln!("get {:?}", key);
 
         loop {
-            eprintln!("match key {:?}", key);
-            match dbg!(slot.load(Ordering::Acquire).r#match(key)) {
+            let snapshot = slot.load(Ordering::Acquire);
+            match snapshot.r#match(key) {
                 slot::Match::Full {
                     len: _,
                     child: slot::Child::Uninit,
                 }
-                | slot::Match::Partial { .. } => break None,
+                | slot::Match::Partial { .. } => return None,
 
                 slot::Match::Full {
                     len,
-                    child: slot::Child::Leaf(leaf),
+                    child: slot::Child::Leaf(_),
                 } => {
                     assert_eq!(key.len(), len.to_usize());
-                    break leaf.map(u48::value);
+                    return Some((slot, snapshot));
                 }
 
                 slot::Match::Full {

@@ -10,5 +10,10 @@ default = []
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
 
 [dev-dependencies]
+bustle = "0.5"
 lincheck.path = "lincheck"
 proptest = "1.6"
+
+[[bench]]
+name = "sequential"
+harness = false

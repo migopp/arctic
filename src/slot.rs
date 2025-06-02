@@ -41,7 +41,6 @@ impl Slot {
         let search_key = key::Array::from_slice(key);
         let slot_key = self.key();
         let prefix_len = key::Array::prefix(&search_key, &slot_key);
-        eprintln!("{:?} {:?} {:?}", search_key, slot_key, prefix_len);
 
         // Fast path: successful traversal
         if search_key.len() >= slot_key.len() && slot_key.len() == prefix_len {
