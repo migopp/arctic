@@ -35,12 +35,28 @@ pub(crate) enum GetOrReserveError {
 }
 
 pub(crate) enum Op {
-    Compress,
-    Expand,
+    /// Node growth (larger size)
     Grow,
+
+    /// Node replacement (same size)
     Replace,
+
+    /// Node shrink (smaller size)
     Shrink,
+
+    /// Node deletion
+    Delete,
+
+    /// Path compression
+    Compress,
+
+    /// Path expansion
+    Expand,
+
+    /// Leaf insertion
     Insert,
+
+    /// Leaf removal
     Remove,
 }
 
@@ -72,7 +88,7 @@ impl Default for Slot {
 }
 
 impl Slot {
-    pub(crate) fn traverse(&self, key: &[u8]) -> Traverse {
+    pub(crate) fn r#match(&self, key: &[u8]) -> Match {
         let search_key = key::Array::from_slice(key);
         let slot_key = self.key();
         let prefix_len = key::Array::prefix(&search_key, &slot_key);
@@ -80,7 +96,7 @@ impl Slot {
 
         // Fast path: successful traversal
         if search_key.len() >= slot_key.len() && slot_key.len() == prefix_len {
-            return Traverse::Walk {
+            return Match::Full {
                 len: prefix_len,
                 child: self.child(),
             };
@@ -92,7 +108,7 @@ impl Slot {
         );
 
         let (start, middle, end) = slot_key.expand(prefix_len);
-        Traverse::Split { start, middle, end }
+        Match::Partial { start, middle, end }
     }
 
     pub(crate) fn freeze(slot: &A128<Self>, grow: bool) {
@@ -179,12 +195,12 @@ pub(crate) enum Child {
 }
 
 #[derive(Debug)]
-pub(crate) enum Traverse {
-    Walk {
+pub(crate) enum Match {
+    Full {
         len: key::Len,
         child: Child,
     },
-    Split {
+    Partial {
         start: key::Array,
         middle: u8,
         end: key::Array,

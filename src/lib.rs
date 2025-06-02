@@ -107,7 +107,7 @@ impl Art {
             let key = cursor.key_partial(key);
             let snapshot = cursor.slot().load(Ordering::Relaxed);
 
-            eprintln!("traverse key {:?}", key);
+            eprintln!("match key {:?}", key);
 
             let (op, slot) = match &cursor.direction {
                 Direction::Descend => match self.get_or_insert(key, &snapshot) {
@@ -168,7 +168,7 @@ impl Art {
             };
 
             match op {
-                node::Op::Insert | node::Op::Compress | node::Op::Remove => (),
+                node::Op::Insert | node::Op::Compress | node::Op::Delete | node::Op::Remove => (),
                 node::Op::Expand | node::Op::Grow | node::Op::Shrink | node::Op::Replace => unsafe {
                     slot.deallocate()
                 },
@@ -201,13 +201,13 @@ impl Art {
     }
 
     fn get_or_insert(&self, key: &[u8], snapshot: &Slot) -> Step {
-        match snapshot.traverse(key) {
-            node::Traverse::Walk {
+        match snapshot.r#match(key) {
+            node::Match::Full {
                 len,
                 child: node::Child::Node(child),
             } => Step::Descend { len, node: child },
 
-            node::Traverse::Walk {
+            node::Match::Full {
                 len,
                 child: node::Child::Uninit,
             } => {
@@ -235,7 +235,7 @@ impl Art {
                 }
             }
 
-            node::Traverse::Walk {
+            node::Match::Full {
                 len,
                 child: node::Child::Leaf(_),
             } => {
@@ -243,7 +243,7 @@ impl Art {
                 Step::Insert
             }
 
-            node::Traverse::Split { start, middle, end } => {
+            node::Match::Partial { start, middle, end } => {
                 let mut node = Box::new(Node3::new());
 
                 let old = node.reserve(middle).unwrap();
@@ -274,15 +274,15 @@ impl Art {
         eprintln!("get {:?}", key);
 
         loop {
-            eprintln!("traverse key {:?}", key);
-            match dbg!(slot.load(Ordering::Acquire).traverse(key)) {
-                node::Traverse::Walk {
+            eprintln!("match key {:?}", key);
+            match dbg!(slot.load(Ordering::Acquire).r#match(key)) {
+                node::Match::Full {
                     len: _,
                     child: node::Child::Uninit,
                 }
-                | node::Traverse::Split { .. } => break None,
+                | node::Match::Partial { .. } => break None,
 
-                node::Traverse::Walk {
+                node::Match::Full {
                     len,
                     child: node::Child::Leaf(leaf),
                 } => {
@@ -290,7 +290,7 @@ impl Art {
                     break leaf.map(u48::value);
                 }
 
-                node::Traverse::Walk {
+                node::Match::Full {
                     len,
                     child: node::Child::Node(node),
                 } => {
