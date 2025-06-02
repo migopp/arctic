@@ -35,6 +35,7 @@ struct Cursor<'a, const OPTIMISTIC: bool> {
     index: usize,
     slot: &'a A128<Slot>,
     path: Vec<Segment<'a>>,
+    direction: Direction,
 }
 
 enum Direction {
@@ -48,6 +49,7 @@ impl<'a, const OPTIMISTIC: bool> Cursor<'a, OPTIMISTIC> {
             index: 0,
             slot: &art.root,
             path: Vec::new(),
+            direction: Direction::Descend,
         }
     }
 
@@ -66,24 +68,47 @@ impl<'a, const OPTIMISTIC: bool> Cursor<'a, OPTIMISTIC> {
         self.slot = slot;
     }
 
-    fn pop(&mut self) -> Option<node::Ref> {
+    fn pop(&mut self, grow: bool) -> bool {
         if OPTIMISTIC {
-            return None;
+            return false;
         }
 
         let segment = self.path.pop().unwrap();
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.slot = segment.slot;
-        Some(segment.node)
+        self.direction = Direction::Ascend {
+            node: segment.node,
+            grow,
+        };
+        true
     }
 
+    #[inline]
     fn slot(&self) -> &A128<Slot> {
         self.slot
     }
 
+    #[inline]
     fn key_partial<'k>(&self, key_full: &'k [u8]) -> &'k [u8] {
         &key_full[self.index..]
+    }
+
+    #[inline]
+    fn direction(&self) -> &Direction {
+        match OPTIMISTIC {
+            true => &Direction::Descend,
+            false => &self.direction,
+        }
+    }
+
+    #[inline]
+    fn descend(&mut self) {
+        if OPTIMISTIC {
+            return;
+        }
+
+        self.direction = Direction::Descend;
     }
 }
 
@@ -126,14 +151,13 @@ impl Art {
         value: u64,
     ) -> Result<Option<u64>, ()> {
         let mut cursor = Cursor::<OPTIMISTIC>::new(self);
-        let mut direction = Direction::Descend;
 
         loop {
             let key = cursor.key_partial(key);
             let snapshot = cursor.slot().load(Ordering::Relaxed);
 
-            let (op, slot) = match (OPTIMISTIC, &direction) {
-                (true, _) | (false, Direction::Descend) => match self.step(&snapshot, key, value) {
+            let (op, slot) = match cursor.direction() {
+                Direction::Descend => match self.step(&snapshot, key, value) {
                     Step::Replace { op, slot } => (Op::Slot(op), slot),
                     Step::Descend { len, node } => {
                         let byte = key[len.to_usize()];
@@ -154,7 +178,7 @@ impl Art {
                         (Op::Node(op), slot)
                     }
                 },
-                (false, Direction::Ascend { node, grow }) => {
+                Direction::Ascend { node, grow } => {
                     let node = unsafe { node.as_node() };
                     node.freeze(*grow);
                     let (op, slot) = node.replace(&snapshot);
@@ -177,7 +201,7 @@ impl Art {
                 }
                 // FIXME: retire old allocation with SMR
                 Ok(_) => {
-                    direction = Direction::Descend;
+                    cursor.descend();
                     continue;
                 }
                 Err(conflict) => conflict,
@@ -196,25 +220,16 @@ impl Art {
             // - Split
             // - Initialize
             // - Leaf update
-            if !conflict.frozen() {
-                // Someone else must have completed (e.g. grow)
-                // or will complete (e.g. split) helping if
-                // we were ascending
-                direction = Direction::Descend;
-
-                // Retry
-                continue;
+            match conflict.frozen() {
+                false => {
+                    // Someone else must have completed (e.g. grow)
+                    // or will complete (e.g. split) helping if
+                    // we were ascending
+                    cursor.descend();
+                }
+                true if cursor.pop(conflict.grow()) => (),
+                true => return Err(()),
             }
-
-            // Start ascending
-            let Some(node) = cursor.pop() else {
-                return Err(());
-            };
-
-            direction = Direction::Ascend {
-                node,
-                grow: conflict.grow(),
-            };
         }
     }
 
