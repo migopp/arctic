@@ -105,10 +105,10 @@ impl Art {
         eprintln!("insert {:?} = {}", key, value);
 
         let mut cursor = Cursor::new(self);
-        let mut snapshot = cursor.slot().load(Ordering::Relaxed);
 
         loop {
             let key = cursor.key_partial(key);
+            let snapshot = cursor.slot().load(Ordering::Relaxed);
 
             eprintln!("traverse key {:?}", key);
 
@@ -119,9 +119,8 @@ impl Art {
 
                         let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
                             // Fast path: no need to replace
-                            Ok(next) => {
-                                cursor.push(len, node, next);
-                                snapshot = cursor.slot().load(Ordering::Relaxed);
+                            Ok(slot) => {
+                                cursor.push(len, node, slot);
                                 continue;
                             }
                             Err(GetOrReserveError::Grow) => true,
@@ -167,8 +166,6 @@ impl Art {
                 }
                 Ok(_) => {
                     cursor.direction = Direction::Descend;
-                    // Optimistic, can also reload from slot
-                    snapshot = replace;
                     continue;
                 }
             };
@@ -194,13 +191,11 @@ impl Art {
                 cursor.direction = Direction::Descend;
 
                 // Retry
-                snapshot = conflict;
                 continue;
             }
 
             // Start ascending
             cursor.pop(conflict.grow());
-            snapshot = cursor.slot.load(Ordering::Relaxed);
         }
     }
 
