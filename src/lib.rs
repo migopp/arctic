@@ -155,6 +155,7 @@ impl Art {
                         _ => unreachable!(),
                     }
                 }
+                // FIXME: retire old allocation with SMR
                 Ok(_) => {
                     direction = Direction::Descend;
                     continue;
