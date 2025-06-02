@@ -9,7 +9,6 @@ use ribbit::u48;
 use ribbit::unpack;
 
 use crate::node;
-use crate::node::FreezeError;
 use crate::node::GetOrReserveError;
 use crate::node::Slot;
 use crate::Node;
@@ -66,12 +65,12 @@ impl Node for Node3 {
         }
     }
 
-    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError> {
+    fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>> {
         // FIXME: shouldn't need atomics with &mut
         let header = self.header.load(Ordering::Relaxed);
-        let (header, index) = header.get_or_reserve(key).unwrap();
+        let (header, index) = header.get_or_reserve(key)?;
         self.header.store(header, Ordering::Relaxed);
-        Ok(&mut self.slots[index as usize])
+        Some(&mut self.slots[index as usize])
     }
 
     fn freeze(&self, grow: bool) {

@@ -16,7 +16,7 @@ pub(crate) trait Node {
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError>;
 
-    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError>;
+    fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>>;
 
     fn freeze(&self, grow: bool);
 
@@ -30,15 +30,6 @@ pub(crate) enum GetOrReserveError {
 
     /// Initiate grow SMO in current node
     Grow,
-}
-
-#[derive(Debug)]
-pub(crate) enum FreezeError {
-    /// Encountered SMO operation in parent
-    Freeze { grow: bool },
-
-    /// Reparent due to path expansion
-    Expand,
 }
 
 #[ribbit::pack(size = 128, debug)]

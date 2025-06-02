@@ -23,8 +23,8 @@ impl Node for Node256 {
         Ok(&self.0[key as usize])
     }
 
-    fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError> {
-        Ok(&mut self.0[key as usize])
+    fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>> {
+        Some(&mut self.0[key as usize])
     }
 
     fn freeze(&self, grow: bool) {
