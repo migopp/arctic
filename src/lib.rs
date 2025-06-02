@@ -1,15 +1,16 @@
 mod key;
 mod node;
+mod slot;
 
 use core::sync::atomic::Ordering;
 
 use node::GetOrReserveError;
 pub(crate) use node::Node;
 use node::Node3;
-use node::Slot;
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
+pub(crate) use slot::Slot;
 
 pub struct Art {
     root: A128<Slot>,
@@ -202,14 +203,14 @@ impl Art {
 
     fn get_or_insert(&self, key: &[u8], snapshot: &Slot) -> Step {
         match snapshot.r#match(key) {
-            node::Match::Full {
+            slot::Match::Full {
                 len,
-                child: node::Child::Node(child),
+                child: slot::Child::Node(child),
             } => Step::Descend { len, node: child },
 
-            node::Match::Full {
+            slot::Match::Full {
                 len,
-                child: node::Child::Uninit,
+                child: slot::Child::Uninit,
             } => {
                 assert_eq!(len, key::Len::ZERO);
 
@@ -235,15 +236,15 @@ impl Art {
                 }
             }
 
-            node::Match::Full {
+            slot::Match::Full {
                 len,
-                child: node::Child::Leaf(_),
+                child: slot::Child::Leaf(_),
             } => {
                 assert_eq!(key.len(), len.to_usize());
                 Step::Insert
             }
 
-            node::Match::Partial { start, middle, end } => {
+            slot::Match::Partial { start, middle, end } => {
                 let mut node = Box::new(Node3::new());
 
                 let old = node.reserve(middle).unwrap();
@@ -276,23 +277,23 @@ impl Art {
         loop {
             eprintln!("match key {:?}", key);
             match dbg!(slot.load(Ordering::Acquire).r#match(key)) {
-                node::Match::Full {
+                slot::Match::Full {
                     len: _,
-                    child: node::Child::Uninit,
+                    child: slot::Child::Uninit,
                 }
-                | node::Match::Partial { .. } => break None,
+                | slot::Match::Partial { .. } => break None,
 
-                node::Match::Full {
+                slot::Match::Full {
                     len,
-                    child: node::Child::Leaf(leaf),
+                    child: slot::Child::Leaf(leaf),
                 } => {
                     assert_eq!(key.len(), len.to_usize());
                     break leaf.map(u48::value);
                 }
 
-                node::Match::Full {
+                slot::Match::Full {
                     len,
-                    child: node::Child::Node(node),
+                    child: slot::Child::Node(node),
                 } => {
                     key = &key[len.to_usize()..];
                     let (head, tail) = key.split_first()?;
