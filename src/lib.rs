@@ -31,7 +31,7 @@ struct Segment<'a> {
     node: node::Ref,
 }
 
-struct Cursor<'a> {
+struct Cursor<'a, const OPTIMISTIC: bool> {
     index: usize,
     slot: &'a A128<Slot>,
     path: Vec<Segment<'a>>,
@@ -42,7 +42,7 @@ enum Direction {
     Descend,
 }
 
-impl<'a> Cursor<'a> {
+impl<'a, const OPTIMISTIC: bool> Cursor<'a, OPTIMISTIC> {
     fn new(art: &'a Art) -> Self {
         Self {
             index: 0,
@@ -55,20 +55,27 @@ impl<'a> Cursor<'a> {
         self.index += len.to_usize();
         self.index += 1;
 
-        self.path.push(Segment {
-            len,
-            slot: self.slot,
-            node,
-        });
+        if !OPTIMISTIC {
+            self.path.push(Segment {
+                len,
+                slot: self.slot,
+                node,
+            });
+        }
+
         self.slot = slot;
     }
 
-    fn pop(&mut self) -> node::Ref {
+    fn pop(&mut self) -> Option<node::Ref> {
+        if OPTIMISTIC {
+            return None;
+        }
+
         let segment = self.path.pop().unwrap();
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.slot = segment.slot;
-        segment.node
+        Some(segment.node)
     }
 
     fn slot(&self) -> &A128<Slot> {
@@ -97,20 +104,36 @@ impl Art {
     }
 
     pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
-        // TODO: implement optimistic version of `insert`
-        //
-        // Insert operations that don't CAS into a frozen
-        // parent slot can complete without tracking any
-        // path history.
-        let mut cursor = Cursor::new(self);
+        match self.insert_optimistic(key, value) {
+            Ok(old) => old,
+            Err(()) => self.insert_pessimistic(key, value),
+        }
+    }
+
+    #[inline]
+    fn insert_optimistic(&self, key: &[u8], value: u64) -> Result<Option<u64>, ()> {
+        self.insert_impl::<true>(key, value)
+    }
+
+    #[cold]
+    fn insert_pessimistic(&self, key: &[u8], value: u64) -> Option<u64> {
+        self.insert_impl::<false>(key, value).unwrap()
+    }
+
+    fn insert_impl<const OPTIMISTIC: bool>(
+        &self,
+        key: &[u8],
+        value: u64,
+    ) -> Result<Option<u64>, ()> {
+        let mut cursor = Cursor::<OPTIMISTIC>::new(self);
         let mut direction = Direction::Descend;
 
         loop {
             let key = cursor.key_partial(key);
             let snapshot = cursor.slot().load(Ordering::Relaxed);
 
-            let (op, slot) = match &direction {
-                Direction::Descend => match self.step(&snapshot, key, value) {
+            let (op, slot) = match (OPTIMISTIC, &direction) {
+                (true, _) | (false, Direction::Descend) => match self.step(&snapshot, key, value) {
                     Step::Replace { op, slot } => (Op::Slot(op), slot),
                     Step::Descend { len, node } => {
                         let byte = key[len.to_usize()];
@@ -131,7 +154,7 @@ impl Art {
                         (Op::Node(op), slot)
                     }
                 },
-                Direction::Ascend { node, grow } => {
+                (false, Direction::Ascend { node, grow }) => {
                     let node = unsafe { node.as_node() };
                     node.freeze(*grow);
                     let (op, slot) = node.replace(&snapshot);
@@ -147,10 +170,10 @@ impl Art {
             ) {
                 Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
                     return match old.kind().unpack() {
-                        <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
-                        <unpack![node::Kind]>::Valid => Some(u64::from(old.next())),
+                        <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => Ok(None),
+                        <unpack![node::Kind]>::Valid => Ok(Some(u64::from(old.next()))),
                         _ => unreachable!(),
-                    }
+                    };
                 }
                 // FIXME: retire old allocation with SMR
                 Ok(_) => {
@@ -174,12 +197,6 @@ impl Art {
             // - Initialize
             // - Leaf update
             if !conflict.frozen() {
-                assert!(
-                    conflict.key() != snapshot.key()
-                        && conflict.key().len() <= snapshot.key().len()
-                        || conflict.kind() != snapshot.kind()
-                );
-
                 // Someone else must have completed (e.g. grow)
                 // or will complete (e.g. split) helping if
                 // we were ascending
@@ -190,7 +207,10 @@ impl Art {
             }
 
             // Start ascending
-            let node = cursor.pop();
+            let Some(node) = cursor.pop() else {
+                return Err(());
+            };
+
             direction = Direction::Ascend {
                 node,
                 grow: conflict.grow(),
