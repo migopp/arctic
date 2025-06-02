@@ -8,7 +8,7 @@ pub(crate) struct Len(u4);
 
 impl Len {
     pub(crate) const ZERO: Self = Len::new(u4::new(0));
-    const MAX: Self = Len::new(u4::new(8));
+    pub(crate) const MAX: Self = Len::new(u4::new(8));
 
     const fn from_usize(len: usize) -> Self {
         if len > Len::MAX.to_usize() {

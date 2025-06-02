@@ -35,7 +35,6 @@ struct Cursor<'a> {
     index: usize,
     slot: &'a A128<Slot>,
     path: Vec<Segment<'a>>,
-    direction: Direction,
 }
 
 enum Direction {
@@ -49,7 +48,6 @@ impl<'a> Cursor<'a> {
             index: 0,
             slot: &art.root,
             path: Vec::new(),
-            direction: Direction::Descend,
         }
     }
 
@@ -65,18 +63,12 @@ impl<'a> Cursor<'a> {
         self.slot = slot;
     }
 
-    fn pop(&mut self, grow: bool) {
-        let Some(segment) = self.path.pop() else {
-            unreachable!()
-        };
-
+    fn pop(&mut self) -> node::Ref {
+        let segment = self.path.pop().unwrap();
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.slot = segment.slot;
-        self.direction = Direction::Ascend {
-            node: segment.node,
-            grow,
-        };
+        segment.node
     }
 
     fn slot(&self) -> &A128<Slot> {
@@ -88,10 +80,14 @@ impl<'a> Cursor<'a> {
     }
 }
 
+enum Op {
+    Node(node::Op),
+    Slot(slot::Op),
+}
+
 enum Step {
     Descend { len: key::Len, node: node::Ref },
-    Replace { op: node::Op, slot: Slot },
-    Insert,
+    Replace { op: slot::Op, slot: Slot },
 }
 
 impl Art {
@@ -103,6 +99,7 @@ impl Art {
         eprintln!("insert {:?} = {}", key, value);
 
         let mut cursor = Cursor::new(self);
+        let mut direction = Direction::Descend;
 
         loop {
             let key = cursor.key_partial(key);
@@ -110,8 +107,9 @@ impl Art {
 
             eprintln!("match key {:?}", key);
 
-            let (op, slot) = match &cursor.direction {
-                Direction::Descend => match self.get_or_insert(key, &snapshot) {
+            let (op, slot) = match &direction {
+                Direction::Descend => match self.get_or_replace(&snapshot, key, value) {
+                    Step::Replace { op, slot } => (Op::Slot(op), slot),
                     Step::Descend { len, node } => {
                         let byte = key[len.to_usize()];
 
@@ -127,24 +125,15 @@ impl Art {
 
                         let node = unsafe { node.as_node() };
                         node.freeze(grow);
-                        node.replace(&snapshot)
+                        let (op, slot) = node.replace(&snapshot);
+                        (Op::Node(op), slot)
                     }
-                    Step::Insert => (
-                        node::Op::Insert,
-                        Slot::new(
-                            key::Array::from_slice(key),
-                            false,
-                            false,
-                            node::Kind::new(<unpack![node::Kind]>::Valid),
-                            u48::new(value),
-                        ),
-                    ),
-                    Step::Replace { op, slot } => (op, slot),
                 },
                 Direction::Ascend { node, grow } => {
                     let node = unsafe { node.as_node() };
                     node.freeze(*grow);
-                    node.replace(&snapshot)
+                    let (op, slot) = node.replace(&snapshot);
+                    (Op::Node(op), slot)
                 }
             };
 
@@ -154,7 +143,7 @@ impl Art {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(old) if matches!(op, node::Op::Insert) => {
+                Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
                     return match old.kind().unpack() {
                         <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
                         <unpack![node::Kind]>::Valid => Some(u64::from(old.next())),
@@ -162,17 +151,18 @@ impl Art {
                     }
                 }
                 Ok(_) => {
-                    cursor.direction = Direction::Descend;
+                    direction = Direction::Descend;
                     continue;
                 }
                 Err(conflict) => conflict,
             };
 
             match op {
-                node::Op::Insert | node::Op::Compress | node::Op::Delete | node::Op::Remove => (),
-                node::Op::Expand | node::Op::Grow | node::Op::Shrink | node::Op::Replace => unsafe {
-                    slot.deallocate()
-                },
+                Op::Node(node::Op::Destroy | node::Op::Compress)
+                | Op::Slot(slot::Op::Insert | slot::Op::Remove) => (),
+
+                Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
+                | Op::Slot(slot::Op::Create | slot::Op::Expand) => unsafe { slot.deallocate() },
             }
 
             // Conflicts can be due to:
@@ -190,18 +180,22 @@ impl Art {
                 // Someone else must have completed (e.g. grow)
                 // or will complete (e.g. split) helping if
                 // we were ascending
-                cursor.direction = Direction::Descend;
+                direction = Direction::Descend;
 
                 // Retry
                 continue;
             }
 
             // Start ascending
-            cursor.pop(conflict.grow());
+            let node = cursor.pop();
+            direction = Direction::Ascend {
+                node,
+                grow: conflict.grow(),
+            };
         }
     }
 
-    fn get_or_insert(&self, key: &[u8], snapshot: &Slot) -> Step {
+    fn get_or_replace(&self, snapshot: &Slot, key: &[u8], value: u64) -> Step {
         match snapshot.r#match(key) {
             slot::Match::Full {
                 len,
@@ -209,39 +203,44 @@ impl Art {
             } => Step::Descend { len, node: child },
 
             slot::Match::Full {
+                len: _,
+                child: slot::Child::Leaf(_) | slot::Child::Uninit,
+            } if key.len() <= key::Len::MAX.to_usize() => Step::Replace {
+                op: slot::Op::Insert,
+                slot: Slot::new(
+                    key::Array::from_slice(key),
+                    false,
+                    false,
+                    node::Kind::new(<unpack![node::Kind]>::Valid),
+                    u48::new(value),
+                ),
+            },
+
+            slot::Match::Full {
+                len: _,
+                child: slot::Child::Leaf(_),
+            } => unreachable!(),
+
+            slot::Match::Full {
                 len,
                 child: slot::Child::Uninit,
             } => {
                 assert_eq!(len, key::Len::ZERO);
 
-                match key.split_first_chunk::<8>() {
-                    // Only create intermediate node if necessary
-                    Some((head, tail)) if !tail.is_empty() => {
-                        let node = Box::new(Node3::new());
-                        let node = Box::leak(node) as *mut Node3;
-                        let slot = Slot::new(
-                            key::Array::from_slice(head),
-                            false,
-                            false,
-                            node::Kind::new(<unpack![node::Kind]>::Node3),
-                            u48::new(node as u64),
-                        );
+                let node = Box::new(Node3::new());
+                let node = Box::leak(node) as *mut Node3;
+                let slot = Slot::new(
+                    key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
+                    false,
+                    false,
+                    node::Kind::new(<unpack![node::Kind]>::Node3),
+                    u48::new(node as u64),
+                );
 
-                        Step::Replace {
-                            op: node::Op::Expand,
-                            slot,
-                        }
-                    }
-                    Some(_) | None => Step::Insert,
+                Step::Replace {
+                    op: slot::Op::Create,
+                    slot,
                 }
-            }
-
-            slot::Match::Full {
-                len,
-                child: slot::Child::Leaf(_),
-            } => {
-                assert_eq!(key.len(), len.to_usize());
-                Step::Insert
             }
 
             slot::Match::Partial { start, middle, end } => {
@@ -263,7 +262,7 @@ impl Art {
                 );
 
                 Step::Replace {
-                    op: node::Op::Expand,
+                    op: slot::Op::Expand,
                     slot,
                 }
             }

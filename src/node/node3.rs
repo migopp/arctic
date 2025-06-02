@@ -125,15 +125,13 @@ impl Node for Node3 {
             });
 
         match len {
-            // Delete
             0 => (
-                Op::Remove,
+                Op::Destroy,
                 snapshot
                     .with_key(key::Array::default())
                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
             ),
 
-            // Compress
             1 if key::Array::can_compress(&snapshot.key(), &slots[0].1.key()) => (
                 Op::Compress,
                 Slot::new(

@@ -32,29 +32,20 @@ pub(crate) enum GetOrReserveError {
 }
 
 pub(crate) enum Op {
-    /// Node growth (larger size)
-    Grow,
+    /// Node shrink (smaller size)
+    Shrink,
 
     /// Node replacement (same size)
     Replace,
 
-    /// Node shrink (smaller size)
-    Shrink,
+    /// Node growth (larger size)
+    Grow,
 
-    /// Node deletion
-    Delete,
+    /// Node elimination
+    Destroy,
 
     /// Path compression
     Compress,
-
-    /// Path expansion
-    Expand,
-
-    /// Leaf insertion
-    Insert,
-
-    /// Leaf removal
-    Remove,
 }
 
 #[derive(Clone)]

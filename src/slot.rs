@@ -106,6 +106,21 @@ impl Slot {
 }
 
 #[derive(Debug)]
+pub(crate) enum Op {
+    /// Node creation
+    Create,
+
+    /// Path expansion
+    Expand,
+
+    /// Leaf insertion
+    Insert,
+
+    /// Leaf removal
+    Remove,
+}
+
+#[derive(Debug)]
 pub(crate) enum Child {
     Uninit,
     Leaf(Option<u48>),
