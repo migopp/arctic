@@ -57,12 +57,6 @@ impl Art {
 
             let (replace, leaf) = match self.get_or_insert(key, &snapshot) {
                 Step::Descend { len, node } => {
-                    path.push(Segment {
-                        index,
-                        slot,
-                        node: node.clone(),
-                    });
-
                     // If `index` is None, then we are traversing from the root,
                     // and there is no byte for the node. Otherwise, we are
                     // traversing from the previous node, which takes one byte.
@@ -70,11 +64,12 @@ impl Art {
                     let index_slot = index_node + 1;
 
                     let byte = key[index_node];
-                    let node = unsafe { node.as_node() };
 
-                    let grow = match node.get_or_reserve(byte) {
+                    let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
                         // Fast path: no need to replace
                         Ok(next) => {
+                            path.push(Segment { index, slot, node });
+
                             slot = next;
                             snapshot = slot.load(Ordering::Relaxed);
                             index = Some(index_slot);
@@ -84,6 +79,7 @@ impl Art {
                         Err(GetOrReserveError::Freeze { grow }) => grow,
                     };
 
+                    let node = unsafe { node.as_node() };
                     node.freeze(grow);
                     (node.replace(&snapshot), false)
                 }
