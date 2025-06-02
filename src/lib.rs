@@ -26,9 +26,68 @@ impl Default for Art {
 
 #[derive(Debug)]
 struct Segment<'a> {
-    index: Option<usize>,
+    len: key::Len,
     slot: &'a A128<Slot>,
     node: node::Ref,
+}
+
+struct Cursor<'a> {
+    art: &'a Art,
+    index: usize,
+    slot: &'a A128<Slot>,
+    path: Vec<Segment<'a>>,
+    direction: Direction,
+}
+
+enum Direction {
+    Ascend { node: node::Ref, grow: bool },
+    Descend,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(art: &'a Art) -> Self {
+        Self {
+            art,
+            index: 0,
+            slot: &art.root,
+            path: Vec::new(),
+            direction: Direction::Descend,
+        }
+    }
+
+    fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
+        self.index += len.to_usize();
+        self.index += 1;
+
+        self.path.push(Segment {
+            len,
+            slot: self.slot,
+            node,
+        });
+        self.slot = slot;
+    }
+
+    fn pop(&mut self, grow: bool) {
+        let Some(segment) = self.path.pop() else {
+            unreachable!()
+        };
+
+        self.index -= 1;
+        self.index -= segment.len.to_usize();
+        self.slot = segment.slot;
+        self.direction = Direction::Ascend {
+            node: segment.node,
+            grow,
+        };
+    }
+
+    fn slot(&self) -> &A128<Slot> {
+        self.slot
+    }
+
+    fn key_partial<'k>(&self, key_full: &'k [u8]) -> &'k [u8] {
+        &key_full[self.index..]
+    }
 }
 
 enum Step {
@@ -44,64 +103,61 @@ impl Art {
 
     pub fn insert(&self, key: &[u8], value: u64) -> Option<u64> {
         eprintln!("insert {:?} = {}", key, value);
-        let mut slot = &self.root;
-        let mut snapshot = slot.load(Ordering::Relaxed);
 
-        let mut index: Option<usize> = None;
-        let mut path = Vec::new();
+        let mut cursor = Cursor::new(self);
+        let mut snapshot = cursor.slot().load(Ordering::Relaxed);
 
         loop {
-            let key = &key[index.unwrap_or(0)..];
+            let key = cursor.key_partial(key);
 
             eprintln!("traverse key {:?}", key);
 
-            let (replace, leaf) = match self.get_or_insert(key, &snapshot) {
-                Step::Descend { len, node } => {
-                    // If `index` is None, then we are traversing from the root,
-                    // and there is no byte for the node. Otherwise, we are
-                    // traversing from the previous node, which takes one byte.
-                    let index_node = index.map_or(0, |index| index + 1) + len.to_usize();
-                    let index_slot = index_node + 1;
+            let (replace, leaf) = match &cursor.direction {
+                Direction::Descend => match self.get_or_insert(key, &snapshot) {
+                    Step::Descend { len, node } => {
+                        let byte = key[len.to_usize()];
 
-                    let byte = key[index_node];
+                        let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
+                            // Fast path: no need to replace
+                            Ok(next) => {
+                                cursor.push(len, node, next);
+                                snapshot = cursor.slot().load(Ordering::Relaxed);
+                                continue;
+                            }
+                            Err(GetOrReserveError::Grow) => true,
+                            Err(GetOrReserveError::Freeze { grow }) => grow,
+                        };
 
-                    let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
-                        // Fast path: no need to replace
-                        Ok(next) => {
-                            path.push(Segment { index, slot, node });
-
-                            slot = next;
-                            snapshot = slot.load(Ordering::Relaxed);
-                            index = Some(index_slot);
-                            continue;
-                        }
-                        Err(GetOrReserveError::Grow) => true,
-                        Err(GetOrReserveError::Freeze { grow }) => grow,
-                    };
-
+                        let node = unsafe { node.as_node() };
+                        node.freeze(grow);
+                        (node.replace(&snapshot), false)
+                    }
+                    Step::Replace { slot } => (slot, false),
+                    Step::Stop => (
+                        Slot::new(
+                            key::Array::from_slice(key),
+                            false,
+                            false,
+                            node::Kind::new(<unpack![node::Kind]>::Valid),
+                            u48::new(value),
+                        ),
+                        true,
+                    ),
+                },
+                Direction::Ascend { node, grow } => {
                     let node = unsafe { node.as_node() };
-                    node.freeze(grow);
+                    node.freeze(*grow);
                     (node.replace(&snapshot), false)
                 }
-                Step::Replace { slot } => (slot, false),
-                Step::Stop => (
-                    Slot::new(
-                        key::Array::from_slice(key),
-                        false,
-                        false,
-                        node::Kind::new(<unpack![node::Kind]>::Valid),
-                        u48::new(value),
-                    ),
-                    true,
-                ),
             };
 
-            match slot.compare_exchange(
+            let conflict = match cursor.slot().compare_exchange(
                 snapshot.with_frozen(false),
                 replace,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
+                Err(conflict) => conflict,
                 Ok(old) if leaf => {
                     return match old.kind().unpack() {
                         <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
@@ -110,26 +166,41 @@ impl Art {
                     }
                 }
                 Ok(_) => {
+                    cursor.direction = Direction::Descend;
                     // Optimistic, can also reload from slot
                     snapshot = replace;
+                    continue;
                 }
+            };
 
-                Err(conflict) if conflict.frozen() => {
-                    todo!()
-                }
+            // TODO: free allocations within `replace`
+            // Split, grow, initialize operations can allocate
 
-                Err(conflict) => {
-                    assert!(
-                        conflict.key() != snapshot.key()
-                            && conflict.key().len() <= snapshot.key().len()
-                            || conflict.kind() != snapshot.kind()
-                    );
+            // Conflicts can be due to:
+            // - Freeze
+            // - Split
+            // - Initialize
+            // - Leaf update
+            if !conflict.frozen() {
+                assert!(
+                    conflict.key() != snapshot.key()
+                        && conflict.key().len() <= snapshot.key().len()
+                        || conflict.kind() != snapshot.kind()
+                );
 
-                    snapshot = conflict;
+                // Someone else must have completed (e.g. grow)
+                // or will complete (e.g. split) helping if
+                // we were ascending
+                cursor.direction = Direction::Descend;
 
-                    // Clean up and retry
-                }
+                // Retry
+                snapshot = conflict;
+                continue;
             }
+
+            // Start ascending
+            cursor.pop(conflict.grow());
+            snapshot = cursor.slot.load(Ordering::Relaxed);
         }
     }
 
