@@ -60,11 +60,11 @@ impl Art {
                             let node = Box::leak(node) as *mut Node3;
 
                             slot.compare_exchange(
-                                snapshot.with_freeze(false),
+                                snapshot.with_frozen(false),
                                 snapshot
                                     .with_key(u64::from_be_bytes(*head))
                                     .with_len(8)
-                                    .with_freeze(false)
+                                    .with_frozen(false)
                                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
                                     .with_next(u48::new(node as u64)),
                                 Ordering::AcqRel,
@@ -78,11 +78,11 @@ impl Art {
                             let prefix = u64::from_be_bytes(prefix);
 
                             slot.compare_exchange(
-                                snapshot.with_freeze(false),
+                                snapshot.with_frozen(false),
                                 snapshot
                                     .with_key(prefix)
                                     .with_len(here.len() as u8)
-                                    .with_freeze(false)
+                                    .with_frozen(false)
                                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Valid))
                                     .with_next(u48::new(value)),
                                 Ordering::AcqRel,
@@ -102,8 +102,8 @@ impl Art {
                     assert_eq!(here.len(), len);
 
                     slot.compare_exchange(
-                        snapshot.with_freeze(false),
-                        snapshot.with_freeze(false).with_next(u48::new(value)),
+                        snapshot.with_frozen(false),
+                        snapshot.with_frozen(false).with_next(u48::new(value)),
                         Ordering::AcqRel,
                         Ordering::Acquire,
                     )
@@ -133,7 +133,15 @@ impl Art {
                             index = Some(index_slot);
                         }
                         Err(GetOrReserveError::Grow) => {
-                            node.grow(path.last().unwrap().slot, &snapshot).unwrap();
+                            node.freeze(true);
+                            let replace = node.replace(&snapshot);
+                            slot.compare_exchange(
+                                snapshot.with_frozen(false),
+                                replace,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .unwrap();
                         }
                         Err(GetOrReserveError::Freeze { grow: _ }) => todo!(),
                     }
@@ -164,7 +172,7 @@ impl Art {
                     let node = Box::leak(node) as *mut Node3;
 
                     slot.compare_exchange(
-                        snapshot.with_freeze(false),
+                        snapshot.with_frozen(false),
                         Slot::new(
                             start,
                             start_len as u8,

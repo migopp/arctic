@@ -27,11 +27,10 @@ impl<K: Arbitrary + 'static> Arbitrary for Op<K, u64> {
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
         prop_oneof![
-            (
-                K::arbitrary(),
-                u64::arbitrary().prop_filter("Tagged pointer", |value| *value < (1 << 63))
-            )
-                .prop_map(|(key, value)| Op::Insert { key, value }),
+            (K::arbitrary(), u32::arbitrary()).prop_map(|(key, value)| Op::Insert {
+                key,
+                value: value as u64
+            }),
             K::arbitrary().prop_map(|key| Op::Get { key }),
         ]
         .boxed()

@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 
 use ribbit::atomic::A128;
 use ribbit::u48;
@@ -17,9 +18,9 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Result<&mut A128<Slot>, GetOrReserveError>;
 
-    fn grow(&self, parent: &A128<Slot>, snapshot: &Slot) -> Result<Ref, GrowError>;
+    fn freeze(&self, grow: bool);
 
-    fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()>;
+    fn replace(&self, snapshot: &Slot) -> Slot;
 }
 
 #[derive(Debug)]
@@ -32,7 +33,7 @@ pub(crate) enum GetOrReserveError {
 }
 
 #[derive(Debug)]
-pub(crate) enum GrowError {
+pub(crate) enum FreezeError {
     /// Encountered SMO operation in parent
     Freeze { grow: bool },
 
@@ -45,7 +46,7 @@ pub(crate) struct Slot {
     pub(crate) key: u64,
     pub(crate) len: u8,
 
-    pub(crate) freeze: bool,
+    pub(crate) frozen: bool,
     pub(crate) grow: bool,
 
     #[ribbit(size = 3)]
@@ -112,6 +113,22 @@ impl Slot {
             start: u64::from_be_bytes(start),
             middle,
             end: u64::from_be_bytes(end),
+        }
+    }
+
+    pub(crate) fn freeze(slot: &A128<Self>, grow: bool) {
+        let mut old = slot.load(Ordering::Relaxed);
+
+        while !old.frozen() {
+            match slot.compare_exchange(
+                old,
+                old.with_frozen(true).with_grow(grow),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) => old = conflict,
+            }
         }
     }
 

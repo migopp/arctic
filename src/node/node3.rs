@@ -9,8 +9,8 @@ use ribbit::u48;
 use ribbit::unpack;
 
 use crate::node;
+use crate::node::FreezeError;
 use crate::node::GetOrReserveError;
-use crate::node::GrowError;
 use crate::node::Slot;
 use crate::Node;
 
@@ -74,76 +74,110 @@ impl Node for Node3 {
         Ok(&mut self.slots[index as usize])
     }
 
-    fn grow(&self, parent: &A128<Slot>, snapshot: &Slot) -> Result<node::Ref, GrowError> {
+    fn freeze(&self, grow: bool) {
         let mut old = self.header.load(Ordering::Relaxed);
 
-        if !old.freeze() {
+        while !old.freeze() {
             match self.header.compare_exchange(
                 old,
-                old.with_freeze(true).with_grow(true),
+                old.with_freeze(true).with_grow(grow),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => (),
-                Err(header) => {
-                    assert!(header.freeze());
-                    old = header;
-                }
+                Ok(_) => break,
+                Err(conflict) => old = conflict,
             }
         }
 
-        for slot in &self.slots {
-            let old = slot.load(Ordering::Relaxed);
-
-            if old.freeze() {
-                continue;
-            }
-
-            // Safe to ignore result here
-            let _ = slot.compare_exchange(
-                old,
-                old.with_freeze(true),
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            );
+        let grow = old.grow();
+        for slot in self.slots.iter().take(old.len().value() as usize) {
+            Slot::freeze(slot, grow)
         }
+    }
 
-        let mut node = Box::new(Node256::new());
+    fn replace(&self, snapshot: &Slot) -> Slot {
         let header = self.header.load(Ordering::Relaxed);
         let keys = header.keys().value();
 
-        for (i, slot) in self.slots.iter().enumerate() {
-            let slot = slot.load(Ordering::Relaxed);
-            let key = (keys >> (i * 8)) as u8;
+        assert!(header.freeze());
 
-            if matches!(
-                slot.kind().unpack(),
-                <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid
-            ) {
-                continue;
+        let mut slots: [(u8, Slot); 3] = core::array::from_fn(|_| (0, Slot::default()));
+        let mut len = 0;
+
+        self.slots
+            .iter()
+            .take(header.len().value() as usize)
+            .map(|slot| slot.load(Ordering::Relaxed))
+            .inspect(|slot| assert!(slot.frozen()))
+            .enumerate()
+            .filter(|(_, slot)| {
+                !matches!(
+                    slot.kind().unpack(),
+                    <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid
+                )
+            })
+            .map(|(index, slot)| ((keys >> (index * 8)) as u8, slot))
+            .zip(&mut slots)
+            .for_each(|(slot, save)| {
+                *save = slot;
+                len += 1;
+            });
+
+        match len {
+            // Delete
+            0 => snapshot
+                .with_len(0)
+                .with_kind(node::Kind::new(<unpack![node::Kind]>::Uninit)),
+
+            // Compress
+            1 if snapshot.len() + 1 + slots[0].1.len() <= 8 => {
+                let mut key = [0u8; 8];
+                key[..snapshot.len() as usize].copy_from_slice(&snapshot.key().to_be_bytes());
+                key[snapshot.len() as usize] = slots[0].0;
+                key[snapshot.len() as usize..][..slots[0].1.len() as usize]
+                    .copy_from_slice(&slots[0].1.key().to_be_bytes());
+                let key = u64::from_be_bytes(key);
+
+                Slot::new(
+                    key,
+                    snapshot.len() + 1 + slots[0].1.len(),
+                    false,
+                    false,
+                    slots[0].1.kind(),
+                    slots[0].1.next(),
+                )
             }
 
-            node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
-        }
+            // Grow
+            3.. if header.grow() => {
+                let mut node = Box::new(Node256::new());
 
-        let node = Box::leak(node) as *mut Node256;
+                for (key, slot) in slots {
+                    node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
+                }
 
-        parent
-            .compare_exchange(
-                snapshot.with_freeze(false),
+                let node = Box::leak(node) as *mut Node256;
+
                 snapshot
                     .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
-                    .with_next(u48::new(node as u64)),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .unwrap();
+                    .with_next(u48::new(node as u64))
+            }
 
-        Ok(node::Ref::Node256(node))
-    }
+            // Replace
+            _ => {
+                let mut node = Box::new(Node3::new());
 
-    fn help(&self, parent: &A128<Slot>, grow: bool) -> Result<(), ()> {
-        todo!()
+                for (key, slot) in slots {
+                    node.reserve(key).unwrap().store(slot, Ordering::Relaxed);
+                }
+
+                let node = Box::leak(node) as *mut Node3;
+
+                snapshot
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
+                    .with_next(u48::new(node as u64))
+            }
+        }
     }
 }
 
