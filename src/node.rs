@@ -31,6 +31,7 @@ pub(crate) enum GetOrReserveError {
     Grow,
 }
 
+#[derive(Debug)]
 pub(crate) enum Op {
     /// Node shrink (smaller size)
     Shrink,

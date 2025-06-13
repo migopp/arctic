@@ -112,6 +112,7 @@ impl<'a, const OPTIMISTIC: bool> Cursor<'a, OPTIMISTIC> {
     }
 }
 
+#[derive(Debug)]
 enum Op {
     Node(node::Op),
     Slot(slot::Op),
@@ -154,7 +155,7 @@ impl Art {
 
         loop {
             let key = cursor.key_partial(key);
-            let snapshot = cursor.slot().load(Ordering::Relaxed);
+            let snapshot = cursor.slot().load(Ordering::Acquire);
 
             let (op, slot) = match cursor.direction() {
                 Direction::Descend => match self.step(&snapshot, key, value) {

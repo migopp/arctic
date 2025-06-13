@@ -52,7 +52,18 @@ impl CollectionHandle for Art {
 }
 
 fn main() {
-    Workload::new(1, Mix::read_heavy())
-        .seed(core::array::from_fn(|i| i as u8))
-        .run::<Art>();
+    Workload::new(
+        1,
+        Mix {
+            read: 100,
+            insert: 0,
+            remove: 0,
+            update: 0,
+            upsert: 0,
+        },
+    )
+    .initial_capacity_log2(16)
+    .prefill_fraction(1.0)
+    .seed(core::array::from_fn(|i| i as u8))
+    .run::<Art>();
 }

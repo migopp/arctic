@@ -46,7 +46,7 @@ impl Node for Node3 {
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError> {
-        let mut old = self.header.load(Ordering::Relaxed);
+        let mut old = self.header.load(Ordering::Acquire);
         loop {
             let Some((new, index)) = old.get_or_reserve(key) else {
                 return Err(GetOrReserveError::Grow);
@@ -54,7 +54,7 @@ impl Node for Node3 {
 
             match self
                 .header
-                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Relaxed)
+                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
             {
                 Ok(_) => return Ok(&self.slots[index as usize]),
                 Err(header) if header.freeze() => {
