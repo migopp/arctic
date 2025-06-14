@@ -6,10 +6,8 @@ mod slot;
 use core::sync::atomic::Ordering;
 
 use cursor::Cursor;
-use cursor::Direction;
-use node::Frozen;
+use cursor::Op;
 pub(crate) use node::Node;
-use node::Node3;
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
@@ -27,18 +25,6 @@ impl Default for Art {
     }
 }
 
-#[derive(Debug)]
-enum Op {
-    Node(node::Op),
-    Slot(slot::Op),
-}
-
-#[derive(Debug)]
-enum Step {
-    Descend { len: key::Len, node: node::Ref },
-    Replace { op: slot::Op, slot: Slot },
-}
-
 impl Art {
     pub fn new() -> Self {
         Self::default()
@@ -53,58 +39,38 @@ impl Art {
 
     #[inline]
     fn insert_optimistic(&self, key: &[u8], value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<true>(key, value)
+        self.insert_impl::<cursor::Optimistic>(key, value)
     }
 
     #[cold]
     fn insert_pessimistic(&self, key: &[u8], value: u64) -> Option<u64> {
-        self.insert_impl::<false>(key, value).unwrap()
+        self.insert_impl::<cursor::Pessimistic>(key, value).unwrap()
     }
 
-    fn insert_impl<const OPTIMISTIC: bool>(
-        &self,
+    fn insert_impl<'a, P: cursor::Path<'a>>(
+        &'a self,
         key: &[u8],
         value: u64,
-    ) -> Result<Option<u64>, ()> {
-        let mut cursor = Cursor::<OPTIMISTIC>::new(&self.root, key);
+    ) -> Result<Option<u64>, P::PopError> {
+        let value = u48::new(value);
+        let mut cursor = Cursor::<P>::new(&self.root, key);
+        let mut ascend: Option<(node::Ref, bool)> = None;
 
         loop {
-            let key = cursor.key();
-            let snapshot = cursor.here().load(Ordering::Acquire);
-
-            let (op, slot) = match cursor.direction() {
-                Direction::Descend => match self.step(&snapshot, key, value) {
-                    Step::Replace { op, slot } => (Op::Slot(op), slot),
-                    Step::Descend { len, node } => {
-                        let byte = key[len.to_usize()];
-
-                        let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
-                            // Fast path: no need to replace
-                            Ok(slot) => {
-                                cursor.push(len, node, slot);
-                                continue;
-                            }
-                            Err(Frozen::Grow) => true,
-                            Err(Frozen::Shrink) => false,
-                        };
-
-                        let node = unsafe { node.as_node() };
-                        node.freeze(grow);
-                        let (op, slot) = node.replace(&snapshot);
-                        (Op::Node(op), slot)
-                    }
-                },
-                Direction::Ascend { node, grow } => {
+            let (op, old, new) = match &ascend {
+                None => cursor.insert(value),
+                Some((node, grow)) => {
                     let node = unsafe { node.as_node() };
                     node.freeze(*grow);
+                    let snapshot = cursor.here().load(Ordering::Acquire);
                     let (op, slot) = node.replace(&snapshot);
-                    (Op::Node(op), slot)
+                    (Op::Node(op), snapshot, slot)
                 }
             };
 
             let conflict = match cursor.here().compare_exchange(
-                snapshot.with_frozen(false),
-                slot,
+                old.with_frozen(false),
+                new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -116,10 +82,7 @@ impl Art {
                     };
                 }
                 // FIXME: retire old allocation with SMR
-                Ok(_) => {
-                    cursor.descend();
-                    continue;
-                }
+                Ok(_) => continue,
                 Err(conflict) => conflict,
             };
 
@@ -128,29 +91,19 @@ impl Art {
                 | Op::Slot(slot::Op::Insert | slot::Op::Remove) => (),
 
                 Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-                | Op::Slot(slot::Op::Create | slot::Op::Expand) => unsafe { slot.deallocate() },
+                | Op::Slot(slot::Op::Create | slot::Op::Expand) => unsafe { new.deallocate() },
             }
 
-            // Conflicts can be due to:
-            // - Freeze
-            // - Split
-            // - Initialize
-            // - Leaf update
-            match conflict.frozen() {
-                false => {
-                    // Someone else must have completed (e.g. grow)
-                    // or will complete (e.g. split) helping if
-                    // we were ascending
-                    cursor.descend();
-                }
-                true if cursor.pop(conflict.grow()) => (),
-                true => return Err(()),
+            if conflict.frozen() {
+                let node = cursor.pop()?;
+                let grow = conflict.grow();
+                ascend = Some((node, grow));
             }
         }
     }
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
-        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let snapshot = cursor.get()?;
 
         match snapshot.kind().unpack() {
@@ -161,7 +114,7 @@ impl Art {
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
-        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut snapshot = cursor.get()?;
         let slot = cursor.here();
 
@@ -193,7 +146,7 @@ impl Art {
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
-        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut snapshot = cursor.get()?;
         let slot = cursor.here();
 
@@ -220,80 +173,6 @@ impl Art {
             <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
             <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
-        }
-    }
-
-    fn step(&self, snapshot: &Slot, key: &[u8], value: u64) -> Step {
-        match snapshot.r#match(key) {
-            slot::Match::Full {
-                len,
-                child: slot::Child::Node(child),
-            } => Step::Descend { len, node: child },
-
-            slot::Match::Full {
-                len: _,
-                child: slot::Child::Leaf(_) | slot::Child::Uninit,
-            } if key.len() <= key::Len::MAX.to_usize() => Step::Replace {
-                op: slot::Op::Insert,
-                slot: Slot::new(
-                    key::Array::from_slice(key),
-                    false,
-                    false,
-                    node::Kind::new(<unpack![node::Kind]>::Valid),
-                    u48::new(value),
-                ),
-            },
-
-            slot::Match::Full {
-                len: _,
-                child: slot::Child::Leaf(_),
-            } => unreachable!(),
-
-            slot::Match::Full {
-                len,
-                child: slot::Child::Uninit,
-            } => {
-                assert_eq!(len, key::Len::ZERO);
-
-                let node = Box::new(Node3::new());
-                let node = Box::leak(node) as *mut Node3;
-                let slot = Slot::new(
-                    key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
-                    false,
-                    false,
-                    node::Kind::new(<unpack![node::Kind]>::Node3),
-                    u48::new(node as u64),
-                );
-
-                Step::Replace {
-                    op: slot::Op::Create,
-                    slot,
-                }
-            }
-
-            slot::Match::Partial { start, middle, end } => {
-                let mut node = Box::new(Node3::new());
-
-                let old = node.reserve(middle).unwrap();
-                old.store(
-                    Slot::new(end, false, false, snapshot.kind(), snapshot.next()),
-                    Ordering::Relaxed,
-                );
-
-                let node = Box::leak(node) as *mut Node3;
-                let slot = Slot::new(
-                    start,
-                    false,
-                    false,
-                    node::Kind::new(<unpack![node::Kind]>::Node3),
-                    u48::new(node as u64),
-                );
-
-                Step::Replace {
-                    op: slot::Op::Expand,
-                    slot,
-                }
-            }
         }
     }
 }
