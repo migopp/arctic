@@ -1,9 +1,12 @@
+mod cursor;
 mod key;
 mod node;
 mod slot;
 
 use core::sync::atomic::Ordering;
 
+use cursor::Cursor;
+use cursor::Direction;
 use node::GetOrReserveError;
 pub(crate) use node::Node;
 use node::Node3;
@@ -21,94 +24,6 @@ impl Default for Art {
         Art {
             root: A128::new(Slot::default()),
         }
-    }
-}
-
-#[derive(Debug)]
-struct Segment<'a> {
-    len: key::Len,
-    slot: &'a A128<Slot>,
-    node: node::Ref,
-}
-
-struct Cursor<'a, const OPTIMISTIC: bool> {
-    index: usize,
-    slot: &'a A128<Slot>,
-    path: Vec<Segment<'a>>,
-    direction: Direction,
-}
-
-enum Direction {
-    Ascend { node: node::Ref, grow: bool },
-    Descend,
-}
-
-impl<'a, const OPTIMISTIC: bool> Cursor<'a, OPTIMISTIC> {
-    fn new(art: &'a Art) -> Self {
-        Self {
-            index: 0,
-            slot: &art.root,
-            path: Vec::new(),
-            direction: Direction::Descend,
-        }
-    }
-
-    fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
-        self.index += len.to_usize();
-        self.index += 1;
-
-        if !OPTIMISTIC {
-            self.path.push(Segment {
-                len,
-                slot: self.slot,
-                node,
-            });
-        }
-
-        self.slot = slot;
-    }
-
-    fn pop(&mut self, grow: bool) -> bool {
-        if OPTIMISTIC {
-            return false;
-        }
-
-        let segment = self.path.pop().unwrap();
-        self.index -= 1;
-        self.index -= segment.len.to_usize();
-        self.slot = segment.slot;
-        self.direction = Direction::Ascend {
-            node: segment.node,
-            grow,
-        };
-        true
-    }
-
-    #[inline]
-    fn slot(&self) -> &A128<Slot> {
-        self.slot
-    }
-
-    #[inline]
-    fn key_partial<'k>(&self, key_full: &'k [u8]) -> &'k [u8] {
-        &key_full[self.index..]
-    }
-
-    #[inline]
-    fn direction(&self) -> &Direction {
-        match OPTIMISTIC {
-            true => &Direction::Descend,
-            false => &self.direction,
-        }
-    }
-
-    #[inline]
-    fn descend(&mut self) {
-        if OPTIMISTIC {
-            return;
-        }
-
-        self.direction = Direction::Descend;
     }
 }
 
@@ -151,11 +66,11 @@ impl Art {
         key: &[u8],
         value: u64,
     ) -> Result<Option<u64>, ()> {
-        let mut cursor = Cursor::<OPTIMISTIC>::new(self);
+        let mut cursor = Cursor::<OPTIMISTIC>::new(&self.root, key);
 
         loop {
             let key = cursor.key_partial(key);
-            let snapshot = cursor.slot().load(Ordering::Acquire);
+            let snapshot = cursor.here().load(Ordering::Acquire);
 
             let (op, slot) = match cursor.direction() {
                 Direction::Descend => match self.step(&snapshot, key, value) {
@@ -187,7 +102,7 @@ impl Art {
                 }
             };
 
-            let conflict = match cursor.slot().compare_exchange(
+            let conflict = match cursor.here().compare_exchange(
                 snapshot.with_frozen(false),
                 slot,
                 Ordering::AcqRel,
