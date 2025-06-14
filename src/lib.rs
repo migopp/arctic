@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering;
 
 use cursor::Cursor;
 use cursor::Direction;
-use node::GetOrReserveError;
+use node::Frozen;
 pub(crate) use node::Node;
 use node::Node3;
 use ribbit::atomic::A128;
@@ -84,8 +84,8 @@ impl Art {
                                 cursor.push(len, node, slot);
                                 continue;
                             }
-                            Err(GetOrReserveError::Grow) => true,
-                            Err(GetOrReserveError::Freeze { grow }) => grow,
+                            Err(Frozen::Grow) => true,
+                            Err(Frozen::Shrink) => false,
                         };
 
                         let node = unsafe { node.as_node() };

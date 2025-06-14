@@ -13,7 +13,7 @@ use crate::Slot;
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&A128<Slot>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError>;
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen>;
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>>;
 
@@ -23,12 +23,9 @@ pub(crate) trait Node {
 }
 
 #[derive(Debug)]
-pub(crate) enum GetOrReserveError {
-    /// Encountered SMO operation in current node
-    Freeze { grow: bool },
-
-    /// Initiate grow SMO in current node
+pub(crate) enum Frozen {
     Grow,
+    Shrink,
 }
 
 #[derive(Debug)]

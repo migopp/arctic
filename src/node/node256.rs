@@ -1,6 +1,6 @@
 use ribbit::atomic::A128;
 
-use crate::node::GetOrReserveError;
+use crate::node::Frozen;
 use crate::node::Op;
 use crate::node::Slot;
 use crate::Node;
@@ -20,7 +20,7 @@ impl Node for Node256 {
         Some(&self.0[key as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError> {
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen> {
         Ok(&self.0[key as usize])
     }
 

@@ -10,7 +10,7 @@ use ribbit::unpack;
 
 use crate::key;
 use crate::node;
-use crate::node::GetOrReserveError;
+use crate::node::Frozen;
 use crate::node::Op;
 use crate::node::Slot;
 use crate::Node;
@@ -45,11 +45,11 @@ impl Node for Node3 {
         Some(&self.slots[index as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, GetOrReserveError> {
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen> {
         let mut old = self.header.load(Ordering::Acquire);
         loop {
             let Some((new, index)) = old.get_or_reserve(key) else {
-                return Err(GetOrReserveError::Grow);
+                return Err(Frozen::Grow);
             };
 
             match self
@@ -58,8 +58,9 @@ impl Node for Node3 {
             {
                 Ok(_) => return Ok(&self.slots[index as usize]),
                 Err(header) if header.freeze() => {
-                    return Err(GetOrReserveError::Freeze {
-                        grow: header.grow(),
+                    return Err(match header.grow() {
+                        true => Frozen::Grow,
+                        false => Frozen::Shrink,
                     })
                 }
                 Err(header) => old = header,
