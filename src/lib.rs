@@ -69,7 +69,7 @@ impl Art {
         let mut cursor = Cursor::<OPTIMISTIC>::new(&self.root, key);
 
         loop {
-            let key = cursor.key_partial(key);
+            let key = cursor.key();
             let snapshot = cursor.here().load(Ordering::Acquire);
 
             let (op, slot) = match cursor.direction() {
@@ -150,7 +150,9 @@ impl Art {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
-        let (_, snapshot) = self.walk(key)?;
+        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let snapshot = cursor.get()?;
+
         match snapshot.kind().unpack() {
             <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
             <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
@@ -159,7 +161,9 @@ impl Art {
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
-        let (slot, mut snapshot) = self.walk(key)?;
+        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let mut snapshot = cursor.get()?;
+        let slot = cursor.here();
 
         loop {
             match slot.compare_exchange(
@@ -189,7 +193,9 @@ impl Art {
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
-        let (slot, mut snapshot) = self.walk(key)?;
+        let mut cursor = Cursor::<true>::new(&self.root, key);
+        let mut snapshot = cursor.get()?;
+        let slot = cursor.here();
 
         loop {
             match slot.compare_exchange(
@@ -286,40 +292,6 @@ impl Art {
                 Step::Replace {
                     op: slot::Op::Expand,
                     slot,
-                }
-            }
-        }
-    }
-
-    fn walk(&self, mut key: &[u8]) -> Option<(&A128<Slot>, Slot)> {
-        let mut slot = &self.root;
-
-        loop {
-            let snapshot = slot.load(Ordering::Acquire);
-            match snapshot.r#match(key) {
-                slot::Match::Full {
-                    len: _,
-                    child: slot::Child::Uninit,
-                }
-                | slot::Match::Partial { .. } => return None,
-
-                slot::Match::Full {
-                    len,
-                    child: slot::Child::Leaf(_),
-                } => {
-                    assert_eq!(key.len(), len.to_usize());
-                    return Some((slot, snapshot));
-                }
-
-                slot::Match::Full {
-                    len,
-                    child: slot::Child::Node(node),
-                } => {
-                    key = &key[len.to_usize()..];
-                    let (head, tail) = key.split_first()?;
-                    let node = unsafe { node.as_node() };
-                    slot = node.get(*head)?;
-                    key = tail;
                 }
             }
         }
