@@ -56,7 +56,7 @@ impl Art {
         let mut cursor = Cursor::<P>::new(&self.root, key);
 
         loop {
-            let (op, old, new) = cursor.insert(value);
+            let (op, old, new) = cursor.traverse_strong(value);
 
             let conflict = match cursor.here().compare_exchange(
                 old.with_frozen(false),
@@ -92,7 +92,7 @@ impl Art {
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let snapshot = cursor.get()?;
+        let snapshot = cursor.traverse_weak()?;
 
         match snapshot.kind().unpack() {
             <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
@@ -103,7 +103,7 @@ impl Art {
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let mut snapshot = cursor.get()?;
+        let mut snapshot = cursor.traverse_weak()?;
         let slot = cursor.here();
 
         loop {
@@ -135,7 +135,7 @@ impl Art {
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let mut snapshot = cursor.get()?;
+        let mut snapshot = cursor.traverse_weak()?;
         let slot = cursor.here();
 
         loop {

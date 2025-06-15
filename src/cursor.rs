@@ -36,7 +36,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn get(&mut self) -> Option<Slot> {
+    pub(crate) fn traverse_weak(&mut self) -> Option<Slot> {
         loop {
             let slot = self.here();
             let snapshot = slot.load(Ordering::Acquire);
@@ -69,7 +69,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn insert(&mut self, value: u48) -> (Op, Slot, Slot) {
+    pub(crate) fn traverse_strong(&mut self, value: u48) -> (Op, Slot, Slot) {
         loop {
             let slot = self.here();
             let snapshot = slot.load(Ordering::Acquire);
@@ -167,7 +167,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
+    fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
         self.index += len.to_usize();
         self.index += 1;
         self.history.push(Segment {
