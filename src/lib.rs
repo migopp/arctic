@@ -47,7 +47,7 @@ impl Art {
         self.insert_impl::<cursor::Pessimistic>(key, value).unwrap()
     }
 
-    fn insert_impl<'a, P: cursor::Path<'a>>(
+    fn insert_impl<'a, P: cursor::History<'a>>(
         &'a self,
         key: &[u8],
         value: u64,

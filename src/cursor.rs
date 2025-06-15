@@ -18,7 +18,7 @@ pub(crate) struct Cursor<'a, 'k, P> {
     key: &'k [u8],
     index: usize,
     here: &'a A128<Slot>,
-    path: P,
+    history: P,
 }
 
 pub(crate) enum Op {
@@ -26,13 +26,13 @@ pub(crate) enum Op {
     Slot(slot::Op),
 }
 
-impl<'a, 'k, P: Path<'a>> Cursor<'a, 'k, P> {
+impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn new(root: &'a A128<Slot>, key: &'k [u8]) -> Self {
         Self {
             key,
             index: 0,
             here: root,
-            path: P::default(),
+            history: P::default(),
         }
     }
 
@@ -166,7 +166,7 @@ impl<'a, 'k, P: Path<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
         self.index += len.to_usize();
         self.index += 1;
-        self.path.push(Segment {
+        self.history.push(Segment {
             len,
             slot: self.here,
             node,
@@ -175,7 +175,7 @@ impl<'a, 'k, P: Path<'a>> Cursor<'a, 'k, P> {
     }
 
     pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
-        let segment = self.path.pop()?.expect("Root slot can never be frozen");
+        let segment = self.history.pop()?.expect("Root slot can never be frozen");
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.here = segment.slot;
@@ -193,7 +193,7 @@ impl<'a, 'k, P: Path<'a>> Cursor<'a, 'k, P> {
     }
 }
 
-pub(crate) trait Path<'a>: Default {
+pub(crate) trait History<'a>: Default {
     type PopError;
     fn push(&mut self, segment: Segment<'a>);
     fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
@@ -202,7 +202,7 @@ pub(crate) trait Path<'a>: Default {
 #[derive(Default)]
 pub(crate) struct Optimistic<'a>(PhantomData<&'a ()>);
 
-impl<'a> Path<'a> for Optimistic<'a> {
+impl<'a> History<'a> for Optimistic<'a> {
     type PopError = ();
 
     #[inline]
@@ -217,7 +217,7 @@ impl<'a> Path<'a> for Optimistic<'a> {
 #[derive(Default)]
 pub(crate) struct Pessimistic<'a>(Vec<Segment<'a>>);
 
-impl<'a> Path<'a> for Pessimistic<'a> {
+impl<'a> History<'a> for Pessimistic<'a> {
     type PopError = Infallible;
 
     #[inline]
