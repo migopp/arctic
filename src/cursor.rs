@@ -80,16 +80,20 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     len,
                     child: slot::Child::Node(node),
                 } => {
-                    let byte = key[len.to_usize()];
-
-                    let grow = match unsafe { node.as_node() }.get_or_reserve(byte) {
-                        // Fast path: no need to replace
-                        Ok(slot) => {
-                            self.push(len, node, slot);
-                            continue;
+                    let grow = match self.history.freeze() {
+                        Some(grow) if unsafe { node.as_node() }.is_frozen() == Some(grow) => grow,
+                        Some(_) | None => {
+                            let byte = key[len.to_usize()];
+                            match unsafe { node.as_node() }.get_or_reserve(byte) {
+                                // Fast path: no need to replace
+                                Ok(slot) => {
+                                    self.push(len, node, slot);
+                                    continue;
+                                }
+                                Err(Frozen::Grow) => true,
+                                Err(Frozen::Shrink) => false,
+                            }
                         }
-                        Err(Frozen::Grow) => true,
-                        Err(Frozen::Shrink) => false,
                     };
 
                     let node = unsafe { node.as_node() };
@@ -174,8 +178,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         self.here = slot;
     }
 
-    pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
-        let segment = self.history.pop()?.expect("Root slot can never be frozen");
+    pub(crate) fn pop(&mut self, grow: bool) -> Result<node::Ref, P::PopError> {
+        let segment = self
+            .history
+            .pop(grow)?
+            .expect("Root slot can never be frozen");
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.here = segment.slot;
@@ -188,15 +195,16 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     }
 
     #[inline]
-    pub(crate) fn key(&self) -> &[u8] {
+    pub(crate) fn key(&self) -> &'k [u8] {
         &self.key[self.index..]
     }
 }
 
 pub(crate) trait History<'a>: Default {
     type PopError;
+    fn freeze(&mut self) -> Option<bool>;
     fn push(&mut self, segment: Segment<'a>);
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
+    fn pop(&mut self, grow: bool) -> Result<Option<Segment<'a>>, Self::PopError>;
 }
 
 #[derive(Default)]
@@ -205,34 +213,46 @@ pub(crate) struct Optimistic<'a>(PhantomData<&'a ()>);
 impl<'a> History<'a> for Optimistic<'a> {
     type PopError = ();
 
+    fn freeze(&mut self) -> Option<bool> {
+        None
+    }
+
     #[inline]
     fn push(&mut self, _segment: Segment<'a>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
+    fn pop(&mut self, _grow: bool) -> Result<Option<Segment<'a>>, Self::PopError> {
         Err(())
     }
 }
 
 #[derive(Default)]
-pub(crate) struct Pessimistic<'a>(Vec<Segment<'a>>);
+pub(crate) struct Pessimistic<'a> {
+    grow: Option<bool>,
+    path: Vec<Segment<'a>>,
+}
 
 impl<'a> History<'a> for Pessimistic<'a> {
     type PopError = Infallible;
 
-    #[inline]
-    fn push(&mut self, segment: Segment<'a>) {
-        self.0.push(segment)
+    fn freeze(&mut self) -> Option<bool> {
+        self.grow.take()
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
-        Ok(self.0.pop())
+    fn push(&mut self, segment: Segment<'a>) {
+        self.path.push(segment)
+    }
+
+    #[inline]
+    fn pop(&mut self, grow: bool) -> Result<Option<Segment<'a>>, Self::PopError> {
+        self.grow = Some(grow);
+        Ok(self.path.pop())
     }
 }
 
 #[derive(Debug)]
-struct Segment<'a> {
+pub(crate) struct Segment<'a> {
     len: key::Len,
     slot: &'a A128<Slot>,
     node: node::Ref,

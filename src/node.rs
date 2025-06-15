@@ -17,6 +17,8 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>>;
 
+    fn is_frozen(&self) -> Option<bool>;
+
     fn freeze(&self, grow: bool);
 
     fn replace(&self, snapshot: &Slot) -> (Op, Slot);

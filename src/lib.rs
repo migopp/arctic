@@ -54,19 +54,9 @@ impl Art {
     ) -> Result<Option<u64>, P::PopError> {
         let value = u48::new(value);
         let mut cursor = Cursor::<P>::new(&self.root, key);
-        let mut ascend: Option<(node::Ref, bool)> = None;
 
         loop {
-            let (op, old, new) = match &ascend {
-                None => cursor.insert(value),
-                Some((node, grow)) => {
-                    let node = unsafe { node.as_node() };
-                    node.freeze(*grow);
-                    let snapshot = cursor.here().load(Ordering::Acquire);
-                    let (op, slot) = node.replace(&snapshot);
-                    (Op::Node(op), snapshot, slot)
-                }
-            };
+            let (op, old, new) = cursor.insert(value);
 
             let conflict = match cursor.here().compare_exchange(
                 old.with_frozen(false),
@@ -95,9 +85,7 @@ impl Art {
             }
 
             if conflict.frozen() {
-                let node = cursor.pop()?;
-                let grow = conflict.grow();
-                ascend = Some((node, grow));
+                cursor.pop(conflict.grow())?;
             }
         }
     }

@@ -1,3 +1,5 @@
+use core::sync::atomic::Ordering;
+
 use ribbit::atomic::A128;
 
 use crate::node::Frozen;
@@ -26,6 +28,14 @@ impl Node for Node256 {
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>> {
         Some(&mut self.0[key as usize])
+    }
+
+    fn is_frozen(&self) -> Option<bool> {
+        let snapshot = self.0[0].load(Ordering::Relaxed);
+        match snapshot.frozen() {
+            true => Some(snapshot.grow()),
+            false => None,
+        }
     }
 
     fn freeze(&self, grow: bool) {

@@ -47,7 +47,8 @@ impl Node for Node3 {
 
     fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen> {
         let mut old = self.header.load(Ordering::Acquire);
-        loop {
+
+        while !old.frozen() {
             let Some((new, index)) = old.get_or_reserve(key) else {
                 return Err(Frozen::Grow);
             };
@@ -57,15 +58,14 @@ impl Node for Node3 {
                 .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
             {
                 Ok(_) => return Ok(&self.slots[index as usize]),
-                Err(header) if header.freeze() => {
-                    return Err(match header.grow() {
-                        true => Frozen::Grow,
-                        false => Frozen::Shrink,
-                    })
-                }
-                Err(header) => old = header,
+                Err(conflict) => old = conflict,
             }
         }
+
+        Err(match old.grow() {
+            true => Frozen::Grow,
+            false => Frozen::Shrink,
+        })
     }
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>> {
@@ -76,13 +76,21 @@ impl Node for Node3 {
         Some(&mut self.slots[index as usize])
     }
 
+    fn is_frozen(&self) -> Option<bool> {
+        let header = self.header.load(Ordering::Relaxed);
+        match header.frozen() {
+            true => Some(header.grow()),
+            false => None,
+        }
+    }
+
     fn freeze(&self, grow: bool) {
         let mut old = self.header.load(Ordering::Relaxed);
 
-        while !old.freeze() {
+        while !old.frozen() {
             match self.header.compare_exchange(
                 old,
-                old.with_freeze(true).with_grow(grow),
+                old.with_frozen(true).with_grow(grow),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -101,7 +109,7 @@ impl Node for Node3 {
         let header = self.header.load(Ordering::Relaxed);
         let keys = header.keys().value();
 
-        assert!(header.freeze());
+        assert!(header.frozen());
 
         let mut slots: [(u8, Slot); 3] = core::array::from_fn(|_| (0, Slot::default()));
         let mut len = 0;
@@ -193,7 +201,7 @@ impl Node for Node3 {
 #[ribbit::pack(size = 32, debug)]
 struct Header {
     len: u2,
-    freeze: bool,
+    frozen: bool,
     grow: bool,
     #[ribbit(offset = 8, debug(format = "{:#08x}"))]
     keys: u24,
@@ -222,7 +230,6 @@ impl Header {
         match len {
             0..3 => Some((
                 self.with_len(u2::new(len + 1))
-                    .with_freeze(false)
                     .with_keys(u24::new(keys | ((key as u32) << (len * 8)))),
                 len,
             )),
