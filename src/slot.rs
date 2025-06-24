@@ -30,7 +30,7 @@ impl Default for Slot {
             key::Array::default(),
             false,
             false,
-            node::Kind::new(<unpack![node::Kind]>::Uninit),
+            node::Kind::new(<unpack![node::Kind]>::Invalid),
             u48::new(0),
         )
     }
@@ -80,9 +80,8 @@ impl Slot {
         let pointer = leaf.value();
 
         match self.kind().unpack() {
-            <unpack![node::Kind]>::Uninit => Child::Uninit,
-            <unpack![node::Kind]>::Invalid => Child::Leaf(None),
-            <unpack![node::Kind]>::Valid => Child::Leaf(Some(leaf)),
+            <unpack![node::Kind]>::Invalid => Child::Uninit,
+            <unpack![node::Kind]>::Valid => Child::Leaf(leaf),
             <unpack![node::Kind]>::Node3 => Child::Node(node::Ref::Node3(pointer as *mut Node3)),
             <unpack![node::Kind]>::Node256 => {
                 Child::Node(node::Ref::Node256(pointer as *mut Node256))
@@ -93,9 +92,7 @@ impl Slot {
     pub(crate) unsafe fn deallocate(self) {
         let pointer = self.next().value();
         match self.kind().unpack() {
-            <unpack![node::Kind]>::Uninit
-            | <unpack![node::Kind]>::Invalid
-            | <unpack![node::Kind]>::Valid => {
+            <unpack![node::Kind]>::Invalid | <unpack![node::Kind]>::Valid => {
                 unreachable!()
             }
             <unpack![node::Kind]>::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
@@ -122,7 +119,7 @@ pub(crate) enum Op {
 #[derive(Debug)]
 pub(crate) enum Child {
     Uninit,
-    Leaf(Option<u48>),
+    Leaf(u48),
     Node(node::Ref),
 }
 

@@ -66,7 +66,7 @@ impl Art {
             ) {
                 Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
                     return match old.kind().unpack() {
-                        <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => Ok(None),
+                        <unpack![node::Kind]>::Invalid => Ok(None),
                         <unpack![node::Kind]>::Valid => Ok(Some(u64::from(old.next()))),
                         _ => unreachable!(),
                     };
@@ -95,7 +95,7 @@ impl Art {
         let snapshot = cursor.traverse_weak()?;
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Invalid => None,
             <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
@@ -127,7 +127,7 @@ impl Art {
         }
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Invalid => None,
             <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
@@ -158,7 +158,7 @@ impl Art {
         }
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Uninit | <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Invalid => None,
             <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
