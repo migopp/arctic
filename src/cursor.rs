@@ -129,7 +129,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                             key::Array::from_slice(key),
                             false,
                             false,
-                            node::Kind::new(<unpack![node::Kind]>::Valid),
+                            node::Kind::new(<unpack![node::Kind]>::Leaf),
                             value,
                         ),
                     )

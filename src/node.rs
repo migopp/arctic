@@ -76,8 +76,8 @@ impl Debug for Ref {
 #[derive(PartialEq, Eq)]
 #[ribbit::pack(size = 3, debug)]
 pub(crate) enum Kind {
-    Invalid,
-    Valid,
+    None,
+    Leaf,
     Node3,
     Node256,
 }

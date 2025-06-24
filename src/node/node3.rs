@@ -120,7 +120,7 @@ impl Node for Node3 {
             .map(|slot| slot.load(Ordering::Relaxed))
             .inspect(|slot| assert!(slot.frozen()))
             .enumerate()
-            .filter(|(_, slot)| !matches!(slot.kind().unpack(), <unpack![node::Kind]>::Invalid))
+            .filter(|(_, slot)| !matches!(slot.kind().unpack(), <unpack![node::Kind]>::None))
             .map(|(index, slot)| {
                 (
                     (keys >> (index * 8)) as u8,
@@ -140,7 +140,7 @@ impl Node for Node3 {
                 Op::Destroy,
                 snapshot
                     .with_key(key::Array::default())
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Invalid)),
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::None)),
             ),
 
             [(key, child)] if key::Array::can_compress(&snapshot.key(), &child.key()) => (

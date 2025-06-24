@@ -66,8 +66,8 @@ impl Art {
             ) {
                 Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
                     return match old.kind().unpack() {
-                        <unpack![node::Kind]>::Invalid => Ok(None),
-                        <unpack![node::Kind]>::Valid => Ok(Some(u64::from(old.next()))),
+                        <unpack![node::Kind]>::None => Ok(None),
+                        <unpack![node::Kind]>::Leaf => Ok(Some(u64::from(old.next()))),
                         _ => unreachable!(),
                     };
                 }
@@ -95,8 +95,8 @@ impl Art {
         let snapshot = cursor.traverse_weak()?;
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Invalid => None,
-            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            <unpack![node::Kind]>::None => None,
+            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
     }
@@ -111,7 +111,7 @@ impl Art {
                 snapshot.with_frozen(false),
                 snapshot
                     .with_frozen(false)
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Invalid)),
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::None)),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -127,8 +127,8 @@ impl Art {
         }
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Invalid => None,
-            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            <unpack![node::Kind]>::None => None,
+            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
     }
@@ -143,7 +143,7 @@ impl Art {
                 snapshot.with_frozen(false),
                 snapshot
                     .with_frozen(false)
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Valid))
+                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Leaf))
                     .with_next(u48::new(value)),
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -158,8 +158,8 @@ impl Art {
         }
 
         match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::Invalid => None,
-            <unpack![node::Kind]>::Valid => Some(u64::from(snapshot.next())),
+            <unpack![node::Kind]>::None => None,
+            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
             _ => unreachable!(),
         }
     }

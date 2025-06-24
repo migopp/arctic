@@ -30,7 +30,7 @@ impl Default for Slot {
             key::Array::default(),
             false,
             false,
-            node::Kind::new(<unpack![node::Kind]>::Invalid),
+            node::Kind::new(<unpack![node::Kind]>::None),
             u48::new(0),
         )
     }
@@ -80,8 +80,8 @@ impl Slot {
         let pointer = leaf.value();
 
         match self.kind().unpack() {
-            <unpack![node::Kind]>::Invalid => None,
-            <unpack![node::Kind]>::Valid => Some(Child::Leaf),
+            <unpack![node::Kind]>::None => None,
+            <unpack![node::Kind]>::Leaf => Some(Child::Leaf),
             <unpack![node::Kind]>::Node3 => {
                 Some(Child::Node(node::Ref::Node3(pointer as *mut Node3)))
             }
@@ -94,7 +94,7 @@ impl Slot {
     pub(crate) unsafe fn deallocate(self) {
         let pointer = self.next().value();
         match self.kind().unpack() {
-            <unpack![node::Kind]>::Invalid | <unpack![node::Kind]>::Valid => {
+            <unpack![node::Kind]>::None | <unpack![node::Kind]>::Leaf => {
                 unreachable!()
             }
             <unpack![node::Kind]>::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
