@@ -72,10 +72,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn traverse_strong(&mut self, value: u48) -> (Op, Slot, Slot) {
         loop {
             let slot = self.here();
-            let snapshot = slot.load(Ordering::Acquire);
+            let old = slot.load(Ordering::Acquire);
             let key = self.key();
 
-            match snapshot.r#match(key) {
+            let (op, new) = match old.r#match(key) {
                 slot::Match::Full {
                     len,
                     child: Some(slot::Child::Node(node)),
@@ -98,8 +98,8 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                     let node = unsafe { node.as_node() };
                     node.freeze(grow);
-                    let (op, slot) = node.replace(&snapshot);
-                    return (Op::Node(op), snapshot, slot);
+                    let (op, new) = node.replace(&old);
+                    (Op::Node(op), new)
                 }
 
                 slot::Match::Full { len, child: None } if key.len() > key::Len::MAX.to_usize() => {
@@ -107,7 +107,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                     let node = Box::new(Node3::new());
                     let node = Box::leak(node) as *mut Node3;
-                    let slot = Slot::new(
+                    let new = Slot::new(
                         key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
                         false,
                         false,
@@ -115,37 +115,34 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         u48::new(node as u64),
                     );
 
-                    return (Op::Slot(slot::Op::Create), snapshot, slot);
+                    (Op::Slot(slot::Op::Create), new)
                 }
 
                 slot::Match::Full {
                     len: _,
                     child: Some(slot::Child::Leaf) | None,
-                } => {
-                    return (
-                        Op::Slot(slot::Op::Insert),
-                        snapshot,
-                        Slot::new(
-                            key::Array::from_slice(key),
-                            false,
-                            false,
-                            node::Kind::new(<unpack![node::Kind]>::Leaf),
-                            value,
-                        ),
-                    )
-                }
+                } => (
+                    Op::Slot(slot::Op::Insert),
+                    Slot::new(
+                        key::Array::from_slice(key),
+                        false,
+                        false,
+                        node::Kind::new(<unpack![node::Kind]>::Leaf),
+                        value,
+                    ),
+                ),
 
                 slot::Match::Partial { start, middle, end } => {
                     let mut node = Box::new(Node3::new());
 
-                    let old = node.reserve(middle).unwrap();
-                    old.store(
-                        Slot::new(end, false, false, snapshot.kind(), snapshot.next()),
+                    node.reserve(middle).unwrap().store(
+                        Slot::new(end, false, false, old.kind(), old.next()),
                         Ordering::Relaxed,
                     );
 
                     let node = Box::leak(node) as *mut Node3;
-                    let slot = Slot::new(
+
+                    let new = Slot::new(
                         start,
                         false,
                         false,
@@ -153,9 +150,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         u48::new(node as u64),
                     );
 
-                    return (Op::Slot(slot::Op::Expand), snapshot, slot);
+                    (Op::Slot(slot::Op::Expand), new)
                 }
-            }
+            };
+
+            return (op, old, new);
         }
     }
 
