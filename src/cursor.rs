@@ -45,13 +45,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             match snapshot.r#match(key) {
                 slot::Match::Full {
                     len: _,
-                    child: slot::Child::Uninit,
+                    child: None,
                 }
                 | slot::Match::Partial { .. } => return None,
 
                 slot::Match::Full {
                     len,
-                    child: slot::Child::Leaf(_),
+                    child: Some(slot::Child::Leaf),
                 } => {
                     assert_eq!(key.len(), len.to_usize());
                     return Some(snapshot);
@@ -59,7 +59,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                 slot::Match::Full {
                     len,
-                    child: slot::Child::Node(node),
+                    child: Some(slot::Child::Node(node)),
                 } => {
                     let byte = key.get(len.to_usize())?;
                     let next = unsafe { node.as_node() }.get(*byte)?;
@@ -78,7 +78,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             match snapshot.r#match(key) {
                 slot::Match::Full {
                     len,
-                    child: slot::Child::Node(node),
+                    child: Some(slot::Child::Node(node)),
                 } => {
                     let grow = match self.history.freeze() {
                         Some(grow) if unsafe { node.as_node() }.is_frozen() == Some(grow) => grow,
@@ -102,32 +102,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     return (Op::Node(op), snapshot, slot);
                 }
 
-                slot::Match::Full {
-                    len: _,
-                    child: slot::Child::Leaf(_) | slot::Child::Uninit,
-                } if key.len() <= key::Len::MAX.to_usize() => {
-                    return (
-                        Op::Slot(slot::Op::Insert),
-                        snapshot,
-                        Slot::new(
-                            key::Array::from_slice(key),
-                            false,
-                            false,
-                            node::Kind::new(<unpack![node::Kind]>::Valid),
-                            value,
-                        ),
-                    )
-                }
-
-                slot::Match::Full {
-                    len: _,
-                    child: slot::Child::Leaf(_),
-                } => unreachable!(),
-
-                slot::Match::Full {
-                    len,
-                    child: slot::Child::Uninit,
-                } => {
+                slot::Match::Full { len, child: None } if key.len() > key::Len::MAX.to_usize() => {
                     assert_eq!(len, key::Len::ZERO);
 
                     let node = Box::new(Node3::new());
@@ -141,6 +116,23 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     );
 
                     return (Op::Slot(slot::Op::Create), snapshot, slot);
+                }
+
+                slot::Match::Full {
+                    len: _,
+                    child: Some(slot::Child::Leaf) | None,
+                } => {
+                    return (
+                        Op::Slot(slot::Op::Insert),
+                        snapshot,
+                        Slot::new(
+                            key::Array::from_slice(key),
+                            false,
+                            false,
+                            node::Kind::new(<unpack![node::Kind]>::Valid),
+                            value,
+                        ),
+                    )
                 }
 
                 slot::Match::Partial { start, middle, end } => {

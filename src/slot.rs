@@ -75,16 +75,18 @@ impl Slot {
         }
     }
 
-    fn child(&self) -> Child {
+    fn child(&self) -> Option<Child> {
         let leaf = self.next();
         let pointer = leaf.value();
 
         match self.kind().unpack() {
-            <unpack![node::Kind]>::Invalid => Child::Uninit,
-            <unpack![node::Kind]>::Valid => Child::Leaf(leaf),
-            <unpack![node::Kind]>::Node3 => Child::Node(node::Ref::Node3(pointer as *mut Node3)),
+            <unpack![node::Kind]>::Invalid => None,
+            <unpack![node::Kind]>::Valid => Some(Child::Leaf),
+            <unpack![node::Kind]>::Node3 => {
+                Some(Child::Node(node::Ref::Node3(pointer as *mut Node3)))
+            }
             <unpack![node::Kind]>::Node256 => {
-                Child::Node(node::Ref::Node256(pointer as *mut Node256))
+                Some(Child::Node(node::Ref::Node256(pointer as *mut Node256)))
             }
         }
     }
@@ -118,8 +120,7 @@ pub(crate) enum Op {
 
 #[derive(Debug)]
 pub(crate) enum Child {
-    Uninit,
-    Leaf(u48),
+    Leaf,
     Node(node::Ref),
 }
 
@@ -127,7 +128,7 @@ pub(crate) enum Child {
 pub(crate) enum Match {
     Full {
         len: key::Len,
-        child: Child,
+        child: Option<Child>,
     },
     Partial {
         start: key::Array,
