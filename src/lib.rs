@@ -65,11 +65,7 @@ impl Art {
                 Ordering::Acquire,
             ) {
                 Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
-                    return match old.kind().unpack() {
-                        <unpack![node::Kind]>::None => Ok(None),
-                        <unpack![node::Kind]>::Leaf => Ok(Some(u64::from(old.next()))),
-                        _ => unreachable!(),
-                    };
+                    return Ok(old.leaf().map(u64::from));
                 }
                 // FIXME: retire old allocation with SMR
                 Ok(_) => continue,
@@ -92,13 +88,7 @@ impl Art {
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let snapshot = cursor.traverse_weak()?;
-
-        match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::None => None,
-            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
-            _ => unreachable!(),
-        }
+        cursor.traverse_weak()?.leaf().map(u64::from)
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
@@ -126,11 +116,7 @@ impl Art {
             }
         }
 
-        match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::None => None,
-            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
-            _ => unreachable!(),
-        }
+        snapshot.leaf().map(u64::from)
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
@@ -157,11 +143,7 @@ impl Art {
             }
         }
 
-        match snapshot.kind().unpack() {
-            <unpack![node::Kind]>::None => None,
-            <unpack![node::Kind]>::Leaf => Some(u64::from(snapshot.next())),
-            _ => unreachable!(),
-        }
+        snapshot.leaf().map(u64::from)
     }
 }
 

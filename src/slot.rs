@@ -75,6 +75,14 @@ impl Slot {
         }
     }
 
+    pub(crate) fn leaf(&self) -> Option<u48> {
+        match self.kind().unpack() {
+            <unpack![node::Kind]>::None => None,
+            <unpack![node::Kind]>::Leaf => Some(self.next()),
+            _ => unreachable!(),
+        }
+    }
+
     fn child(&self) -> Option<Child> {
         let leaf = self.next();
         let pointer = leaf.value();
