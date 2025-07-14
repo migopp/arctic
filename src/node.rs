@@ -8,20 +8,20 @@ mod node3;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 
-use crate::Slot;
+use crate::Edge;
 
 pub(crate) trait Node {
-    fn get(&self, key: u8) -> Option<&A128<Slot>>;
+    fn get(&self, key: u8) -> Option<&A128<Edge>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Edge>, Frozen>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>>;
 
     fn is_frozen(&self) -> Option<bool>;
 
     fn freeze(&self, grow: bool);
 
-    fn replace(&self, snapshot: &Slot) -> (Op, Slot);
+    fn replace(&self, snapshot: &Edge) -> (Op, Edge);
 }
 
 #[derive(Debug)]

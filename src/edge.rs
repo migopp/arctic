@@ -10,7 +10,7 @@ use crate::node::Node256;
 use crate::node::Node3;
 
 #[ribbit::pack(size = 128, debug)]
-pub(crate) struct Slot {
+pub(crate) struct Edge {
     #[ribbit(size = 72)]
     pub(crate) key: key::Array,
 
@@ -24,7 +24,7 @@ pub(crate) struct Slot {
     pub(crate) next: u48,
 }
 
-impl Default for Slot {
+impl Default for Edge {
     fn default() -> Self {
         Self::new(
             key::Array::default(),
@@ -36,14 +36,14 @@ impl Default for Slot {
     }
 }
 
-impl Slot {
+impl Edge {
     pub(crate) fn r#match(&self, key: &[u8]) -> Match {
         let search_key = key::Array::from_slice(key);
-        let slot_key = self.key();
-        let prefix_len = key::Array::prefix(&search_key, &slot_key);
+        let edge_key = self.key();
+        let prefix_len = key::Array::prefix(&search_key, &edge_key);
 
         // Fast path: successful traversal
-        if search_key.len() >= slot_key.len() && slot_key.len() == prefix_len {
+        if search_key.len() >= edge_key.len() && edge_key.len() == prefix_len {
             return Match::Full {
                 len: prefix_len,
                 child: self.child(),
@@ -51,19 +51,19 @@ impl Slot {
         }
 
         assert!(
-            search_key.len() >= slot_key.len() || slot_key.len() != prefix_len,
+            search_key.len() >= edge_key.len() || edge_key.len() != prefix_len,
             "Precondition: no key is a prefix of another key",
         );
 
-        let (start, middle, end) = slot_key.expand(prefix_len);
+        let (start, middle, end) = edge_key.expand(prefix_len);
         Match::Partial { start, middle, end }
     }
 
-    pub(crate) fn freeze(slot: &A128<Self>, grow: bool) {
-        let mut old = slot.load(Ordering::Relaxed);
+    pub(crate) fn freeze(edge: &A128<Self>, grow: bool) {
+        let mut old = edge.load(Ordering::Relaxed);
 
         while !old.frozen() {
-            match slot.compare_exchange(
+            match edge.compare_exchange(
                 old,
                 old.with_frozen(true).with_grow(grow),
                 Ordering::AcqRel,

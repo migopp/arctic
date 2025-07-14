@@ -6,28 +6,28 @@ use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
 
+use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Frozen;
 use crate::node::Node3;
-use crate::slot;
+use crate::Edge;
 use crate::Node as _;
-use crate::Slot;
 
 pub(crate) struct Cursor<'a, 'k, P> {
     key: &'k [u8],
     index: usize,
-    here: &'a A128<Slot>,
+    here: &'a A128<Edge>,
     history: P,
 }
 
 pub(crate) enum Op {
     Node(node::Op),
-    Slot(slot::Op),
+    Edge(edge::Op),
 }
 
 impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
-    pub(crate) fn new(root: &'a A128<Slot>, key: &'k [u8]) -> Self {
+    pub(crate) fn new(root: &'a A128<Edge>, key: &'k [u8]) -> Self {
         Self {
             key,
             index: 0,
@@ -36,30 +36,30 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse_weak(&mut self) -> Option<Slot> {
+    pub(crate) fn traverse_weak(&mut self) -> Option<Edge> {
         loop {
-            let slot = self.here();
-            let snapshot = slot.load(Ordering::Acquire);
+            let edge = self.here();
+            let snapshot = edge.load(Ordering::Acquire);
             let key = self.key();
 
             match snapshot.r#match(key) {
-                slot::Match::Full {
+                edge::Match::Full {
                     len: _,
                     child: None,
                 }
-                | slot::Match::Partial { .. } => return None,
+                | edge::Match::Partial { .. } => return None,
 
-                slot::Match::Full {
+                edge::Match::Full {
                     len,
-                    child: Some(slot::Child::Leaf),
+                    child: Some(edge::Child::Leaf),
                 } => {
                     assert_eq!(key.len(), len.to_usize());
                     return Some(snapshot);
                 }
 
-                slot::Match::Full {
+                edge::Match::Full {
                     len,
-                    child: Some(slot::Child::Node(node)),
+                    child: Some(edge::Child::Node(node)),
                 } => {
                     let byte = key.get(len.to_usize())?;
                     let next = unsafe { node.as_node() }.get(*byte)?;
@@ -69,16 +69,16 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse_strong(&mut self, value: u48) -> (Op, Slot, Slot) {
+    pub(crate) fn traverse_strong(&mut self, value: u48) -> (Op, Edge, Edge) {
         loop {
-            let slot = self.here();
-            let old = slot.load(Ordering::Acquire);
+            let edge = self.here();
+            let old = edge.load(Ordering::Acquire);
             let key = self.key();
 
             let (op, new) = match old.r#match(key) {
-                slot::Match::Full {
+                edge::Match::Full {
                     len,
-                    child: Some(slot::Child::Node(node)),
+                    child: Some(edge::Child::Node(node)),
                 } => {
                     let grow = match self.history.freeze() {
                         Some(grow) if unsafe { node.as_node() }.is_frozen() == Some(grow) => grow,
@@ -86,8 +86,8 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                             let byte = key[len.to_usize()];
                             match unsafe { node.as_node() }.get_or_reserve(byte) {
                                 // Fast path: no need to replace
-                                Ok(slot) => {
-                                    self.push(len, node, slot);
+                                Ok(edge) => {
+                                    self.push(len, node, edge);
                                     continue;
                                 }
                                 Err(Frozen::Grow) => true,
@@ -102,12 +102,12 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     (Op::Node(op), new)
                 }
 
-                slot::Match::Full { len, child: None } if key.len() > key::Len::MAX.to_usize() => {
+                edge::Match::Full { len, child: None } if key.len() > key::Len::MAX.to_usize() => {
                     assert_eq!(len, key::Len::ZERO);
 
                     let node = Box::new(Node3::new());
                     let node = Box::leak(node) as *mut Node3;
-                    let new = Slot::new(
+                    let new = Edge::new(
                         key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
                         false,
                         false,
@@ -115,15 +115,15 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         u48::new(node as u64),
                     );
 
-                    (Op::Slot(slot::Op::Create), new)
+                    (Op::Edge(edge::Op::Create), new)
                 }
 
-                slot::Match::Full {
+                edge::Match::Full {
                     len: _,
-                    child: Some(slot::Child::Leaf) | None,
+                    child: Some(edge::Child::Leaf) | None,
                 } => (
-                    Op::Slot(slot::Op::Insert),
-                    Slot::new(
+                    Op::Edge(edge::Op::Insert),
+                    Edge::new(
                         key::Array::from_slice(key),
                         false,
                         false,
@@ -132,17 +132,17 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     ),
                 ),
 
-                slot::Match::Partial { start, middle, end } => {
+                edge::Match::Partial { start, middle, end } => {
                     let mut node = Box::new(Node3::new());
 
                     node.reserve(middle).unwrap().store(
-                        Slot::new(end, false, false, old.kind(), old.next()),
+                        Edge::new(end, false, false, old.kind(), old.next()),
                         Ordering::Relaxed,
                     );
 
                     let node = Box::leak(node) as *mut Node3;
 
-                    let new = Slot::new(
+                    let new = Edge::new(
                         start,
                         false,
                         false,
@@ -150,7 +150,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         u48::new(node as u64),
                     );
 
-                    (Op::Slot(slot::Op::Expand), new)
+                    (Op::Edge(edge::Op::Expand), new)
                 }
             };
 
@@ -158,30 +158,30 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    fn push(&mut self, len: key::Len, node: node::Ref, slot: &'a A128<Slot>) {
+    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a A128<Edge>) {
         self.index += len.to_usize();
         self.index += 1;
         self.history.push(Segment {
             len,
-            slot: self.here,
+            edge: self.here,
             node,
         });
-        self.here = slot;
+        self.here = edge;
     }
 
     pub(crate) fn pop(&mut self, grow: bool) -> Result<node::Ref, P::PopError> {
         let segment = self
             .history
             .pop(grow)?
-            .expect("Root slot can never be frozen");
+            .expect("Root edge can never be frozen");
         self.index -= 1;
         self.index -= segment.len.to_usize();
-        self.here = segment.slot;
+        self.here = segment.edge;
         Ok(segment.node)
     }
 
     #[inline]
-    pub(crate) fn here(&self) -> &A128<Slot> {
+    pub(crate) fn here(&self) -> &A128<Edge> {
         self.here
     }
 
@@ -245,6 +245,6 @@ impl<'a> History<'a> for Pessimistic<'a> {
 #[derive(Debug)]
 pub(crate) struct Segment<'a> {
     len: key::Len,
-    slot: &'a A128<Slot>,
+    edge: &'a A128<Edge>,
     node: node::Ref,
 }

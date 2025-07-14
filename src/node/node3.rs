@@ -10,9 +10,9 @@ use ribbit::unpack;
 
 use crate::key;
 use crate::node;
+use crate::node::Edge;
 use crate::node::Frozen;
 use crate::node::Op;
-use crate::node::Slot;
 use crate::Node;
 
 use super::Node256;
@@ -24,7 +24,7 @@ pub(crate) struct Node3 {
 
     _pad: [u32; 3],
 
-    slots: [A128<Slot>; 3],
+    edges: [A128<Edge>; 3],
 }
 
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
@@ -34,18 +34,18 @@ impl Node3 {
         Self {
             header: A32::new(Header::default()),
             _pad: [0; 3],
-            slots: core::array::from_fn(|_| A128::new(Slot::default())),
+            edges: core::array::from_fn(|_| A128::new(Edge::default())),
         }
     }
 }
 
 impl Node for Node3 {
-    fn get(&self, key: u8) -> Option<&A128<Slot>> {
+    fn get(&self, key: u8) -> Option<&A128<Edge>> {
         let index = self.header.load(Ordering::Acquire).get(key)?;
-        Some(&self.slots[index as usize])
+        Some(&self.edges[index as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Slot>, Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Result<&A128<Edge>, Frozen> {
         let mut old = self.header.load(Ordering::Acquire);
 
         while !old.frozen() {
@@ -57,7 +57,7 @@ impl Node for Node3 {
                 .header
                 .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
             {
-                Ok(_) => return Ok(&self.slots[index as usize]),
+                Ok(_) => return Ok(&self.edges[index as usize]),
                 Err(conflict) => old = conflict,
             }
         }
@@ -68,12 +68,12 @@ impl Node for Node3 {
         })
     }
 
-    fn reserve(&mut self, key: u8) -> Option<&mut A128<Slot>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>> {
         // FIXME: shouldn't need atomics with &mut
         let header = self.header.load(Ordering::Relaxed);
         let (header, index) = header.get_or_reserve(key)?;
         self.header.store(header, Ordering::Relaxed);
-        Some(&mut self.slots[index as usize])
+        Some(&mut self.edges[index as usize])
     }
 
     fn is_frozen(&self) -> Option<bool> {
@@ -100,42 +100,42 @@ impl Node for Node3 {
         }
 
         let grow = old.grow();
-        for slot in self.slots.iter().take(old.len().value() as usize) {
-            Slot::freeze(slot, grow)
+        for edge in self.edges.iter().take(old.len().value() as usize) {
+            Edge::freeze(edge, grow)
         }
     }
 
-    fn replace(&self, snapshot: &Slot) -> (Op, Slot) {
+    fn replace(&self, snapshot: &Edge) -> (Op, Edge) {
         let header = self.header.load(Ordering::Relaxed);
         let keys = header.keys().value();
 
         assert!(header.frozen());
 
-        let mut slots: [(u8, Slot); 3] = core::array::from_fn(|_| (0, Slot::default()));
+        let mut edges: [(u8, Edge); 3] = core::array::from_fn(|_| (0, Edge::default()));
         let mut len = 0;
 
-        self.slots
+        self.edges
             .iter()
             .take(header.len().value() as usize)
-            .map(|slot| slot.load(Ordering::Relaxed))
-            .inspect(|slot| assert!(slot.frozen()))
+            .map(|edge| edge.load(Ordering::Relaxed))
+            .inspect(|edge| assert!(edge.frozen()))
             .enumerate()
-            .filter(|(_, slot)| !matches!(slot.kind().unpack(), <unpack![node::Kind]>::None))
-            .map(|(index, slot)| {
+            .filter(|(_, edge)| !matches!(edge.kind().unpack(), <unpack![node::Kind]>::None))
+            .map(|(index, edge)| {
                 (
                     (keys >> (index * 8)) as u8,
-                    slot.with_frozen(false).with_grow(false),
+                    edge.with_frozen(false).with_grow(false),
                 )
             })
-            .zip(&mut slots)
-            .for_each(|(slot, save)| {
-                *save = slot;
+            .zip(&mut edges)
+            .for_each(|(edge, save)| {
+                *save = edge;
                 len += 1;
             });
 
-        let slots = &slots[..len];
+        let edges = &edges[..len];
 
-        match slots {
+        match edges {
             [] => (
                 Op::Destroy,
                 snapshot
@@ -145,7 +145,7 @@ impl Node for Node3 {
 
             [(key, child)] if key::Array::can_compress(&snapshot.key(), &child.key()) => (
                 Op::Compress,
-                Slot::new(
+                Edge::new(
                     key::Array::compress(&snapshot.key(), *key, &child.key()),
                     false,
                     false,
@@ -155,11 +155,11 @@ impl Node for Node3 {
             ),
 
             // Grow
-            slots if slots.len() == 3 && header.grow() => {
+            edges if edges.len() == 3 && header.grow() => {
                 let mut node = Box::new(Node256::new());
 
-                for (key, slot) in slots {
-                    node.reserve(*key).unwrap().store(*slot, Ordering::Relaxed);
+                for (key, edge) in edges {
+                    node.reserve(*key).unwrap().store(*edge, Ordering::Relaxed);
                 }
 
                 let node = Box::leak(node) as *mut Node256;
@@ -176,8 +176,8 @@ impl Node for Node3 {
             _ => {
                 let mut node = Box::new(Node3::new());
 
-                for (key, slot) in slots {
-                    node.reserve(*key).unwrap().store(*slot, Ordering::Relaxed);
+                for (key, edge) in edges {
+                    node.reserve(*key).unwrap().store(*edge, Ordering::Relaxed);
                 }
 
                 let node = Box::leak(node) as *mut Node3;

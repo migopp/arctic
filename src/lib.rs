@@ -1,26 +1,26 @@
 mod cursor;
+mod edge;
 mod key;
 mod node;
-mod slot;
 
 use core::sync::atomic::Ordering;
 
 use cursor::Cursor;
 use cursor::Op;
+pub(crate) use edge::Edge;
 pub(crate) use node::Node;
 use ribbit::atomic::A128;
 use ribbit::u48;
 use ribbit::unpack;
-pub(crate) use slot::Slot;
 
 pub struct Art {
-    root: A128<Slot>,
+    root: A128<Edge>,
 }
 
 impl Default for Art {
     fn default() -> Self {
         Art {
-            root: A128::new(Slot::default()),
+            root: A128::new(Edge::default()),
         }
     }
 }
@@ -64,7 +64,7 @@ impl Art {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(old) if matches!(op, Op::Slot(slot::Op::Insert)) => {
+                Ok(old) if matches!(op, Op::Edge(edge::Op::Insert)) => {
                     return Ok(old.leaf().map(u64::from));
                 }
                 // FIXME: retire old allocation with SMR
@@ -74,10 +74,10 @@ impl Art {
 
             match op {
                 Op::Node(node::Op::Destroy | node::Op::Compress)
-                | Op::Slot(slot::Op::Insert | slot::Op::Remove) => (),
+                | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
 
                 Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-                | Op::Slot(slot::Op::Create | slot::Op::Expand) => unsafe { new.deallocate() },
+                | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe { new.deallocate() },
             }
 
             if conflict.frozen() {
@@ -94,10 +94,10 @@ impl Art {
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut snapshot = cursor.traverse_weak()?;
-        let slot = cursor.here();
+        let edge = cursor.here();
 
         loop {
-            match slot.compare_exchange(
+            match edge.compare_exchange(
                 snapshot.with_frozen(false),
                 snapshot
                     .with_frozen(false)
@@ -122,10 +122,10 @@ impl Art {
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut snapshot = cursor.traverse_weak()?;
-        let slot = cursor.here();
+        let edge = cursor.here();
 
         loop {
-            match slot.compare_exchange(
+            match edge.compare_exchange(
                 snapshot.with_frozen(false),
                 snapshot
                     .with_frozen(false)
