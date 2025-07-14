@@ -81,7 +81,7 @@ impl Art {
             }
 
             if conflict.frozen() {
-                cursor.pop(conflict.grow())?;
+                cursor.pop()?;
             }
         }
     }

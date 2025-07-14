@@ -15,7 +15,6 @@ pub(crate) struct Edge {
     pub(crate) key: key::Array,
 
     pub(crate) frozen: bool,
-    pub(crate) grow: bool,
 
     #[ribbit(size = 3)]
     pub(crate) kind: node::Kind,
@@ -28,7 +27,6 @@ impl Default for Edge {
     fn default() -> Self {
         Self::new(
             key::Array::default(),
-            false,
             false,
             node::Kind::new(<unpack![node::Kind]>::None),
             u48::new(0),
@@ -59,13 +57,13 @@ impl Edge {
         Match::Partial { start, middle, end }
     }
 
-    pub(crate) fn freeze(edge: &A128<Self>, grow: bool) {
+    pub(crate) fn freeze(edge: &A128<Self>) {
         let mut old = edge.load(Ordering::Relaxed);
 
         while !old.frozen() {
             match edge.compare_exchange(
                 old,
-                old.with_frozen(true).with_grow(grow),
+                old.with_frozen(true),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {

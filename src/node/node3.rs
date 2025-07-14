@@ -50,7 +50,7 @@ impl Node for Node3 {
 
         while !old.frozen() {
             let Some((new, index)) = old.get_or_reserve(key) else {
-                return Err(Frozen::Grow);
+                return Err(Frozen);
             };
 
             match self
@@ -62,10 +62,7 @@ impl Node for Node3 {
             }
         }
 
-        Err(match old.grow() {
-            true => Frozen::Grow,
-            false => Frozen::Shrink,
-        })
+        Err(Frozen)
     }
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>> {
@@ -76,21 +73,17 @@ impl Node for Node3 {
         Some(&mut self.edges[index as usize])
     }
 
-    fn is_frozen(&self) -> Option<bool> {
-        let header = self.header.load(Ordering::Relaxed);
-        match header.frozen() {
-            true => Some(header.grow()),
-            false => None,
-        }
+    fn is_frozen(&self) -> bool {
+        self.header.load(Ordering::Relaxed).frozen()
     }
 
-    fn freeze(&self, grow: bool) {
+    fn freeze(&self) {
         let mut old = self.header.load(Ordering::Relaxed);
 
         while !old.frozen() {
             match self.header.compare_exchange(
                 old,
-                old.with_frozen(true).with_grow(grow),
+                old.with_frozen(true),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -99,10 +92,10 @@ impl Node for Node3 {
             }
         }
 
-        let grow = old.grow();
-        for edge in self.edges.iter().take(old.len().value() as usize) {
-            Edge::freeze(edge, grow)
-        }
+        self.edges
+            .iter()
+            .take(old.len().value() as usize)
+            .for_each(Edge::freeze);
     }
 
     fn replace(&self, snapshot: &Edge) -> (Op, Edge) {
@@ -121,12 +114,7 @@ impl Node for Node3 {
             .inspect(|edge| assert!(edge.frozen()))
             .enumerate()
             .filter(|(_, edge)| !matches!(edge.kind().unpack(), <unpack![node::Kind]>::None))
-            .map(|(index, edge)| {
-                (
-                    (keys >> (index * 8)) as u8,
-                    edge.with_frozen(false).with_grow(false),
-                )
-            })
+            .map(|(index, edge)| ((keys >> (index * 8)) as u8, edge.with_frozen(false)))
             .zip(&mut edges)
             .for_each(|(edge, save)| {
                 *save = edge;
@@ -148,14 +136,13 @@ impl Node for Node3 {
                 Edge::new(
                     key::Array::compress(&snapshot.key(), *key, &child.key()),
                     false,
-                    false,
                     child.kind(),
                     child.next(),
                 ),
             ),
 
             // Grow
-            edges if edges.len() == 3 && header.grow() => {
+            edges if edges.len() == 3 => {
                 let mut node = Box::new(Node256::new());
 
                 for (key, edge) in edges {
@@ -197,14 +184,13 @@ impl Node for Node3 {
 struct Header {
     len: u2,
     frozen: bool,
-    grow: bool,
     #[ribbit(offset = 8, debug(format = "{:#08x}"))]
     keys: u24,
 }
 
 impl Default for Header {
     fn default() -> Self {
-        Self::new(u2::new(0), false, false, u24::new(0))
+        Self::new(u2::new(0), false, u24::new(0))
     }
 }
 

@@ -17,18 +17,15 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>>;
 
-    fn is_frozen(&self) -> Option<bool>;
+    fn is_frozen(&self) -> bool;
 
-    fn freeze(&self, grow: bool);
+    fn freeze(&self);
 
     fn replace(&self, snapshot: &Edge) -> (Op, Edge);
 }
 
 #[derive(Debug)]
-pub(crate) enum Frozen {
-    Grow,
-    Shrink,
-}
+pub(crate) struct Frozen;
 
 #[derive(Debug)]
 pub(crate) enum Op {

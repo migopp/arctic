@@ -1,5 +1,6 @@
 use core::convert::Infallible;
 use core::marker::PhantomData;
+use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::A128;
@@ -80,9 +81,9 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     len,
                     child: Some(edge::Child::Node(node)),
                 } => {
-                    let grow = match self.history.freeze() {
-                        Some(grow) if unsafe { node.as_node() }.is_frozen() == Some(grow) => grow,
-                        Some(_) | None => {
+                    match self.history.freeze() {
+                        true if unsafe { node.as_node() }.is_frozen() => (),
+                        true | false => {
                             let byte = key[len.to_usize()];
                             match unsafe { node.as_node() }.get_or_reserve(byte) {
                                 // Fast path: no need to replace
@@ -90,14 +91,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                                     self.push(len, node, edge);
                                     continue;
                                 }
-                                Err(Frozen::Grow) => true,
-                                Err(Frozen::Shrink) => false,
+                                Err(Frozen) => (),
                             }
                         }
                     };
 
                     let node = unsafe { node.as_node() };
-                    node.freeze(grow);
+                    node.freeze();
                     let (op, new) = node.replace(&old);
                     (Op::Node(op), new)
                 }
@@ -109,7 +109,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     let node = Box::leak(node) as *mut Node3;
                     let new = Edge::new(
                         key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
-                        false,
                         false,
                         node::Kind::new(<unpack![node::Kind]>::Node3),
                         u48::new(node as u64),
@@ -126,7 +125,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     Edge::new(
                         key::Array::from_slice(key),
                         false,
-                        false,
                         node::Kind::new(<unpack![node::Kind]>::Leaf),
                         value,
                     ),
@@ -136,7 +134,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     let mut node = Box::new(Node3::new());
 
                     node.reserve(middle).unwrap().store(
-                        Edge::new(end, false, false, old.kind(), old.next()),
+                        Edge::new(end, false, old.kind(), old.next()),
                         Ordering::Relaxed,
                     );
 
@@ -144,7 +142,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                     let new = Edge::new(
                         start,
-                        false,
                         false,
                         node::Kind::new(<unpack![node::Kind]>::Node3),
                         u48::new(node as u64),
@@ -169,11 +166,8 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         self.here = edge;
     }
 
-    pub(crate) fn pop(&mut self, grow: bool) -> Result<node::Ref, P::PopError> {
-        let segment = self
-            .history
-            .pop(grow)?
-            .expect("Root edge can never be frozen");
+    pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
+        let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.here = segment.edge;
@@ -193,9 +187,9 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
 pub(crate) trait History<'a>: Default {
     type PopError;
-    fn freeze(&mut self) -> Option<bool>;
+    fn freeze(&mut self) -> bool;
     fn push(&mut self, segment: Segment<'a>);
-    fn pop(&mut self, grow: bool) -> Result<Option<Segment<'a>>, Self::PopError>;
+    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
 }
 
 #[derive(Default)]
@@ -204,30 +198,32 @@ pub(crate) struct Optimistic<'a>(PhantomData<&'a ()>);
 impl<'a> History<'a> for Optimistic<'a> {
     type PopError = ();
 
-    fn freeze(&mut self) -> Option<bool> {
-        None
+    #[inline]
+    fn freeze(&mut self) -> bool {
+        false
     }
 
     #[inline]
     fn push(&mut self, _segment: Segment<'a>) {}
 
     #[inline]
-    fn pop(&mut self, _grow: bool) -> Result<Option<Segment<'a>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
         Err(())
     }
 }
 
 #[derive(Default)]
 pub(crate) struct Pessimistic<'a> {
-    grow: Option<bool>,
+    freeze: bool,
     path: Vec<Segment<'a>>,
 }
 
 impl<'a> History<'a> for Pessimistic<'a> {
     type PopError = Infallible;
 
-    fn freeze(&mut self) -> Option<bool> {
-        self.grow.take()
+    #[inline]
+    fn freeze(&mut self) -> bool {
+        mem::take(&mut self.freeze)
     }
 
     #[inline]
@@ -236,8 +232,8 @@ impl<'a> History<'a> for Pessimistic<'a> {
     }
 
     #[inline]
-    fn pop(&mut self, grow: bool) -> Result<Option<Segment<'a>>, Self::PopError> {
-        self.grow = Some(grow);
+    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
+        self.freeze = true;
         Ok(self.path.pop())
     }
 }

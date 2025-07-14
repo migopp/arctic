@@ -30,18 +30,12 @@ impl Node for Node256 {
         Some(&mut self.0[key as usize])
     }
 
-    fn is_frozen(&self) -> Option<bool> {
-        let snapshot = self.0[0].load(Ordering::Relaxed);
-        match snapshot.frozen() {
-            true => Some(snapshot.grow()),
-            false => None,
-        }
+    fn is_frozen(&self) -> bool {
+        self.0[0].load(Ordering::Relaxed).frozen()
     }
 
-    fn freeze(&self, grow: bool) {
-        for edge in &self.0 {
-            Edge::freeze(edge, grow);
-        }
+    fn freeze(&self) {
+        self.0.iter().for_each(Edge::freeze);
     }
 
     fn replace(&self, _snapshot: &Edge) -> (Op, Edge) {
