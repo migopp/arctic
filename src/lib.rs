@@ -9,18 +9,18 @@ use cursor::Cursor;
 use cursor::Op;
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
-use ribbit::atomic::A128;
+use ribbit::atomic::Atomic128;
 use ribbit::u48;
 use ribbit::unpack;
 
 pub struct Art {
-    root: A128<Edge>,
+    root: Atomic128<Edge>,
 }
 
 impl Default for Art {
     fn default() -> Self {
         Art {
-            root: A128::new(Edge::default()),
+            root: Atomic128::new(Edge::default()),
         }
     }
 }

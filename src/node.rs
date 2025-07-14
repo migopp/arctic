@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use ribbit::atomic::A128;
+use ribbit::atomic::Atomic128;
 
 mod node256;
 mod node3;
@@ -11,11 +11,11 @@ pub(crate) use node3::Node3;
 use crate::Edge;
 
 pub(crate) trait Node {
-    fn get(&self, key: u8) -> Option<&A128<Edge>>;
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Edge>, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
 
     fn is_frozen(&self) -> bool;
 

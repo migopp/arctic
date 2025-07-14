@@ -1,8 +1,8 @@
 use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::A128;
-use ribbit::atomic::A32;
+use ribbit::atomic::Atomic128;
+use ribbit::atomic::Atomic32;
 use ribbit::u2;
 use ribbit::u24;
 use ribbit::u48;
@@ -20,11 +20,11 @@ use super::Node256;
 #[repr(C)]
 #[derive(Debug)]
 pub(crate) struct Node3 {
-    header: A32<Header>,
+    header: Atomic32<Header>,
 
     _pad: [u32; 3],
 
-    edges: [A128<Edge>; 3],
+    edges: [Atomic128<Edge>; 3],
 }
 
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
@@ -32,20 +32,20 @@ const _: () = assert!(core::mem::size_of::<Node3>() == 64);
 impl Node3 {
     pub(crate) fn new() -> Self {
         Self {
-            header: A32::new(Header::default()),
+            header: Atomic32::new(Header::default()),
             _pad: [0; 3],
-            edges: core::array::from_fn(|_| A128::new(Edge::default())),
+            edges: core::array::from_fn(|_| Atomic128::new(Edge::default())),
         }
     }
 }
 
 impl Node for Node3 {
-    fn get(&self, key: u8) -> Option<&A128<Edge>> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.load(Ordering::Acquire).get(key)?;
         Some(&self.edges[index as usize])
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&A128<Edge>, Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
         let mut old = self.header.load(Ordering::Acquire);
 
         while !old.frozen() {
@@ -65,11 +65,10 @@ impl Node for Node3 {
         Err(Frozen)
     }
 
-    fn reserve(&mut self, key: u8) -> Option<&mut A128<Edge>> {
-        // FIXME: shouldn't need atomics with &mut
-        let header = self.header.load(Ordering::Relaxed);
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
+        let header = self.header.get();
         let (header, index) = header.get_or_reserve(key)?;
-        self.header.store(header, Ordering::Relaxed);
+        self.header.set(header);
         Some(&mut self.edges[index as usize])
     }
 

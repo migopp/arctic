@@ -1,6 +1,6 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::A128;
+use ribbit::atomic::Atomic128;
 use ribbit::u48;
 use ribbit::unpack;
 
@@ -57,7 +57,7 @@ impl Edge {
         Match::Partial { start, middle, end }
     }
 
-    pub(crate) fn freeze(edge: &A128<Self>) {
+    pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load(Ordering::Relaxed);
 
         while !old.frozen() {

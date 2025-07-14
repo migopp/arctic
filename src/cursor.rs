@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use core::mem;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::A128;
+use ribbit::atomic::Atomic128;
 use ribbit::u48;
 use ribbit::unpack;
 
@@ -18,7 +18,7 @@ use crate::Node as _;
 pub(crate) struct Cursor<'a, 'k, P> {
     key: &'k [u8],
     index: usize,
-    here: &'a A128<Edge>,
+    here: &'a Atomic128<Edge>,
     history: P,
 }
 
@@ -28,7 +28,7 @@ pub(crate) enum Op {
 }
 
 impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
-    pub(crate) fn new(root: &'a A128<Edge>, key: &'k [u8]) -> Self {
+    pub(crate) fn new(root: &'a Atomic128<Edge>, key: &'k [u8]) -> Self {
         Self {
             key,
             index: 0,
@@ -155,7 +155,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a A128<Edge>) {
+    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a Atomic128<Edge>) {
         self.index += len.to_usize();
         self.index += 1;
         self.history.push(Segment {
@@ -175,7 +175,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     }
 
     #[inline]
-    pub(crate) fn here(&self) -> &A128<Edge> {
+    pub(crate) fn here(&self) -> &Atomic128<Edge> {
         self.here
     }
 
@@ -241,6 +241,6 @@ impl<'a> History<'a> for Pessimistic<'a> {
 #[derive(Debug)]
 pub(crate) struct Segment<'a> {
     len: key::Len,
-    edge: &'a A128<Edge>,
+    edge: &'a Atomic128<Edge>,
     node: node::Ref,
 }
