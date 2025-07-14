@@ -5,13 +5,13 @@ use bustle::CollectionHandle;
 use bustle::Mix;
 use bustle::Workload;
 
-struct Art(Arc<art::Art>);
+struct Art(Arc<art::Map<u64, u32>>);
 
 impl Collection for Art {
     type Handle = Art;
 
     fn with_capacity(_capacity: usize) -> Self {
-        Self(Arc::new(art::Art::default()))
+        Self(Arc::new(art::Map::default()))
     }
 
     fn pin(&self) -> Self::Handle {
@@ -23,9 +23,9 @@ impl CollectionHandle for Art {
     type Key = u64;
 
     fn get(&mut self, key: &Self::Key) -> bool {
-        match self.0.get(&key.to_be_bytes()) {
+        match self.0.get(*key) {
             Some(value) => {
-                assert_eq!(key >> 16, value);
+                assert_eq!(*key as u32, value);
                 true
             }
             None => false,
@@ -33,21 +33,21 @@ impl CollectionHandle for Art {
     }
 
     fn insert(&mut self, key: &Self::Key) -> bool {
-        match self.0.insert(&key.to_be_bytes(), key >> 16) {
+        match self.0.insert(*key, *key as u32) {
             None => true,
             Some(value) => {
-                assert_eq!(key >> 16, value);
+                assert_eq!(*key as u32, value);
                 false
             }
         }
     }
 
     fn remove(&mut self, key: &Self::Key) -> bool {
-        self.0.remove(&key.to_be_bytes()).is_some()
+        self.0.remove(*key).is_some()
     }
 
     fn update(&mut self, key: &Self::Key) -> bool {
-        self.0.update(&key.to_be_bytes(), 0).is_some()
+        self.0.update(*key, 0).is_some()
     }
 }
 

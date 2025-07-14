@@ -21,28 +21,25 @@ enum Ret<V> {
     Get(Option<V>),
 }
 
-impl<K: Arbitrary + 'static> Arbitrary for Op<K, u64> {
+impl<K: Arbitrary + 'static> Arbitrary for Op<K, u32> {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
         prop_oneof![
-            (K::arbitrary(), u32::arbitrary()).prop_map(|(key, value)| Op::Insert {
-                key,
-                value: value as u64
-            }),
+            (K::arbitrary(), u32::arbitrary()).prop_map(|(key, value)| Op::Insert { key, value }),
             K::arbitrary().prop_map(|key| Op::Get { key }),
         ]
         .boxed()
     }
 }
 
-struct Sequential<K, V> {
-    inner: HashMap<Vec<u8>, V>,
+struct Sequential<K: art::Key, V> {
+    inner: HashMap<K::ByteArray, V>,
     _key: PhantomData<fn() -> K>,
 }
 
-impl<K, V> Default for Sequential<K, V> {
+impl<K: art::Key, V> Default for Sequential<K, V> {
     fn default() -> Self {
         Self {
             inner: HashMap::default(),
@@ -51,37 +48,34 @@ impl<K, V> Default for Sequential<K, V> {
     }
 }
 
-trait Key: Arbitrary + 'static {
-    fn as_bytes(&self) -> &[u8];
-}
-
-impl Key for u8 {
-    fn as_bytes(&self) -> &[u8] {
-        std::array::from_ref(self)
-    }
-}
-
 trait Value: Arbitrary + Clone {}
 
-impl Value for u64 {}
+impl Value for u32 {}
 
-impl<K: Key, V: Value> SequentialSpec for Sequential<K, V> {
+impl<K: art::Key, V: Value> SequentialSpec for Sequential<K, V>
+where
+    K::ByteArray: core::hash::Hash + Eq,
+{
     type Op = Op<K, V>;
     type Ret = Ret<V>;
 
     fn exec(&mut self, op: Self::Op) -> Self::Ret {
         match op {
             Op::Insert { key, value } => {
-                let old = self.inner.insert(key.as_bytes().to_owned(), value);
+                let key = key.to_byte_array();
+                let old = self.inner.insert(key, value);
                 Ret::Insert(old)
             }
-            Op::Get { key } => Ret::Get(self.inner.get(key.as_bytes()).cloned()),
+            Op::Get { key } => {
+                let key = key.to_byte_array();
+                Ret::Get(self.inner.get(&key).cloned())
+            }
         }
     }
 }
 
 struct Concurrent<K, V> {
-    inner: art::Art,
+    inner: art::Map<K, V>,
     _key: PhantomData<fn() -> K>,
     _value: PhantomData<fn() -> V>,
 }
@@ -89,19 +83,22 @@ struct Concurrent<K, V> {
 impl<K, V> Default for Concurrent<K, V> {
     fn default() -> Self {
         Self {
-            inner: art::Art::default(),
+            inner: art::Map::default(),
             _key: PhantomData,
             _value: PhantomData,
         }
     }
 }
 
-impl<K: Key> ConcurrentSpec for Concurrent<K, u64> {
-    type Seq = Sequential<K, u64>;
+impl<K: art::Key> ConcurrentSpec for Concurrent<K, u32>
+where
+    K::ByteArray: core::hash::Hash + Eq,
+{
+    type Seq = Sequential<K, u32>;
     fn exec(&self, op: lincheck::ConcOp<Self>) -> lincheck::ConcRet<Self> {
         match op {
-            Op::Insert { key, value } => Ret::Insert(self.inner.insert(key.as_bytes(), value)),
-            Op::Get { key } => Ret::Get(self.inner.get(key.as_bytes())),
+            Op::Insert { key, value } => Ret::Insert(self.inner.insert(key, value)),
+            Op::Get { key } => Ret::Get(self.inner.get(key)),
         }
     }
 }
@@ -112,5 +109,5 @@ fn two_threads() {
         num_ops: 2,
         num_threads: 2,
     }
-    .verify_or_panic::<Concurrent<u8, u64>>();
+    .verify_or_panic::<Concurrent<u8, u32>>();
 }
