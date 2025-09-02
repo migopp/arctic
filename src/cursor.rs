@@ -5,7 +5,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 use ribbit::u48;
-use ribbit::unpack;
 
 use crate::edge;
 use crate::key;
@@ -107,12 +106,12 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                     let node = Box::new(Node3::new());
                     let node = Box::leak(node) as *mut Node3;
-                    let new = Edge::new(
-                        key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
-                        false,
-                        node::Kind::new(<unpack![node::Kind]>::Node3),
-                        u48::new(node as u64),
-                    );
+                    let new = Edge {
+                        key: key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
+                        frozen: false,
+                        kind: node::Kind::Node3,
+                        next: u48::new(node as u64),
+                    };
 
                     (Op::Edge(edge::Op::Create), new)
                 }
@@ -122,30 +121,34 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     child: Some(edge::Child::Leaf) | None,
                 } => (
                     Op::Edge(edge::Op::Insert),
-                    Edge::new(
-                        key::Array::from_slice(key),
-                        false,
-                        node::Kind::new(<unpack![node::Kind]>::Leaf),
-                        value,
-                    ),
+                    Edge {
+                        key: key::Array::from_slice(key),
+                        frozen: false,
+                        kind: node::Kind::Leaf,
+                        next: value,
+                    },
                 ),
 
                 edge::Match::Partial { start, middle, end } => {
                     let mut node = Box::new(Node3::new());
 
                     node.reserve(middle).unwrap().store(
-                        Edge::new(end, false, old.kind(), old.next()),
+                        Edge {
+                            key: end,
+                            frozen: false,
+                            ..old
+                        },
                         Ordering::Relaxed,
                     );
 
                     let node = Box::leak(node) as *mut Node3;
 
-                    let new = Edge::new(
-                        start,
-                        false,
-                        node::Kind::new(<unpack![node::Kind]>::Node3),
-                        u48::new(node as u64),
-                    );
+                    let new = Edge {
+                        key: start,
+                        frozen: false,
+                        kind: node::Kind::Node3,
+                        next: u48::new(node as u64),
+                    };
 
                     (Op::Edge(edge::Op::Expand), new)
                 }

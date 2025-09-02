@@ -70,11 +70,21 @@ impl Debug for Ref {
     }
 }
 
-#[derive(PartialEq, Eq)]
-#[ribbit::pack(size = 3, debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[ribbit::pack(size = 2, debug)]
 pub(crate) enum Kind {
+    #[ribbit(size = 0)]
     None,
+    #[ribbit(size = 0)]
     Leaf,
+    #[ribbit(size = 0)]
     Node3,
+    #[ribbit(size = 0)]
     Node256,
+}
+
+impl Default for Kind {
+    fn default() -> Self {
+        Self::None
+    }
 }

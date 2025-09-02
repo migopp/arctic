@@ -1,29 +1,30 @@
 use core::iter;
 
 use ribbit::u4;
-use ribbit::Pack as _;
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[ribbit::pack(size = 4, debug, eq, ord)]
 pub(crate) struct Len(u4);
 
 impl Len {
-    pub(crate) const ZERO: Self = Len::new(u4::new(0));
-    pub(crate) const MAX: Self = Len::new(u4::new(8));
+    pub(crate) const ZERO: Self = Self(u4::new(0));
+    pub(crate) const MAX: Self = Self(u4::new(8));
 
     const fn from_usize(len: usize) -> Self {
-        if len > Len::MAX.to_usize() {
-            Len::MAX
+        if len > Self::MAX.to_usize() {
+            Self::MAX
         } else {
-            unsafe { Len::new(u4::new_unchecked(len as u8)) }
+            unsafe { Self(u4::new_unchecked(len as u8)) }
         }
     }
 
     pub(crate) const fn to_usize(self) -> usize {
-        self._0().value() as usize
+        self.0.value() as usize
     }
 }
 
-#[ribbit::pack(size = 72, debug, eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[ribbit::pack(size = 72, debug)]
 pub(crate) struct Array {
     #[ribbit(size = 64)]
     buffer: Buffer,
@@ -35,7 +36,7 @@ pub(crate) struct Array {
 impl Array {
     pub(crate) fn from_slice(key: &[u8]) -> Self {
         let (buffer, len) = Buffer::from_slice(key);
-        Self::new(buffer, len)
+        Self { buffer, len }
     }
 
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
@@ -45,13 +46,13 @@ impl Array {
             .take_while(|(l, r)| l == r)
             .count();
 
-        Len::new(u4::new(len as u8))
+        Len(u4::new(len as u8))
     }
 
     pub(crate) fn expand(&self, index: Len) -> (Self, u8, Self) {
-        let buffer = self.buffer().to_bytes();
+        let buffer = self.buffer.to_bytes();
         let index = index.to_usize();
-        let len = self.len().to_usize();
+        let len = self.len.to_usize();
 
         (
             Self::from_slice(&buffer[..index]),
@@ -61,8 +62,8 @@ impl Array {
     }
 
     pub(crate) fn can_compress(parent: &Self, child: &Self) -> bool {
-        let parent = parent.len().to_usize();
-        let child = child.len().to_usize();
+        let parent = parent.len.to_usize();
+        let child = child.len.to_usize();
         parent + 1 + child <= Len::MAX.to_usize()
     }
 
@@ -76,41 +77,31 @@ impl Array {
             .zip(&mut buffer)
             .for_each(|(byte, save)| *save = byte);
 
-        Self::from_slice(&buffer[..parent.len().to_usize() + 1 + child.len().to_usize()])
+        Self::from_slice(&buffer[..parent.len.to_usize() + 1 + child.len.to_usize()])
     }
 
     fn iter(&self) -> impl Iterator<Item = u8> {
-        self.buffer()
+        self.buffer
             .to_bytes()
             .into_iter()
-            .take(self.len()._0().value() as usize)
+            .take(self.len.0.value() as usize)
     }
 }
 
-impl Default for Array {
-    fn default() -> Self {
-        Self::new(Buffer::default(), Len::ZERO)
-    }
-}
-
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[ribbit::pack(size = 64, debug, eq)]
-struct Buffer(#[ribbit(debug(format = "{:#010x}"))] u64);
+struct Buffer(u64);
 
 impl Buffer {
     fn from_slice(key: &[u8]) -> (Self, Len) {
         let len = Len::from_usize(key.len());
         let mut buffer = [0u8; Len::MAX.to_usize()];
         buffer[..len.to_usize()].copy_from_slice(&key[..len.to_usize()]);
-        (Self::new(u64::from_be_bytes(buffer)), len)
+        (Self(u64::from_be_bytes(buffer)), len)
     }
 
     fn to_bytes(self) -> [u8; 8] {
-        self.to_loose().to_be_bytes()
-    }
-}
-
-impl Default for Buffer {
-    fn default() -> Self {
-        Self::new(0)
+        self.0.to_be_bytes()
     }
 }

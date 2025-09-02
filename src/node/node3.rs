@@ -6,7 +6,6 @@ use ribbit::atomic::Atomic32;
 use ribbit::u2;
 use ribbit::u24;
 use ribbit::u48;
-use ribbit::unpack;
 
 use crate::key;
 use crate::node;
@@ -48,7 +47,7 @@ impl Node for Node3 {
     fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
         let mut old = self.header.load(Ordering::Acquire);
 
-        while !old.frozen() {
+        while !old.frozen {
             let Some((new, index)) = old.get_or_reserve(key) else {
                 return Err(Frozen);
             };
@@ -73,16 +72,19 @@ impl Node for Node3 {
     }
 
     fn is_frozen(&self) -> bool {
-        self.header.load(Ordering::Relaxed).frozen()
+        self.header.load(Ordering::Relaxed).frozen
     }
 
     fn freeze(&self) {
         let mut old = self.header.load(Ordering::Relaxed);
 
-        while !old.frozen() {
+        while !old.frozen {
             match self.header.compare_exchange(
                 old,
-                old.with_frozen(true),
+                Header {
+                    frozen: true,
+                    ..old
+                },
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -93,27 +95,35 @@ impl Node for Node3 {
 
         self.edges
             .iter()
-            .take(old.len().value() as usize)
+            .take(old.len.value() as usize)
             .for_each(Edge::freeze);
     }
 
     fn replace(&self, snapshot: &Edge) -> (Op, Edge) {
         let header = self.header.load(Ordering::Relaxed);
-        let keys = header.keys().value();
+        let keys = header.keys.value();
 
-        assert!(header.frozen());
+        assert!(header.frozen);
 
         let mut edges: [(u8, Edge); 3] = core::array::from_fn(|_| (0, Edge::default()));
         let mut len = 0;
 
         self.edges
             .iter()
-            .take(header.len().value() as usize)
+            .take(header.len.value() as usize)
             .map(|edge| edge.load(Ordering::Relaxed))
-            .inspect(|edge| assert!(edge.frozen()))
+            .inspect(|edge| assert!(edge.frozen))
             .enumerate()
-            .filter(|(_, edge)| !matches!(edge.kind().unpack(), <unpack![node::Kind]>::None))
-            .map(|(index, edge)| ((keys >> (index * 8)) as u8, edge.with_frozen(false)))
+            .filter(|(_, edge)| !matches!(edge.kind, node::Kind::None))
+            .map(|(index, edge)| {
+                (
+                    (keys >> (index * 8)) as u8,
+                    Edge {
+                        frozen: false,
+                        ..edge
+                    },
+                )
+            })
             .zip(&mut edges)
             .for_each(|(edge, save)| {
                 *save = edge;
@@ -125,19 +135,20 @@ impl Node for Node3 {
         match edges {
             [] => (
                 Op::Destroy,
-                snapshot
-                    .with_key(key::Array::default())
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::None)),
+                Edge {
+                    key: key::Array::default(),
+                    kind: node::Kind::None,
+                    ..*snapshot
+                },
             ),
 
-            [(key, child)] if key::Array::can_compress(&snapshot.key(), &child.key()) => (
+            [(key, child)] if key::Array::can_compress(&snapshot.key, &child.key) => (
                 Op::Compress,
-                Edge::new(
-                    key::Array::compress(&snapshot.key(), *key, &child.key()),
-                    false,
-                    child.kind(),
-                    child.next(),
-                ),
+                Edge {
+                    key: key::Array::compress(&snapshot.key, *key, &child.key),
+                    frozen: false,
+                    ..*child
+                },
             ),
 
             // Grow
@@ -152,9 +163,11 @@ impl Node for Node3 {
 
                 (
                     node::Op::Grow,
-                    snapshot
-                        .with_kind(node::Kind::new(<unpack![node::Kind]>::Node256))
-                        .with_next(u48::new(node as u64)),
+                    Edge {
+                        kind: node::Kind::Node256,
+                        next: u48::new(node as u64),
+                        ..*snapshot
+                    },
                 )
             }
 
@@ -170,33 +183,30 @@ impl Node for Node3 {
 
                 (
                     node::Op::Replace,
-                    snapshot
-                        .with_kind(node::Kind::new(<unpack![node::Kind]>::Node3))
-                        .with_next(u48::new(node as u64)),
+                    Edge {
+                        kind: node::Kind::Node3,
+                        next: u48::new(node as u64),
+                        ..*snapshot
+                    },
                 )
             }
         }
     }
 }
 
+#[derive(Copy, Clone, Debug, Default)]
 #[ribbit::pack(size = 32, debug)]
 struct Header {
     len: u2,
     frozen: bool,
-    #[ribbit(offset = 8, debug(format = "{:#08x}"))]
+    #[ribbit(offset = 8)]
     keys: u24,
-}
-
-impl Default for Header {
-    fn default() -> Self {
-        Self::new(u2::new(0), false, u24::new(0))
-    }
 }
 
 impl Header {
     fn get(&self, key: u8) -> Option<u8> {
-        let keys = self.keys().value();
-        let len = self.len().value();
+        let keys = self.keys.value();
+        let len = self.len.value();
         (0..len).find(|i| (keys >> (i * 8)) as u8 == key)
     }
 
@@ -205,12 +215,15 @@ impl Header {
             return Some((*self, index));
         }
 
-        let keys = self.keys().value();
-        let len = self.len().value();
+        let keys = self.keys.value();
+        let len = self.len.value();
         match len {
             0..3 => Some((
-                self.with_len(u2::new(len + 1))
-                    .with_keys(u24::new(keys | ((key as u32) << (len * 8)))),
+                Self {
+                    len: u2::new(len + 1),
+                    keys: u24::new(keys | ((key as u32) << (len * 8))),
+                    frozen: self.frozen,
+                },
                 len,
             )),
             _ => None,

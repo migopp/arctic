@@ -8,7 +8,6 @@ use crate::node;
 use crate::Edge;
 use ribbit::atomic::Atomic128;
 use ribbit::u48;
-use ribbit::unpack;
 
 pub struct Raw {
     root: Atomic128<Edge>,
@@ -55,7 +54,10 @@ impl Raw {
             let (op, old, new) = cursor.traverse_strong(value);
 
             let conflict = match cursor.here().compare_exchange(
-                old.with_frozen(false),
+                Edge {
+                    frozen: false,
+                    ..old
+                },
                 new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -76,7 +78,7 @@ impl Raw {
                 | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe { new.deallocate() },
             }
 
-            if conflict.frozen() {
+            if conflict.frozen {
                 cursor.pop()?;
             }
         }
@@ -94,18 +96,23 @@ impl Raw {
 
         loop {
             match edge.compare_exchange(
-                snapshot.with_frozen(false),
-                snapshot
-                    .with_frozen(false)
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::None)),
+                Edge {
+                    frozen: false,
+                    ..snapshot
+                },
+                Edge {
+                    frozen: false,
+                    kind: node::Kind::None,
+                    ..snapshot
+                },
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
-                Err(conflict) if conflict.frozen() => {
+                Err(conflict) if conflict.frozen => {
                     todo!()
                 }
-                Err(conflict) if conflict.key() != snapshot.key() => todo!(),
+                Err(conflict) if conflict.key != snapshot.key => todo!(),
                 Err(conflict) => {
                     snapshot = conflict;
                 }
@@ -122,17 +129,22 @@ impl Raw {
 
         loop {
             match edge.compare_exchange(
-                snapshot.with_frozen(false),
-                snapshot
-                    .with_frozen(false)
-                    .with_kind(node::Kind::new(<unpack![node::Kind]>::Leaf))
-                    .with_next(value),
+                Edge {
+                    frozen: false,
+                    ..snapshot
+                },
+                Edge {
+                    frozen: false,
+                    kind: node::Kind::Leaf,
+                    next: value,
+                    ..snapshot
+                },
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
-                Err(conflict) if conflict.frozen() => todo!(),
-                Err(conflict) if conflict.key() != snapshot.key() => todo!(),
+                Err(conflict) if conflict.frozen => todo!(),
+                Err(conflict) if conflict.key != snapshot.key => todo!(),
                 Err(conflict) => {
                     snapshot = conflict;
                 }

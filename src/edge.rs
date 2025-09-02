@@ -2,13 +2,13 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 use ribbit::u48;
-use ribbit::unpack;
 
 use crate::key;
 use crate::node;
 use crate::node::Node256;
 use crate::node::Node3;
 
+#[derive(Copy, Clone, Debug, Default)]
 #[ribbit::pack(size = 128, debug)]
 pub(crate) struct Edge {
     #[ribbit(size = 72)]
@@ -16,32 +16,21 @@ pub(crate) struct Edge {
 
     pub(crate) frozen: bool,
 
-    #[ribbit(size = 3)]
+    #[ribbit(size = 2)]
     pub(crate) kind: node::Kind,
 
     #[ribbit(offset = 80)]
     pub(crate) next: u48,
 }
 
-impl Default for Edge {
-    fn default() -> Self {
-        Self::new(
-            key::Array::default(),
-            false,
-            node::Kind::new(<unpack![node::Kind]>::None),
-            u48::new(0),
-        )
-    }
-}
-
 impl Edge {
     pub(crate) fn r#match(&self, key: &[u8]) -> Match {
         let search_key = key::Array::from_slice(key);
-        let edge_key = self.key();
+        let edge_key = self.key;
         let prefix_len = key::Array::prefix(&search_key, &edge_key);
 
         // Fast path: successful traversal
-        if search_key.len() >= edge_key.len() && edge_key.len() == prefix_len {
+        if search_key.len >= edge_key.len && edge_key.len == prefix_len {
             return Match::Full {
                 len: prefix_len,
                 child: self.child(),
@@ -49,7 +38,7 @@ impl Edge {
         }
 
         assert!(
-            search_key.len() >= edge_key.len() || edge_key.len() != prefix_len,
+            search_key.len >= edge_key.len || edge_key.len != prefix_len,
             "Precondition: no key is a prefix of another key",
         );
 
@@ -60,10 +49,13 @@ impl Edge {
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load(Ordering::Relaxed);
 
-        while !old.frozen() {
+        while !old.frozen {
             match edge.compare_exchange(
                 old,
-                old.with_frozen(true),
+                Self {
+                    frozen: true,
+                    ..old
+                },
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -74,37 +66,33 @@ impl Edge {
     }
 
     pub(crate) fn leaf(&self) -> Option<u48> {
-        match self.kind().unpack() {
-            <unpack![node::Kind]>::None => None,
-            <unpack![node::Kind]>::Leaf => Some(self.next()),
+        match self.kind {
+            node::Kind::None => None,
+            node::Kind::Leaf => Some(self.next),
             _ => unreachable!(),
         }
     }
 
     fn child(&self) -> Option<Child> {
-        let leaf = self.next();
+        let leaf = self.next;
         let pointer = leaf.value();
 
-        match self.kind().unpack() {
-            <unpack![node::Kind]>::None => None,
-            <unpack![node::Kind]>::Leaf => Some(Child::Leaf),
-            <unpack![node::Kind]>::Node3 => {
-                Some(Child::Node(node::Ref::Node3(pointer as *mut Node3)))
-            }
-            <unpack![node::Kind]>::Node256 => {
-                Some(Child::Node(node::Ref::Node256(pointer as *mut Node256)))
-            }
+        match self.kind {
+            node::Kind::None => None,
+            node::Kind::Leaf => Some(Child::Leaf),
+            node::Kind::Node3 => Some(Child::Node(node::Ref::Node3(pointer as *mut Node3))),
+            node::Kind::Node256 => Some(Child::Node(node::Ref::Node256(pointer as *mut Node256))),
         }
     }
 
     pub(crate) unsafe fn deallocate(self) {
-        let pointer = self.next().value();
-        match self.kind().unpack() {
-            <unpack![node::Kind]>::None | <unpack![node::Kind]>::Leaf => {
+        let pointer = self.next.value();
+        match self.kind {
+            node::Kind::None | node::Kind::Leaf => {
                 unreachable!()
             }
-            <unpack![node::Kind]>::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
-            <unpack![node::Kind]>::Node256 => drop(Box::from_raw(pointer as *mut Node256)),
+            node::Kind::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
+            node::Kind::Node256 => drop(Box::from_raw(pointer as *mut Node256)),
         }
     }
 }

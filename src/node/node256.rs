@@ -31,7 +31,7 @@ impl Node for Node256 {
     }
 
     fn is_frozen(&self) -> bool {
-        self.0[0].load(Ordering::Relaxed).frozen()
+        self.0[0].load(Ordering::Relaxed).frozen
     }
 
     fn freeze(&self) {
