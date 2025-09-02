@@ -11,8 +11,6 @@ ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u12
 
 [dev-dependencies]
 bustle = "0.5"
-lincheck.path = "lincheck"
-proptest = "1.6"
 rand = "0.9"
 
 [[bench]]
