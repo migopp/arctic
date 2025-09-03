@@ -3,6 +3,7 @@ mod edge;
 mod key;
 mod node;
 mod raw;
+pub mod stat;
 
 pub use raw::Raw;
 use ribbit::u48;

@@ -62,11 +62,16 @@ impl Raw {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(old) if matches!(op, Op::Edge(edge::Op::Insert)) => {
-                    return Ok(old.leaf());
+                Ok(old) => {
+                    crate::stat::increment(&op);
+
+                    if matches!(op, Op::Edge(edge::Op::Insert)) {
+                        return Ok(old.leaf());
+                    } else {
+                        // FIXME: retire old allocation with SMR
+                        continue;
+                    }
                 }
-                // FIXME: retire old allocation with SMR
-                Ok(_) => continue,
                 Err(conflict) => conflict,
             };
 

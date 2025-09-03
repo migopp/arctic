@@ -5,9 +5,11 @@ edition = "2021"
 
 [features]
 default = []
+stat = ["dep:serde"]
 
 [dependencies]
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
+serde = { version = "1.0.219", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 bustle = "0.5"
