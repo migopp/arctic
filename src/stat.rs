@@ -1,11 +1,117 @@
 use core::cell::Cell;
 
+use crate::edge::Child;
+use crate::node;
+
 thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
 }
 
+pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
+    let mut depth = Histogram::new();
+    let mut compression = Histogram::new();
+    let mut node_3 = Histogram::new();
+    let mut node_256 = Histogram::new();
+
+    map.raw.preorder().for_each(|(depth_, _, edge)| {
+        let Some(child) = edge.child() else { return };
+
+        compression.record(edge.key.len.to_usize() as u64);
+
+        match child {
+            Child::Leaf => {
+                depth.record(depth_ as u64);
+            }
+            Child::Node(node) => {
+                let histogram = match node {
+                    node::Ref::Node3(_) => &mut node_3,
+                    node::Ref::Node256(_) => &mut node_256,
+                };
+
+                let children = unsafe { node.iter() }
+                    .filter(|(_, edge)| !matches!(edge.kind, node::Kind::None))
+                    .count();
+
+                histogram.record(children as u64);
+            }
+        }
+    });
+
+    Process {
+        depth: depth.into(),
+        compression: compression.into(),
+        node_3: node_3.into(),
+        node_256: node_256.into(),
+    }
+}
+
 pub fn thread() -> Thread {
     THREAD.with(|thread| thread.clone())
+}
+
+#[derive(Default)]
+#[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(not(feature = "stat"), expect(unused))]
+pub struct Process {
+    depth: Distribution,
+    compression: Distribution,
+    node_3: Distribution,
+    node_256: Distribution,
+}
+
+#[derive(Default)]
+#[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(not(feature = "stat"), expect(unused))]
+struct Distribution {
+    min: u64,
+    max: u64,
+    mean: f64,
+    p50: u64,
+    p75: u64,
+    p90: u64,
+    p99: u64,
+}
+
+struct Histogram {
+    #[cfg(feature = "stat")]
+    inner: hdrhistogram::Histogram<u64>,
+}
+
+impl Histogram {
+    fn new() -> Self {
+        Self {
+            #[cfg(feature = "stat")]
+            inner: hdrhistogram::Histogram::new(3).unwrap(),
+        }
+    }
+
+    fn record(&mut self, value: u64) {
+        #[cfg(feature = "stat")]
+        self.inner.record(value).unwrap();
+    }
+}
+
+impl From<Histogram> for Distribution {
+    fn from(histogram: Histogram) -> Self {
+        #[cfg(not(feature = "stat"))]
+        {
+            Self::default()
+        }
+
+        #[cfg(feature = "stat")]
+        {
+            let histogram = histogram.inner;
+            Self {
+                min: histogram.min(),
+                max: histogram.max(),
+                mean: histogram.mean(),
+                p50: histogram.value_at_quantile(0.5),
+                p75: histogram.value_at_quantile(0.75),
+                p90: histogram.value_at_quantile(0.9),
+                p99: histogram.value_at_quantile(0.99),
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -56,11 +162,11 @@ impl Thread {
     fn get(&self, op: &crate::cursor::Op) -> &Cell<u64> {
         match op {
             crate::cursor::Op::Node(op) => match op {
-                crate::node::Op::Shrink => &self.node.shrink,
-                crate::node::Op::Replace => &self.node.replace,
-                crate::node::Op::Grow => &self.node.grow,
-                crate::node::Op::Destroy => &self.node.destroy,
-                crate::node::Op::Compress => &self.node.compress,
+                node::Op::Shrink => &self.node.shrink,
+                node::Op::Replace => &self.node.replace,
+                node::Op::Grow => &self.node.grow,
+                node::Op::Destroy => &self.node.destroy,
+                node::Op::Compress => &self.node.compress,
             },
             crate::cursor::Op::Edge(op) => match op {
                 crate::edge::Op::Create => &self.edge.create,
