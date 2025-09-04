@@ -98,10 +98,10 @@ impl Buffer {
         let len = Len::from_usize(key.len());
         let mut buffer = [0u8; Len::MAX.to_usize()];
         buffer[..len.to_usize()].copy_from_slice(&key[..len.to_usize()]);
-        (Self(u64::from_be_bytes(buffer)), len)
+        (Self(u64::from_ne_bytes(buffer)), len)
     }
 
     fn to_bytes(self) -> [u8; 8] {
-        self.0.to_be_bytes()
+        self.0.to_ne_bytes()
     }
 }
