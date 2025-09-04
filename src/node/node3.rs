@@ -230,3 +230,15 @@ impl Header {
         }
     }
 }
+
+impl<'a> IntoIterator for &'a Node3 {
+    type Item = (Option<u8>, Edge);
+    type IntoIter = super::Iter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        let header = self.header.load(Ordering::Relaxed);
+        let keys = header.keys.value();
+        let keys: [u8; 3] = core::array::from_fn(|index| (keys >> (index * 8)) as u8);
+
+        super::KeyIter::new_3(keys).zip(super::EdgeIter::new(&self.edges))
+    }
+}

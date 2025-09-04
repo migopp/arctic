@@ -9,6 +9,7 @@ pub use raw::Raw;
 use ribbit::u48;
 
 use core::marker::PhantomData;
+use std::rc::Rc;
 
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
@@ -53,69 +54,115 @@ impl<K: Key, V: Value> Map<K, V> {
         let key = key.as_ref();
         self.raw.update(key, value.into_u48()).map(V::from_u48)
     }
+
+    pub fn preorder_entries(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
+        self.raw
+            .preorder_entries()
+            .map(|(key, value)| (K::from_byte_array(key), V::from_u48(value)))
+    }
+
+    pub fn preorder_keys(&mut self) -> impl Iterator<Item = K::Owned> + '_ {
+        self.preorder_entries().map(|(key, _)| key)
+    }
+
+    pub fn preorder_values(&mut self) -> impl Iterator<Item = V> + '_ {
+        self.preorder_entries().map(|(_, value)| value)
+    }
 }
 
+// TODO: add size hint for iterator key buffer? or use arrayvec?
 pub trait Key {
     type ByteArray: AsRef<[u8]>;
+    type Owned;
+
     fn to_byte_array(&self) -> Self::ByteArray;
+    // TODO: avoid cloning?
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned;
 }
 
-impl Key for u64 {
-    type ByteArray = [u8; 8];
-    fn to_byte_array(&self) -> Self::ByteArray {
-        self.to_be_bytes()
-    }
+macro_rules! impl_key {
+    ($($type:ident: $len:expr),* $(,)?) => {
+        $(
+            impl Key for $type {
+                type ByteArray = [u8; $len];
+                type Owned = Self;
+
+                fn to_byte_array(&self) -> Self::ByteArray {
+                    self.to_be_bytes()
+                }
+
+                fn from_byte_array(array: Rc<Vec<u8>>) -> Self {
+                    Self::from_be_bytes(Self::ByteArray::try_from(array.as_slice()).unwrap())
+                }
+            }
+        )*
+    };
 }
 
-impl Key for u32 {
-    type ByteArray = [u8; 4];
-    fn to_byte_array(&self) -> Self::ByteArray {
-        self.to_be_bytes()
-    }
-}
-
-impl Key for u16 {
-    type ByteArray = [u8; 2];
-    fn to_byte_array(&self) -> Self::ByteArray {
-        self.to_be_bytes()
-    }
-}
-
-impl Key for u8 {
-    type ByteArray = [u8; 1];
-    fn to_byte_array(&self) -> Self::ByteArray {
-        self.to_be_bytes()
-    }
-}
+impl_key!(
+    u64: 8,
+    u32: 4,
+    u16: 2,
+    u8: 1,
+);
 
 impl<'a> Key for &'a str {
     type ByteArray = &'a [u8];
+    type Owned = String;
+
+    #[inline]
     fn to_byte_array(&self) -> Self::ByteArray {
         self.as_bytes()
+    }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        String::from_utf8(Rc::unwrap_or_clone(array)).unwrap()
     }
 }
 
 impl<'a> Key for &'a [u8] {
     type ByteArray = &'a [u8];
+    type Owned = Vec<u8>;
+
+    #[inline]
     fn to_byte_array(&self) -> Self::ByteArray {
         self
+    }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        Rc::unwrap_or_clone(array)
     }
 }
 
 impl<const LEN: usize> Key for [u8; LEN] {
     type ByteArray = Self;
+    type Owned = Self;
 
     #[inline]
     fn to_byte_array(&self) -> Self::ByteArray {
         *self
     }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        Rc::unwrap_or_clone(array).try_into().unwrap()
+    }
 }
 
 impl<const LEN: usize> Key for &'_ [u8; LEN] {
     type ByteArray = Self;
+    type Owned = [u8; LEN];
+
     #[inline]
     fn to_byte_array(&self) -> Self::ByteArray {
         *self
+    }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        Rc::unwrap_or_clone(array).try_into().unwrap()
     }
 }
 
@@ -125,18 +172,22 @@ pub trait Value {
 }
 
 impl Value for u32 {
+    #[inline]
     fn from_u48(value: u48) -> Self {
         value.value() as u32
     }
 
+    #[inline]
     fn into_u48(self) -> u48 {
         u48::from(self)
     }
 }
 
 impl Value for () {
+    #[inline]
     fn from_u48(_: u48) -> Self {}
 
+    #[inline]
     fn into_u48(self) -> u48 {
         u48::new(0)
     }
@@ -173,7 +224,7 @@ mod tests {
 
     #[test]
     fn node3_full() {
-        let art = Map::default();
+        let mut art = Map::default();
 
         const KEYS: [u8; 3] = [1, 2, 3];
 
@@ -185,6 +236,8 @@ mod tests {
         for key in KEYS {
             assert_eq!(art.get(&[key]), Some(key as u32));
         }
+
+        assert_eq!(art.preorder_entries().count(), 3);
     }
 
     #[test]

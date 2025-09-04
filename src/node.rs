@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
@@ -59,6 +60,13 @@ impl Ref {
             Ref::Node256(node) => unsafe { node.as_ref().unwrap() },
         }
     }
+
+    pub(crate) unsafe fn iter<'art>(&self) -> Iter<'art> {
+        match self {
+            Ref::Node3(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
+            Ref::Node256(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
+        }
+    }
 }
 
 impl Debug for Ref {
@@ -86,5 +94,82 @@ pub(crate) enum Kind {
 impl Default for Kind {
     fn default() -> Self {
         Self::None
+    }
+}
+
+pub(crate) type Iter<'a> = core::iter::Zip<KeyIter, EdgeIter<'a>>;
+
+pub(crate) struct EdgeIter<'a> {
+    edges: &'a [Atomic128<Edge>],
+    next: usize,
+}
+
+impl<'a> EdgeIter<'a> {
+    pub(crate) fn new(edges: &'a [Atomic128<Edge>]) -> Self {
+        Self { edges, next: 0 }
+    }
+}
+
+impl<'a> Iterator for EdgeIter<'a> {
+    type Item = Edge;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next >= self.edges.len() {
+            return None;
+        }
+
+        let next = self.next;
+        let edge = self.edges[next].load(Ordering::Relaxed);
+
+        self.next += 1;
+        Some(edge)
+    }
+}
+
+pub(crate) enum KeyIter {
+    K0 { done: bool },
+    K3 { keys: [u8; 3], next: u8 },
+    K256 { next: u16 },
+}
+
+impl KeyIter {
+    pub(crate) fn new_0() -> Self {
+        Self::K0 { done: false }
+    }
+
+    pub(crate) fn new_3(keys: [u8; 3]) -> Self {
+        Self::K3 { keys, next: 0 }
+    }
+
+    pub(crate) fn new_256() -> Self {
+        Self::K256 { next: 0 }
+    }
+}
+
+impl Iterator for KeyIter {
+    // NOTE: `Option` here is only necessary to handle the root edge,
+    // which has no incoming key. Is there a way to avoid this?
+    type Item = Option<u8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            KeyIter::K0 { done } if *done => None,
+            KeyIter::K0 { done } => {
+                *done = true;
+                Some(None)
+            }
+
+            KeyIter::K3 { keys, next } => {
+                let key = keys.get(*next as usize)?;
+                *next += 1;
+                Some(Some(*key))
+            }
+
+            KeyIter::K256 { next } if *next >= 256 => None,
+            KeyIter::K256 { next } => {
+                let key = *next;
+                *next += 1;
+                Some(Some(key as u8))
+            }
+        }
     }
 }

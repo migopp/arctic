@@ -41,8 +41,8 @@ impl Array {
 
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
         let len = left
-            .iter()
-            .zip(right.iter())
+            .bytes()
+            .zip(right.bytes())
             .take_while(|(l, r)| l == r)
             .count();
 
@@ -71,16 +71,16 @@ impl Array {
         let mut buffer = [0u8; Len::MAX.to_usize()];
 
         parent
-            .iter()
+            .bytes()
             .chain(iter::once(byte))
-            .chain(child.iter())
+            .chain(child.bytes())
             .zip(&mut buffer)
             .for_each(|(byte, save)| *save = byte);
 
         Self::from_slice(&buffer[..parent.len.to_usize() + 1 + child.len.to_usize()])
     }
 
-    fn iter(&self) -> impl Iterator<Item = u8> {
+    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> {
         self.buffer
             .to_bytes()
             .into_iter()

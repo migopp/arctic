@@ -1,4 +1,7 @@
+use core::iter;
+use core::mem;
 use core::sync::atomic::Ordering;
+use std::rc::Rc;
 
 use crate::cursor;
 use crate::cursor::Cursor;
@@ -157,5 +160,105 @@ impl Raw {
         }
 
         snapshot.leaf()
+    }
+
+    pub fn preorder_entries(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u48)> + '_ {
+        self.preorder()
+            .filter_map(|(key, edge)| match edge.child()? {
+                edge::Child::Leaf => Some((key, edge.next)),
+                edge::Child::Node(_) => None,
+            })
+    }
+
+    pub fn preorder_keys(&mut self) -> impl Iterator<Item = Rc<Vec<u8>>> + '_ {
+        self.preorder_entries().map(|(key, _)| key)
+    }
+
+    pub fn preorder_values(&mut self) -> impl Iterator<Item = u48> + '_ {
+        self.preorder_entries().map(|(_, value)| value)
+    }
+
+    fn preorder(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, Edge)> + '_ {
+        Iter::new(&mut self.root)
+    }
+}
+
+struct Iter<'a> {
+    // Workaround for lending iterator
+    // https://users.rust-lang.org/t/how-to-write-an-iterator-that-returns-references-to-itself/72386/5
+    key: Rc<Vec<u8>>,
+
+    // TODO: allow starting traversal at a given prefix?
+    frontier: Vec<(
+        usize,
+        iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>,
+    )>,
+}
+
+impl<'a> Iter<'a> {
+    fn new(root: &'a mut Atomic128<Edge>) -> Self {
+        Self {
+            key: Rc::new(Vec::new()),
+            frontier: vec![(
+                0,
+                iter::repeat(false)
+                    .zip(
+                        node::KeyIter::new_0()
+                            .zip(node::EdgeIter::new(core::slice::from_ref(root))),
+                    )
+                    .peekable(),
+            )],
+        }
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (Rc<Vec<u8>>, Edge);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        'vertical: loop {
+            let (len, node) = self.frontier.last_mut()?;
+
+            'horizontal: loop {
+                let Some((descend, (byte, edge))) = node.peek_mut() else {
+                    let len = self.key.len() - *len;
+                    Rc::make_mut(&mut self.key).truncate(len);
+                    self.frontier.pop();
+                    continue 'vertical;
+                };
+
+                if !mem::replace(descend, true) {
+                    if let Some(byte) = byte {
+                        Rc::make_mut(&mut self.key).push(*byte);
+                    }
+
+                    return Some((Rc::clone(&self.key), *edge));
+                }
+
+                match edge.child() {
+                    None | Some(edge::Child::Leaf) => {
+                        if let Some(byte) = byte {
+                            let last = Rc::make_mut(&mut self.key).pop();
+                            assert_eq!(last, Some(*byte));
+                        }
+
+                        node.next();
+                        continue 'horizontal;
+                    }
+                    Some(edge::Child::Node(child)) => {
+                        let len = edge.key.len.to_usize() + byte.is_some() as usize;
+
+                        Rc::make_mut(&mut self.key).extend(edge.key.bytes());
+
+                        node.next();
+                        self.frontier.push((
+                            len,
+                            iter::repeat(false).zip(unsafe { child.iter() }).peekable(),
+                        ));
+                        continue 'vertical;
+                    }
+                }
+            }
+        }
     }
 }

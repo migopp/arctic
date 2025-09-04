@@ -73,7 +73,7 @@ impl Edge {
         }
     }
 
-    fn child(&self) -> Option<Child> {
+    pub(crate) fn child(&self) -> Option<Child> {
         let leaf = self.next;
         let pointer = leaf.value();
 
