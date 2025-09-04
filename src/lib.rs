@@ -55,18 +55,18 @@ impl<K: Key, V: Value> Map<K, V> {
         self.raw.update(key, value.into_u48()).map(V::from_u48)
     }
 
-    pub fn preorder_entries(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
+    pub fn iter(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
         self.raw
-            .preorder_entries()
+            .iter()
             .map(|(key, value)| (K::from_byte_array(key), V::from_u48(value)))
     }
 
-    pub fn preorder_keys(&mut self) -> impl Iterator<Item = K::Owned> + '_ {
-        self.preorder_entries().map(|(key, _)| key)
+    pub fn keys(&mut self) -> impl Iterator<Item = K::Owned> + '_ {
+        self.iter().map(|(key, _)| key)
     }
 
-    pub fn preorder_values(&mut self) -> impl Iterator<Item = V> + '_ {
-        self.preorder_entries().map(|(_, value)| value)
+    pub fn values(&mut self) -> impl Iterator<Item = V> + '_ {
+        self.iter().map(|(_, value)| value)
     }
 }
 
@@ -214,12 +214,19 @@ mod tests {
 
     #[test]
     fn node3_overwrite() {
-        let art = Map::default();
+        let mut art = Map::default();
 
         for value in [1, 2, 3] {
-            art.insert(&[1], value);
-            assert_eq!(art.get(&[1]), Some(value));
+            art.insert(1u8, value);
+            assert_eq!(art.get(1), Some(value));
         }
+
+        assert_eq!(art.iter().count(), 1);
+
+        art.iter().for_each(|(key, value)| {
+            assert_eq!(key, 1);
+            assert_eq!(value, 3);
+        });
     }
 
     #[test]
@@ -229,44 +236,57 @@ mod tests {
         const KEYS: [u8; 3] = [1, 2, 3];
 
         for key in KEYS {
-            art.insert(&[key], key as u32);
-            assert_eq!(art.get(&[key]), Some(key as u32));
+            art.insert(key, key as u32);
+            assert_eq!(art.get(key), Some(key as u32));
         }
 
         for key in KEYS {
-            assert_eq!(art.get(&[key]), Some(key as u32));
+            assert_eq!(art.get(key), Some(key as u32));
         }
 
-        assert_eq!(art.preorder_entries().count(), 3);
+        assert_eq!(art.iter().count(), 3);
+
+        art.keys().zip(KEYS).for_each(|(l, r)| assert_eq!(l, r));
     }
 
     #[test]
     fn node3_expand() {
-        let art = Map::default();
+        let mut art = Map::default();
 
         const KEYS: [u8; 4] = [1, 2, 3, 4];
 
         for key in KEYS {
-            art.insert(&[key], key as u32);
-            assert_eq!(art.get(&[key]), Some(key as u32));
+            art.insert(key, key as u32);
+            assert_eq!(art.get(key), Some(key as u32));
         }
 
         for key in KEYS {
-            assert_eq!(art.get(&[key]), Some(key as u32));
+            assert_eq!(art.get(key), Some(key as u32));
         }
+
+        assert_eq!(art.iter().count(), 4);
+
+        art.keys().zip(KEYS).for_each(|(l, r)| assert_eq!(l, r));
     }
 
     #[test]
     fn node256_full() {
-        let art = Map::default();
+        let mut art = Map::default();
 
-        for key in 0..=255 {
-            art.insert(&[key], key as u32);
-            assert_eq!(art.get(&[key]), Some(key as u32));
+        for key in 0u8..=255 {
+            art.insert(key, key as u32);
+            assert_eq!(art.get(key), Some(key as u32));
         }
 
         for key in 0..=255 {
-            assert_eq!(art.get(&[key]), Some(key as u32));
+            assert_eq!(art.get(key), Some(key as u32));
         }
+
+        assert_eq!(art.iter().count(), 256);
+
+        art.iter().enumerate().for_each(|(index, (key, value))| {
+            assert_eq!(index, key as usize);
+            assert_eq!(index, value as usize);
+        });
     }
 }
