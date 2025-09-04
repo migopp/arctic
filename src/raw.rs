@@ -164,7 +164,7 @@ impl Raw {
 
     pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u48)> + '_ {
         self.preorder()
-            .filter_map(|(key, edge)| match edge.child()? {
+            .filter_map(|(_, key, edge)| match edge.child()? {
                 edge::Child::Leaf => Some((key, edge.next)),
                 edge::Child::Node(_) => None,
             })
@@ -178,7 +178,7 @@ impl Raw {
         self.iter().map(|(_, value)| value)
     }
 
-    fn preorder(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, Edge)> + '_ {
+    pub(crate) fn preorder(&mut self) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, Edge)> + '_ {
         Iter::new(&mut self.root)
     }
 }
@@ -213,10 +213,11 @@ impl<'a> Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (Rc<Vec<u8>>, Edge);
+    type Item = (usize, Rc<Vec<u8>>, Edge);
 
     fn next(&mut self) -> Option<Self::Item> {
         'vertical: loop {
+            let depth = self.frontier.len() - 1;
             let (len, node) = self.frontier.last_mut()?;
 
             'horizontal: loop {
@@ -226,24 +227,32 @@ impl<'a> Iterator for Iter<'a> {
                     continue 'vertical;
                 };
 
+                // Skip empty edges
+                let Some(child) = edge.child() else {
+                    node.next();
+                    continue 'horizontal;
+                };
+
+                // Update key for current edge
                 let byte = *byte;
                 let edge = *edge;
                 let len = self.key.len() - edge.key.len.to_usize() - byte.is_some() as usize;
                 let key = Rc::make_mut(&mut self.key);
 
+                // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
                     key.extend(byte.into_iter().chain(edge.key.bytes()));
-                    return Some((Rc::clone(&self.key), edge));
+                    return Some((depth, Rc::clone(&self.key), edge));
                 } else {
                     node.next();
                 }
 
-                match edge.child() {
-                    None | Some(edge::Child::Leaf) => {
+                match child {
+                    edge::Child::Leaf => {
                         key.truncate(len);
                         continue 'horizontal;
                     }
-                    Some(edge::Child::Node(child)) => {
+                    edge::Child::Node(child) => {
                         self.frontier.push((
                             len,
                             iter::repeat(false).zip(unsafe { child.iter() }).peekable(),
