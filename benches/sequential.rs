@@ -23,7 +23,7 @@ impl CollectionHandle for Art {
     type Key = u64;
 
     fn get(&mut self, key: &Self::Key) -> bool {
-        match self.0.get(*key) {
+        match self.0.get(key) {
             Some(value) => {
                 assert_eq!(*key as u32, value);
                 true
@@ -33,7 +33,7 @@ impl CollectionHandle for Art {
     }
 
     fn insert(&mut self, key: &Self::Key) -> bool {
-        match self.0.insert(*key, *key as u32) {
+        match self.0.insert(key, *key as u32) {
             None => true,
             Some(value) => {
                 assert_eq!(*key as u32, value);
@@ -43,11 +43,11 @@ impl CollectionHandle for Art {
     }
 
     fn remove(&mut self, key: &Self::Key) -> bool {
-        self.0.remove(*key).is_some()
+        self.0.remove(key).is_some()
     }
 
     fn update(&mut self, key: &Self::Key) -> bool {
-        self.0.update(*key, 0).is_some()
+        self.0.update(key, 0).is_some()
     }
 }
 

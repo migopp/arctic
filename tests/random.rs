@@ -30,7 +30,7 @@ fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
                 barrier.wait();
 
                 for key in keys {
-                    assert_eq!(map.insert(key as u64, key), None);
+                    assert_eq!(map.insert(&(key as u64), key), None);
                 }
             });
         }
@@ -44,7 +44,7 @@ fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
                 barrier.wait();
 
                 for key in keys {
-                    assert_eq!(map.remove(key as u64), Some(key));
+                    assert_eq!(map.remove(&(key as u64)), Some(key));
                 }
             });
         }
@@ -58,7 +58,7 @@ fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
                 barrier.wait();
 
                 for key in keys {
-                    assert_eq!(map.get(key as u64), Some(key));
+                    assert_eq!(map.get(&(key as u64)), Some(key));
                 }
             });
         }

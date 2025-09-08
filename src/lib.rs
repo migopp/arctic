@@ -31,25 +31,25 @@ impl<K, V> Default for Map<K, V> {
 }
 
 impl<K: Key, V: Value> Map<K, V> {
-    pub fn get(&self, key: K) -> Option<V> {
+    pub fn get(&self, key: &K) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
         self.raw.get(key).map(V::from_u48)
     }
 
-    pub fn insert(&self, key: K, value: V) -> Option<V> {
+    pub fn insert(&self, key: &K, value: V) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
         self.raw.insert(key, value.into_u48()).map(V::from_u48)
     }
 
-    pub fn remove(&self, key: K) -> Option<V> {
+    pub fn remove(&self, key: &K) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
         self.raw.remove(key).map(V::from_u48)
     }
 
-    pub fn update(&self, key: K, value: V) -> Option<V> {
+    pub fn update(&self, key: &K, value: V) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
         self.raw.update(key, value.into_u48()).map(V::from_u48)
@@ -217,8 +217,8 @@ mod tests {
         let mut art = Map::default();
 
         for value in [1, 2, 3] {
-            art.insert(1u8, value);
-            assert_eq!(art.get(1), Some(value));
+            art.insert(&1u8, value);
+            assert_eq!(art.get(&1), Some(value));
         }
 
         assert_eq!(art.iter().count(), 1);
@@ -236,12 +236,12 @@ mod tests {
         const KEYS: [u8; 3] = [1, 2, 3];
 
         for key in KEYS {
-            art.insert(key, key as u32);
-            assert_eq!(art.get(key), Some(key as u32));
+            art.insert(&key, key as u32);
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         for key in KEYS {
-            assert_eq!(art.get(key), Some(key as u32));
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         assert_eq!(art.iter().count(), 3);
@@ -256,12 +256,12 @@ mod tests {
         const KEYS: [u8; 4] = [1, 2, 3, 4];
 
         for key in KEYS {
-            art.insert(key, key as u32);
-            assert_eq!(art.get(key), Some(key as u32));
+            art.insert(&key, key as u32);
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         for key in KEYS {
-            assert_eq!(art.get(key), Some(key as u32));
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         assert_eq!(art.iter().count(), 4);
@@ -274,12 +274,12 @@ mod tests {
         let mut art = Map::default();
 
         for key in 0u8..=255 {
-            art.insert(key, key as u32);
-            assert_eq!(art.get(key), Some(key as u32));
+            art.insert(&key, key as u32);
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         for key in 0..=255 {
-            assert_eq!(art.get(key), Some(key as u32));
+            assert_eq!(art.get(&key), Some(key as u32));
         }
 
         assert_eq!(art.iter().count(), 256);
