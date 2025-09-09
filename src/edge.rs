@@ -25,6 +25,13 @@ pub(crate) struct Edge {
 
 impl Edge {
     pub(crate) fn r#match(&self, key: &[u8]) -> Match {
+        if cfg!(feature = "opt-empty-match") && key.is_empty() {
+            return Match::Full {
+                len: key::Len::ZERO,
+                child: self.child(),
+            };
+        }
+
         let search_key = key::Array::from_slice(key);
         let edge_key = self.key;
         let prefix_len = key::Array::prefix(&search_key, &edge_key);

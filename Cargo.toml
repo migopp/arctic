@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = []
 stat = ["dep:serde", "dep:hdrhistogram"]
+opt-empty-match = []
 
 [dependencies]
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false }
