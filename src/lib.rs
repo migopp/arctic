@@ -72,10 +72,12 @@ impl<K: Key, V: Value> Map<K, V> {
 
 // TODO: add size hint for iterator key buffer? or use arrayvec?
 pub trait Key {
-    type ByteArray: AsRef<[u8]>;
+    type ByteArray<'a>: AsRef<[u8]>
+    where
+        Self: 'a;
     type Owned;
 
-    fn to_byte_array(&self) -> Self::ByteArray;
+    fn to_byte_array(&self) -> Self::ByteArray<'_>;
     // TODO: avoid cloning?
     fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned;
 }
@@ -84,10 +86,10 @@ macro_rules! impl_key {
     ($($type:ident: $len:expr),* $(,)?) => {
         $(
             impl Key for $type {
-                type ByteArray = [u8; $len];
+                type ByteArray<'a> = [u8; $len];
                 type Owned = Self;
 
-                fn to_byte_array(&self) -> Self::ByteArray {
+                fn to_byte_array(&self) -> Self::ByteArray<'static> {
                     self.to_be_bytes()
                 }
 
@@ -106,12 +108,15 @@ impl_key!(
     u8: 1,
 );
 
-impl<'a> Key for &'a str {
-    type ByteArray = &'a [u8];
+impl Key for &'_ str {
+    type ByteArray<'a>
+        = &'a [u8]
+    where
+        Self: 'a;
     type Owned = String;
 
     #[inline]
-    fn to_byte_array(&self) -> Self::ByteArray {
+    fn to_byte_array(&self) -> Self::ByteArray<'_> {
         self.as_bytes()
     }
 
@@ -121,12 +126,30 @@ impl<'a> Key for &'a str {
     }
 }
 
-impl<'a> Key for &'a [u8] {
-    type ByteArray = &'a [u8];
+impl Key for String {
+    type ByteArray<'a> = &'a [u8];
+    type Owned = String;
+
+    #[inline]
+    fn to_byte_array(&self) -> Self::ByteArray<'_> {
+        self.as_bytes()
+    }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        String::from_utf8(Rc::unwrap_or_clone(array)).unwrap()
+    }
+}
+
+impl Key for &'_ [u8] {
+    type ByteArray<'a>
+        = &'a [u8]
+    where
+        Self: 'a;
     type Owned = Vec<u8>;
 
     #[inline]
-    fn to_byte_array(&self) -> Self::ByteArray {
+    fn to_byte_array(&self) -> Self::ByteArray<'_> {
         self
     }
 
@@ -137,11 +160,11 @@ impl<'a> Key for &'a [u8] {
 }
 
 impl<const LEN: usize> Key for [u8; LEN] {
-    type ByteArray = Self;
+    type ByteArray<'a> = Self;
     type Owned = Self;
 
     #[inline]
-    fn to_byte_array(&self) -> Self::ByteArray {
+    fn to_byte_array(&self) -> Self::ByteArray<'static> {
         *self
     }
 
@@ -152,17 +175,35 @@ impl<const LEN: usize> Key for [u8; LEN] {
 }
 
 impl<const LEN: usize> Key for &'_ [u8; LEN] {
-    type ByteArray = Self;
+    type ByteArray<'a>
+        = &'a [u8; LEN]
+    where
+        Self: 'a;
     type Owned = [u8; LEN];
 
     #[inline]
-    fn to_byte_array(&self) -> Self::ByteArray {
-        *self
+    fn to_byte_array(&self) -> Self::ByteArray<'_> {
+        self
     }
 
     #[inline]
     fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
         Rc::unwrap_or_clone(array).try_into().unwrap()
+    }
+}
+
+impl Key for Vec<u8> {
+    type ByteArray<'a> = &'a [u8];
+    type Owned = Self;
+
+    #[inline]
+    fn to_byte_array(&self) -> Self::ByteArray<'_> {
+        self
+    }
+
+    #[inline]
+    fn from_byte_array(array: Rc<Vec<u8>>) -> Self::Owned {
+        Rc::unwrap_or_clone(array)
     }
 }
 
