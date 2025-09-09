@@ -217,7 +217,7 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         'vertical: loop {
-            let depth = self.frontier.len() - 1;
+            let (depth, _) = self.frontier.len().overflowing_sub(1);
             let (len, node) = self.frontier.last_mut()?;
 
             'horizontal: loop {
@@ -236,16 +236,16 @@ impl<'a> Iterator for Iter<'a> {
                 // Update key for current edge
                 let byte = *byte;
                 let edge = *edge;
-                let len = self.key.len() - edge.key.len.to_usize() - byte.is_some() as usize;
                 let key = Rc::make_mut(&mut self.key);
 
                 // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
                     key.extend(byte.into_iter().chain(edge.key.bytes()));
                     return Some((depth, Rc::clone(&self.key), edge));
-                } else {
-                    node.next();
                 }
+
+                node.next();
+                let len = key.len() - edge.key.len.to_usize() - byte.is_some() as usize;
 
                 match child {
                     edge::Child::Leaf => {
