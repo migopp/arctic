@@ -21,7 +21,7 @@ use super::Node256;
 pub(crate) struct Node3 {
     header: Atomic32<Header>,
 
-    _pad: [u32; 3],
+    _pad: u64,
 
     edges: [Atomic128<Edge>; 3],
 }
@@ -32,7 +32,7 @@ impl Node3 {
     pub(crate) fn new() -> Self {
         Self {
             header: Atomic32::new(Header::default()),
-            _pad: [0; 3],
+            _pad: 0,
             edges: core::array::from_fn(|_| Atomic128::new(Edge::default())),
         }
     }
@@ -40,8 +40,8 @@ impl Node3 {
 
 impl Node for Node3 {
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
-        let index = self.header.load(Ordering::Acquire).get(key)?;
-        Some(&self.edges[index as usize])
+        let index = self.header.load(Ordering::Acquire).get(key);
+        self.edges.get(index as usize)
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
@@ -204,14 +204,35 @@ struct Header {
 }
 
 impl Header {
-    fn get(&self, key: u8) -> Option<u8> {
+    fn get(&self, key: u8) -> u8 {
         let keys = self.keys.value();
         let len = self.len.value();
-        (0..len).find(|i| (keys >> (i * 8)) as u8 == key)
+
+        // https://richardstartin.github.io/posts/finding-bytes
+        if cfg!(feature = "opt-node3-get") {
+            const PATTERN: u32 = 0x00_7F_7F_7F;
+
+            let input = keys ^ Self::broadcast(key);
+            let temp = (input & PATTERN) + PATTERN;
+            let temp = !(input | temp | PATTERN);
+
+            (temp.trailing_zeros() >> 3) as u8
+        } else {
+            (0..len)
+                .find(|i| (keys >> (i * 8)) as u8 == key)
+                .unwrap_or(len)
+        }
+    }
+
+    const fn broadcast(byte: u8) -> u32 {
+        let byte = byte as u32;
+        (byte << 16) | (byte << 8) | byte
     }
 
     fn get_or_reserve(&self, key: u8) -> Option<(Self, u8)> {
-        if let Some(index) = self.get(key) {
+        let index = self.get(key);
+
+        if index < self.len.value() {
             return Some((*self, index));
         }
 
