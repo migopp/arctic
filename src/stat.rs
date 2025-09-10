@@ -89,14 +89,14 @@ impl Histogram {
         }
     }
 
-    fn record(&mut self, value: u64) {
+    fn record(&mut self, _value: u64) {
         #[cfg(feature = "stat")]
-        self.inner.record(value).unwrap();
+        self.inner.record(_value).unwrap();
     }
 }
 
 impl From<Histogram> for Distribution {
-    fn from(histogram: Histogram) -> Self {
+    fn from(_histogram: Histogram) -> Self {
         #[cfg(not(feature = "stat"))]
         {
             Self::default()
@@ -104,7 +104,7 @@ impl From<Histogram> for Distribution {
 
         #[cfg(feature = "stat")]
         {
-            let histogram = histogram.inner;
+            let histogram = _histogram.inner;
             Self {
                 min: histogram.min(),
                 max: histogram.max(),
