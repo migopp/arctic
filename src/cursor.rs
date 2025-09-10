@@ -104,7 +104,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 edge::Match::Full { len, child: None } if key.len() > key::Len::MAX.to_usize() => {
                     assert_eq!(len, key::Len::ZERO);
 
-                    let node = Box::new(Node3::new());
+                    let node = Box::new(Node3::default());
                     let node = Box::leak(node) as *mut Node3;
                     let new = Edge {
                         key: key::Array::from_slice(&key[..key::Len::MAX.to_usize()]),
@@ -130,7 +130,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 ),
 
                 edge::Match::Partial { start, middle, end } => {
-                    let mut node = Box::new(Node3::new());
+                    let mut node = Box::new(Node3::default());
 
                     node.reserve(middle).unwrap().store(
                         Edge {

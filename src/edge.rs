@@ -5,6 +5,7 @@ use ribbit::u48;
 
 use crate::key;
 use crate::node;
+use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
 
@@ -16,7 +17,7 @@ pub(crate) struct Edge {
 
     pub(crate) frozen: bool,
 
-    #[ribbit(size = 2)]
+    #[ribbit(size = 3)]
     pub(crate) kind: node::Kind,
 
     #[ribbit(offset = 80)]
@@ -88,6 +89,7 @@ impl Edge {
             node::Kind::None => None,
             node::Kind::Leaf => Some(Child::Leaf),
             node::Kind::Node3 => Some(Child::Node(node::Ref::Node3(pointer as *mut Node3))),
+            node::Kind::Node15 => Some(Child::Node(node::Ref::Node15(pointer as *mut Node15))),
             node::Kind::Node256 => Some(Child::Node(node::Ref::Node256(pointer as *mut Node256))),
         }
     }
@@ -99,6 +101,7 @@ impl Edge {
                 unreachable!()
             }
             node::Kind::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
+            node::Kind::Node15 => drop(Box::from_raw(pointer as *mut Node15)),
             node::Kind::Node256 => drop(Box::from_raw(pointer as *mut Node256)),
         }
     }

@@ -2,10 +2,16 @@ use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::u120;
+use ribbit::u24;
 
+mod linear;
+mod node15;
 mod node256;
 mod node3;
 
+use linear::Linear;
+pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 
@@ -49,6 +55,7 @@ pub(crate) enum Op {
 #[derive(Clone)]
 pub(crate) enum Ref {
     Node3(*mut Node3),
+    Node15(*mut Node15),
     Node256(*mut Node256),
 }
 
@@ -57,6 +64,7 @@ impl Ref {
     pub(crate) unsafe fn as_node<'art>(&self) -> &'art dyn Node {
         match self {
             Ref::Node3(node) => unsafe { node.as_ref().unwrap() },
+            Ref::Node15(node) => unsafe { node.as_ref().unwrap() },
             Ref::Node256(node) => unsafe { node.as_ref().unwrap() },
         }
     }
@@ -64,6 +72,7 @@ impl Ref {
     pub(crate) unsafe fn iter<'art>(&self) -> Iter<'art> {
         match self {
             Ref::Node3(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
+            Ref::Node15(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
             Ref::Node256(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
         }
     }
@@ -73,13 +82,14 @@ impl Debug for Ref {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Ref::Node3(node3) => unsafe { node3.as_ref().unwrap() }.fmt(fmt),
+            Ref::Node15(node15) => unsafe { node15.as_ref().unwrap() }.fmt(fmt),
             Ref::Node256(node256) => unsafe { node256.as_ref().unwrap() }.fmt(fmt),
         }
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[ribbit::pack(size = 2, debug)]
+#[ribbit::pack(size = 3, debug)]
 pub(crate) enum Kind {
     #[ribbit(size = 0)]
     None,
@@ -87,6 +97,8 @@ pub(crate) enum Kind {
     Leaf,
     #[ribbit(size = 0)]
     Node3,
+    #[ribbit(size = 0)]
+    Node15,
     #[ribbit(size = 0)]
     Node256,
 }
@@ -128,6 +140,7 @@ impl<'a> Iterator for EdgeIter<'a> {
 pub(crate) enum KeyIter {
     K0 { done: bool },
     K3 { keys: [u8; 3], next: u8 },
+    K15 { keys: [u8; 15], next: u8 },
     K256 { next: u16 },
 }
 
@@ -136,8 +149,20 @@ impl KeyIter {
         Self::K0 { done: false }
     }
 
-    pub(crate) fn new_3(keys: [u8; 3]) -> Self {
-        Self::K3 { keys, next: 0 }
+    pub(crate) fn new_3(keys: u24) -> Self {
+        let keys = keys.value();
+        Self::K3 {
+            keys: core::array::from_fn(|index| (keys >> (index * 8)) as u8),
+            next: 0,
+        }
+    }
+
+    pub(crate) fn new_15(keys: u120) -> Self {
+        let keys = keys.value();
+        Self::K15 {
+            keys: core::array::from_fn(|index| (keys >> (index * 8)) as u8),
+            next: 0,
+        }
     }
 
     pub(crate) fn new_256() -> Self {
@@ -159,6 +184,12 @@ impl Iterator for KeyIter {
             }
 
             KeyIter::K3 { keys, next } => {
+                let key = keys.get(*next as usize)?;
+                *next += 1;
+                Some(Some(*key))
+            }
+
+            KeyIter::K15 { keys, next } => {
                 let key = keys.get(*next as usize)?;
                 *next += 1;
                 Some(Some(*key))

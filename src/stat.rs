@@ -11,6 +11,7 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut depth = Histogram::new();
     let mut compression = Histogram::new();
     let mut node_3 = Histogram::new();
+    let mut node_15 = Histogram::new();
     let mut node_256 = Histogram::new();
 
     map.raw.preorder().for_each(|(depth_, _, edge)| {
@@ -25,6 +26,7 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
             Child::Node(node) => {
                 let histogram = match node {
                     node::Ref::Node3(_) => &mut node_3,
+                    node::Ref::Node15(_) => &mut node_15,
                     node::Ref::Node256(_) => &mut node_256,
                 };
 
@@ -41,6 +43,7 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
         depth: depth.into(),
         compression: compression.into(),
         node_3: node_3.into(),
+        node_15: node_15.into(),
         node_256: node_256.into(),
     }
 }
@@ -56,6 +59,7 @@ pub struct Process {
     depth: Distribution,
     compression: Distribution,
     node_3: Distribution,
+    node_15: Distribution,
     node_256: Distribution,
 }
 
