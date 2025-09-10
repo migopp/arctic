@@ -272,62 +272,63 @@ mod tests {
 
     #[test]
     fn node3_full() {
-        let mut art = Map::default();
-
-        const KEYS: [u8; 3] = [1, 2, 3];
-
-        for key in KEYS {
-            art.insert(&key, key as u32);
-            assert_eq!(art.get(&key), Some(key as u32));
-        }
-
-        for key in KEYS {
-            assert_eq!(art.get(&key), Some(key as u32));
-        }
-
-        assert_eq!(art.iter().count(), 3);
-
-        art.keys().zip(KEYS).for_each(|(l, r)| assert_eq!(l, r));
+        insert_all(0u8..3);
     }
 
     #[test]
     fn node3_expand() {
-        let mut art = Map::default();
+        insert_all(0u8..4);
+    }
 
-        const KEYS: [u8; 4] = [1, 2, 3, 4];
+    #[test]
+    fn node15_full() {
+        insert_all(0u8..15);
+    }
 
-        for key in KEYS {
-            art.insert(&key, key as u32);
-            assert_eq!(art.get(&key), Some(key as u32));
-        }
-
-        for key in KEYS {
-            assert_eq!(art.get(&key), Some(key as u32));
-        }
-
-        assert_eq!(art.iter().count(), 4);
-
-        art.keys().zip(KEYS).for_each(|(l, r)| assert_eq!(l, r));
+    #[test]
+    fn node15_expand() {
+        insert_all(0u8..16);
     }
 
     #[test]
     fn node256_full() {
+        insert_all(0u8..=255);
+    }
+
+    fn insert_all<I, K>(iter: I)
+    where
+        I: IntoIterator<Item = K>,
+        I::IntoIter: Clone,
+        K: crate::Key + Clone + Ord + PartialEq<K::Owned> + core::fmt::Debug,
+        K::Owned: core::fmt::Debug,
+    {
+        let keys = iter
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| (key, index as u32));
+
         let mut art = Map::default();
 
-        for key in 0u8..=255 {
-            art.insert(&key, key as u32);
-            assert_eq!(art.get(&key), Some(key as u32));
+        for (key, value) in keys.clone() {
+            art.insert(&key, value);
+            assert_eq!(art.get(&key), Some(value));
         }
 
-        for key in 0..=255 {
-            assert_eq!(art.get(&key), Some(key as u32));
+        for (key, value) in keys.clone() {
+            assert_eq!(art.get(&key), Some(value));
         }
 
-        assert_eq!(art.iter().count(), 256);
+        assert_eq!(art.iter().count(), keys.clone().count());
 
-        art.iter().enumerate().for_each(|(index, (key, value))| {
-            assert_eq!(index, key as usize);
-            assert_eq!(index, value as usize);
-        });
+        let mut sorted = keys.collect::<Vec<_>>();
+        sorted.sort_by(|(l, _), (r, _)| l.cmp(r));
+
+        sorted
+            .into_iter()
+            .zip(art.iter())
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, rk);
+                assert_eq!(lv, rv);
+            });
     }
 }
