@@ -37,13 +37,22 @@ impl Array {
     }
 
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
-        let len = left
-            .bytes()
-            .zip(right.bytes())
-            .take_while(|(l, r)| l == r)
-            .count();
-
-        Len(u4::new(len as u8))
+        if cfg!(feature = "opt-prefix") {
+            Len(unsafe {
+                u4::new_unchecked(
+                    (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
+                        .min(left.len.0.value())
+                        .min(right.len.0.value()),
+                )
+            })
+        } else {
+            let len = left
+                .bytes()
+                .zip(right.bytes())
+                .take_while(|(l, r)| l == r)
+                .count();
+            Len(u4::new(len as u8))
+        }
     }
 
     pub(crate) fn expand(&self, index: Len) -> (Self, u8, Self) {
