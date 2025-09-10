@@ -132,17 +132,12 @@ impl<'a> Iterator for EdgeIter<'a> {
 }
 
 pub(crate) enum KeyIter {
-    K0 { done: bool },
     K3 { keys: [u8; 3], next: u8 },
     K15 { keys: [u8; 15], next: u8 },
     K256 { next: u16 },
 }
 
 impl KeyIter {
-    pub(crate) fn new_0() -> Self {
-        Self::K0 { done: false }
-    }
-
     pub(crate) fn new_3(keys: u24) -> Self {
         let keys = keys.value();
         Self::K3 {
@@ -165,35 +160,27 @@ impl KeyIter {
 }
 
 impl Iterator for KeyIter {
-    // NOTE: `Option` here is only necessary to handle the root edge,
-    // which has no incoming key. Is there a way to avoid this?
-    type Item = Option<u8>;
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            KeyIter::K0 { done } if *done => None,
-            KeyIter::K0 { done } => {
-                *done = true;
-                Some(None)
-            }
-
             KeyIter::K3 { keys, next } => {
                 let key = keys.get(*next as usize)?;
                 *next += 1;
-                Some(Some(*key))
+                Some(*key)
             }
 
             KeyIter::K15 { keys, next } => {
                 let key = keys.get(*next as usize)?;
                 *next += 1;
-                Some(Some(*key))
+                Some(*key)
             }
 
             KeyIter::K256 { next } if *next >= 256 => None,
             KeyIter::K256 { next } => {
                 let key = *next;
                 *next += 1;
-                Some(Some(key as u8))
+                Some(key as u8)
             }
         }
     }

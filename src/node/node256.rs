@@ -44,7 +44,7 @@ impl Node for Node256 {
 }
 
 impl<'a> IntoIterator for &'a Node256 {
-    type Item = (Option<u8>, Edge);
+    type Item = (u8, Edge);
     type IntoIter = super::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         super::KeyIter::new_256().zip(super::EdgeIter::new(&self.0))

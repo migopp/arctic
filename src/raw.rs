@@ -189,11 +189,11 @@ struct Iter<'a> {
     key: Rc<Vec<u8>>,
 
     // TODO: allow starting traversal at a given prefix?
-    frontier: Vec<(
-        usize,
-        iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>,
-    )>,
+    frontier: Vec<(usize, Or<IterRoot<'a>, IterNode<'a>>)>,
 }
+
+type IterRoot<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
+type IterNode<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
 impl<'a> Iter<'a> {
     fn new(root: &'a mut Atomic128<Edge>) -> Self {
@@ -201,12 +201,13 @@ impl<'a> Iter<'a> {
             key: Rc::new(Vec::new()),
             frontier: vec![(
                 0,
-                iter::repeat(false)
-                    .zip(
-                        node::KeyIter::new_0()
-                            .zip(node::EdgeIter::new(core::slice::from_ref(root))),
+                Or::L(
+                    iter::zip(
+                        iter::once(false),
+                        node::EdgeIter::new(core::slice::from_ref(root)),
                     )
                     .peekable(),
+                ),
             )],
         }
     }
@@ -217,11 +218,22 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         'vertical: loop {
-            let (depth, _) = self.frontier.len().overflowing_sub(1);
-            let (len, node) = self.frontier.last_mut()?;
+            // NOTE: we use `saturating_sub` to avoid underflow.
+            //
+            // If `self.frontier.len()` == 0, we will immediately return at `last_mut()`.
+            // We can't move the len call after because `self.frontier` is mutably borrowed.
+            let depth = self.frontier.len().saturating_sub(1);
+            let (len, iter) = self.frontier.last_mut()?;
 
             'horizontal: loop {
-                let Some((descend, (byte, edge))) = node.peek_mut() else {
+                let Some((descend, byte, edge)) = (match iter {
+                    Or::L(iter_root) => iter_root
+                        .peek_mut()
+                        .map(|(descend, edge)| (descend, None, edge)),
+                    Or::R(iter_node) => iter_node
+                        .peek_mut()
+                        .map(|(descend, (key, edge))| (descend, Some(*key), edge)),
+                }) else {
                     Rc::make_mut(&mut self.key).truncate(*len);
                     self.frontier.pop();
                     continue 'vertical;
@@ -229,12 +241,11 @@ impl<'a> Iterator for Iter<'a> {
 
                 // Skip empty edges
                 let Some(child) = edge.child() else {
-                    node.next();
+                    iter.skip();
                     continue 'horizontal;
                 };
 
                 // Update key for current edge
-                let byte = *byte;
                 let edge = *edge;
                 let key = Rc::make_mut(&mut self.key);
 
@@ -244,7 +255,7 @@ impl<'a> Iterator for Iter<'a> {
                     return Some((depth, Rc::clone(&self.key), edge));
                 }
 
-                node.next();
+                iter.skip();
                 let len = key.len() - edge.key.len.to_usize() - byte.is_some() as usize;
 
                 match child {
@@ -255,11 +266,33 @@ impl<'a> Iterator for Iter<'a> {
                     edge::Child::Node(child) => {
                         self.frontier.push((
                             len,
-                            iter::repeat(false).zip(unsafe { child.iter() }).peekable(),
+                            Or::R(iter::repeat(false).zip(unsafe { child.iter() }).peekable()),
                         ));
                         continue 'vertical;
                     }
                 }
+            }
+        }
+    }
+}
+
+enum Or<L, R> {
+    L(L),
+    R(R),
+}
+
+impl<L, R> Or<L, R>
+where
+    L: Iterator,
+    R: Iterator,
+{
+    fn skip(&mut self) {
+        match self {
+            Or::L(left) => {
+                left.next();
+            }
+            Or::R(right) => {
+                right.next();
             }
         }
     }

@@ -33,13 +33,12 @@ impl super::linear::KeyArray for u24 {
     }
 
     fn iter(&self) -> impl Iterator<Item = u8> {
-        let keys = self.value();
-        (0..3).map(move |i| (keys >> (i * 8)) as u8)
+        super::KeyIter::new_3(*self)
     }
 }
 
 impl<'a> IntoIterator for &'a Node3 {
-    type Item = (Option<u8>, Edge);
+    type Item = (u8, Edge);
     type IntoIter = super::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         let header = self.header.load(Ordering::Relaxed);
