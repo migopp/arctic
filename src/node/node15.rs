@@ -19,10 +19,10 @@ impl linear::KeyArray for u120 {
     fn get(&self, key: u8) -> usize {
         // https://richardstartin.github.io/posts/finding-bytes
         const PATTERN: u128 = {
-            let mut pattern = 0;
+            let mut pattern = 0u128;
             let mut i = 0;
             while i < 16 {
-                pattern |= 0x7Fu128 << i;
+                pattern |= 0x7Fu128 << (i * 8);
                 i += 1;
             }
             pattern
