@@ -9,14 +9,10 @@ pub(crate) struct Len(u4);
 
 impl Len {
     pub(crate) const ZERO: Self = Self(u4::new(0));
-    pub(crate) const MAX: Self = Self(u4::new(8));
+    pub(crate) const MAX: usize = 8;
 
-    const fn from_usize(len: usize) -> Self {
-        if len > Self::MAX.to_usize() {
-            Self::MAX
-        } else {
-            unsafe { Self(u4::new_unchecked(len as u8)) }
-        }
+    fn from_usize(len: usize) -> Self {
+        unsafe { Self(u4::new_unchecked(len.max(8) as u8)) }
     }
 
     pub(crate) const fn to_usize(self) -> usize {
@@ -65,11 +61,11 @@ impl Array {
     pub(crate) fn can_compress(parent: &Self, child: &Self) -> bool {
         let parent = parent.len.to_usize();
         let child = child.len.to_usize();
-        parent + 1 + child <= Len::MAX.to_usize()
+        parent + 1 + child <= Len::MAX
     }
 
     pub(crate) fn compress(parent: &Self, byte: u8, child: &Self) -> Self {
-        let mut buffer = [0u8; Len::MAX.to_usize()];
+        let mut buffer = [0u8; Len::MAX];
 
         parent
             .bytes()
@@ -102,10 +98,35 @@ struct Buffer(u64);
 
 impl Buffer {
     fn from_slice(key: &[u8]) -> (Self, Len) {
-        let len = Len::from_usize(key.len());
-        let mut buffer = [0u8; Len::MAX.to_usize()];
-        buffer[..len.to_usize()].copy_from_slice(&key[..len.to_usize()]);
-        (Self(u64::from_ne_bytes(buffer)), len)
+        let mut buffer = [0u8; Len::MAX];
+        let len = key.len().min(Len::MAX);
+
+        #[cfg(feature = "opt-memcpy")]
+        unsafe {
+            #[cfg(not(target_arch = "x86_64"))]
+            compile_error!("opt-memcpy requires target_arch=x86_64");
+
+            core::arch::asm! {
+                "mov rcx, {len}",
+                "mov rsi, {input}",
+                "mov rdi, {output}",
+                "rep movsb",
+                len = in(reg) len,
+                input = in(reg) key.as_ptr(),
+                output = in(reg) &mut buffer,
+                out("rcx") _,
+                out("rsi") _,
+                out("rdi") _,
+                options(nostack),
+            }
+        }
+
+        #[cfg(not(feature = "opt-memcpy"))]
+        buffer[..len].copy_from_slice(&key[..len]);
+
+        (Self(u64::from_ne_bytes(buffer)), unsafe {
+            Len(u4::new_unchecked(len as u8))
+        })
     }
 
     fn to_bytes(self) -> [u8; 8] {
