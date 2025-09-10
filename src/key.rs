@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::iter;
 
 use ribbit::u4;
@@ -23,8 +24,8 @@ impl Len {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 72, debug)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[ribbit::pack(size = 72)]
 pub(crate) struct Array {
     #[ribbit(size = 64)]
     buffer: Buffer,
@@ -88,9 +89,15 @@ impl Array {
     }
 }
 
+impl Debug for Array {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.bytes()).finish()
+    }
+}
+
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 64, debug, eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[ribbit::pack(size = 64)]
 struct Buffer(u64);
 
 impl Buffer {
