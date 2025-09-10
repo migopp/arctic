@@ -31,6 +31,14 @@ pub(crate) trait Node {
     fn replace(&self, snapshot: &Edge) -> (Op, Edge);
 }
 
+pub(crate) trait Info: Node + Default {
+    const KIND: Kind;
+    const GROW: usize;
+
+    type Grow: Info;
+    type Shrink: Info;
+}
+
 #[derive(Debug)]
 pub(crate) struct Frozen;
 

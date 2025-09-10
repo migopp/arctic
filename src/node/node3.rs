@@ -2,13 +2,19 @@ use core::sync::atomic::Ordering;
 
 use ribbit::u24;
 
+use crate::node;
+use crate::node::linear;
 use crate::Edge;
+
+use super::Node15;
 
 pub(crate) type Node3 = super::Linear<3, u24>;
 
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
 
-impl super::linear::KeyArray for u24 {
+impl linear::KeyArray for u24 {
+    const LEN: usize = 3;
+
     #[cfg(feature = "opt-node3-get")]
     fn get(&self, key: u8) -> usize {
         // https://richardstartin.github.io/posts/finding-bytes
@@ -44,4 +50,12 @@ impl<'a> IntoIterator for &'a Node3 {
         let header = self.header.load(Ordering::Relaxed);
         super::KeyIter::new_3(header.keys).zip(super::EdgeIter::new(&self.edges))
     }
+}
+
+impl node::Info for Node3 {
+    const KIND: node::Kind = node::Kind::Node3;
+    const GROW: usize = 3;
+
+    type Grow = Node15;
+    type Shrink = Node3;
 }

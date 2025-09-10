@@ -2,17 +2,20 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::node;
 use crate::node::Edge;
 use crate::node::Frozen;
 use crate::node::Op;
 use crate::Node;
 
+use super::Node15;
+
 #[repr(C)]
 #[derive(Debug)]
 pub(crate) struct Node256([Atomic128<Edge>; 256]);
 
-impl Node256 {
-    pub(crate) fn new() -> Self {
+impl Default for Node256 {
+    fn default() -> Self {
         Self(core::array::from_fn(|_| Atomic128::new(Edge::default())))
     }
 }
@@ -49,4 +52,11 @@ impl<'a> IntoIterator for &'a Node256 {
     fn into_iter(self) -> Self::IntoIter {
         super::KeyIter::new_256().zip(super::EdgeIter::new(&self.0))
     }
+}
+
+impl node::Info for Node256 {
+    const KIND: node::Kind = node::Kind::Node256;
+    const GROW: usize = 256;
+    type Grow = Node256;
+    type Shrink = Node15;
 }

@@ -12,8 +12,6 @@ use crate::node::Frozen;
 use crate::node::Op;
 use crate::Node;
 
-use super::Node256;
-
 #[repr(C)]
 #[derive(Debug)]
 #[expect(private_bounds)]
@@ -40,6 +38,7 @@ where
 impl<const LEN: usize, K> Node for Linear<LEN, K>
 where
     K: KeyArray,
+    Self: node::Info,
 {
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.load(Ordering::Acquire).get(key);
@@ -106,8 +105,8 @@ where
         self.edges
             .iter()
             .map(|edge| edge.load(Ordering::Relaxed))
-            .inspect(|edge| assert!(edge.frozen))
             .zip(header.keys())
+            .inspect(|(edge, _)| assert!(edge.frozen))
             .filter(|(edge, _)| !matches!(edge.kind, node::Kind::None))
             .map(|(edge, key)| {
                 (
@@ -146,20 +145,19 @@ where
             ),
 
             // Grow
-            // FIXME: grow to next largest size
-            edges if edges.len() == 3 => {
-                let mut node = Box::new(Node256::new());
+            edges if edges.len() == <Self as node::Info>::GROW => {
+                let mut node = Box::new(<Self as node::Info>::Grow::default());
 
                 for (key, edge) in edges {
                     node.reserve(*key).unwrap().store(*edge, Ordering::Relaxed);
                 }
 
-                let node = Box::leak(node) as *mut Node256;
+                let node = Box::leak(node) as *mut <Self as node::Info>::Grow;
 
                 (
                     node::Op::Grow,
                     Edge {
-                        kind: node::Kind::Node256,
+                        kind: <<Self as node::Info>::Grow as node::Info>::KIND,
                         next: u48::new(node as u64),
                         ..*snapshot
                     },
@@ -179,7 +177,7 @@ where
                 (
                     node::Op::Replace,
                     Edge {
-                        kind: node::Kind::Node15,
+                        kind: <Self as node::Info>::KIND,
                         next: u48::new(node as u64),
                         ..*snapshot
                     },
@@ -191,10 +189,7 @@ where
 
 #[derive(Copy, Clone, Debug, Default)]
 #[ribbit::pack(size = 128)]
-pub(super) struct Header<K>
-where
-    K: KeyArray,
-{
+pub(super) struct Header<K> {
     len: u4,
     frozen: bool,
     #[ribbit(offset = 8, size = 120)]
@@ -229,17 +224,18 @@ impl<K: KeyArray> Header<K> {
             return Some((*self, index));
         }
 
-        match len {
-            0..3 => Some((
-                Self {
-                    len: u4::new((len + 1) as u8),
-                    keys: self.keys.insert(len, key),
-                    frozen: self.frozen,
-                },
-                len,
-            )),
-            _ => None,
+        if len >= K::LEN {
+            return None;
         }
+
+        Some((
+            Self {
+                len: u4::new((len + 1) as u8),
+                keys: self.keys.insert(len, key),
+                frozen: self.frozen,
+            },
+            len,
+        ))
     }
 
     fn keys(&self) -> impl Iterator<Item = u8> + '_ {
@@ -249,6 +245,8 @@ impl<K: KeyArray> Header<K> {
 }
 
 pub(super) trait KeyArray: ribbit::Pack + Default {
+    const LEN: usize;
+
     fn get(&self, key: u8) -> usize {
         self.iter()
             .position(|byte| byte == key)
