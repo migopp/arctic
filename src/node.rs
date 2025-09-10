@@ -125,13 +125,7 @@ impl<'a> EdgeIter<'a> {
 impl<'a> Iterator for EdgeIter<'a> {
     type Item = Edge;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next >= self.edges.len() {
-            return None;
-        }
-
-        let next = self.next;
-        let edge = self.edges[next].load(Ordering::Relaxed);
-
+        let edge = self.edges.get(self.next)?.load(Ordering::Relaxed);
         self.next += 1;
         Some(edge)
     }
