@@ -57,7 +57,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 edge::Child::Node(kind) => unsafe { data.to_node(kind) },
             };
             let byte = key.get(len.to_usize())?;
-            let next = unsafe { node.as_node() }.get(*byte)?;
+            let next = node.get(*byte)?;
             self.push(len, node, next);
         }
     }
@@ -150,8 +150,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 continue;
             }
 
-            let node_ref = unsafe { old_data.to_node(kind) };
-            let node = unsafe { node_ref.as_node() };
+            let node = unsafe { old_data.to_node(kind) };
 
             match self.history.freeze() {
                 true if node.is_frozen() => (),
@@ -161,7 +160,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     match node.get_or_reserve(byte) {
                         // Fast path: no need to replace
                         Ok(edge) => {
-                            self.push(prefix, node_ref, edge);
+                            self.push(prefix, node, edge);
                             continue;
                         }
                         Err(Frozen) => (),
@@ -175,7 +174,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a Edge) {
+    fn push(&mut self, len: key::Len, node: node::Ref<'a>, edge: &'a Edge) {
         self.index += len.to_usize();
         self.index += 1;
         self.history.push(Segment {
@@ -262,5 +261,5 @@ impl<'a> History<'a> for Pessimistic<'a> {
 pub(crate) struct Segment<'a> {
     len: key::Len,
     edge: &'a Edge,
-    node: node::Ref,
+    node: node::Ref<'a>,
 }
