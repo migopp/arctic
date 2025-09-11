@@ -9,7 +9,6 @@ use ribbit::u56;
 pub(crate) struct Len(u3);
 
 impl Len {
-    pub(crate) const ZERO: Self = Self(u3::new(0));
     pub(crate) const MAX: usize = 7;
 
     pub(crate) const fn to_usize(self) -> usize {
@@ -34,22 +33,13 @@ impl Array {
     }
 
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
-        if cfg!(feature = "opt-prefix") {
-            Len(unsafe {
-                u3::new_unchecked(
-                    (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
-                        .min(left.len.0.value())
-                        .min(right.len.0.value()),
-                )
-            })
-        } else {
-            let len = left
-                .bytes()
-                .zip(right.bytes())
-                .take_while(|(l, r)| l == r)
-                .count();
-            Len(u3::new(len as u8))
-        }
+        Len(unsafe {
+            u3::new_unchecked(
+                (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
+                    .min(left.len.0.value())
+                    .min(right.len.0.value()),
+            )
+        })
     }
 
     pub(crate) fn expand(&self, index: Len) -> (Self, u8, Self) {

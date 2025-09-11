@@ -21,7 +21,8 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
         compression.record(meta.key.len.to_usize() as u64);
 
         match child {
-            Child::Leaf => {
+            Child::Leaf { removed } => {
+                assert!(!removed);
                 depth.record(depth_ as u64);
             }
             Child::Node(kind) => {
@@ -35,7 +36,7 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
                 let children = unsafe { node.iter() }
                     .filter(|(_, edge)| {
                         let meta = edge.load_low(Ordering::Relaxed);
-                        !matches!(meta.kind, node::Kind::None)
+                        !matches!(meta.kind, node::Kind::Removed)
                     })
                     .count();
 

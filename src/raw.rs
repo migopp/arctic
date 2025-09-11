@@ -10,16 +10,9 @@ use crate::edge;
 use crate::node;
 use crate::Edge;
 
+#[derive(Default)]
 pub struct Raw {
     root: Edge,
-}
-
-impl Default for Raw {
-    fn default() -> Self {
-        Raw {
-            root: Edge::default(),
-        }
-    }
 }
 
 impl Raw {
@@ -63,7 +56,9 @@ impl Raw {
                 Ok((meta, data)) => {
                     crate::stat::increment(&op);
                     match (op, meta.kind) {
-                        (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
+                        (Op::Edge(edge::Op::Insert), node::Kind::Uninit | node::Kind::Removed) => {
+                            return Ok(None)
+                        }
                         (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
                             return Ok(Some(data.to_leaf()))
                         }
@@ -103,13 +98,17 @@ impl Raw {
         let edge = cursor.here();
 
         loop {
+            if matches!(old_meta.kind, node::Kind::Removed) {
+                return None;
+            }
+
             match edge.compare_exchange(
                 (old_meta, old_data),
                 (
                     edge::Meta {
                         key: old_meta.key,
                         frozen: false,
-                        kind: node::Kind::None,
+                        kind: node::Kind::Removed,
                     },
                     old_data,
                 ),
@@ -117,7 +116,6 @@ impl Raw {
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
-                Err((meta, _)) if matches!(meta.kind, node::Kind::None) => return None,
                 Err((meta, _)) if meta != old_meta => todo!(
                     "Handle metadata conflict in remove: expected {:?} but found {:?}",
                     old_meta,
@@ -158,7 +156,7 @@ impl Raw {
                 Err((meta, _))
                     if meta.frozen
                         || meta.key != old_meta.key
-                        || !matches!(meta.kind, node::Kind::None | node::Kind::Leaf) =>
+                        || !matches!(meta.kind, node::Kind::Removed | node::Kind::Leaf) =>
                 {
                     todo!(
                         "Handle metadata conflict in update: expected {:?} but found {:?}",
@@ -179,7 +177,8 @@ impl Raw {
     pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
         self.preorder()
             .filter_map(|(_, key, meta, data)| match meta.child()? {
-                edge::Child::Leaf => Some((key, data.to_leaf())),
+                edge::Child::Leaf { removed: true } => None,
+                edge::Child::Leaf { removed: false } => Some((key, data.to_leaf())),
                 edge::Child::Node(_) => None,
             })
     }
@@ -258,9 +257,12 @@ impl<'a> Iterator for Iter<'a> {
                 let meta = edge.load_low(Ordering::Relaxed);
 
                 // Skip empty edges
-                let Some(child) = meta.child() else {
-                    iter.skip();
-                    continue 'horizontal;
+                let child = match meta.child() {
+                    None | Some(edge::Child::Leaf { removed: true }) => {
+                        iter.skip();
+                        continue 'horizontal;
+                    }
+                    Some(child) => child,
                 };
 
                 let data = edge.load_high(Ordering::Acquire);
@@ -278,7 +280,7 @@ impl<'a> Iterator for Iter<'a> {
                 let len = key.len() - meta.key.len.to_usize() - byte.is_some() as usize;
 
                 match child {
-                    edge::Child::Leaf => {
+                    edge::Child::Leaf { removed: _ } => {
                         key.truncate(len);
                         continue 'horizontal;
                     }

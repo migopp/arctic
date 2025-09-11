@@ -99,7 +99,9 @@ impl Debug for Ref {
 #[ribbit::pack(size = 3, debug)]
 pub(crate) enum Kind {
     #[ribbit(size = 0)]
-    None,
+    Uninit,
+    #[ribbit(size = 0)]
+    Removed,
     #[ribbit(size = 0)]
     Leaf,
     #[ribbit(size = 0)]
@@ -112,7 +114,7 @@ pub(crate) enum Kind {
 
 impl Default for Kind {
     fn default() -> Self {
-        Self::None
+        Self::Uninit
     }
 }
 

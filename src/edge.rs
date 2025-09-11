@@ -64,12 +64,16 @@ pub(crate) struct Meta {
 }
 
 impl Meta {
-    pub(crate) fn r#match(&self, key: &[u8]) -> Match {
+    pub(crate) fn match_weak(&self, key: &[u8]) -> Option<key::Len> {
+        let search_key = key::Array::from_slice(key);
+        let edge_key = self.key;
+        let prefix_len = key::Array::prefix(&search_key, &edge_key);
+        (search_key.len >= edge_key.len && edge_key.len == prefix_len).then_some(prefix_len)
+    }
+
+    pub(crate) fn match_strong(&self, key: &[u8]) -> Match {
         if cfg!(feature = "opt-empty-match") && key.is_empty() {
-            return Match::Full {
-                len: key::Len::ZERO,
-                child: self.child(),
-            };
+            return Match::Full(key::Len::default());
         }
 
         let search_key = key::Array::from_slice(key);
@@ -78,10 +82,7 @@ impl Meta {
 
         // Fast path: successful traversal
         if search_key.len >= edge_key.len && edge_key.len == prefix_len {
-            return Match::Full {
-                len: prefix_len,
-                child: self.child(),
-            };
+            return Match::Full(prefix_len);
         }
 
         assert!(
@@ -102,8 +103,9 @@ impl Meta {
 
     pub(crate) fn child(&self) -> Option<Child> {
         match self.kind {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(Child::Leaf),
+            node::Kind::Uninit => None,
+            node::Kind::Removed => Some(Child::Leaf { removed: true }),
+            node::Kind::Leaf => Some(Child::Leaf { removed: false }),
             node::Kind::Node3 => Some(Child::Node(Node::Node3)),
             node::Kind::Node15 => Some(Child::Node(Node::Node15)),
             node::Kind::Node256 => Some(Child::Node(Node::Node256)),
@@ -152,7 +154,7 @@ impl Data {
 
     pub(crate) unsafe fn deallocate(self, kind: node::Kind) {
         match kind {
-            node::Kind::None | node::Kind::Leaf => {
+            node::Kind::Uninit | node::Kind::Removed | node::Kind::Leaf => {
                 unreachable!()
             }
             node::Kind::Node3 => drop(Box::from_raw(self.0 as *mut Node3)),
@@ -179,7 +181,7 @@ pub(crate) enum Op {
 
 #[derive(Debug)]
 pub(crate) enum Child {
-    Leaf,
+    Leaf { removed: bool },
     Node(Node),
 }
 
@@ -192,10 +194,7 @@ pub(crate) enum Node {
 
 #[derive(Debug)]
 pub(crate) enum Match {
-    Full {
-        len: key::Len,
-        child: Option<Child>,
-    },
+    Full(key::Len),
     Partial {
         start: key::Array,
         middle: u8,
