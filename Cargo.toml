@@ -10,6 +10,7 @@ opt-empty-match = []
 opt-node3-get = []
 opt-node15-get = []
 opt-memcpy = []
+opt-prefix = []
 
 [dependencies]
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false }
