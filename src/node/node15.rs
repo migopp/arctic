@@ -20,29 +20,17 @@ impl linear::KeyArray for u120 {
         #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
         compile_error!("opt-node15-get requires target_arch=x86_64 and target_feature=sse2");
 
+        use core::arch::x86_64::_mm_cmpeq_epi8;
         use core::arch::x86_64::_mm_movemask_epi8;
         use core::arch::x86_64::_mm_set1_epi8;
         use std::arch::x86_64::__m128i;
-        use std::arch::x86_64::_mm_adds_epu8;
-        use std::arch::x86_64::_mm_xor_si128;
-
-        const PATTERN: __m128i = {
-            let mut pattern = 0u128;
-            let mut i = 0;
-            while i < 16 {
-                pattern |= 0x7Fu128 << (i * 8);
-                i += 1;
-            }
-            unsafe { core::mem::transmute::<u128, __m128i>(pattern) }
-        };
 
         unsafe {
-            let input = _mm_xor_si128(
+            _mm_movemask_epi8(_mm_cmpeq_epi8(
                 core::mem::transmute::<u128, __m128i>(self.value()),
                 _mm_set1_epi8(key as i8),
-            );
-
-            _mm_movemask_epi8(_mm_adds_epu8(input, PATTERN)).trailing_ones() as usize
+            ))
+            .trailing_zeros() as usize
         }
     }
 
