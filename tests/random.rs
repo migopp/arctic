@@ -20,7 +20,7 @@ fn one() {
 
 fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
     let barrier = &Barrier::new(thread_count);
-    let map = &art::Map::<u64, u32>::default();
+    let map = &arctic::Map::<u64, u32>::default();
 
     std::thread::scope(|scope| {
         for thread_id in 0..thread_count {

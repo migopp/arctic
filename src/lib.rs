@@ -240,31 +240,31 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let art = Map::default();
-        art.insert(b"abcd", 1);
-        assert_eq!(art.get(b"abcd"), Some(1));
+        let map = Map::default();
+        map.insert(b"abcd", 1);
+        assert_eq!(map.get(b"abcd"), Some(1));
     }
 
     #[test]
     fn smoke_u64_key() {
-        let art = Map::default();
+        let map = Map::default();
         let key = 0xdeadbeefu64.to_be_bytes();
-        art.insert(&key, 1);
-        assert_eq!(art.get(&key), Some(1));
+        map.insert(&key, 1);
+        assert_eq!(map.get(&key), Some(1));
     }
 
     #[test]
     fn node3_overwrite() {
-        let mut art = Map::default();
+        let mut map = Map::default();
 
         for value in [1, 2, 3] {
-            art.insert(&1u8, value);
-            assert_eq!(art.get(&1), Some(value));
+            map.insert(&1u8, value);
+            assert_eq!(map.get(&1), Some(value));
         }
 
-        assert_eq!(art.iter().count(), 1);
+        assert_eq!(map.iter().count(), 1);
 
-        art.iter().for_each(|(key, value)| {
+        map.iter().for_each(|(key, value)| {
             assert_eq!(key, 1);
             assert_eq!(value, 3);
         });
@@ -307,25 +307,25 @@ mod tests {
             .enumerate()
             .map(|(index, key)| (key, index as u32));
 
-        let mut art = Map::default();
+        let mut map = Map::default();
 
         for (key, value) in keys.clone() {
-            art.insert(&key, value);
-            assert_eq!(art.get(&key), Some(value));
+            map.insert(&key, value);
+            assert_eq!(map.get(&key), Some(value));
         }
 
         for (key, value) in keys.clone() {
-            assert_eq!(art.get(&key), Some(value));
+            assert_eq!(map.get(&key), Some(value));
         }
 
-        assert_eq!(art.iter().count(), keys.clone().count());
+        assert_eq!(map.iter().count(), keys.clone().count());
 
         let mut sorted = keys.collect::<Vec<_>>();
         sorted.sort_by(|(l, _), (r, _)| l.cmp(r));
 
         sorted
             .into_iter()
-            .zip(art.iter())
+            .zip(map.iter())
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, rk);
                 assert_eq!(lv, rv);

@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
+use arctic::Map;
 use bustle::Collection;
 use bustle::CollectionHandle;
 use bustle::Mix;
 use bustle::Workload;
 
-struct Art(Arc<art::Map<u64, u32>>);
+struct Arctic(Arc<Map<u64, u32>>);
 
-impl Collection for Art {
-    type Handle = Art;
+impl Collection for Arctic {
+    type Handle = Arctic;
 
     fn with_capacity(_capacity: usize) -> Self {
-        Self(Arc::new(art::Map::default()))
+        Self(Arc::new(Map::default()))
     }
 
     fn pin(&self) -> Self::Handle {
@@ -19,7 +20,7 @@ impl Collection for Art {
     }
 }
 
-impl CollectionHandle for Art {
+impl CollectionHandle for Arctic {
     type Key = u64;
 
     fn get(&mut self, key: &Self::Key) -> bool {
@@ -65,5 +66,5 @@ fn main() {
     .initial_capacity_log2(16)
     .prefill_fraction(1.0)
     .seed(core::array::from_fn(|i| i as u8))
-    .run::<Art>();
+    .run::<Arctic>();
 }
