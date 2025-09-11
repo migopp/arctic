@@ -115,7 +115,7 @@ where
             .map(|edge| (edge, edge.load_low(Ordering::Relaxed)))
             .zip(header.keys())
             .inspect(|((_, meta), _)| assert!(meta.frozen))
-            .filter(|((_, meta), _)| !matches!(meta.kind, node::Kind::Removed))
+            .filter(|((_, meta), _)| !matches!(meta.kind, node::Kind::None))
             .map(|((edge, meta), key)| (key, meta.unfreeze(), edge.load_high(Ordering::Relaxed)))
             .zip(&mut edges)
             .for_each(|(edge, save)| {
@@ -128,7 +128,7 @@ where
                 Op::Destroy,
                 edge::Meta {
                     key: key::Array::default(),
-                    kind: node::Kind::Removed,
+                    kind: node::Kind::None,
                     frozen: false,
                 },
                 edge::Data::default(),
