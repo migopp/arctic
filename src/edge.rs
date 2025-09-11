@@ -54,7 +54,7 @@ impl DerefMut for Edge {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 63)]
+#[ribbit::pack(size = 63, eq)]
 pub(crate) struct Meta {
     #[ribbit(size = 59)]
     pub(crate) key: key::Array,

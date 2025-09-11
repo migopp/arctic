@@ -3,6 +3,8 @@ use core::marker::PhantomData;
 use core::mem;
 use core::sync::atomic::Ordering;
 
+use ribbit::Unpack as _;
+
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -36,7 +38,9 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn traverse_weak(&mut self) -> Option<(edge::Meta, edge::Data)> {
         loop {
             let edge = self.here();
-            let meta = edge.load_low(Ordering::Relaxed);
+            let meta_packed = edge.load_low_packed(Ordering::Relaxed);
+            let meta = meta_packed.unpack();
+
             let key = self.key();
 
             let (len, kind) = match meta.r#match(key) {
@@ -52,6 +56,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 } => {
                     assert_eq!(key.len(), len.to_usize());
                     let data = edge.load_high(Ordering::Acquire);
+
+                    if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
+                        continue;
+                    }
                     return Some((meta, data));
                 }
 
@@ -61,9 +69,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 } => (len, kind),
             };
 
-            let byte = key.get(len.to_usize())?;
+            if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
+                continue;
+            }
             let data = edge.load_high(Ordering::Acquire);
             let node = unsafe { data.to_node(kind) };
+
+            let byte = key.get(len.to_usize())?;
             let next = unsafe { node.as_node() }.get(*byte)?;
             self.push(len, node, next);
         }
@@ -75,8 +87,14 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     ) -> (Op, (edge::Meta, edge::Data), (edge::Meta, edge::Data)) {
         loop {
             let edge = self.here();
-            let old_meta = edge.load_low(Ordering::Acquire);
+            let old_meta_packed = edge.load_low_packed(Ordering::Relaxed);
+            let old_meta = old_meta_packed.unpack();
+
             let old_data = edge.load_high(Ordering::Acquire);
+
+            if edge.load_low_packed(Ordering::Relaxed) != old_meta_packed {
+                continue;
+            }
 
             let key = self.key();
 
