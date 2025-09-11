@@ -1,19 +1,16 @@
 use core::fmt::Debug;
 use core::iter;
 
-use ribbit::u4;
+use ribbit::u3;
+use ribbit::u56;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-#[ribbit::pack(size = 4, debug, eq, ord)]
-pub(crate) struct Len(u4);
+#[ribbit::pack(size = 3, debug, eq, ord)]
+pub(crate) struct Len(u3);
 
 impl Len {
-    pub(crate) const ZERO: Self = Self(u4::new(0));
-    pub(crate) const MAX: usize = 8;
-
-    fn from_usize(len: usize) -> Self {
-        unsafe { Self(u4::new_unchecked(len.max(8) as u8)) }
-    }
+    pub(crate) const ZERO: Self = Self(u3::new(0));
+    pub(crate) const MAX: usize = 7;
 
     pub(crate) const fn to_usize(self) -> usize {
         self.0.value() as usize
@@ -21,12 +18,12 @@ impl Len {
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 72)]
+#[ribbit::pack(size = 59)]
 pub(crate) struct Array {
-    #[ribbit(size = 64)]
+    #[ribbit(size = 56)]
     buffer: Buffer,
 
-    #[ribbit(size = 4)]
+    #[ribbit(size = 3)]
     pub(crate) len: Len,
 }
 
@@ -39,7 +36,7 @@ impl Array {
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
         if cfg!(feature = "opt-prefix") {
             Len(unsafe {
-                u4::new_unchecked(
+                u3::new_unchecked(
                     (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
                         .min(left.len.0.value())
                         .min(right.len.0.value()),
@@ -51,7 +48,7 @@ impl Array {
                 .zip(right.bytes())
                 .take_while(|(l, r)| l == r)
                 .count();
-            Len(u4::new(len as u8))
+            Len(u3::new(len as u8))
         }
     }
 
@@ -102,8 +99,8 @@ impl Debug for Array {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 64)]
-struct Buffer(u64);
+#[ribbit::pack(size = 56)]
+struct Buffer(u56);
 
 impl Buffer {
     fn from_slice(key: &[u8]) -> (Self, Len) {
@@ -133,12 +130,12 @@ impl Buffer {
         #[cfg(not(feature = "opt-memcpy"))]
         buffer[..len].copy_from_slice(&key[..len]);
 
-        (Self(u64::from_ne_bytes(buffer)), unsafe {
-            Len(u4::new_unchecked(len as u8))
+        (Self(u56::from_ne_bytes(buffer)), unsafe {
+            Len(u3::new_unchecked(len as u8))
         })
     }
 
-    fn to_bytes(self) -> [u8; 8] {
+    fn to_bytes(self) -> [u8; Len::MAX] {
         self.0.to_ne_bytes()
     }
 }

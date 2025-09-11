@@ -1,7 +1,5 @@
 use core::fmt::Debug;
-use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
 use ribbit::u120;
 use ribbit::u24;
 
@@ -15,20 +13,21 @@ pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 
+use crate::edge;
 use crate::Edge;
 
 pub(crate) trait Node {
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
+    fn get(&self, key: u8) -> Option<&Edge>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Edge>;
 
     fn is_frozen(&self) -> bool;
 
     fn freeze(&self);
 
-    fn replace(&self, snapshot: &Edge) -> (Op, Edge);
+    fn replace(&self, meta: &edge::Meta) -> (Op, edge::Meta, edge::Data);
 }
 
 pub(crate) trait Info: Node + Default {
@@ -120,20 +119,20 @@ impl Default for Kind {
 pub(crate) type Iter<'a> = core::iter::Zip<KeyIter, EdgeIter<'a>>;
 
 pub(crate) struct EdgeIter<'a> {
-    edges: &'a [Atomic128<Edge>],
+    edges: &'a [Edge],
     next: usize,
 }
 
 impl<'a> EdgeIter<'a> {
-    pub(crate) fn new(edges: &'a [Atomic128<Edge>]) -> Self {
+    pub(crate) fn new(edges: &'a [Edge]) -> Self {
         Self { edges, next: 0 }
     }
 }
 
 impl<'a> Iterator for EdgeIter<'a> {
-    type Item = Edge;
+    type Item = &'a Edge;
     fn next(&mut self) -> Option<Self::Item> {
-        let edge = self.edges.get(self.next)?.load(Ordering::Relaxed);
+        let edge = self.edges.get(self.next)?;
         self.next += 1;
         Some(edge)
     }

@@ -3,21 +3,17 @@ use core::marker::PhantomData;
 use core::mem;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
-use ribbit::u48;
-
 use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Frozen;
 use crate::node::Node3;
 use crate::Edge;
-use crate::Node as _;
 
 pub(crate) struct Cursor<'a, 'k, P> {
     key: &'k [u8],
     index: usize,
-    here: &'a Atomic128<Edge>,
+    here: &'a Edge,
     history: P,
 }
 
@@ -28,7 +24,7 @@ pub(crate) enum Op {
 }
 
 impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
-    pub(crate) fn new(root: &'a Atomic128<Edge>, key: &'k [u8]) -> Self {
+    pub(crate) fn new(root: &'a Edge, key: &'k [u8]) -> Self {
         Self {
             key,
             index: 0,
@@ -37,13 +33,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse_weak(&mut self) -> Option<Edge> {
+    pub(crate) fn traverse_weak(&mut self) -> Option<(edge::Meta, edge::Data)> {
         loop {
             let edge = self.here();
-            let snapshot = edge.load(Ordering::Acquire);
+            let meta = edge.load_low(Ordering::Relaxed);
             let key = self.key();
 
-            match snapshot.r#match(key) {
+            let (len, kind) = match meta.r#match(key) {
                 edge::Match::Full {
                     len: _,
                     child: None,
@@ -55,32 +51,42 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     child: Some(edge::Child::Leaf),
                 } => {
                     assert_eq!(key.len(), len.to_usize());
-                    return Some(snapshot);
+                    let data = edge.load_high(Ordering::Acquire);
+                    return Some((meta, data));
                 }
 
                 edge::Match::Full {
                     len,
-                    child: Some(edge::Child::Node(node)),
-                } => {
-                    let byte = key.get(len.to_usize())?;
-                    let next = unsafe { node.as_node() }.get(*byte)?;
-                    self.push(len, node, next);
-                }
-            }
+                    child: Some(edge::Child::Node(kind)),
+                } => (len, kind),
+            };
+
+            let byte = key.get(len.to_usize())?;
+            let data = edge.load_high(Ordering::Acquire);
+            let node = unsafe { data.to_node(kind) };
+            let next = unsafe { node.as_node() }.get(*byte)?;
+            self.push(len, node, next);
         }
     }
 
-    pub(crate) fn traverse_strong(&mut self, value: u48) -> (Op, Edge, Edge) {
+    pub(crate) fn traverse_strong(
+        &mut self,
+        value: u64,
+    ) -> (Op, (edge::Meta, edge::Data), (edge::Meta, edge::Data)) {
         loop {
             let edge = self.here();
-            let old = edge.load(Ordering::Acquire);
+            let old_meta = edge.load_low(Ordering::Acquire);
+            let old_data = edge.load_high(Ordering::Acquire);
+
             let key = self.key();
 
-            let (op, new) = match old.r#match(key) {
+            let (op, new_meta, new_data) = match old_meta.r#match(key) {
                 edge::Match::Full {
                     len,
-                    child: Some(edge::Child::Node(node)),
+                    child: Some(edge::Child::Node(kind)),
                 } => {
+                    let node = unsafe { old_data.to_node(kind) };
+
                     match self.history.freeze() {
                         true if unsafe { node.as_node() }.is_frozen() => (),
                         true | false => {
@@ -98,68 +104,62 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
                     let node = unsafe { node.as_node() };
                     node.freeze();
-                    let (op, new) = node.replace(&old);
-                    (Op::Node(op), new)
+                    let (op, new_meta, new_data) = node.replace(&old_meta);
+                    (Op::Node(op), new_meta, new_data)
                 }
 
-                edge::Match::Full { len, child: None } if key.len() > key::Len::MAX => {
-                    assert_eq!(len, key::Len::ZERO);
-
-                    let node = Box::new(Node3::default());
-                    let node = Box::leak(node) as *mut Node3;
-                    let new = Edge {
+                edge::Match::Full {
+                    len: _,
+                    child: None,
+                } if key.len() > key::Len::MAX => (
+                    Op::Edge(edge::Op::Create),
+                    edge::Meta {
                         key: key::Array::from_slice(&key[..key::Len::MAX]),
                         frozen: false,
                         kind: node::Kind::Node3,
-                        next: u48::new(node as u64),
-                    };
-
-                    (Op::Edge(edge::Op::Create), new)
-                }
+                    },
+                    edge::Data::new_node::<Node3, _>(core::iter::empty()),
+                ),
 
                 edge::Match::Full {
                     len: _,
                     child: Some(edge::Child::Leaf) | None,
                 } => (
                     Op::Edge(edge::Op::Insert),
-                    Edge {
+                    edge::Meta {
                         key: key::Array::from_slice(key),
                         frozen: false,
                         kind: node::Kind::Leaf,
-                        next: value,
                     },
+                    edge::Data::new_leaf(value),
                 ),
 
                 edge::Match::Partial { start, middle, end } => {
-                    let mut node = Box::new(Node3::default());
-
-                    node.reserve(middle).unwrap().store(
-                        Edge {
-                            key: end,
-                            frozen: false,
-                            ..old
-                        },
-                        Ordering::Relaxed,
-                    );
-
-                    let node = Box::leak(node) as *mut Node3;
-
-                    let new = Edge {
+                    let new_meta = edge::Meta {
                         key: start,
                         frozen: false,
                         kind: node::Kind::Node3,
-                        next: u48::new(node as u64),
                     };
 
-                    (Op::Edge(edge::Op::Expand), new)
+                    let new_data = edge::Data::new_node::<Node3, _>(core::iter::once((
+                        middle,
+                        edge::Meta {
+                            key: end,
+                            frozen: false,
+                            kind: old_meta.kind,
+                        },
+                        old_data,
+                    )));
+
+                    (Op::Edge(edge::Op::Expand), new_meta, new_data)
                 }
             };
 
-            return (op, old, new);
+            return (op, (old_meta, old_data), (new_meta, new_data));
         }
     }
 
-    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a Atomic128<Edge>) {
+    fn push(&mut self, len: key::Len, node: node::Ref, edge: &'a Edge) {
         self.index += len.to_usize();
         self.index += 1;
         self.history.push(Segment {
@@ -179,7 +179,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     }
 
     #[inline]
-    pub(crate) fn here(&self) -> &Atomic128<Edge> {
+    pub(crate) fn here(&self) -> &Edge {
         self.here
     }
 
@@ -245,6 +245,6 @@ impl<'a> History<'a> for Pessimistic<'a> {
 #[derive(Debug)]
 pub(crate) struct Segment<'a> {
     len: key::Len,
-    edge: &'a Atomic128<Edge>,
+    edge: &'a Edge,
     node: node::Ref,
 }

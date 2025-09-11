@@ -46,7 +46,7 @@ impl linear::KeyArray for u120 {
 }
 
 impl<'a> IntoIterator for &'a Node15 {
-    type Item = (u8, Edge);
+    type Item = (u8, &'a Edge);
     type IntoIter = super::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         let header = self.header.load(Ordering::Relaxed);

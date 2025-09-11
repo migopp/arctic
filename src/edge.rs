@@ -1,30 +1,69 @@
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
-
-use ribbit::atomic::Atomic128;
-use ribbit::u48;
 
 use crate::key;
 use crate::node;
 use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
+use crate::Split;
 
-#[derive(Copy, Clone, Debug, Default)]
-#[ribbit::pack(size = 128, debug)]
-pub(crate) struct Edge {
-    #[ribbit(size = 72)]
-    pub(crate) key: key::Array,
-
-    pub(crate) frozen: bool,
-
-    #[ribbit(size = 3)]
-    pub(crate) kind: node::Kind,
-
-    #[ribbit(offset = 80)]
-    pub(crate) next: u48,
-}
+#[derive(Default, Debug)]
+pub(crate) struct Edge(Split<Meta, Data>);
 
 impl Edge {
+    pub(crate) fn freeze(&self) {
+        let mut old_meta = self.load_low_packed(Ordering::Relaxed);
+
+        if old_meta.frozen() {
+            return;
+        }
+
+        let mut old_data = self.load_high_packed(Ordering::Relaxed);
+
+        loop {
+            match self.compare_exchange_packed(
+                (old_meta, old_data),
+                (old_meta.with_frozen(true), old_data),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err((meta, _)) if meta.frozen() => break,
+                Err((meta, data)) => {
+                    old_meta = meta;
+                    old_data = data;
+                }
+            }
+        }
+    }
+}
+
+impl Deref for Edge {
+    type Target = Split<Meta, Data>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Edge {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[ribbit::pack(size = 63)]
+pub(crate) struct Meta {
+    #[ribbit(size = 59)]
+    pub(crate) key: key::Array,
+    pub(crate) frozen: bool,
+    #[ribbit(size = 3)]
+    pub(crate) kind: node::Kind,
+}
+
+impl Meta {
     pub(crate) fn r#match(&self, key: &[u8]) -> Match {
         if cfg!(feature = "opt-empty-match") && key.is_empty() {
             return Match::Full {
@@ -54,51 +93,71 @@ impl Edge {
         Match::Partial { start, middle, end }
     }
 
-    pub(crate) fn freeze(edge: &Atomic128<Self>) {
-        let mut old = edge.load_packed(Ordering::Relaxed);
-        while !old.frozen() {
-            match edge.compare_exchange_packed(
-                old,
-                old.with_frozen(true),
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(conflict) => old = conflict,
-            }
-        }
-    }
-
-    pub(crate) fn leaf(&self) -> Option<u48> {
-        match self.kind {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(self.next),
-            _ => unreachable!(),
+    pub(crate) fn unfreeze(&self) -> Self {
+        Self {
+            frozen: false,
+            ..*self
         }
     }
 
     pub(crate) fn child(&self) -> Option<Child> {
-        let leaf = self.next;
-        let pointer = leaf.value();
-
         match self.kind {
             node::Kind::None => None,
             node::Kind::Leaf => Some(Child::Leaf),
-            node::Kind::Node3 => Some(Child::Node(node::Ref::Node3(pointer as *mut Node3))),
-            node::Kind::Node15 => Some(Child::Node(node::Ref::Node15(pointer as *mut Node15))),
-            node::Kind::Node256 => Some(Child::Node(node::Ref::Node256(pointer as *mut Node256))),
+            node::Kind::Node3 => Some(Child::Node(Node::Node3)),
+            node::Kind::Node15 => Some(Child::Node(Node::Node15)),
+            node::Kind::Node256 => Some(Child::Node(Node::Node256)),
+        }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Default, Debug)]
+#[ribbit::pack(size = 64)]
+pub(crate) struct Data(u64);
+
+impl Data {
+    pub(crate) fn new_node<N, I>(edges: I) -> Self
+    where
+        N: node::Info,
+        I: IntoIterator<Item = (u8, Meta, Data)>,
+    {
+        let mut node = Box::new(N::default());
+
+        for (key, meta, data) in edges {
+            let edge = node.reserve(key).expect("Node can fit all edges");
+            edge.set_low(meta);
+            edge.set_high(data);
+        }
+
+        let node = Box::leak(node) as *mut N;
+        Self(node as u64)
+    }
+
+    pub(crate) fn new_leaf(leaf: u64) -> Self {
+        Self(leaf)
+    }
+
+    pub(crate) fn to_leaf(self) -> u64 {
+        self.0
+    }
+
+    pub(crate) unsafe fn to_node(self, kind: Node) -> node::Ref {
+        match kind {
+            Node::Node3 => node::Ref::Node3(self.0 as *mut Node3),
+            Node::Node15 => node::Ref::Node15(self.0 as *mut Node15),
+            Node::Node256 => node::Ref::Node256(self.0 as *mut Node256),
         }
     }
 
-    pub(crate) unsafe fn deallocate(self) {
-        let pointer = self.next.value();
-        match self.kind {
+    pub(crate) unsafe fn deallocate(self, kind: node::Kind) {
+        match kind {
             node::Kind::None | node::Kind::Leaf => {
                 unreachable!()
             }
-            node::Kind::Node3 => drop(Box::from_raw(pointer as *mut Node3)),
-            node::Kind::Node15 => drop(Box::from_raw(pointer as *mut Node15)),
-            node::Kind::Node256 => drop(Box::from_raw(pointer as *mut Node256)),
+            node::Kind::Node3 => drop(Box::from_raw(self.0 as *mut Node3)),
+            node::Kind::Node15 => drop(Box::from_raw(self.0 as *mut Node15)),
+            node::Kind::Node256 => drop(Box::from_raw(self.0 as *mut Node256)),
         }
     }
 }
@@ -121,7 +180,14 @@ pub(crate) enum Op {
 #[derive(Debug)]
 pub(crate) enum Child {
     Leaf,
-    Node(node::Ref),
+    Node(Node),
+}
+
+#[derive(Debug)]
+pub(crate) enum Node {
+    Node3,
+    Node15,
+    Node256,
 }
 
 #[derive(Debug)]

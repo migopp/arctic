@@ -3,16 +3,17 @@ mod edge;
 mod key;
 mod node;
 mod raw;
+mod split;
 pub mod stat;
 
 pub use raw::Raw;
-use ribbit::u48;
 
 use core::marker::PhantomData;
 use std::rc::Rc;
 
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
+pub(crate) use split::Split;
 
 pub struct Map<K, V> {
     raw: Raw,
@@ -34,31 +35,31 @@ impl<K: Key, V: Value> Map<K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
-        self.raw.get(key).map(V::from_u48)
+        self.raw.get(key).map(V::from_u64)
     }
 
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
-        self.raw.insert(key, value.into_u48()).map(V::from_u48)
+        self.raw.insert(key, value.into_u64()).map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
-        self.raw.remove(key).map(V::from_u48)
+        self.raw.remove(key).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
         let key = key.to_byte_array();
         let key = key.as_ref();
-        self.raw.update(key, value.into_u48()).map(V::from_u48)
+        self.raw.update(key, value.into_u64()).map(V::from_u64)
     }
 
     pub fn iter(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
         self.raw
             .iter()
-            .map(|(key, value)| (K::from_byte_array(key), V::from_u48(value)))
+            .map(|(key, value)| (K::from_byte_array(key), V::from_u64(value)))
     }
 
     pub fn keys(&mut self) -> impl Iterator<Item = K::Owned> + '_ {
@@ -208,29 +209,29 @@ impl Key for Vec<u8> {
 }
 
 pub trait Value {
-    fn from_u48(value: u48) -> Self;
-    fn into_u48(self) -> u48;
+    fn from_u64(value: u64) -> Self;
+    fn into_u64(self) -> u64;
 }
 
 impl Value for u32 {
     #[inline]
-    fn from_u48(value: u48) -> Self {
-        value.value() as u32
+    fn from_u64(value: u64) -> Self {
+        value as u32
     }
 
     #[inline]
-    fn into_u48(self) -> u48 {
-        u48::from(self)
+    fn into_u64(self) -> u64 {
+        self as u64
     }
 }
 
 impl Value for () {
     #[inline]
-    fn from_u48(_: u48) -> Self {}
+    fn from_u64(_: u64) -> Self {}
 
     #[inline]
-    fn into_u48(self) -> u48 {
-        u48::new(0)
+    fn into_u64(self) -> u64 {
+        0
     }
 }
 

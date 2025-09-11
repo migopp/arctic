@@ -1,4 +1,5 @@
 use core::cell::Cell;
+use core::sync::atomic::Ordering;
 
 use crate::edge::Child;
 use crate::node;
@@ -14,16 +15,17 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_15 = Histogram::new();
     let mut node_256 = Histogram::new();
 
-    map.raw.preorder().for_each(|(depth_, _, edge)| {
-        let Some(child) = edge.child() else { return };
+    map.raw.preorder().for_each(|(depth_, _, meta, data)| {
+        let Some(child) = meta.child() else { return };
 
-        compression.record(edge.key.len.to_usize() as u64);
+        compression.record(meta.key.len.to_usize() as u64);
 
         match child {
             Child::Leaf => {
                 depth.record(depth_ as u64);
             }
-            Child::Node(node) => {
+            Child::Node(kind) => {
+                let node = unsafe { data.to_node(kind) };
                 let histogram = match node {
                     node::Ref::Node3(_) => &mut node_3,
                     node::Ref::Node15(_) => &mut node_15,
@@ -31,7 +33,10 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
                 };
 
                 let children = unsafe { node.iter() }
-                    .filter(|(_, edge)| !matches!(edge.kind, node::Kind::None))
+                    .filter(|(_, edge)| {
+                        let meta = edge.load_low(Ordering::Relaxed);
+                        !matches!(meta.kind, node::Kind::None)
+                    })
                     .count();
 
                 histogram.record(children as u64);
