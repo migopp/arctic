@@ -28,9 +28,9 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
             Child::Node(kind) => {
                 let node = unsafe { data.to_node(kind) };
                 let histogram = match node {
-                    node::Ref::Node3(_, _) => &mut node_3,
-                    node::Ref::Node15(_, _) => &mut node_15,
-                    node::Ref::Node256(_, _) => &mut node_256,
+                    node::Ref::Node3(_) => &mut node_3,
+                    node::Ref::Node15(_) => &mut node_15,
+                    node::Ref::Node256(_) => &mut node_256,
                 };
 
                 let children = unsafe { node.iter() }

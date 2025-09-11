@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::marker::PhantomData;
 
 use ribbit::u120;
 use ribbit::u24;
@@ -61,84 +60,37 @@ pub(crate) enum Op {
 }
 
 #[derive(Clone)]
-pub(crate) enum Ref<'a> {
-    Node3(*mut Node3, PhantomData<&'a ()>),
-    Node15(*mut Node15, PhantomData<&'a ()>),
-    Node256(*mut Node256, PhantomData<&'a ()>),
+pub(crate) enum Ref {
+    Node3(*mut Node3),
+    Node15(*mut Node15),
+    Node256(*mut Node256),
 }
 
-impl<'a> Ref<'a> {
-    pub(crate) unsafe fn iter(&self) -> Iter<'a> {
+impl Ref {
+    // FIXME: how to express lifetimes?
+    pub(crate) unsafe fn as_node<'art>(&self) -> &'art dyn Node {
         match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.into_iter(),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.into_iter(),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.into_iter(),
-        }
-    }
-}
-
-impl<'a> Ref<'a> {
-    #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'a Edge> {
-        match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.get(key),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.get(key),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.get(key),
+            Ref::Node3(node) => unsafe { node.as_ref().unwrap() },
+            Ref::Node15(node) => unsafe { node.as_ref().unwrap() },
+            Ref::Node256(node) => unsafe { node.as_ref().unwrap() },
         }
     }
 
-    #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Result<&'a Edge, Frozen> {
+    pub(crate) unsafe fn iter<'art>(&self) -> Iter<'art> {
         match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.get_or_reserve(key),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.get_or_reserve(key),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.get_or_reserve(key),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn reserve(&mut self, key: u8) -> Option<&'a mut Edge> {
-        match self {
-            Ref::Node3(node, _) => unsafe { node.as_mut().unwrap() }.reserve(key),
-            Ref::Node15(node, _) => unsafe { node.as_mut().unwrap() }.reserve(key),
-            Ref::Node256(node, _) => unsafe { node.as_mut().unwrap() }.reserve(key),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn is_frozen(&self) -> bool {
-        match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.is_frozen(),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.is_frozen(),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.is_frozen(),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn freeze(&self) {
-        match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.freeze(),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.freeze(),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.freeze(),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn replace(&self, meta: &edge::Meta) -> (Op, edge::Meta, edge::Data) {
-        match self {
-            Ref::Node3(node, _) => unsafe { node.as_ref().unwrap() }.replace(meta),
-            Ref::Node15(node, _) => unsafe { node.as_ref().unwrap() }.replace(meta),
-            Ref::Node256(node, _) => unsafe { node.as_ref().unwrap() }.replace(meta),
+            Ref::Node3(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
+            Ref::Node15(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
+            Ref::Node256(node) => unsafe { node.as_ref().unwrap() }.into_iter(),
         }
     }
 }
 
-impl Debug for Ref<'_> {
+impl Debug for Ref {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Ref::Node3(node3, _) => unsafe { node3.as_ref().unwrap() }.fmt(fmt),
-            Ref::Node15(node15, _) => unsafe { node15.as_ref().unwrap() }.fmt(fmt),
-            Ref::Node256(node256, _) => unsafe { node256.as_ref().unwrap() }.fmt(fmt),
+            Ref::Node3(node3) => unsafe { node3.as_ref().unwrap() }.fmt(fmt),
+            Ref::Node15(node15) => unsafe { node15.as_ref().unwrap() }.fmt(fmt),
+            Ref::Node256(node256) => unsafe { node256.as_ref().unwrap() }.fmt(fmt),
         }
     }
 }
