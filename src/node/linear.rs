@@ -137,7 +137,7 @@ where
             [(key, meta, data)] if key::Array::can_compress(&snapshot.key, &meta.key) => (
                 Op::Compress,
                 edge::Meta {
-                    key: key::Array::compress(&snapshot.key, *key, &meta.key),
+                    key: unsafe { key::Array::compress(&snapshot.key, *key, &meta.key) },
                     kind: snapshot.kind,
                     frozen: false,
                 },

@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::iter;
 
 use ribbit::u3;
 use ribbit::u56;
@@ -34,33 +33,33 @@ impl Array {
     }
 
     pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
-        if cfg!(feature = "opt-prefix") {
-            Len(unsafe {
-                u3::new_unchecked(
-                    (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
-                        .min(left.len.0.value())
-                        .min(right.len.0.value()),
-                )
-            })
-        } else {
-            let len = left
-                .bytes()
-                .zip(right.bytes())
-                .take_while(|(l, r)| l == r)
-                .count();
-            Len(u3::new(len as u8))
-        }
+        Len(unsafe {
+            u3::new_unchecked(
+                (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
+                    .min(left.len.0.value())
+                    .min(right.len.0.value()),
+            )
+        })
     }
 
-    pub(crate) fn expand(&self, index: Len) -> (Self, u8, Self) {
-        let buffer = self.buffer.to_bytes();
-        let index = index.to_usize();
-        let len = self.len.to_usize();
-
+    /// SAFETY: caller must guarantee `index < self.len` and `self.len > 0`.
+    pub(crate) unsafe fn expand(&self, index: Len) -> (Self, u8, Self) {
+        let index_byte = index.0.value();
+        let index_bit = index_byte << 3;
+        let buffer = self.buffer.0.value();
+        let len = self.len.0.value();
         (
-            Self::from_slice(&buffer[..index]),
-            buffer[index],
-            Self::from_slice(&buffer[index + 1..len]),
+            Self {
+                buffer: Buffer(unsafe {
+                    u56::new_unchecked(buffer & ((1u64 << index_bit) - 1u64))
+                }),
+                len: Len(unsafe { u3::new_unchecked(index_byte) }),
+            },
+            (buffer >> index_bit) as u8,
+            Self {
+                buffer: Buffer(unsafe { u56::new_unchecked(buffer >> (index_bit + 8)) }),
+                len: Len(unsafe { u3::new_unchecked(len - index_byte - 1) }),
+            },
         )
     }
 
@@ -70,22 +69,26 @@ impl Array {
         parent + 1 + child <= Len::MAX
     }
 
-    pub(crate) fn compress(parent: &Self, byte: u8, child: &Self) -> Self {
-        let mut buffer = [0u8; Len::MAX];
-
-        parent
-            .bytes()
-            .chain(iter::once(byte))
-            .chain(child.bytes())
-            .zip(&mut buffer)
-            .for_each(|(byte, save)| *save = byte);
-
-        Self::from_slice(&buffer[..parent.len.to_usize() + 1 + child.len.to_usize()])
+    /// SAFETY: caller must guarantee `can_compress(parent, child)`.
+    pub(crate) unsafe fn compress(parent: &Self, byte: u8, child: &Self) -> Self {
+        let index_bit = parent.len.0.value() << 3;
+        Self {
+            buffer: Buffer(unsafe {
+                u56::new_unchecked(
+                    parent.buffer.0.value()
+                        | ((byte as u64) << index_bit)
+                        | (child.buffer.0.value() << (index_bit + 8)),
+                )
+            }),
+            len: Len(unsafe { u3::new_unchecked(parent.len.0.value() + 1 + child.len.0.value()) }),
+        }
     }
 
     pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> {
         self.buffer
-            .to_bytes()
+            .0
+            .value()
+            .to_ne_bytes()
             .into_iter()
             .take(self.len.0.value() as usize)
     }
@@ -104,7 +107,7 @@ struct Buffer(u56);
 
 impl Buffer {
     fn from_slice(key: &[u8]) -> (Self, Len) {
-        let mut buffer = [0u8; Len::MAX];
+        let mut buffer = [0u8; 8];
         let len = key.len().min(Len::MAX);
 
         #[cfg(feature = "opt-memcpy")]
@@ -130,12 +133,9 @@ impl Buffer {
         #[cfg(not(feature = "opt-memcpy"))]
         buffer[..len].copy_from_slice(&key[..len]);
 
-        (Self(u56::from_ne_bytes(buffer)), unsafe {
-            Len(u3::new_unchecked(len as u8))
-        })
-    }
-
-    fn to_bytes(self) -> [u8; Len::MAX] {
-        self.0.to_ne_bytes()
+        (
+            Self(unsafe { u56::new_unchecked(u64::from_ne_bytes(buffer)) }),
+            unsafe { Len(u3::new_unchecked(len as u8)) },
+        )
     }
 }
