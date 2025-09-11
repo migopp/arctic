@@ -56,7 +56,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 } => {
                     assert_eq!(key.len(), len.to_usize());
                     let data = edge.load_high(Ordering::Acquire);
-
                     if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
                         continue;
                     }
@@ -69,13 +68,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 } => (len, kind),
             };
 
+            let data = edge.load_high(Ordering::Acquire);
             if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
                 continue;
             }
-            let data = edge.load_high(Ordering::Acquire);
-            let node = unsafe { data.to_node(kind) };
 
             let byte = key.get(len.to_usize())?;
+            let node = unsafe { data.to_node(kind) };
             let next = unsafe { node.as_node() }.get(*byte)?;
             self.push(len, node, next);
         }
@@ -109,6 +108,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         true if unsafe { node.as_node() }.is_frozen() => (),
                         true | false => {
                             let byte = key[len.to_usize()];
+                            #[allow(clippy::single_match)]
                             match unsafe { node.as_node() }.get_or_reserve(byte) {
                                 // Fast path: no need to replace
                                 Ok(edge) => {
