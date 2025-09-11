@@ -49,8 +49,10 @@ where
         let mut old = self.header.load(Ordering::Acquire);
 
         while !old.is_frozen() {
-            let Some((new, index)) = old.get_or_reserve(key) else {
-                return Err(Frozen);
+            let (new, index) = match old.get_or_reserve(key) {
+                Reservation::Found(index) => return Ok(&self.edges[index]),
+                Reservation::Grow => return Err(Frozen),
+                Reservation::Reserve(new, index) => (new, index),
             };
 
             match self
@@ -67,9 +69,14 @@ where
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
         let header = self.header.get();
-        let (header, index) = header.get_or_reserve(key)?;
-        self.header.set(header);
-        Some(&mut self.edges[index])
+        match header.get_or_reserve(key) {
+            Reservation::Found(index) => Some(&mut self.edges[index]),
+            Reservation::Grow => None,
+            Reservation::Reserve(header, index) => {
+                self.header.set(header);
+                Some(&mut self.edges[index])
+            }
+        }
     }
 
     fn is_frozen(&self) -> bool {
@@ -196,6 +203,12 @@ pub(super) struct Header<K> {
     pub(super) keys: K,
 }
 
+enum Reservation<K> {
+    Found(usize),
+    Reserve(Header<K>, usize),
+    Grow,
+}
+
 impl<K: KeyArray> Header<K> {
     fn is_frozen(&self) -> bool {
         self.frozen
@@ -216,26 +229,26 @@ impl<K: KeyArray> Header<K> {
         self.keys.get(key)
     }
 
-    fn get_or_reserve(&self, key: u8) -> Option<(Self, usize)> {
+    fn get_or_reserve(&self, key: u8) -> Reservation<K> {
         let index = self.get(key);
         let len = self.len();
 
         if index < len {
-            return Some((*self, index));
+            return Reservation::Found(index);
         }
 
         if len >= K::LEN {
-            return None;
+            return Reservation::Grow;
         }
 
-        Some((
+        Reservation::Reserve(
             Self {
                 len: u4::new((len + 1) as u8),
                 keys: self.keys.insert(len, key),
                 frozen: self.frozen,
             },
             len,
-        ))
+        )
     }
 
     fn keys(&self) -> impl Iterator<Item = u8> + '_ {

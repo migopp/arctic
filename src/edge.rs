@@ -55,15 +55,11 @@ impl Edge {
     }
 
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
-        let mut old = edge.load(Ordering::Relaxed);
-
-        while !old.frozen {
-            match edge.compare_exchange(
+        let mut old = edge.load_packed(Ordering::Relaxed);
+        while !old.frozen() {
+            match edge.compare_exchange_packed(
                 old,
-                Self {
-                    frozen: true,
-                    ..old
-                },
+                old.with_frozen(true),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
