@@ -39,19 +39,17 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         loop {
             let edge = self.here();
             let meta_packed = edge.load_low_packed(Ordering::Relaxed);
-            let meta = meta_packed.unpack();
-
-            let key = self.key();
-
-            let (len, child) = match meta.r#match(key) {
-                edge::Match::Partial { .. } => return None,
-                edge::Match::Full { len, child } => (len, child?),
-            };
-
             let data = edge.load_high(Ordering::Acquire);
             if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
                 continue;
             }
+            let meta = meta_packed.unpack();
+
+            let key = self.key();
+            let (len, child) = match meta.r#match(key) {
+                edge::Match::Partial { .. } => return None,
+                edge::Match::Full { len, child } => (len, child?),
+            };
 
             let kind = match child {
                 // Stop unconditionally at a leaf
@@ -80,13 +78,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         loop {
             let edge = self.here();
             let old_meta_packed = edge.load_low_packed(Ordering::Relaxed);
-            let old_meta = old_meta_packed.unpack();
-
             let old_data = edge.load_high(Ordering::Acquire);
-
             if edge.load_low_packed(Ordering::Relaxed) != old_meta_packed {
                 continue;
             }
+            let old_meta = old_meta_packed.unpack();
 
             let key = self.key();
 
