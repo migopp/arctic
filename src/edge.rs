@@ -64,7 +64,19 @@ pub(crate) struct Meta {
 }
 
 impl Meta {
-    pub(crate) fn r#match(&self, key: &[u8]) -> Match {
+    pub(crate) fn r#match(&self, key: &[u8]) -> Option<key::Len> {
+        if cfg!(feature = "opt-empty-match") && key.is_empty() {
+            return Some(key::Len::ZERO);
+        }
+
+        let search_key = key::Array::from_slice(key);
+        let edge_key = self.key;
+        let prefix_len = key::Array::prefix(&search_key, &edge_key);
+
+        (search_key.len >= edge_key.len && edge_key.len == prefix_len).then_some(prefix_len)
+    }
+
+    pub(crate) fn match_or_insert(&self, key: &[u8]) -> Match {
         if cfg!(feature = "opt-empty-match") && key.is_empty() {
             return Match::Full {
                 len: key::Len::ZERO,

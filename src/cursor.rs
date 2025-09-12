@@ -46,12 +46,9 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let meta = meta_packed.unpack();
 
             let key = self.key();
-            let (len, child) = match meta.r#match(key) {
-                edge::Match::Partial { .. } => return None,
-                edge::Match::Full { len, child } => (len, child?),
-            };
+            let len = meta.r#match(key)?;
 
-            let kind = match child {
+            let kind = match meta.child()? {
                 // Stop unconditionally at a leaf
                 edge::Child::Leaf => return Some((meta, data)),
 
@@ -86,7 +83,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
             let key = self.key();
 
-            let (op, new_meta, new_data) = match old_meta.r#match(key) {
+            let (op, new_meta, new_data) = match old_meta.match_or_insert(key) {
                 edge::Match::Full {
                     len,
                     child: Some(edge::Child::Node(kind)),
