@@ -139,30 +139,22 @@ impl<'a> Iterator for EdgeIter<'a> {
 }
 
 pub(crate) enum KeyIter {
-    K3 { keys: [u8; 3], next: u8 },
-    K15 { keys: [u8; 15], next: u8 },
-    K256 { next: u16 },
+    K3(core::iter::Take<core::array::IntoIter<u8, 4>>),
+    K15(core::iter::Take<core::array::IntoIter<u8, 16>>),
+    K256(core::ops::RangeInclusive<u8>),
 }
 
 impl KeyIter {
     pub(crate) fn new_3(keys: u24) -> Self {
-        let keys = keys.value();
-        Self::K3 {
-            keys: core::array::from_fn(|index| (keys >> (index * 8)) as u8),
-            next: 0,
-        }
+        Self::K3(keys.value().to_ne_bytes().into_iter().take(3))
     }
 
     pub(crate) fn new_15(keys: u120) -> Self {
-        let keys = keys.value();
-        Self::K15 {
-            keys: core::array::from_fn(|index| (keys >> (index * 8)) as u8),
-            next: 0,
-        }
+        Self::K15(keys.value().to_ne_bytes().into_iter().take(15))
     }
 
     pub(crate) fn new_256() -> Self {
-        Self::K256 { next: 0 }
+        Self::K256(0..=255u8)
     }
 }
 
@@ -171,24 +163,9 @@ impl Iterator for KeyIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            KeyIter::K3 { keys, next } => {
-                let key = keys.get(*next as usize)?;
-                *next += 1;
-                Some(*key)
-            }
-
-            KeyIter::K15 { keys, next } => {
-                let key = keys.get(*next as usize)?;
-                *next += 1;
-                Some(*key)
-            }
-
-            KeyIter::K256 { next } if *next >= 256 => None,
-            KeyIter::K256 { next } => {
-                let key = *next;
-                *next += 1;
-                Some(key as u8)
-            }
+            KeyIter::K3(iter) => iter.next(),
+            KeyIter::K15(iter) => iter.next(),
+            KeyIter::K256(iter) => iter.next(),
         }
     }
 }
