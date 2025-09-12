@@ -54,7 +54,14 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     len,
                     child: Some(edge::Child::Leaf),
                 } => {
-                    assert_eq!(key.len(), len.to_usize());
+                    if cfg!(feature = "validate") {
+                        assert_eq!(
+                            key.len(),
+                            len.to_usize(),
+                            "Precondition: no key is a prefix of another key",
+                        );
+                    }
+
                     let data = edge.load_high(Ordering::Acquire);
                     if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
                         continue;
@@ -65,7 +72,17 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 edge::Match::Full {
                     len,
                     child: Some(edge::Child::Node(kind)),
-                } => (len, kind),
+                } => {
+                    if cfg!(feature = "validate") {
+                        assert_ne!(
+                            len,
+                            key::Len::ZERO,
+                            "Precondition: no key is a prefix of another key",
+                        );
+                    }
+
+                    (len, kind)
+                }
             };
 
             let data = edge.load_high(Ordering::Acquire);

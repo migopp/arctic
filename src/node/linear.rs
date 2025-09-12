@@ -104,7 +104,13 @@ where
     fn replace(&self, snapshot: &edge::Meta) -> (Op, edge::Meta, edge::Data) {
         let header = self.header.load(Ordering::Relaxed);
 
-        assert!(header.is_frozen());
+        if cfg!(feature = "validate") {
+            assert!(
+                header.is_frozen(),
+                "{} header must be frozen before replace",
+                core::any::type_name::<Self>(),
+            );
+        }
 
         let mut edges: [(u8, edge::Meta, edge::Data); LEN] =
             core::array::from_fn(|_| (0, edge::Meta::default(), edge::Data::default()));
@@ -114,7 +120,15 @@ where
             .iter()
             .map(|edge| (edge, edge.load_low(Ordering::Relaxed)))
             .zip(header.keys())
-            .inspect(|((_, meta), _)| assert!(meta.frozen))
+            .inspect(|((_, meta), _)| {
+                if cfg!(feature = "validate") {
+                    assert!(
+                        meta.frozen,
+                        "{} edge must be frozen before replace",
+                        core::any::type_name::<Self>(),
+                    )
+                }
+            })
             .filter(|((_, meta), _)| !matches!(meta.kind, node::Kind::None))
             .map(|((edge, meta), key)| (key, meta.unfreeze(), edge.load_high(Ordering::Relaxed)))
             .zip(&mut edges)

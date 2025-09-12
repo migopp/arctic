@@ -84,10 +84,12 @@ impl Meta {
             };
         }
 
-        assert!(
-            search_key.len >= edge_key.len || edge_key.len != prefix_len,
-            "Precondition: no key is a prefix of another key",
-        );
+        if cfg!(feature = "validate") {
+            assert!(
+                search_key.len >= edge_key.len || edge_key.len != prefix_len,
+                "Precondition: no key is a prefix of another key",
+            );
+        }
 
         let (start, middle, end) = unsafe { edge_key.expand(prefix_len) };
         Match::Partial { start, middle, end }
