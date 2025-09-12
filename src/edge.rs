@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
@@ -144,11 +145,11 @@ impl Data {
         self.0
     }
 
-    pub(crate) unsafe fn to_node(self, kind: Node) -> node::Ref {
+    pub(crate) unsafe fn to_node<'a>(self, kind: Node) -> node::Ref<'a> {
         match kind {
-            Node::Node3 => node::Ref::Node3(self.0 as *mut Node3),
-            Node::Node15 => node::Ref::Node15(self.0 as *mut Node15),
-            Node::Node256 => node::Ref::Node256(self.0 as *mut Node256),
+            Node::Node3 => node::Ref::Node3(self.0 as *mut Node3, PhantomData),
+            Node::Node15 => node::Ref::Node15(self.0 as *mut Node15, PhantomData),
+            Node::Node256 => node::Ref::Node256(self.0 as *mut Node256, PhantomData),
         }
     }
 
