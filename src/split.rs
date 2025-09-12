@@ -90,19 +90,19 @@ where
         unsafe { self.pair.high.load_packed(ordering) }
     }
 
-    // #[inline]
-    // pub(crate) fn load(&self, ordering: Ordering) -> (L, H) {
-    //     const { Self::INVARIANT }
-    //     let (low, high) = self.load_packed(ordering);
-    //     (low.unpack(), high.unpack())
-    // }
-    //
-    // #[inline]
-    // pub(crate) fn load_packed(&self, ordering: Ordering) -> (ribbit::Packed<L>, ribbit::Packed<H>) {
-    //     const { Self::INVARIANT }
-    //     let whole = unsafe { self.whole.load_packed(ordering) };
-    //     (whole.low(), whole.high())
-    // }
+    #[inline]
+    pub(crate) fn load(&self, ordering: Ordering) -> (L, H) {
+        const { Self::INVARIANT }
+        let (low, high) = self.load_packed(ordering);
+        (low.unpack(), high.unpack())
+    }
+
+    #[inline]
+    pub(crate) fn load_packed(&self, ordering: Ordering) -> (ribbit::Packed<L>, ribbit::Packed<H>) {
+        const { Self::INVARIANT }
+        let whole = unsafe { self.whole.load_packed(ordering) };
+        (whole.low(), whole.high())
+    }
 
     #[inline]
     pub(crate) fn set_low(&mut self, low: L) {

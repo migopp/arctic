@@ -9,6 +9,7 @@ pub mod stat;
 pub use raw::Raw;
 
 use core::marker::PhantomData;
+use core::ops::RangeBounds;
 use std::rc::Rc;
 
 pub(crate) use edge::Edge;
@@ -68,6 +69,16 @@ impl<K: Key, V: Value> Map<K, V> {
 
     pub fn values(&mut self) -> impl Iterator<Item = V> + '_ {
         self.iter().map(|(_, value)| value)
+    }
+
+    pub fn scan<'a, R: RangeBounds<&'a K> + 'a>(&self, range: R) -> impl Iterator<Item = V> + 'a
+    where
+        K: 'a,
+        V: 'a,
+    {
+        let low = range.start_bound().map(|low| low.to_byte_array());
+        let high = range.end_bound().map(|high| high.to_byte_array());
+        self.raw.scan((low, high)).map(V::from_u64)
     }
 }
 
@@ -255,6 +266,41 @@ mod tests {
     }
 
     #[test]
+    fn scan_leaf() {
+        let map = Map::default();
+        let key = [1];
+        map.insert(&key, 1);
+        assert_eq!(map.scan(&[1]..=&[1]).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn scan_node3() {
+        let map = insert_all(0u64..3);
+        assert_eq!(
+            map.scan(&0..=&2).collect::<Vec<_>>(),
+            (0..3).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_node256() {
+        let map = insert_all(0u64..256);
+        assert_eq!(
+            map.scan(&0..=&255).collect::<Vec<_>>(),
+            (0..256).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_gap() {
+        let map = insert_all((0u64..256).step_by(2));
+        assert_eq!(
+            map.scan(&64..=&191).collect::<Vec<_>>(),
+            (32..96).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn node3_overwrite() {
         let mut map = Map::default();
 
@@ -296,7 +342,7 @@ mod tests {
         insert_all(0u8..=255);
     }
 
-    fn insert_all<I, K>(iter: I)
+    fn insert_all<I, K>(iter: I) -> Map<K, u32>
     where
         I: IntoIterator<Item = K>,
         I::IntoIter: Clone,
@@ -331,5 +377,7 @@ mod tests {
                 assert_eq!(lk, rk);
                 assert_eq!(lv, rv);
             });
+
+        map
     }
 }

@@ -35,7 +35,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse<const LEAF: bool>(&mut self) -> Option<(edge::Meta, edge::Data)> {
+    pub(crate) fn traverse<const LEAF: bool>(&mut self) -> Option<(usize, edge::Meta, edge::Data)> {
         loop {
             let edge = self.here();
             let meta_packed = edge.load_low_packed(Ordering::Relaxed);
@@ -46,17 +46,19 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let meta = meta_packed.unpack();
 
             let key = self.key();
-            let len = meta.r#match(key)?;
+            let len = meta.r#match(key);
 
             let kind = match meta.child()? {
                 // Stop unconditionally at a leaf
-                edge::Child::Leaf => return Some((meta, data)),
+                edge::Child::Leaf => return Some((self.index, meta, data)),
 
-                // Continue traversal if there are more key bytes
-                edge::Child::Node(kind) if key.len() > len.to_usize() => kind,
+                // Continue traversal only if exact match
+                edge::Child::Node(kind) if key.len() > len.to_usize() && len == meta.key.len => {
+                    kind
+                }
 
                 edge::Child::Node(_) if LEAF => return None,
-                edge::Child::Node(_) => return Some((meta, data)),
+                edge::Child::Node(_) => return Some((self.index, meta, data)),
             };
 
             let byte = key.get(len.to_usize())?;

@@ -84,6 +84,15 @@ impl Array {
         }
     }
 
+    pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, prefix: Option<u8>, with: F) -> T {
+        let bytes = match prefix {
+            Some(prefix) => (self.buffer.0.value() << 8 | prefix as u64).to_ne_bytes(),
+            None => self.buffer.0.value().to_ne_bytes(),
+        };
+        let slice = &bytes[..self.len.to_usize() + prefix.is_some() as usize];
+        with(slice)
+    }
+
     pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> {
         self.buffer
             .0

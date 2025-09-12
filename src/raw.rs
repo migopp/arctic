@@ -1,5 +1,7 @@
 use core::iter;
 use core::mem;
+use core::ops::Bound;
+use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 use std::rc::Rc;
 
@@ -7,6 +9,7 @@ use crate::cursor;
 use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
+use crate::key;
 use crate::node;
 use crate::Edge;
 
@@ -92,13 +95,17 @@ impl Raw {
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, data) = cursor.traverse::<true>()?;
+        let (len, meta, data) = cursor.traverse::<true>()?;
+        if cfg!(feature = "validate") {
+            assert_eq!(len + meta.key.len.to_usize(), key.len());
+            assert_eq!(meta.kind, node::Kind::Leaf);
+        }
         Some(data.to_leaf())
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (mut old_meta, mut old_data) = cursor.traverse::<true>()?;
+        let (_, mut old_meta, mut old_data) = cursor.traverse::<true>()?;
         old_meta = old_meta.unfreeze();
         let edge = cursor.here();
 
@@ -135,7 +142,7 @@ impl Raw {
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (mut old_meta, mut old_data) = cursor.traverse::<true>()?;
+        let (_, mut old_meta, mut old_data) = cursor.traverse::<true>()?;
         old_meta = old_meta.unfreeze();
         let edge = cursor.here();
 
@@ -195,23 +202,66 @@ impl Raw {
     pub(crate) fn preorder(
         &mut self,
     ) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, edge::Meta, edge::Data)> + '_ {
-        Iter::new(&mut self.root)
+        EntryIter::new(&mut self.root)
+    }
+
+    pub fn scan<'r, R: RangeBounds<B> + 'r, B: AsRef<[u8]> + 'r>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = u64> + 'r {
+        let low = range.start_bound().map(|low| low.as_ref());
+        let high = range.end_bound().map(|high| high.as_ref());
+
+        let prefix = match (low, high) {
+            (Bound::Unbounded, _) | (_, Bound::Unbounded) => &[],
+            (
+                Bound::Included(low) | Bound::Excluded(low),
+                Bound::Included(high) | Bound::Excluded(high),
+            ) => {
+                let prefix = low
+                    .iter()
+                    .zip(high)
+                    .position(|(left, right)| left != right)
+                    .unwrap_or_else(|| low.len().min(high.len()));
+                &low[..prefix]
+            }
+        };
+
+        let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, prefix);
+        let Some((len, _, _)) = cursor.traverse::<false>() else {
+            return Or::L(None.into_iter());
+        };
+
+        let iter = ScanIter::new(
+            low.map(|low| &low[len..]),
+            high.map(|high| &high[len..]),
+            cursor.here(),
+        );
+
+        Or::R(
+            iter.filter_map(|(meta, data)| match meta.kind {
+                node::Kind::Leaf => Some(data.to_leaf()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .into_iter(),
+        )
     }
 }
 
-struct Iter<'a> {
+struct EntryIter<'a> {
     // Workaround for lending iterator
     // https://users.rust-lang.org/t/how-to-write-an-iterator-that-returns-references-to-itself/72386/5
     key: Rc<Vec<u8>>,
 
     // TODO: allow starting traversal at a given prefix?
-    frontier: Vec<(usize, Or<IterRoot<'a>, IterNode<'a>>)>,
+    frontier: Vec<(usize, Or<EdgeIter<'a>, NodeIter<'a>>)>,
 }
 
-type IterRoot<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
-type IterNode<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
+type EdgeIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
+type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
-impl<'a> Iter<'a> {
+impl<'a> EntryIter<'a> {
     fn new(root: &'a mut Edge) -> Self {
         Self {
             key: Rc::new(Vec::new()),
@@ -229,7 +279,7 @@ impl<'a> Iter<'a> {
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl<'a> Iterator for EntryIter<'a> {
     type Item = (usize, Rc<Vec<u8>>, edge::Meta, edge::Data);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -296,9 +346,139 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+struct ScanIter<'a> {
+    index: usize,
+    low: Bound<&'a [u8]>,
+    high: Bound<&'a [u8]>,
+
+    root: node::EdgeIter<'a>,
+    frontier: Vec<(usize, NodeIter<'a>)>,
+}
+
+impl<'a> ScanIter<'a> {
+    fn new(low: Bound<&'a [u8]>, high: Bound<&'a [u8]>, root: &'a Edge) -> Self {
+        Self {
+            index: 0,
+            low,
+            high,
+            root: node::EdgeIter::new(core::slice::from_ref(root)),
+            frontier: vec![],
+        }
+    }
+
+    fn contains(
+        index: usize,
+        low: Bound<&'a [u8]>,
+        high: Bound<&'a [u8]>,
+        prefix: Option<u8>,
+        key: &key::Array,
+    ) -> bool {
+        key.with_bytes(prefix, |key| {
+            match low.map(|low| &low[index..]) {
+                // Accept prefixes
+                Bound::Included(low) | Bound::Excluded(low) if key.len() < low.len() => {
+                    if key != &low[..key.len()] {
+                        return false;
+                    }
+                }
+                Bound::Included(low) if key < low => return false,
+                Bound::Excluded(low) if key <= low => return false,
+                Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded => (),
+            }
+            match high.map(|high| &high[index..]) {
+                Bound::Included(high) => key <= high,
+                Bound::Excluded(high) => key < high,
+                Bound::Unbounded => true,
+            }
+        })
+    }
+}
+
+impl<'a> Iterator for ScanIter<'a> {
+    type Item = (edge::Meta, edge::Data);
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(edge) = self.root.next() {
+            let (meta, data) = edge.load(Ordering::Relaxed);
+
+            // Root
+            assert!(Self::contains(
+                self.index, self.low, self.high, None, &meta.key
+            ));
+
+            let kind = match meta.child()? {
+                edge::Child::Leaf => return Some((meta, data)),
+                edge::Child::Node(kind) => kind,
+            };
+
+            let node = unsafe { data.to_node(kind) };
+            self.frontier.push((
+                self.index,
+                iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
+            ));
+            self.index += meta.key.len.to_usize();
+        }
+
+        'vertical: loop {
+            let (index, iter) = self.frontier.last_mut()?;
+
+            'horizontal: loop {
+                let Some((descend, (key, edge))) = iter.peek_mut() else {
+                    self.index = *index;
+                    self.frontier.pop();
+                    continue 'vertical;
+                };
+
+                let (meta, data) = edge.load(Ordering::Relaxed);
+
+                if !Self::contains(self.index, self.low, self.high, Some(*key), &meta.key) {
+                    iter.next();
+                    continue 'horizontal;
+                }
+
+                let kind = match meta.child() {
+                    None | Some(edge::Child::Leaf) => {
+                        iter.next();
+                        return Some((meta, data));
+                    }
+                    Some(edge::Child::Node(kind)) => kind,
+                };
+
+                let node = unsafe { data.to_node(kind) };
+
+                if !mem::replace(descend, true) {
+                    self.frontier.push((
+                        self.index,
+                        iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
+                    ));
+                    self.index += 1 + meta.key.len.to_usize();
+                    return Some((meta, data));
+                } else {
+                    iter.next();
+                    continue 'vertical;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
 enum Or<L, R> {
     L(L),
     R(R),
+}
+
+impl<L, R, T> Iterator for Or<L, R>
+where
+    L: Iterator<Item = T>,
+    R: Iterator<Item = T>,
+{
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Or::L(left) => left.next(),
+            Or::R(right) => right.next(),
+        }
+    }
 }
 
 impl<L, R> Or<L, R>
