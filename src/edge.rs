@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
@@ -146,10 +145,22 @@ impl Data {
     }
 
     pub(crate) unsafe fn to_node<'a>(self, kind: Node) -> node::Ref<'a> {
-        match kind {
-            Node::Node3 => node::Ref::Node3(self.0 as *mut Node3, PhantomData),
-            Node::Node15 => node::Ref::Node15(self.0 as *mut Node15, PhantomData),
-            Node::Node256 => node::Ref::Node256(self.0 as *mut Node256, PhantomData),
+        if cfg!(feature = "validate") {
+            match kind {
+                Node::Node3 => node::Ref::Node3((self.0 as *mut Node3).as_ref().unwrap()),
+                Node::Node15 => node::Ref::Node15((self.0 as *mut Node15).as_ref().unwrap()),
+                Node::Node256 => node::Ref::Node256((self.0 as *mut Node256).as_ref().unwrap()),
+            }
+        } else {
+            match kind {
+                Node::Node3 => node::Ref::Node3((self.0 as *mut Node3).as_ref().unwrap_unchecked()),
+                Node::Node15 => {
+                    node::Ref::Node15((self.0 as *mut Node15).as_ref().unwrap_unchecked())
+                }
+                Node::Node256 => {
+                    node::Ref::Node256((self.0 as *mut Node256).as_ref().unwrap_unchecked())
+                }
+            }
         }
     }
 
