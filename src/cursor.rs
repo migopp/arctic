@@ -13,7 +13,7 @@ use crate::node::Node3;
 use crate::Edge;
 
 pub(crate) struct Cursor<'a, 'k, P> {
-    key: &'k [u8],
+    prefix: &'k [u8],
     index: usize,
     here: &'a Edge,
     history: P,
@@ -26,16 +26,16 @@ pub(crate) enum Op {
 }
 
 impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
-    pub(crate) fn new(root: &'a Edge, key: &'k [u8]) -> Self {
+    pub(crate) fn new(root: &'a Edge, prefix: &'k [u8]) -> Self {
         Self {
-            key,
+            prefix,
             index: 0,
             here: root,
             history: P::default(),
         }
     }
 
-    pub(crate) fn traverse_weak(&mut self) -> Option<(edge::Meta, edge::Data)> {
+    pub(crate) fn traverse<const LEAF: bool>(&mut self) -> Option<(edge::Meta, edge::Data)> {
         loop {
             let edge = self.here();
             let meta_packed = edge.load_low_packed(Ordering::Relaxed);
@@ -43,52 +43,26 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
             let key = self.key();
 
-            let (len, kind) = match meta.r#match(key) {
-                edge::Match::Full {
-                    len: _,
-                    child: None,
-                }
-                | edge::Match::Partial { .. } => return None,
-
-                edge::Match::Full {
-                    len,
-                    child: Some(edge::Child::Leaf),
-                } => {
-                    if cfg!(feature = "validate") {
-                        assert_eq!(
-                            key.len(),
-                            len.to_usize(),
-                            "Precondition: no key is a prefix of another key",
-                        );
-                    }
-
-                    let data = edge.load_high(Ordering::Acquire);
-                    if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
-                        continue;
-                    }
-                    return Some((meta, data));
-                }
-
-                edge::Match::Full {
-                    len,
-                    child: Some(edge::Child::Node(kind)),
-                } => {
-                    if cfg!(feature = "validate") {
-                        assert_ne!(
-                            len,
-                            key::Len::ZERO,
-                            "Precondition: no key is a prefix of another key",
-                        );
-                    }
-
-                    (len, kind)
-                }
+            let (len, child) = match meta.r#match(key) {
+                edge::Match::Partial { .. } => return None,
+                edge::Match::Full { len, child } => (len, child?),
             };
 
             let data = edge.load_high(Ordering::Acquire);
             if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
                 continue;
             }
+
+            let kind = match child {
+                // Stop unconditionally at a leaf
+                edge::Child::Leaf => return Some((meta, data)),
+
+                // Continue traversal if there are more key bytes
+                edge::Child::Node(kind) if key.len() > len.to_usize() => kind,
+
+                edge::Child::Node(_) if LEAF => return None,
+                edge::Child::Node(_) => return Some((meta, data)),
+            };
 
             let byte = key.get(len.to_usize())?;
             let node = unsafe { data.to_node(kind) };
@@ -97,7 +71,9 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse_strong(
+    /// Return CAS operands to either insert the leaf or structurally update
+    /// the tree on the way to inserting the leaf.
+    pub(crate) fn traverse_or_insert(
         &mut self,
         value: u64,
     ) -> (Op, (edge::Meta, edge::Data), (edge::Meta, edge::Data)) {
@@ -219,7 +195,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
     #[inline]
     pub(crate) fn key(&self) -> &'k [u8] {
-        &self.key[self.index..]
+        &self.prefix[self.index..]
     }
 }
 

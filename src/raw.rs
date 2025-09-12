@@ -52,7 +52,7 @@ impl Raw {
         let mut cursor = Cursor::<P>::new(&self.root, key);
 
         loop {
-            let (op, (old_meta, old_data), (new_meta, new_data)) = cursor.traverse_strong(value);
+            let (op, (old_meta, old_data), (new_meta, new_data)) = cursor.traverse_or_insert(value);
 
             let meta = match cursor.here().compare_exchange(
                 (old_meta.unfreeze(), old_data),
@@ -92,13 +92,13 @@ impl Raw {
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, data) = cursor.traverse_weak()?;
+        let (_, data) = cursor.traverse::<true>()?;
         Some(data.to_leaf())
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (mut old_meta, mut old_data) = cursor.traverse_weak()?;
+        let (mut old_meta, mut old_data) = cursor.traverse::<true>()?;
         old_meta = old_meta.unfreeze();
         let edge = cursor.here();
 
@@ -135,7 +135,7 @@ impl Raw {
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (mut old_meta, mut old_data) = cursor.traverse_weak()?;
+        let (mut old_meta, mut old_data) = cursor.traverse::<true>()?;
         old_meta = old_meta.unfreeze();
         let edge = cursor.here();
 
