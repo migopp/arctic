@@ -205,6 +205,29 @@ impl Raw {
         EntryIter::new(&mut self.root)
     }
 
+    pub fn scan(&self, low: &[u8], count: usize) -> impl Iterator<Item = u64> {
+        let iter = ScanIter::new(Bound::Included(low), Bound::Unbounded, &self.root);
+
+        match iter {
+            Or::L(leaf) => Or::L(leaf.into_iter()),
+            Or::R(iter) => Or::R(
+                iter.flat_map(|node| {
+                    unsafe { node.iter() }.filter_map(|(_, edge)| {
+                        match edge.load_low(Ordering::Relaxed) {
+                            meta if matches!(meta.kind, node::Kind::Leaf) => {
+                                Some(edge.load_high(Ordering::Acquire).to_leaf())
+                            }
+                            _ => None,
+                        }
+                    })
+                })
+                .take(count)
+                .collect::<Vec<_>>()
+                .into_iter(),
+            ),
+        }
+    }
+
     pub fn range<'r, R: RangeBounds<B> + 'r, B: AsRef<[u8]> + 'r>(
         &self,
         range: R,

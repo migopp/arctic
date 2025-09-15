@@ -71,6 +71,11 @@ impl<K: Key, V: Value> Map<K, V> {
         self.iter().map(|(_, value)| value)
     }
 
+    pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = V> {
+        let low = low.to_byte_array();
+        self.raw.scan(low.as_ref(), count).map(V::from_u64)
+    }
+
     pub fn range<'a, R: RangeBounds<&'a K> + 'a>(&self, range: R) -> impl Iterator<Item = V> + 'a
     where
         K: 'a,
