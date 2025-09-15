@@ -292,6 +292,15 @@ mod tests {
     }
 
     #[test]
+    fn scan_node256_exclusive() {
+        let map = insert_all(0u64..256);
+        assert_eq!(
+            map.scan(&0..&256).collect::<Vec<_>>(),
+            (0..256).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn scan_gap() {
         let map = insert_all((0u64..256).step_by(2));
         assert_eq!(

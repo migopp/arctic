@@ -1,3 +1,4 @@
+use core::cmp;
 use core::iter;
 use core::mem;
 use core::ops::Bound;
@@ -347,9 +348,7 @@ impl<'a> Iterator for EntryIter<'a> {
 }
 
 struct ScanIter<'a> {
-    index: usize,
-    low: Bound<&'a [u8]>,
-    high: Bound<&'a [u8]>,
+    window: Window<'a>,
 
     root: node::EdgeIter<'a>,
     frontier: Vec<(usize, NodeIter<'a>)>,
@@ -358,39 +357,22 @@ struct ScanIter<'a> {
 impl<'a> ScanIter<'a> {
     fn new(low: Bound<&'a [u8]>, high: Bound<&'a [u8]>, root: &'a Edge) -> Self {
         Self {
-            index: 0,
-            low,
-            high,
+            window: Window {
+                index: 0,
+                low,
+                high,
+                within_low: match low {
+                    Bound::Unbounded => Within::Yes(0),
+                    _ => Within::Maybe,
+                },
+                within_high: match high {
+                    Bound::Unbounded => Within::Yes(0),
+                    _ => Within::Maybe,
+                },
+            },
             root: node::EdgeIter::new(core::slice::from_ref(root)),
             frontier: vec![],
         }
-    }
-
-    fn contains(
-        index: usize,
-        low: Bound<&'a [u8]>,
-        high: Bound<&'a [u8]>,
-        prefix: Option<u8>,
-        key: &key::Array,
-    ) -> bool {
-        key.with_bytes(prefix, |key| {
-            match low.map(|low| &low[index..]) {
-                // Accept prefixes
-                Bound::Included(low) | Bound::Excluded(low) if key.len() < low.len() => {
-                    if key != &low[..key.len()] {
-                        return false;
-                    }
-                }
-                Bound::Included(low) if key < low => return false,
-                Bound::Excluded(low) if key <= low => return false,
-                Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded => (),
-            }
-            match high.map(|high| &high[index..]) {
-                Bound::Included(high) => key <= high,
-                Bound::Excluded(high) => key < high,
-                Bound::Unbounded => true,
-            }
-        })
     }
 }
 
@@ -400,10 +382,9 @@ impl<'a> Iterator for ScanIter<'a> {
         if let Some(edge) = self.root.next() {
             let (meta, data) = edge.load(Ordering::Relaxed);
 
-            // Root
-            assert!(Self::contains(
-                self.index, self.low, self.high, None, &meta.key
-            ));
+            meta.key.with_bytes(None, |key| {
+                assert!(self.window.push(key));
+            });
 
             let kind = match meta.child()? {
                 edge::Child::Leaf => return Some((meta, data)),
@@ -412,31 +393,31 @@ impl<'a> Iterator for ScanIter<'a> {
 
             let node = unsafe { data.to_node(kind) };
             self.frontier.push((
-                self.index,
+                meta.key.len.to_usize(),
                 iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
             ));
-            self.index += meta.key.len.to_usize();
         }
 
         'vertical: loop {
-            let (index, iter) = self.frontier.last_mut()?;
+            let (delta, iter) = self.frontier.last_mut()?;
 
             'horizontal: loop {
                 let Some((descend, (key, edge))) = iter.peek_mut() else {
-                    self.index = *index;
+                    self.window.pop(*delta);
                     self.frontier.pop();
                     continue 'vertical;
                 };
 
                 let (meta, data) = edge.load(Ordering::Relaxed);
 
-                if !Self::contains(self.index, self.low, self.high, Some(*key), &meta.key) {
+                if !meta.key.with_bytes(Some(*key), |key| self.window.push(key)) {
                     iter.next();
                     continue 'horizontal;
                 }
 
                 let kind = match meta.child() {
                     None | Some(edge::Child::Leaf) => {
+                        self.window.pop(1 + meta.key.len.to_usize());
                         iter.next();
                         return Some((meta, data));
                     }
@@ -447,16 +428,127 @@ impl<'a> Iterator for ScanIter<'a> {
 
                 if !mem::replace(descend, true) {
                     self.frontier.push((
-                        self.index,
+                        1 + meta.key.len.to_usize(),
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
                     ));
-                    self.index += 1 + meta.key.len.to_usize();
                     return Some((meta, data));
                 } else {
                     iter.next();
                     continue 'vertical;
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Window<'a> {
+    index: usize,
+    low: Bound<&'a [u8]>,
+    high: Bound<&'a [u8]>,
+    within_low: Within,
+    within_high: Within,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Within {
+    Yes(usize),
+    Maybe,
+}
+
+impl<'a> Window<'a> {
+    fn push(&mut self, key: &[u8]) -> bool {
+        if let (Within::Yes(_), Within::Yes(_)) = (self.within_low, self.within_high) {
+            self.index += key.len();
+            return true;
+        }
+
+        // Check against low
+        if matches!(self.within_low, Within::Maybe) {
+            match self.low.map(|low| &low[self.index..]) {
+                Bound::Unbounded => {
+                    assert_eq!(self.index, 0);
+                    self.within_low = Within::Yes(self.index);
+                }
+                Bound::Included(low) if key.len() == low.len() => {
+                    if key < low {
+                        return false;
+                    }
+                }
+                Bound::Excluded(low) if key.len() == low.len() => {
+                    if key <= low {
+                        return false;
+                    }
+                }
+
+                Bound::Included(low) | Bound::Excluded(low) => {
+                    if key.len() < low.len() {
+                        match low[..key.len()].cmp(key) {
+                            cmp::Ordering::Less => self.within_low = Within::Yes(self.index),
+                            cmp::Ordering::Equal => (),
+                            cmp::Ordering::Greater => {
+                                return false;
+                            }
+                        }
+                    } else {
+                        assert!(key.len() > low.len());
+                        self.within_low = Within::Yes(self.index);
+                    }
+                }
+            }
+        }
+
+        // Check against high
+        if matches!(self.within_high, Within::Maybe) {
+            match self.high.map(|high| &high[self.index..]) {
+                Bound::Unbounded => {
+                    assert_eq!(self.index, 0);
+                    self.within_high = Within::Yes(self.index);
+                }
+                Bound::Included(high) if key.len() == high.len() => {
+                    if key > high {
+                        return false;
+                    }
+                }
+                Bound::Excluded(high) if key.len() == high.len() => {
+                    if key >= high {
+                        return false;
+                    }
+                }
+                Bound::Included(high) | Bound::Excluded(high) => {
+                    if key.len() < high.len() {
+                        match high[..key.len()].cmp(key) {
+                            cmp::Ordering::Less => {
+                                return false;
+                            }
+                            cmp::Ordering::Equal => (),
+                            cmp::Ordering::Greater => {
+                                self.within_high = Within::Yes(self.index);
+                            }
+                        }
+                    } else {
+                        assert!(key.len() > high.len());
+                        return false;
+                    }
+                }
+            }
+        }
+
+        self.index += key.len();
+        true
+    }
+
+    fn pop(&mut self, delta: usize) {
+        self.index -= delta;
+
+        match self.within_low {
+            Within::Yes(reset) if self.index == reset => self.within_low = Within::Maybe,
+            _ => (),
+        }
+
+        match self.within_high {
+            Within::Yes(reset) if self.index == reset => self.within_high = Within::Maybe,
+            _ => (),
         }
     }
 }
