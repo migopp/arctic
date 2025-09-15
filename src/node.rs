@@ -1,8 +1,5 @@
 use core::fmt::Debug;
 
-use ribbit::u120;
-use ribbit::u24;
-
 mod linear;
 mod node15;
 mod node256;
@@ -183,12 +180,12 @@ pub(crate) enum KeyIter {
 }
 
 impl KeyIter {
-    pub(crate) fn new_3(keys: u24) -> Self {
-        Self::K3(keys.value().to_ne_bytes().into_iter().take(3))
+    pub(crate) fn new_3(keys: u32) -> Self {
+        Self::K3(keys.to_ne_bytes().into_iter().take(3))
     }
 
-    pub(crate) fn new_15(keys: u120) -> Self {
-        Self::K15(keys.value().to_ne_bytes().into_iter().take(15))
+    pub(crate) fn new_15(keys: u128) -> Self {
+        Self::K15(keys.to_ne_bytes().into_iter().take(15))
     }
 
     pub(crate) fn new_256() -> Self {

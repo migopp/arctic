@@ -13,16 +13,9 @@ use crate::edge;
 use crate::node;
 use crate::Edge;
 
+#[derive(Default)]
 pub struct Raw {
     root: Edge,
-}
-
-impl Default for Raw {
-    fn default() -> Self {
-        Raw {
-            root: Edge::default(),
-        }
-    }
 }
 
 impl Raw {

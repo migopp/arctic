@@ -1,9 +1,6 @@
 use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
-use ribbit::u4;
-
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -14,99 +11,55 @@ use crate::Node;
 
 #[repr(C)]
 #[derive(Debug)]
-#[expect(private_bounds)]
-pub(crate) struct Linear<const LEN: usize, K>
-where
-    K: KeyArray,
-{
-    pub(super) header: Atomic128<Header<K>>,
+pub(crate) struct Linear<const LEN: usize, H> {
+    pub(super) header: H,
     pub(super) edges: [Edge; LEN],
 }
 
-impl<const LEN: usize, K> Default for Linear<LEN, K>
-where
-    K: KeyArray,
-{
+impl<const LEN: usize, H: Default> Default for Linear<LEN, H> {
     fn default() -> Self {
         Self {
-            header: Atomic128::new(Header::default()),
+            header: H::default(),
             edges: core::array::from_fn(|_| Edge::default()),
         }
     }
 }
 
-impl<const LEN: usize, K> Node for Linear<LEN, K>
+impl<const LEN: usize, H> Node for Linear<LEN, H>
 where
-    K: KeyArray,
+    H: Header,
     Self: node::Info,
 {
     fn get(&self, key: u8) -> Option<&Edge> {
-        let index = self.header.load(Ordering::Acquire).get(key);
+        let index = self.header.get(key);
         self.edges.get(index)
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen> {
-        let mut old = self.header.load(Ordering::Acquire);
-
-        while !old.is_frozen() {
-            let (new, index) = match old.get_or_reserve(key) {
-                Reservation::Found(index) => return Ok(&self.edges[index]),
-                Reservation::Grow => return Err(Frozen),
-                Reservation::Reserve(new, index) => (new, index),
-            };
-
-            match self
-                .header
-                .compare_exchange(old, new, Ordering::AcqRel, Ordering::Acquire)
-            {
-                Ok(_) => return Ok(&self.edges[index]),
-                Err(conflict) => old = conflict,
-            }
-        }
-
-        Err(Frozen)
+        let index = self.header.get_or_reserve(key)?;
+        Ok(&self.edges[index])
     }
 
     fn reserve(&mut self, key: u8) -> Option<&mut Edge> {
-        let header = self.header.get();
-        match header.get_or_reserve(key) {
-            Reservation::Found(index) => Some(&mut self.edges[index]),
-            Reservation::Grow => None,
-            Reservation::Reserve(header, index) => {
-                self.header.set(header);
-                Some(&mut self.edges[index])
-            }
+        match self.header.get_or_reserve(key) {
+            Ok(index) => Some(&mut self.edges[index]),
+            Err(_) => None,
         }
     }
 
     fn is_frozen(&self) -> bool {
-        self.header.load(Ordering::Relaxed).is_frozen()
+        self.header.is_frozen()
     }
 
     fn freeze(&self) {
-        let mut old = self.header.load(Ordering::Relaxed);
-
-        while !old.is_frozen() {
-            match self.header.compare_exchange(
-                old,
-                old.freeze(),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(conflict) => old = conflict,
-            }
-        }
-
-        self.edges.iter().take(old.len()).for_each(Edge::freeze);
+        let len = self.header.freeze();
+        self.edges.iter().take(len).for_each(Edge::freeze);
     }
 
     fn replace(&self, snapshot: &edge::Meta) -> (Op, edge::Meta, edge::Data) {
-        let header = self.header.load(Ordering::Relaxed);
-
         if cfg!(feature = "validate") {
             assert!(
-                header.is_frozen(),
+                self.header.is_frozen(),
                 "{} header must be frozen before replace",
                 core::any::type_name::<Self>(),
             );
@@ -119,7 +72,7 @@ where
         self.edges
             .iter()
             .map(|edge| (edge, edge.load_low(Ordering::Relaxed)))
-            .zip(header.keys())
+            .zip(self.header.keys())
             .inspect(|((_, meta), _)| {
                 if cfg!(feature = "validate") {
                     assert!(
@@ -183,78 +136,10 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
-#[ribbit::pack(size = 128)]
-pub(super) struct Header<K> {
-    len: u4,
-    frozen: bool,
-    #[ribbit(offset = 8, size = 120)]
-    pub(super) keys: K,
-}
-
-enum Reservation<K> {
-    Found(usize),
-    Reserve(Header<K>, usize),
-    Grow,
-}
-
-impl<K: KeyArray> Header<K> {
-    fn is_frozen(&self) -> bool {
-        self.frozen
-    }
-
-    fn freeze(&self) -> Self {
-        Self {
-            frozen: true,
-            ..*self
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.len.value() as usize
-    }
-
-    fn get(&self, key: u8) -> usize {
-        self.keys.get(key)
-    }
-
-    fn get_or_reserve(&self, key: u8) -> Reservation<K> {
-        let index = self.get(key);
-        let len = self.len();
-
-        if index < len {
-            return Reservation::Found(index);
-        }
-
-        if len >= K::LEN {
-            return Reservation::Grow;
-        }
-
-        Reservation::Reserve(
-            Self {
-                len: u4::new((len + 1) as u8),
-                keys: self.keys.insert(len, key),
-                frozen: self.frozen,
-            },
-            len,
-        )
-    }
-
-    fn keys(&self) -> impl Iterator<Item = u8> + '_ {
-        let len = self.len();
-        self.keys.iter().take(len)
-    }
-}
-
-pub(super) trait KeyArray: ribbit::Pack + Default {
-    const LEN: usize;
-
-    fn get(&self, key: u8) -> usize {
-        self.iter()
-            .position(|byte| byte == key)
-            .unwrap_or(usize::MAX)
-    }
-
-    fn insert(&self, index: usize, key: u8) -> Self;
-    fn iter(&self) -> impl Iterator<Item = u8>;
+pub(super) trait Header {
+    fn is_frozen(&self) -> bool;
+    fn freeze(&self) -> usize;
+    fn get(&self, key: u8) -> usize;
+    fn get_or_reserve(&self, key: u8) -> Result<usize, Frozen>;
+    fn keys(&self) -> super::KeyIter;
 }
