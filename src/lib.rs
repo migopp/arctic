@@ -302,10 +302,10 @@ mod tests {
 
     #[test]
     fn scan_gap() {
-        let map = insert_all((0u64..256).step_by(2));
+        let map = insert_all((0u64..512).step_by(2));
         assert_eq!(
-            map.scan(&64..=&191).collect::<Vec<_>>(),
-            (32..96).collect::<Vec<_>>()
+            map.scan(&256..=&511).collect::<Vec<_>>(),
+            (128..256).collect::<Vec<_>>()
         );
     }
 

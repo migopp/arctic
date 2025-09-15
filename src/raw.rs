@@ -239,14 +239,24 @@ impl Raw {
             cursor.here(),
         );
 
-        Or::R(
-            iter.filter_map(|(meta, data)| match meta.kind {
-                node::Kind::Leaf => Some(data.to_leaf()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .into_iter(),
-        )
+        match iter {
+            Or::L(leaf) => Or::L(leaf.into_iter()),
+            Or::R(iter) => Or::R(
+                // FIXME: root node can contain leaves outside of bounds
+                iter.flat_map(|node| {
+                    unsafe { node.iter() }.filter_map(|(_, edge)| {
+                        match edge.load_low(Ordering::Relaxed) {
+                            meta if matches!(meta.kind, node::Kind::Leaf) => {
+                                Some(edge.load_high(Ordering::Acquire).to_leaf())
+                            }
+                            _ => None,
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter(),
+            ),
+        }
     }
 }
 
@@ -350,13 +360,26 @@ impl<'a> Iterator for EntryIter<'a> {
 struct ScanIter<'a> {
     window: Window<'a>,
 
-    root: node::EdgeIter<'a>,
+    // root: node::EdgeIter<'a>,
     frontier: Vec<(usize, NodeIter<'a>)>,
 }
 
 impl<'a> ScanIter<'a> {
-    fn new(low: Bound<&'a [u8]>, high: Bound<&'a [u8]>, root: &'a Edge) -> Self {
-        Self {
+    fn new(
+        low: Bound<&'a [u8]>,
+        high: Bound<&'a [u8]>,
+        root: &'a Edge,
+    ) -> Or<Option<u64>, iter::Chain<iter::Once<node::Ref<'a>>, Self>> {
+        let (meta, data) = root.load(Ordering::Acquire);
+
+        let kind = match meta.child() {
+            None => return Or::L(None),
+            Some(edge::Child::Leaf) => return Or::L(Some(data.to_leaf())),
+            Some(edge::Child::Node(kind)) => kind,
+        };
+        let node = unsafe { data.to_node(kind) };
+
+        Or::R(iter::once(node.clone()).chain(Self {
             window: Window {
                 index: 0,
                 low,
@@ -370,34 +393,18 @@ impl<'a> ScanIter<'a> {
                     _ => Within::Maybe,
                 },
             },
-            root: node::EdgeIter::new(core::slice::from_ref(root)),
-            frontier: vec![],
-        }
+            // root: node::EdgeIter::new(core::slice::from_ref(root)),
+            frontier: vec![(
+                0,
+                iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
+            )],
+        }))
     }
 }
 
 impl<'a> Iterator for ScanIter<'a> {
-    type Item = (edge::Meta, edge::Data);
+    type Item = node::Ref<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(edge) = self.root.next() {
-            let (meta, data) = edge.load(Ordering::Relaxed);
-
-            meta.key.with_bytes(None, |key| {
-                assert!(self.window.push(key));
-            });
-
-            let kind = match meta.child()? {
-                edge::Child::Leaf => return Some((meta, data)),
-                edge::Child::Node(kind) => kind,
-            };
-
-            let node = unsafe { data.to_node(kind) };
-            self.frontier.push((
-                meta.key.len.to_usize(),
-                iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
-            ));
-        }
-
         'vertical: loop {
             let (delta, iter) = self.frontier.last_mut()?;
 
@@ -410,28 +417,26 @@ impl<'a> Iterator for ScanIter<'a> {
 
                 let (meta, data) = edge.load(Ordering::Relaxed);
 
+                let kind = match meta.child() {
+                    Some(edge::Child::Node(kind)) => kind,
+                    None | Some(edge::Child::Leaf) => {
+                        iter.next();
+                        continue 'horizontal;
+                    }
+                };
+
                 if !meta.key.with_bytes(Some(*key), |key| self.window.push(key)) {
                     iter.next();
                     continue 'horizontal;
                 }
 
-                let kind = match meta.child() {
-                    None | Some(edge::Child::Leaf) => {
-                        self.window.pop(1 + meta.key.len.to_usize());
-                        iter.next();
-                        return Some((meta, data));
-                    }
-                    Some(edge::Child::Node(kind)) => kind,
-                };
-
                 let node = unsafe { data.to_node(kind) };
-
                 if !mem::replace(descend, true) {
                     self.frontier.push((
                         1 + meta.key.len.to_usize(),
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
                     ));
-                    return Some((meta, data));
+                    return Some(node);
                 } else {
                     iter.next();
                     continue 'vertical;
