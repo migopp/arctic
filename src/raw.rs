@@ -10,7 +10,6 @@ use crate::cursor;
 use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
-use crate::key;
 use crate::node;
 use crate::Edge;
 
@@ -206,7 +205,7 @@ impl Raw {
         EntryIter::new(&mut self.root)
     }
 
-    pub fn scan<'r, R: RangeBounds<B> + 'r, B: AsRef<[u8]> + 'r>(
+    pub fn range<'r, R: RangeBounds<B> + 'r, B: AsRef<[u8]> + 'r>(
         &self,
         range: R,
     ) -> impl Iterator<Item = u64> + 'r {

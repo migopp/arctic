@@ -71,14 +71,14 @@ impl<K: Key, V: Value> Map<K, V> {
         self.iter().map(|(_, value)| value)
     }
 
-    pub fn scan<'a, R: RangeBounds<&'a K> + 'a>(&self, range: R) -> impl Iterator<Item = V> + 'a
+    pub fn range<'a, R: RangeBounds<&'a K> + 'a>(&self, range: R) -> impl Iterator<Item = V> + 'a
     where
         K: 'a,
         V: 'a,
     {
         let low = range.start_bound().map(|low| low.to_byte_array());
         let high = range.end_bound().map(|high| high.to_byte_array());
-        self.raw.scan((low, high)).map(V::from_u64)
+        self.raw.range((low, high)).map(V::from_u64)
     }
 }
 
@@ -270,14 +270,14 @@ mod tests {
         let map = Map::default();
         let key = [1];
         map.insert(&key, 1);
-        assert_eq!(map.scan(&[1]..=&[1]).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(map.range(&[1]..=&[1]).collect::<Vec<_>>(), vec![1]);
     }
 
     #[test]
     fn scan_node3() {
         let map = insert_all(0u64..3);
         assert_eq!(
-            map.scan(&0..=&2).collect::<Vec<_>>(),
+            map.range(&0..=&2).collect::<Vec<_>>(),
             (0..3).collect::<Vec<_>>()
         );
     }
@@ -286,7 +286,7 @@ mod tests {
     fn scan_node256() {
         let map = insert_all(0u64..256);
         assert_eq!(
-            map.scan(&0..=&255).collect::<Vec<_>>(),
+            map.range(&0..=&255).collect::<Vec<_>>(),
             (0..256).collect::<Vec<_>>()
         );
     }
@@ -295,7 +295,7 @@ mod tests {
     fn scan_node256_exclusive() {
         let map = insert_all(0u64..256);
         assert_eq!(
-            map.scan(&0..&256).collect::<Vec<_>>(),
+            map.range(&0..&256).collect::<Vec<_>>(),
             (0..256).collect::<Vec<_>>()
         );
     }
@@ -304,7 +304,7 @@ mod tests {
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));
         assert_eq!(
-            map.scan(&256..=&511).collect::<Vec<_>>(),
+            map.range(&256..=&511).collect::<Vec<_>>(),
             (128..256).collect::<Vec<_>>()
         );
     }
