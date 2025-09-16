@@ -1,8 +1,8 @@
 use core::cell::Cell;
 use core::sync::atomic::Ordering;
 
-use crate::edge::Child;
 use crate::node;
+use crate::Or;
 
 thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
@@ -16,16 +16,17 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_256 = Histogram::new();
 
     map.raw.preorder().for_each(|(depth_, _, meta, data)| {
-        let Some(child) = meta.child() else { return };
+        let Some(child) = (unsafe { data.to_node(meta.kind) }) else {
+            return;
+        };
 
         compression.record(meta.key.len.to_usize() as u64);
 
         match child {
-            Child::Leaf => {
+            Or::L(_) => {
                 depth.record(depth_ as u64);
             }
-            Child::Node(kind) => {
-                let node = unsafe { data.to_node(kind) };
+            Or::R(node) => {
                 let histogram = match node {
                     node::Ref::Node3(_) => &mut node_3,
                     node::Ref::Node15(_) => &mut node_15,

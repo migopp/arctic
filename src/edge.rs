@@ -7,6 +7,7 @@ use crate::node;
 use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
+use crate::Or;
 use crate::Split;
 
 #[derive(Default, Debug)]
@@ -64,44 +65,15 @@ pub(crate) struct Meta {
 }
 
 impl Meta {
-    pub(crate) fn r#match(&self, key: &[u8]) -> key::Len {
-        if cfg!(feature = "opt-empty-match") && key.is_empty() {
-            return key::Len::ZERO;
-        }
-
-        let search_key = key::Array::from_slice(key);
-        let edge_key = self.key;
-        key::Array::prefix(&search_key, &edge_key)
-    }
-
     pub(crate) fn match_or_insert(&self, key: &[u8]) -> Match {
-        if cfg!(feature = "opt-empty-match") && key.is_empty() {
-            return Match::Full {
-                len: key::Len::ZERO,
-                child: self.child(),
-            };
+        let key = key::Array::from_slice_len(key, self.key.len);
+
+        if key == self.key {
+            return Match::Full;
         }
 
-        let search_key = key::Array::from_slice(key);
-        let edge_key = self.key;
-        let prefix_len = key::Array::prefix(&search_key, &edge_key);
-
-        // Fast path: successful traversal
-        if search_key.len >= edge_key.len && edge_key.len == prefix_len {
-            return Match::Full {
-                len: prefix_len,
-                child: self.child(),
-            };
-        }
-
-        if cfg!(feature = "validate") {
-            assert!(
-                search_key.len >= edge_key.len || edge_key.len != prefix_len,
-                "Precondition: no key is a prefix of another key",
-            );
-        }
-
-        let (start, middle, end) = unsafe { edge_key.expand(prefix_len) };
+        let prefix = key::Array::prefix(&key, &self.key);
+        let (start, middle, end) = unsafe { self.key.expand(prefix) };
         Match::Partial { start, middle, end }
     }
 
@@ -109,16 +81,6 @@ impl Meta {
         Self {
             frozen: false,
             ..*self
-        }
-    }
-
-    pub(crate) fn child(&self) -> Option<Child> {
-        match self.kind {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(Child::Leaf),
-            node::Kind::Node3 => Some(Child::Node(Node::Node3)),
-            node::Kind::Node15 => Some(Child::Node(Node::Node15)),
-            node::Kind::Node256 => Some(Child::Node(Node::Node256)),
         }
     }
 }
@@ -154,23 +116,22 @@ impl Data {
         self.0
     }
 
-    pub(crate) unsafe fn to_node<'a>(self, kind: Node) -> node::Ref<'a> {
-        if cfg!(feature = "validate") {
-            match kind {
-                Node::Node3 => node::Ref::Node3((self.0 as *mut Node3).as_ref().unwrap()),
-                Node::Node15 => node::Ref::Node15((self.0 as *mut Node15).as_ref().unwrap()),
-                Node::Node256 => node::Ref::Node256((self.0 as *mut Node256).as_ref().unwrap()),
-            }
-        } else {
-            match kind {
-                Node::Node3 => node::Ref::Node3((self.0 as *mut Node3).as_ref().unwrap_unchecked()),
-                Node::Node15 => {
-                    node::Ref::Node15((self.0 as *mut Node15).as_ref().unwrap_unchecked())
-                }
-                Node::Node256 => {
-                    node::Ref::Node256((self.0 as *mut Node256).as_ref().unwrap_unchecked())
-                }
-            }
+    pub(crate) unsafe fn to_node<'a>(self, kind: node::Kind) -> Option<Or<u64, node::Ref<'a>>> {
+        match kind {
+            node::Kind::None => None,
+            node::Kind::Leaf => Some(Or::L(self.0)),
+            node::Kind::Node3 => (self.0 as *mut Node3)
+                .as_ref()
+                .map(node::Ref::Node3)
+                .map(Or::R),
+            node::Kind::Node15 => (self.0 as *mut Node15)
+                .as_ref()
+                .map(node::Ref::Node15)
+                .map(Or::R),
+            node::Kind::Node256 => (self.0 as *mut Node256)
+                .as_ref()
+                .map(node::Ref::Node256)
+                .map(Or::R),
         }
     }
 
@@ -202,24 +163,8 @@ pub(crate) enum Op {
 }
 
 #[derive(Debug)]
-pub(crate) enum Child {
-    Leaf,
-    Node(Node),
-}
-
-#[derive(Debug)]
-pub(crate) enum Node {
-    Node3,
-    Node15,
-    Node256,
-}
-
-#[derive(Debug)]
 pub(crate) enum Match {
-    Full {
-        len: key::Len,
-        child: Option<Child>,
-    },
+    Full,
     Partial {
         start: key::Array,
         middle: u8,

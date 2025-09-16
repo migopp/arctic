@@ -8,7 +8,6 @@ use ribbit::u56;
 pub(crate) struct Len(u3);
 
 impl Len {
-    pub(crate) const ZERO: Self = Self(u3::new(0));
     pub(crate) const MAX: usize = 7;
 
     pub(crate) const fn to_usize(self) -> usize {
@@ -28,7 +27,13 @@ pub(crate) struct Array {
 
 impl Array {
     pub(crate) fn from_slice(key: &[u8]) -> Self {
-        let (buffer, len) = Buffer::from_slice(key);
+        const MAX: Len = Len(u3::new(Len::MAX as u8));
+        let (buffer, len) = Buffer::from_slice_len(key, MAX);
+        Self { buffer, len }
+    }
+
+    pub(crate) fn from_slice_len(key: &[u8], len: Len) -> Self {
+        let (buffer, len) = Buffer::from_slice_len(key, len);
         Self { buffer, len }
     }
 
@@ -115,9 +120,9 @@ impl Debug for Array {
 struct Buffer(u56);
 
 impl Buffer {
-    fn from_slice(key: &[u8]) -> (Self, Len) {
+    fn from_slice_len(key: &[u8], len: Len) -> (Self, Len) {
         let mut buffer = [0u8; 8];
-        let len = key.len().min(Len::MAX);
+        let len = key.len().min(len.to_usize()) & Len::MAX;
 
         #[cfg(feature = "opt-memcpy")]
         unsafe {

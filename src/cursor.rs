@@ -9,6 +9,7 @@ use crate::node;
 use crate::node::Frozen;
 use crate::node::Node3;
 use crate::Edge;
+use crate::Or;
 
 pub(crate) struct Cursor<'a, 'k, P> {
     prefix: &'k [u8],
@@ -33,31 +34,46 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse<const LEAF: bool>(&mut self) -> Option<(usize, edge::Meta, edge::Data)> {
+    pub(crate) fn get(&mut self) -> Option<u64> {
         loop {
-            let edge = self.here();
-            let (meta, data) = edge.load(Ordering::Relaxed);
-
+            let (meta, data) = self.here().load(Ordering::Relaxed);
             let key = self.key();
-            let len = meta.r#match(key);
 
-            let kind = match meta.child()? {
-                // Stop unconditionally at a leaf
-                edge::Child::Leaf => return Some((self.index, meta, data)),
+            let node = match unsafe { data.to_node(meta.kind) }? {
+                // Stop unconditionally at a leaf due to precondition
+                Or::L(leaf) => return Some(leaf),
 
                 // Continue traversal only if exact match
-                edge::Child::Node(kind) if key.len() > len.to_usize() && len == meta.key.len => {
-                    kind
-                }
-
-                edge::Child::Node(_) if LEAF => return None,
-                edge::Child::Node(_) => return Some((self.index, meta, data)),
+                Or::R(node) if key::Array::from_slice_len(key, meta.key.len) == meta.key => node,
+                Or::R(_) => return None,
             };
 
-            let byte = key.get(len.to_usize())?;
-            let node = unsafe { data.to_node(kind) };
+            let byte = key.get(meta.key.len.to_usize())?;
             let next = node.get(*byte)?;
-            self.push(len, node, next);
+            self.push(meta.key.len, node, next);
+        }
+    }
+
+    pub(crate) fn traverse(&mut self) -> Option<(usize, edge::Meta, edge::Data)> {
+        loop {
+            let (meta, data) = self.here().load(Ordering::Relaxed);
+            let key = self.key();
+
+            match unsafe { data.to_node(meta.kind)? } {
+                // Continue traversal only if exact match
+                Or::R(node) if key::Array::from_slice_len(key, meta.key.len) == meta.key => {
+                    if let Some(next) = key
+                        .get(meta.key.len.to_usize())
+                        .and_then(|byte| node.get(*byte))
+                    {
+                        self.push(meta.key.len, node, next);
+                        continue;
+                    }
+                }
+                Or::L(_) | Or::R(_) => (),
+            }
+
+            return Some((self.index, meta, data));
         }
     }
 
@@ -68,27 +84,46 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         value: u64,
     ) -> (Op, (edge::Meta, edge::Data), (edge::Meta, edge::Data)) {
         loop {
-            let edge = self.here();
-            let (old_meta, old_data) = edge.load(Ordering::Relaxed);
-
+            let (old_meta, old_data) = self.here().load(Ordering::Relaxed);
             let key = self.key();
 
-            let (op, new_meta, new_data) = match old_meta.match_or_insert(key) {
-                edge::Match::Full {
-                    len,
-                    child: Some(edge::Child::Node(kind)),
-                } => {
-                    let node = unsafe { old_data.to_node(kind) };
+            match old_meta.match_or_insert(key) {
+                edge::Match::Full => (),
+                edge::Match::Partial { start, middle, end } => {
+                    return (
+                        Op::Edge(edge::Op::Expand),
+                        (old_meta, old_data),
+                        (
+                            edge::Meta {
+                                key: start,
+                                frozen: false,
+                                kind: node::Kind::Node3,
+                            },
+                            edge::Data::new_node::<Node3, _>(core::iter::once((
+                                middle,
+                                edge::Meta {
+                                    key: end,
+                                    frozen: false,
+                                    kind: old_meta.kind,
+                                },
+                                old_data,
+                            ))),
+                        ),
+                    )
+                }
+            };
 
+            let (op, new_meta, new_data) = match unsafe { old_data.to_node(old_meta.kind) } {
+                Some(Or::R(node)) => {
                     match self.history.freeze() {
                         true if node.is_frozen() => (),
                         true | false => {
-                            let byte = key[len.to_usize()];
+                            let byte = key[old_meta.key.len.to_usize()];
                             #[allow(clippy::single_match)]
                             match node.get_or_reserve(byte) {
                                 // Fast path: no need to replace
                                 Ok(edge) => {
-                                    self.push(len, node, edge);
+                                    self.push(old_meta.key.len, node, edge);
                                     continue;
                                 }
                                 Err(Frozen) => (),
@@ -100,24 +135,16 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     let (op, new_meta, new_data) = node.replace(&old_meta);
                     (Op::Node(op), new_meta, new_data)
                 }
-
-                edge::Match::Full {
-                    len: _,
-                    child: None,
-                } if key.len() > key::Len::MAX => (
+                None if key.len() > key::Len::MAX => (
                     Op::Edge(edge::Op::Create),
                     edge::Meta {
-                        key: key::Array::from_slice(&key[..key::Len::MAX]),
+                        key: key::Array::from_slice(key),
                         frozen: false,
                         kind: node::Kind::Node3,
                     },
                     edge::Data::new_node::<Node3, _>(core::iter::empty()),
                 ),
-
-                edge::Match::Full {
-                    len: _,
-                    child: Some(edge::Child::Leaf) | None,
-                } => (
+                None | Some(Or::L(_)) => (
                     Op::Edge(edge::Op::Insert),
                     edge::Meta {
                         key: key::Array::from_slice(key),
@@ -126,26 +153,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     },
                     edge::Data::new_leaf(value),
                 ),
-
-                edge::Match::Partial { start, middle, end } => {
-                    let new_meta = edge::Meta {
-                        key: start,
-                        frozen: false,
-                        kind: node::Kind::Node3,
-                    };
-
-                    let new_data = edge::Data::new_node::<Node3, _>(core::iter::once((
-                        middle,
-                        edge::Meta {
-                            key: end,
-                            frozen: false,
-                            kind: old_meta.kind,
-                        },
-                        old_data,
-                    )));
-
-                    (Op::Edge(edge::Op::Expand), new_meta, new_data)
-                }
             };
 
             return (op, (old_meta, old_data), (new_meta, new_data));
