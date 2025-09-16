@@ -10,6 +10,7 @@ use crate::node::Node3;
 use crate::Or;
 use crate::Split;
 
+#[repr(transparent)]
 #[derive(Default, Debug)]
 pub(crate) struct Edge(Split<Meta, Data>);
 

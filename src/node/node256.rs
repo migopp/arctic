@@ -8,7 +8,7 @@ use crate::node::Node15;
 use crate::node::Op;
 use crate::Node;
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug)]
 pub(crate) struct Node256([Edge; 256]);
 
