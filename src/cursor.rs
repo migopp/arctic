@@ -87,71 +87,65 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let (old_meta, old_data) = self.here().load(Ordering::Relaxed);
             let key = self.key();
 
-            match old_meta.match_or_insert(key) {
-                edge::Match::Full => (),
-                edge::Match::Partial { start, middle, end } => {
-                    return (
-                        Op::Edge(edge::Op::Expand),
-                        (old_meta, old_data),
-                        (
+            let (op, new_meta, new_data) = match old_meta.match_or_insert(key) {
+                edge::Match::Full => {
+                    match unsafe { old_data.to_node(old_meta.kind) } {
+                        Some(Or::R(node)) => {
+                            if !self.history.freeze() || !node.is_frozen() {
+                                // FIXME: expand if no key byte here
+                                let byte = key[old_meta.key.len.to_usize()];
+
+                                #[allow(clippy::single_match)]
+                                match node.get_or_reserve(byte) {
+                                    // Fast path: no need to replace
+                                    Ok(edge) => {
+                                        self.push(old_meta.key.len, node, edge);
+                                        continue;
+                                    }
+                                    Err(Frozen) => (),
+                                }
+                            }
+
+                            node.freeze();
+                            let (op, new_meta, new_data) = node.replace(&old_meta);
+                            (Op::Node(op), new_meta, new_data)
+                        }
+                        None if key.len() > key::Len::MAX => (
+                            Op::Edge(edge::Op::Create),
                             edge::Meta {
-                                key: start,
+                                key: key::Array::from_slice(key),
                                 frozen: false,
                                 kind: node::Kind::Node3,
                             },
-                            edge::Data::new_node::<Node3, _>(core::iter::once((
-                                middle,
-                                edge::Meta {
-                                    key: end,
-                                    frozen: false,
-                                    kind: old_meta.kind,
-                                },
-                                old_data,
-                            ))),
+                            edge::Data::new_node::<Node3, _>(core::iter::empty()),
                         ),
-                    )
+                        None | Some(Or::L(_)) => (
+                            Op::Edge(edge::Op::Insert),
+                            edge::Meta {
+                                key: key::Array::from_slice(key),
+                                frozen: false,
+                                kind: node::Kind::Leaf,
+                            },
+                            edge::Data::new_leaf(value),
+                        ),
+                    }
                 }
-            };
-
-            let (op, new_meta, new_data) = match unsafe { old_data.to_node(old_meta.kind) } {
-                Some(Or::R(node)) => {
-                    match self.history.freeze() {
-                        true if node.is_frozen() => (),
-                        true | false => {
-                            let byte = key[old_meta.key.len.to_usize()];
-                            #[allow(clippy::single_match)]
-                            match node.get_or_reserve(byte) {
-                                // Fast path: no need to replace
-                                Ok(edge) => {
-                                    self.push(old_meta.key.len, node, edge);
-                                    continue;
-                                }
-                                Err(Frozen) => (),
-                            }
-                        }
-                    };
-
-                    node.freeze();
-                    let (op, new_meta, new_data) = node.replace(&old_meta);
-                    (Op::Node(op), new_meta, new_data)
-                }
-                None if key.len() > key::Len::MAX => (
-                    Op::Edge(edge::Op::Create),
+                edge::Match::Partial { start, middle, end } => (
+                    Op::Edge(edge::Op::Expand),
                     edge::Meta {
-                        key: key::Array::from_slice(key),
+                        key: start,
                         frozen: false,
                         kind: node::Kind::Node3,
                     },
-                    edge::Data::new_node::<Node3, _>(core::iter::empty()),
-                ),
-                None | Some(Or::L(_)) => (
-                    Op::Edge(edge::Op::Insert),
-                    edge::Meta {
-                        key: key::Array::from_slice(key),
-                        frozen: false,
-                        kind: node::Kind::Leaf,
-                    },
-                    edge::Data::new_leaf(value),
+                    edge::Data::new_node::<Node3, _>(core::iter::once((
+                        middle,
+                        edge::Meta {
+                            key: end,
+                            frozen: false,
+                            kind: old_meta.kind,
+                        },
+                        old_data,
+                    ))),
                 ),
             };
 
