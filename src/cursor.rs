@@ -3,8 +3,6 @@ use core::marker::PhantomData;
 use core::mem;
 use core::sync::atomic::Ordering;
 
-use ribbit::Unpack as _;
-
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -38,12 +36,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn traverse<const LEAF: bool>(&mut self) -> Option<(usize, edge::Meta, edge::Data)> {
         loop {
             let edge = self.here();
-            let meta_packed = edge.load_low_packed(Ordering::Relaxed);
-            let data = edge.load_high(Ordering::Acquire);
-            if edge.load_low_packed(Ordering::Relaxed) != meta_packed {
-                continue;
-            }
-            let meta = meta_packed.unpack();
+            let (meta, data) = edge.load(Ordering::Relaxed);
 
             let key = self.key();
             let len = meta.r#match(key);
@@ -76,12 +69,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     ) -> (Op, (edge::Meta, edge::Data), (edge::Meta, edge::Data)) {
         loop {
             let edge = self.here();
-            let old_meta_packed = edge.load_low_packed(Ordering::Relaxed);
-            let old_data = edge.load_high(Ordering::Acquire);
-            if edge.load_low_packed(Ordering::Relaxed) != old_meta_packed {
-                continue;
-            }
-            let old_meta = old_meta_packed.unpack();
+            let (old_meta, old_data) = edge.load(Ordering::Relaxed);
 
             let key = self.key();
 
