@@ -21,22 +21,29 @@ impl Default for Node256 {
 }
 
 impl Node for Node256 {
+    #[inline]
     fn get(&self, key: u8) -> Option<&Edge> {
-        Some(&self.0[key as usize])
+        // SAFETY: `key` is a u8 and must be < 256
+        Some(unsafe { self.0.get_unchecked(key as usize) })
     }
 
+    #[inline]
     fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen> {
-        Ok(&self.0[key as usize])
+        self.get(key).ok_or(Frozen)
     }
 
+    #[inline]
     fn reserve(&mut self, key: u8) -> Option<&mut Edge> {
-        Some(&mut self.0[key as usize])
+        // SAFETY: `key` is a u8 and must be < 256
+        Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
+    #[inline]
     fn is_frozen(&self) -> bool {
         self.0[0].load_low_packed(Ordering::Relaxed).frozen()
     }
 
+    #[inline]
     fn freeze(&self) {
         self.0.iter().for_each(Edge::freeze);
     }
