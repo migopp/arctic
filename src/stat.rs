@@ -1,8 +1,11 @@
 use core::cell::Cell;
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::node;
 use crate::Or;
+
+static RECORD: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
@@ -56,6 +59,24 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
 
 pub fn thread() -> Thread {
     THREAD.with(|thread| thread.clone())
+}
+
+pub fn start() {
+    if cfg!(feature = "stat") {
+        RECORD.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn stop() {
+    if cfg!(feature = "stat") {
+        RECORD.store(false, Ordering::Relaxed);
+    }
+}
+
+pub fn reset() {
+    if cfg!(feature = "stat") {
+        THREAD.with(|thread| thread.reset());
+    }
 }
 
 #[derive(Default)]
@@ -169,6 +190,19 @@ impl Thread {
         }
     }
 
+    fn reset(&self) {
+        self.node.replace.set(0);
+        self.node.shrink.set(0);
+        self.node.grow.set(0);
+        self.node.destroy.set(0);
+        self.node.compress.set(0);
+
+        self.edge.create.set(0);
+        self.edge.expand.set(0);
+        self.edge.insert.set(0);
+        self.edge.remove.set(0);
+    }
+
     fn get(&self, op: &crate::cursor::Op) -> &Cell<u64> {
         match op {
             crate::cursor::Op::Node(op) => match op {
@@ -190,7 +224,7 @@ impl Thread {
 
 #[inline]
 pub(crate) fn increment(op: &crate::cursor::Op) {
-    if cfg!(feature = "stat") {
+    if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
         THREAD.with(|thread| thread.get(op).update(|count| count + 1))
     }
 }
