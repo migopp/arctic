@@ -20,8 +20,6 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Option<&mut Edge>;
 
-    fn is_frozen(&self) -> bool;
-
     fn freeze(&self);
 
     fn replace(&self, meta: &edge::Meta) -> (Op, edge::Meta, edge::Data);
@@ -89,15 +87,6 @@ impl<'a> Ref<'a> {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
             Ref::Node256(node) => node.get_or_reserve(key),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn is_frozen(&self) -> bool {
-        match self {
-            Ref::Node3(node) => node.is_frozen(),
-            Ref::Node15(node) => node.is_frozen(),
-            Ref::Node256(node) => node.is_frozen(),
         }
     }
 

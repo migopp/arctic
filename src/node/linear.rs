@@ -47,10 +47,6 @@ where
         }
     }
 
-    fn is_frozen(&self) -> bool {
-        self.header.is_frozen()
-    }
-
     fn freeze(&self) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);

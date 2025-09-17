@@ -1,5 +1,3 @@
-use core::sync::atomic::Ordering;
-
 use crate::edge;
 use crate::node;
 use crate::node::Edge;
@@ -36,11 +34,6 @@ impl Node for Node256 {
     fn reserve(&mut self, key: u8) -> Option<&mut Edge> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
-    }
-
-    #[inline]
-    fn is_frozen(&self) -> bool {
-        self.0[0].load_low_packed(Ordering::Relaxed).frozen()
     }
 
     #[inline]
