@@ -91,18 +91,21 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 edge::Match::Full => {
                     match unsafe { old_data.to_node(old_meta.kind) } {
                         Some(Or::R(node)) => {
-                            if !self.history.freeze() || !node.is_frozen() {
-                                // FIXME: expand if no key byte here
-                                let byte = key[old_meta.key.len.to_usize()];
+                            match self.history.freeze() {
+                                Some(data) if old_data == data => (),
+                                None | Some(_) => {
+                                    // Must be more bytes left by no-prefix precondition
+                                    let byte = key[old_meta.key.len.to_usize()];
 
-                                #[allow(clippy::single_match)]
-                                match node.get_or_reserve(byte) {
-                                    // Fast path: no need to replace
-                                    Ok(edge) => {
-                                        self.push(old_meta.key.len, node, edge);
-                                        continue;
+                                    #[allow(clippy::single_match)]
+                                    match node.get_or_reserve(byte) {
+                                        // Fast path: no need to replace
+                                        Ok(edge) => {
+                                            self.push(old_meta.key.len, node, edge);
+                                            continue;
+                                        }
+                                        Err(Frozen) => (),
                                     }
-                                    Err(Frozen) => (),
                                 }
                             }
 
@@ -164,8 +167,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         self.here = edge;
     }
 
-    pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
-        let segment = self.history.pop()?.expect("Root edge can never be frozen");
+    pub(crate) fn pop(&mut self, data: edge::Data) -> Result<node::Ref, P::PopError> {
+        let segment = self
+            .history
+            .pop(data)?
+            .expect("Root edge can never be frozen");
         self.index -= 1;
         self.index -= segment.len.to_usize();
         self.here = segment.edge;
@@ -185,9 +191,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
 pub(crate) trait History<'a>: Default {
     type PopError;
-    fn freeze(&mut self) -> bool;
+    fn freeze(&mut self) -> Option<edge::Data>;
+
     fn push(&mut self, segment: Segment<'a>);
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
+    fn pop(&mut self, data: edge::Data) -> Result<Option<Segment<'a>>, Self::PopError>;
 }
 
 #[derive(Default)]
@@ -196,23 +203,23 @@ pub(crate) struct Optimistic<'a>(PhantomData<&'a ()>);
 impl<'a> History<'a> for Optimistic<'a> {
     type PopError = ();
 
-    #[inline]
-    fn freeze(&mut self) -> bool {
-        false
+    #[inline(always)]
+    fn freeze(&mut self) -> Option<edge::Data> {
+        None
     }
 
-    #[inline]
+    #[inline(always)]
     fn push(&mut self, _segment: Segment<'a>) {}
 
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
+    #[inline(always)]
+    fn pop(&mut self, _data: edge::Data) -> Result<Option<Segment<'a>>, Self::PopError> {
         Err(())
     }
 }
 
 #[derive(Default)]
 pub(crate) struct Pessimistic<'a> {
-    freeze: bool,
+    freeze: Option<edge::Data>,
     path: Vec<Segment<'a>>,
 }
 
@@ -220,7 +227,7 @@ impl<'a> History<'a> for Pessimistic<'a> {
     type PopError = Infallible;
 
     #[inline]
-    fn freeze(&mut self) -> bool {
+    fn freeze(&mut self) -> Option<edge::Data> {
         mem::take(&mut self.freeze)
     }
 
@@ -229,9 +236,12 @@ impl<'a> History<'a> for Pessimistic<'a> {
         self.path.push(segment)
     }
 
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
-        self.freeze = true;
+    fn pop(&mut self, data: edge::Data) -> Result<Option<Segment<'a>>, Self::PopError> {
+        if cfg!(feature = "validate") {
+            assert!(self.freeze.is_none());
+        }
+
+        self.freeze = Some(data);
         Ok(self.path.pop())
     }
 }

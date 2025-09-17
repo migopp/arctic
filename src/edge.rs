@@ -87,7 +87,7 @@ impl Meta {
 }
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 #[ribbit::pack(size = 64)]
 pub(crate) struct Data(u64);
 

@@ -53,7 +53,7 @@ impl Raw {
         loop {
             let (op, (old_meta, old_data), (new_meta, new_data)) = cursor.traverse_or_insert(value);
 
-            let meta = match cursor.here().compare_exchange(
+            let (meta, data) = match cursor.here().compare_exchange(
                 (old_meta.unfreeze(), old_data),
                 (new_meta, new_data),
                 Ordering::AcqRel,
@@ -70,7 +70,7 @@ impl Raw {
                         _ => continue,
                     }
                 }
-                Err((meta, _)) => meta,
+                Err((meta, data)) => (meta, data),
             };
 
             match op {
@@ -84,7 +84,7 @@ impl Raw {
             }
 
             if meta.frozen {
-                cursor.pop()?;
+                cursor.pop(data)?;
             }
         }
     }
