@@ -38,7 +38,7 @@ pub(crate) trait Info: Node + Default {
 #[derive(Debug)]
 pub(crate) struct Frozen;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum Op {
     /// Node shrink (smaller size)
     Shrink,

@@ -2,6 +2,7 @@ use core::cell::Cell;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
+use crate::cursor;
 use crate::node;
 use crate::Or;
 
@@ -145,11 +146,23 @@ impl From<Histogram> for Distribution {
     }
 }
 
+pub(crate) enum Counter {
+    Op(cursor::Op),
+    InsertPessimistic,
+}
+
+impl From<cursor::Op> for Counter {
+    fn from(op: cursor::Op) -> Self {
+        Self::Op(op)
+    }
+}
+
 #[derive(Clone)]
 #[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
 pub struct Thread {
     node: Node,
     edge: Edge,
+    insert_pessimistic: Cell<u64>,
 }
 
 #[derive(Clone)]
@@ -187,6 +200,7 @@ impl Thread {
                 insert: Cell::new(0),
                 remove: Cell::new(0),
             },
+            insert_pessimistic: Cell::new(0),
         }
     }
 
@@ -203,16 +217,16 @@ impl Thread {
         self.edge.remove.set(0);
     }
 
-    fn get(&self, op: &crate::cursor::Op) -> &Cell<u64> {
+    fn op(&self, op: cursor::Op) -> &Cell<u64> {
         match op {
-            crate::cursor::Op::Node(op) => match op {
+            cursor::Op::Node(op) => match op {
                 node::Op::Shrink => &self.node.shrink,
                 node::Op::Replace => &self.node.replace,
                 node::Op::Grow => &self.node.grow,
                 node::Op::Destroy => &self.node.destroy,
                 node::Op::Compress => &self.node.compress,
             },
-            crate::cursor::Op::Edge(op) => match op {
+            cursor::Op::Edge(op) => match op {
                 crate::edge::Op::Create => &self.edge.create,
                 crate::edge::Op::Expand => &self.edge.expand,
                 crate::edge::Op::Insert => &self.edge.insert,
@@ -223,8 +237,13 @@ impl Thread {
 }
 
 #[inline]
-pub(crate) fn increment(op: &crate::cursor::Op) {
+pub(crate) fn increment<C: Into<Counter>>(counter: C) {
     if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
-        THREAD.with(|thread| thread.get(op).update(|count| count + 1))
+        match counter.into() {
+            Counter::Op(op) => THREAD.with(|thread| thread.op(op).update(|count| count + 1)),
+            Counter::InsertPessimistic => {
+                THREAD.with(|thread| thread.insert_pessimistic.update(|count| count + 1))
+            }
+        }
     }
 }

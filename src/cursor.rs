@@ -18,7 +18,7 @@ pub(crate) struct Cursor<'a, 'k, P> {
     history: P,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum Op {
     Node(node::Op),
     Edge(edge::Op),

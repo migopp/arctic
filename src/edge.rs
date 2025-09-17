@@ -148,7 +148,7 @@ impl Data {
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum Op {
     /// Node creation
     Create,

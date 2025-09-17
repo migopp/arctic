@@ -11,6 +11,7 @@ use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
 use crate::node;
+use crate::stat;
 use crate::Edge;
 use crate::Or;
 
@@ -38,6 +39,7 @@ impl Raw {
 
     #[cold]
     fn insert_pessimistic(&self, key: &[u8], value: u64) -> Option<u64> {
+        stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::Pessimistic>(key, value).unwrap()
     }
 
@@ -58,7 +60,7 @@ impl Raw {
                 Ordering::Acquire,
             ) {
                 Ok((meta, data)) => {
-                    crate::stat::increment(&op);
+                    stat::increment(op);
                     match (op, meta.kind) {
                         (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
                         (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
