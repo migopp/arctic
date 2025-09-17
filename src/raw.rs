@@ -53,7 +53,7 @@ impl Raw {
         loop {
             let (op, (old_meta, old_data), (new_meta, new_data)) = cursor.traverse_or_insert(value);
 
-            let (meta, data) = match cursor.here().compare_exchange(
+            let meta = match cursor.here().compare_exchange(
                 (old_meta.unfreeze(), old_data),
                 (new_meta, new_data),
                 Ordering::AcqRel,
@@ -70,7 +70,7 @@ impl Raw {
                         _ => continue,
                     }
                 }
-                Err((meta, data)) => (meta, data),
+                Err((meta, _)) => meta,
             };
 
             match op {
@@ -84,7 +84,7 @@ impl Raw {
             }
 
             if meta.frozen {
-                cursor.pop(data)?;
+                cursor.pop()?;
             }
         }
     }
@@ -391,7 +391,7 @@ impl<'a> ScanIter<'a> {
             Some(Or::R(node)) => node,
         };
 
-        Or::R(iter::once(node.clone()).chain(Self {
+        Or::R(iter::once(node).chain(Self {
             window: Window {
                 index: 0,
                 low,
