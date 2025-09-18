@@ -39,18 +39,19 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let (meta, data) = self.here().load(Ordering::Relaxed);
             let key = self.key();
 
-            let node = match unsafe { data.to_node(meta.kind) }? {
-                // Stop unconditionally at a leaf due to precondition
-                Or::L(leaf) => return Some(leaf),
+            if key::Array::from_slice_len(key, meta.key.len) == meta.key {
+                match unsafe { data.to_node(meta.kind) }? {
+                    Or::R(node) => {
+                        let byte = key.get(meta.key.len.to_usize())?;
+                        let next = node.get(*byte)?;
+                        self.push(meta.key.len, node, next);
+                        continue;
+                    }
+                    Or::L(leaf) => return Some(leaf),
+                }
+            }
 
-                // Continue traversal only if exact match
-                Or::R(node) if key::Array::from_slice_len(key, meta.key.len) == meta.key => node,
-                Or::R(_) => return None,
-            };
-
-            let byte = key.get(meta.key.len.to_usize())?;
-            let next = node.get(*byte)?;
-            self.push(meta.key.len, node, next);
+            return None;
         }
     }
 
