@@ -24,7 +24,7 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
             return;
         };
 
-        compression.record(edge.meta.key.len.to_usize() as u64);
+        compression.record(edge.meta.key.len.value() as u64);
 
         match child {
             Or::L(_) => {

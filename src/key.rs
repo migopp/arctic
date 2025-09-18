@@ -1,48 +1,42 @@
 use core::fmt::Debug;
+use core::ops::BitAnd as _;
 use core::ops::BitOr as _;
 use core::ops::BitXor as _;
 use core::ops::Shr as _;
 
 use ribbit::u3;
 use ribbit::u56;
-use ribbit::Unpack as _;
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-#[ribbit::pack(size = 3, debug, eq, ord)]
-pub(crate) struct Len(u3);
-
-impl Len {
-    pub(crate) const MAX: usize = 7;
-
-    pub(crate) const fn to_usize(self) -> usize {
-        self.0.value() as usize
-    }
-}
+use ribbit::u59;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 #[ribbit::pack(size = 59)]
 pub(crate) struct Array {
     #[ribbit(size = 56)]
-    buffer: Buffer,
+    buffer: u56,
 
     #[ribbit(size = 3)]
-    pub(crate) len: Len,
+    pub(crate) len: u3,
 }
 
 impl Array {
-    pub(crate) fn from_slice(key: &[u8]) -> Self {
-        const MAX: Len = Len(u3::new(Len::MAX as u8));
-        let (buffer, len) = Buffer::from_slice_len(key, MAX);
-        Self { buffer, len }
+    pub(crate) const EMPTY: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(u56::new(0), u3::new(0));
+
+    const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
+    pub(crate) const MAX: usize = 7;
+
+    pub(crate) fn from_slice(key: &[u8]) -> ribbit::Packed<Self> {
+        let len = key.len().min(Self::MAX);
+        unsafe { ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(Self::copy(key, len))) }
     }
 
     pub(crate) fn match_prefix(key: &[u8], edge: ribbit::Packed<Self>) -> Option<usize> {
-        let len = key.len().min(edge.len().unpack().to_usize());
+        let len = key.len().min(edge.len().value() as usize);
         (unsafe { Self::copy(key, len) } == edge.value.value()).then_some(len)
     }
 
     pub(crate) fn match_split(key: &[u8], edge: ribbit::Packed<Self>) -> Match {
-        let edge_len = edge.len().unpack().to_usize();
+        let edge_len = edge.len().value() as usize;
         let edge = edge.value.value();
 
         let key_len = key.len();
@@ -66,21 +60,15 @@ impl Array {
         Match::Partial {
             start: unsafe {
                 ribbit::Packed::<Self>::new(
-                    ribbit::Packed::<super::key::Buffer>::new(u56::new_unchecked(
-                        edge & ((1u64 << prefix_bit) - 1u64),
-                    )),
-                    ribbit::Packed::<Len>::new_unchecked(u3::new_unchecked(prefix_byte)),
+                    u56::new_unchecked(edge & ((1u64 << prefix_bit) - 1u64)),
+                    u3::new_unchecked(prefix_byte),
                 )
             },
             middle: (edge >> prefix_bit) as u8,
             end: unsafe {
                 ribbit::Packed::<Self>::new(
-                    ribbit::Packed::<super::key::Buffer>::new(u56::new_unchecked(
-                        (edge & (0x00FF_FFFF_FFFF_FFFF)) >> (prefix_bit + 8),
-                    )),
-                    ribbit::Packed::<Len>::new_unchecked(u3::new_unchecked(
-                        edge_len as u8 - prefix_byte - 1,
-                    )),
+                    u56::new_unchecked((edge & Self::MASK) >> (prefix_bit + 8)),
+                    u3::new_unchecked(edge_len as u8 - prefix_byte - 1),
                 )
             },
         }
@@ -101,50 +89,56 @@ impl Array {
 
         let mut buffer = Buffer { byte: [0u8; 8] };
         unsafe {
-            core::hint::assert_unchecked(len <= Len::MAX);
+            core::hint::assert_unchecked(len <= Self::MAX);
             buffer.byte[..len].copy_from_slice(&key[..len]);
             buffer.byte[7] = len as u8;
             buffer.word
         }
     }
 
-    pub(crate) fn can_compress(parent: &Self, child: &Self) -> bool {
-        let parent = parent.len.to_usize();
-        let child = child.len.to_usize();
-        parent + 1 + child <= Len::MAX
-    }
-
-    /// SAFETY: caller must guarantee `can_compress(parent, child)`.
-    pub(crate) unsafe fn compress(parent: &Self, byte: u8, child: &Self) -> Self {
-        let index_bit = parent.len.0.value() << 3;
-        Self {
-            buffer: Buffer(unsafe {
-                u56::new_unchecked(
-                    parent.buffer.0.value()
-                        | ((byte as u64) << index_bit)
-                        | (child.buffer.0.value() << (index_bit + 8)),
-                )
-            }),
-            len: Len(unsafe { u3::new_unchecked(parent.len.0.value() + 1 + child.len.0.value()) }),
+    pub(crate) fn compress(
+        parent: ribbit::Packed<Self>,
+        byte: u8,
+        child: ribbit::Packed<Self>,
+    ) -> Option<ribbit::Packed<Self>> {
+        let parent_len = parent.len().value() as usize;
+        let child_len = child.len().value() as usize;
+        let len = parent_len + 1 + child_len;
+        if len > Self::MAX {
+            return None;
         }
+
+        let bit = parent_len << 3;
+        Some(ribbit::Packed::<Self>::new(
+            unsafe {
+                u56::new_unchecked(
+                    parent
+                        .value
+                        .value()
+                        .bitor((byte as u64) << bit)
+                        .bitor(child.value.value() << (bit + 8))
+                        .bitand(Self::MASK),
+                )
+            },
+            unsafe { u3::new_unchecked(len as u8) },
+        ))
     }
 
     pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, prefix: Option<u8>, with: F) -> T {
         let bytes = match prefix {
-            Some(prefix) => (self.buffer.0.value() << 8 | prefix as u64).to_ne_bytes(),
-            None => self.buffer.0.value().to_ne_bytes(),
+            Some(prefix) => (self.buffer.value() << 8 | prefix as u64).to_ne_bytes(),
+            None => self.buffer.value().to_ne_bytes(),
         };
-        let slice = &bytes[..self.len.to_usize() + prefix.is_some() as usize];
+        let slice = &bytes[..self.len.value() as usize + prefix.is_some() as usize];
         with(slice)
     }
 
     pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> {
         self.buffer
-            .0
             .value()
             .to_ne_bytes()
             .into_iter()
-            .take(self.len.0.value() as usize)
+            .take(self.len.value() as usize)
     }
 }
 

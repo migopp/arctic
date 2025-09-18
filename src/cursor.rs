@@ -4,6 +4,7 @@ use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
 use crate::edge;
@@ -81,7 +82,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
     /// Return CAS operands to either insert the leaf or structurally update
     /// the tree on the way to inserting the leaf.
-    pub(crate) fn traverse_or_insert(&mut self, value: u64) -> (Op, Edge, Edge) {
+    pub(crate) fn traverse_or_insert(
+        &mut self,
+        value: u64,
+    ) -> (Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>) {
         loop {
             let old = self.here().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -110,57 +114,38 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                             }
 
                             node.freeze();
-                            let (op, new) = node.replace(&old.meta().unpack());
+                            let (op, new) = node.replace(old_meta);
                             (Op::Node(op), new)
                         }
-                        None if key.len() > key::Len::MAX => (
+                        None if key.len() > key::Array::MAX => (
                             Op::Edge(edge::Op::Create),
-                            Edge {
-                                meta: edge::Meta {
-                                    key: key::Array::from_slice(key),
-                                    frozen: false,
-                                    kind: node::Kind::Node3,
-                                },
-                                data: edge::Data::new_node::<Node3, _>(None),
-                            },
+                            ribbit::Packed::<Edge>::new(
+                                edge::Meta::NODE_3.with_key(key::Array::from_slice(key)),
+                                edge::Data::new_node::<Node3, _>(None),
+                            ),
                         ),
                         None | Some(Or::L(_)) => (
                             Op::Edge(edge::Op::Insert),
-                            Edge {
-                                meta: edge::Meta {
-                                    key: key::Array::from_slice(key),
-                                    frozen: false,
-                                    kind: node::Kind::Leaf,
-                                },
-                                data: edge::Data::new_leaf(value),
-                            },
+                            ribbit::Packed::<Edge>::new(
+                                edge::Meta::LEAF.with_key(key::Array::from_slice(key)),
+                                edge::Data::new_leaf(value).pack(),
+                            ),
                         ),
                     }
                 }
                 key::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
-                    Edge {
-                        meta: edge::Meta {
-                            key: start.unpack(),
-                            frozen: false,
-                            kind: node::Kind::Node3,
-                        },
-                        data: edge::Data::new_node::<Node3, _>(Some((
+                    ribbit::Packed::<Edge>::new(
+                        edge::Meta::NODE_3.with_key(start),
+                        edge::Data::new_node::<Node3, _>(Some((
                             middle,
-                            edge::Edge {
-                                meta: edge::Meta {
-                                    key: end.unpack(),
-                                    frozen: false,
-                                    kind: old_meta.kind().unpack(),
-                                },
-                                data: old.data().unpack(),
-                            },
+                            old.with_meta(old.meta().with_key(end).with_frozen(false)),
                         ))),
-                    },
+                    ),
                 ),
             };
 
-            return (op, old.unpack(), new);
+            return (op, old, new);
         }
     }
 

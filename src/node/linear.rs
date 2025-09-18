@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Unpack as _;
 
 use crate::edge;
 use crate::key;
@@ -54,7 +55,7 @@ where
         self.edges.iter().take(len).for_each(Edge::freeze);
     }
 
-    fn replace(&self, snapshot: &edge::Meta) -> (Op, Edge) {
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         if cfg!(feature = "validate") {
             assert!(
                 self.header.is_frozen(),
@@ -63,94 +64,71 @@ where
             );
         }
 
-        let mut edges: [(u8, Edge); LEN] = core::array::from_fn(|_| (0, Edge::default()));
+        let mut edges: [(u8, ribbit::Packed<Edge>); LEN] =
+            core::array::from_fn(|_| (0, Edge::DEFAULT));
         let mut len = 0;
 
-        self.edges
-            .iter()
-            .map(|edge| edge.load(Ordering::Relaxed))
-            .zip(self.header.keys())
-            .inspect(|(edge, _)| {
-                if cfg!(feature = "validate") {
-                    assert!(
-                        edge.meta.frozen,
-                        "{} edge must be frozen before replace",
-                        core::any::type_name::<Self>(),
-                    )
-                }
-            })
-            .filter(|(edge, _)| !matches!(edge.meta.kind, node::Kind::None))
-            .map(|(edge, key)| {
-                (
-                    key,
-                    Edge {
-                        meta: edge::Meta {
-                            frozen: false,
-                            ..edge.meta
-                        },
-                        ..edge
-                    },
+        core::iter::zip(
+            self.header.keys(),
+            self.edges
+                .iter()
+                .map(|edge| edge.load_packed(Ordering::Relaxed)),
+        )
+        .filter(|(_, edge)| !matches!(edge.meta().kind().unpack(), node::Kind::None))
+        .map(|(key, edge)| {
+            if cfg!(feature = "validate") {
+                assert!(
+                    edge.meta().frozen(),
+                    "{} edge must be frozen before replace",
+                    core::any::type_name::<Self>(),
                 )
-            })
-            .zip(&mut edges)
-            .for_each(|(edge, save)| {
-                *save = edge;
-                len += 1;
-            });
+            }
+
+            (key, edge.with_meta(edge.meta().with_frozen(false)))
+        })
+        .zip(&mut edges)
+        .for_each(|(edge, save)| {
+            *save = edge;
+            len += 1;
+        });
 
         match &edges[..len] {
-            [] => (
-                Op::Destroy,
-                Edge {
-                    meta: edge::Meta {
-                        key: key::Array::default(),
-                        kind: node::Kind::None,
-                        frozen: false,
-                    },
-                    data: edge::Data::default(),
-                },
-            ),
-
-            [(key, edge)] if key::Array::can_compress(&snapshot.key, &edge.meta.key) => (
-                Op::Compress,
-                Edge {
-                    meta: edge::Meta {
-                        key: unsafe { key::Array::compress(&snapshot.key, *key, &edge.meta.key) },
-                        kind: snapshot.kind,
-                        frozen: false,
-                    },
-                    data: edge.data,
-                },
-            ),
-
-            // Grow
-            _ if len == <Self as node::Info>::GROW => (
-                node::Op::Grow,
-                Edge {
-                    meta: edge::Meta {
-                        key: snapshot.key,
-                        kind: <<Self as node::Info>::Grow as node::Info>::KIND,
-                        frozen: false,
-                    },
-                    data: edge::Data::new_node::<<Self as node::Info>::Grow, _>(
-                        edges.into_iter().take(len),
+            _ if len == <Self as node::Info>::GROW => {
+                return (
+                    node::Op::Grow,
+                    ribbit::Packed::<Edge>::new(
+                        <<Self as node::Info>::Grow as node::Info>::META.with_key(parent.key()),
+                        edge::Data::new_node::<<Self as node::Info>::Grow, _>(
+                            edges.into_iter().take(len),
+                        ),
                     ),
-                },
-            ),
+                )
+            }
+            [] => return (Op::Destroy, Edge::DEFAULT),
+            [(key, edge)] => {
+                if let Some(key) = key::Array::compress(parent.key(), *key, edge.meta().key()) {
+                    return (
+                        Op::Compress,
+                        edge.with_meta(ribbit::Packed::<edge::Meta>::new(
+                            key,
+                            false,
+                            parent.kind(),
+                        )),
+                    );
+                }
+            }
 
-            // Replace
-            _ => (
-                node::Op::Replace,
-                Edge {
-                    meta: edge::Meta {
-                        key: snapshot.key,
-                        kind: <Self as node::Info>::KIND,
-                        frozen: false,
-                    },
-                    data: edge::Data::new_node::<Self, _>(edges.into_iter().take(len)),
-                },
-            ),
+            _ => (),
         }
+
+        // Catch-all:
+        (
+            node::Op::Replace,
+            ribbit::Packed::<Edge>::new(
+                parent.with_frozen(false),
+                edge::Data::new_node::<Self, _>(edges.into_iter().take(len)),
+            ),
+        )
     }
 }
 

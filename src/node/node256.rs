@@ -44,7 +44,7 @@ impl Node for Node256 {
         self.0.iter().for_each(Edge::freeze);
     }
 
-    fn replace(&self, _snapshot: &edge::Meta) -> (Op, Edge) {
+    fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         todo!()
     }
 }
@@ -58,7 +58,7 @@ impl<'a> IntoIterator for &'a Node256 {
 }
 
 impl node::Info for Node256 {
-    const KIND: node::Kind = node::Kind::Node256;
+    const KIND: ribbit::Packed<node::Kind> = ribbit::Packed::<node::Kind>::new_node256();
     const GROW: usize = 256;
     type Grow = Node256;
     type Shrink = Node15;

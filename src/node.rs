@@ -23,11 +23,12 @@ pub(crate) trait Node {
 
     fn freeze(&self);
 
-    fn replace(&self, meta: &edge::Meta) -> (Op, Edge);
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
 }
 
 pub(crate) trait Info: Node + Default {
-    const KIND: Kind;
+    const KIND: ribbit::Packed<Kind>;
+    const META: ribbit::Packed<edge::Meta> = edge::Meta::NONE.with_kind(Self::KIND);
     const GROW: usize;
 
     type Grow: Info;
@@ -114,7 +115,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn replace(&self, meta: &edge::Meta) -> (Op, Edge) {
+    pub(crate) fn replace(&self, meta: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         match self {
             Ref::Node3(node) => node.replace(meta),
             Ref::Node15(node) => node.replace(meta),

@@ -7,6 +7,7 @@ use core::sync::atomic::Ordering;
 use std::rc::Rc;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Unpack as _;
 
 use crate::cursor;
 use crate::cursor::Cursor;
@@ -55,18 +56,18 @@ impl Raw {
         loop {
             let (op, old, new) = cursor.traverse_or_insert(value);
 
-            let edge = match cursor.here().compare_exchange(
-                old.unfreeze(),
+            let edge = match cursor.here().compare_exchange_packed(
+                old.with_meta(old.meta().with_frozen(false)),
                 new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(edge) => {
                     stat::increment(op);
-                    match (op, edge.meta.kind) {
+                    match (op, edge.meta().kind().unpack()) {
                         (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
                         (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
-                            return Ok(Some(edge.data.to_leaf()))
+                            return Ok(Some(edge.data().unpack().to_leaf()))
                         }
                         // FIXME: retire old allocation with SMR
                         _ => continue,
@@ -81,11 +82,11 @@ impl Raw {
 
                 Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
                 | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                    new.data.deallocate(new.meta.kind)
+                    new.data().unpack().deallocate(new.meta().kind().unpack())
                 },
             }
 
-            if edge.meta.frozen {
+            if edge.meta().frozen() {
                 cursor.pop()?;
             }
         }
@@ -340,7 +341,7 @@ impl<'a> Iterator for EntryIter<'a> {
                 }
 
                 iter.skip();
-                let len = key.len() - edge.meta.key.len.to_usize() - byte.is_some() as usize;
+                let len = key.len() - edge.meta.key.len.value() as usize - byte.is_some() as usize;
 
                 match child {
                     Or::L(_) => {
@@ -438,7 +439,7 @@ impl<'a> Iterator for ScanIter<'a> {
 
                 if !mem::replace(descend, true) {
                     self.frontier.push((
-                        1 + edge.meta.key.len.to_usize(),
+                        1 + edge.meta.key.len.value() as usize,
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
                     ));
                     return Some(node);

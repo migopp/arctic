@@ -1,6 +1,7 @@
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Pack as _;
 
 use crate::key;
 use crate::node;
@@ -19,6 +20,9 @@ pub(crate) struct Edge {
 }
 
 impl Edge {
+    pub(crate) const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(Meta::NONE, Data::DEFAULT);
+
     pub(crate) fn unfreeze(&self) -> Self {
         Self {
             meta: self.meta.unfreeze(),
@@ -54,6 +58,18 @@ pub(crate) struct Meta {
 }
 
 impl Meta {
+    pub(crate) const NONE: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(
+        key::Array::EMPTY,
+        false,
+        ribbit::Packed::<node::Kind>::new_none(),
+    );
+
+    pub(crate) const NODE_3: ribbit::Packed<Self> =
+        Self::NONE.with_kind(ribbit::Packed::<node::Kind>::new_node3());
+
+    pub(crate) const LEAF: ribbit::Packed<Self> =
+        Self::NONE.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
+
     fn unfreeze(&self) -> Self {
         Self {
             frozen: false,
@@ -68,19 +84,23 @@ impl Meta {
 pub(crate) struct Data(u64);
 
 impl Data {
-    pub(crate) fn new_node<N, I>(edges: I) -> Self
+    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(0);
+
+    pub(crate) fn new_node<N, I>(edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
-        I: IntoIterator<Item = (u8, Edge)>,
+        I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
     {
         let mut node = Box::new(N::default());
 
         for (key, edge) in edges {
-            node.reserve(key).expect("Node can fit all edges").set(edge);
+            node.reserve(key)
+                .expect("Node can fit all edges")
+                .set_packed(edge);
         }
 
         let node = Box::leak(node) as *mut N;
-        Self(node as u64)
+        Self(node as u64).pack()
     }
 
     pub(crate) fn new_leaf(leaf: u64) -> Self {

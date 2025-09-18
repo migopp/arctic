@@ -97,7 +97,7 @@ impl<'a> IntoIterator for &'a Node15 {
 }
 
 impl node::Info for Node15 {
-    const KIND: node::Kind = node::Kind::Node15;
+    const KIND: ribbit::Packed<node::Kind> = ribbit::Packed::<node::Kind>::new_node15();
     const GROW: usize = 15;
 
     type Grow = Node256;
