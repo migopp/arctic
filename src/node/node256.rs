@@ -6,11 +6,12 @@ use crate::node::Node15;
 use crate::node::Op;
 use crate::Node;
 
-#[repr(transparent)]
+#[repr(C, align(4096))]
 #[derive(Debug)]
 pub(crate) struct Node256([Edge; 256]);
 
 const _: () = assert!(core::mem::size_of::<Node256>() == 4096);
+const _: () = assert!(core::mem::align_of::<Node256>() == 4096);
 
 impl Default for Node256 {
     fn default() -> Self {

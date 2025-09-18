@@ -9,7 +9,7 @@ use crate::node::Frozen;
 use crate::node::Op;
 use crate::Node;
 
-#[repr(C)]
+#[repr(C, align(64))]
 #[derive(Debug)]
 pub(crate) struct Linear<const LEN: usize, H> {
     pub(super) header: H,

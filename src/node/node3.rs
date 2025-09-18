@@ -14,6 +14,7 @@ use super::Node15;
 pub(crate) type Node3 = super::Linear<3, Atomic64<Header>>;
 
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
+const _: () = assert!(core::mem::align_of::<Node3>() == 64);
 
 #[derive(Copy, Clone, Debug, Default)]
 #[ribbit::pack(size = 32)]

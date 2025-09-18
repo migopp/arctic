@@ -15,6 +15,7 @@ use super::linear::Header as _;
 pub(crate) type Node15 = super::Linear<15, Atomic128<Header>>;
 
 const _: () = assert!(core::mem::size_of::<Node15>() == 256);
+const _: () = assert!(core::mem::align_of::<Node15>() == 64);
 
 #[derive(Copy, Clone, Debug, Default)]
 #[ribbit::pack(size = 128)]

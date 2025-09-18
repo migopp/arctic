@@ -6,7 +6,7 @@ use ribbit::atomic::Atomic128;
 use ribbit::atomic::Atomic64;
 use ribbit::Unpack as _;
 
-#[repr(C)]
+#[repr(C, align(16))]
 pub(crate) union Split<L, H> {
     whole: ManuallyDrop<Atomic128<Whole<L, H>>>,
     pair: ManuallyDrop<Pair<L, H>>,
