@@ -9,7 +9,7 @@ use ribbit::u56;
 use ribbit::u59;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 59)]
+#[ribbit::pack(size = 59, eq)]
 pub(crate) struct Array {
     #[ribbit(size = 56)]
     buffer: u56,

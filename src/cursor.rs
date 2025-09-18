@@ -36,13 +36,12 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn get(&mut self) -> Option<u64> {
+    pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
             let len = key::Array::match_prefix(key, meta.key())?;
-
             match unsafe { Edge::next(edge) }? {
                 Or::R(node) => {
                     let byte = key.get(len)?;
@@ -50,17 +49,16 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                     self.push(len, node, next);
                     continue;
                 }
-                Or::L(leaf) => return Some(leaf),
+                Or::L(_) => return Some(edge),
             }
         }
     }
 
-    pub(crate) fn traverse(&mut self) -> Option<(usize, ribbit::Packed<Edge>)> {
+    pub(crate) fn traverse_prefix(&mut self) -> Option<(usize, ribbit::Packed<Edge>)> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
-
             match unsafe { Edge::next(edge) }? {
                 // Continue traversal only if exact match
                 Or::R(node) => {

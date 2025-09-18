@@ -94,12 +94,14 @@ impl Raw {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<u64> {
-        Cursor::<cursor::Optimistic>::new(&self.root, key).get()
+        Cursor::<cursor::Optimistic>::new(&self.root, key)
+            .traverse_exact()
+            .map(|edge| edge.data())
     }
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, mut old) = cursor.traverse()?;
+        let mut old = cursor.traverse_exact()?;
         old = Edge::unfreeze(old);
         let edge = cursor.here();
 
@@ -130,7 +132,7 @@ impl Raw {
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, mut old) = cursor.traverse()?;
+        let mut old = cursor.traverse_exact()?;
         old = Edge::unfreeze(old);
         let edge = cursor.here();
 
@@ -236,7 +238,7 @@ impl Raw {
         };
 
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, prefix);
-        let Some((len, _)) = cursor.traverse() else {
+        let Some((len, _)) = cursor.traverse_prefix() else {
             return Or::L(None.into_iter());
         };
 
