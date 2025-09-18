@@ -1,6 +1,6 @@
-use core::ops::Deref;
-use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
+
+use ribbit::atomic::Atomic128;
 
 use crate::key;
 use crate::node;
@@ -8,50 +8,38 @@ use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
 use crate::Or;
-use crate::Split;
 
-#[repr(transparent)]
-#[derive(Default, Debug)]
-pub(crate) struct Edge(Split<Meta, Data>);
+#[ribbit::pack(size = 128)]
+#[derive(Copy, Clone, Default, Debug)]
+pub(crate) struct Edge {
+    #[ribbit(size = 63)]
+    pub(crate) meta: Meta,
+    #[ribbit(offset = 64, size = 64)]
+    pub(crate) data: Data,
+}
 
 impl Edge {
-    pub(crate) fn freeze(&self) {
-        let mut old_meta = self.load_low_packed(Ordering::Relaxed);
-
-        if old_meta.frozen() {
-            return;
+    pub(crate) fn unfreeze(&self) -> Self {
+        Self {
+            meta: self.meta.unfreeze(),
+            data: self.data,
         }
+    }
 
-        let mut old_data = self.load_high_packed(Ordering::Relaxed);
+    pub(crate) fn freeze(edge: &Atomic128<Self>) {
+        let mut old = edge.load_packed(Ordering::Relaxed);
 
-        loop {
-            match self.compare_exchange_packed(
-                (old_meta, old_data),
-                (old_meta.with_frozen(true), old_data),
-                Ordering::AcqRel,
+        while !old.meta().frozen() {
+            match edge.compare_exchange_packed(
+                old,
+                old.with_meta(old.meta().with_frozen(true)),
+                Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
                 Ok(_) => break,
-                Err((meta, _)) if meta.frozen() => break,
-                Err((meta, data)) => {
-                    old_meta = meta;
-                    old_data = data;
-                }
+                Err(conflict) => old = conflict,
             }
         }
-    }
-}
-
-impl Deref for Edge {
-    type Target = Split<Meta, Data>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Edge {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -78,7 +66,7 @@ impl Meta {
         Match::Partial { start, middle, end }
     }
 
-    pub(crate) fn unfreeze(&self) -> Self {
+    fn unfreeze(&self) -> Self {
         Self {
             frozen: false,
             ..*self
@@ -95,14 +83,12 @@ impl Data {
     pub(crate) fn new_node<N, I>(edges: I) -> Self
     where
         N: node::Info,
-        I: IntoIterator<Item = (u8, Meta, Data)>,
+        I: IntoIterator<Item = (u8, Edge)>,
     {
         let mut node = Box::new(N::default());
 
-        for (key, meta, data) in edges {
-            let edge = node.reserve(key).expect("Node can fit all edges");
-            edge.set_low(meta);
-            edge.set_high(data);
+        for (key, edge) in edges {
+            node.reserve(key).expect("Node can fit all edges").set(edge);
         }
 
         let node = Box::leak(node) as *mut N;

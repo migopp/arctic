@@ -1,5 +1,6 @@
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
 use ribbit::atomic::Atomic64;
 use ribbit::u24;
 use ribbit::u4;
@@ -88,10 +89,10 @@ impl linear::Header for Atomic64<Header> {
 }
 
 impl<'a> IntoIterator for &'a Node3 {
-    type Item = (u8, &'a Edge);
+    type Item = (u8, &'a Atomic128<Edge>);
     type IntoIter = super::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        self.header.keys().zip(super::EdgeIter::new(&self.edges))
+        self.header.keys().zip(self.edges.as_slice().iter())
     }
 }
 

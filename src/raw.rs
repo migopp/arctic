@@ -6,6 +6,8 @@ use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 use std::rc::Rc;
 
+use ribbit::atomic::Atomic128;
+
 use crate::cursor;
 use crate::cursor::Cursor;
 use crate::cursor::Op;
@@ -17,7 +19,7 @@ use crate::Or;
 
 #[derive(Default)]
 pub struct Raw {
-    root: Edge,
+    root: Atomic128<Edge>,
 }
 
 impl Raw {
@@ -51,26 +53,26 @@ impl Raw {
         let mut cursor = Cursor::<P>::new(&self.root, key);
 
         loop {
-            let (op, (old_meta, old_data), (new_meta, new_data)) = cursor.traverse_or_insert(value);
+            let (op, old, new) = cursor.traverse_or_insert(value);
 
-            let meta = match cursor.here().compare_exchange(
-                (old_meta.unfreeze(), old_data),
-                (new_meta, new_data),
+            let edge = match cursor.here().compare_exchange(
+                old.unfreeze(),
+                new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok((meta, data)) => {
+                Ok(edge) => {
                     stat::increment(op);
-                    match (op, meta.kind) {
+                    match (op, edge.meta.kind) {
                         (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
                         (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
-                            return Ok(Some(data.to_leaf()))
+                            return Ok(Some(edge.data.to_leaf()))
                         }
                         // FIXME: retire old allocation with SMR
                         _ => continue,
                     }
                 }
-                Err((meta, _)) => meta,
+                Err(edge) => edge,
             };
 
             match op {
@@ -79,11 +81,11 @@ impl Raw {
 
                 Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
                 | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                    new_data.deallocate(new_meta.kind)
+                    new.data.deallocate(new.meta.kind)
                 },
             }
 
-            if meta.frozen {
+            if edge.meta.frozen {
                 cursor.pop()?;
             }
         }
@@ -95,91 +97,89 @@ impl Raw {
 
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, mut old_meta, mut old_data) = cursor.traverse()?;
-        old_meta = old_meta.unfreeze();
+        let (_, mut old) = cursor.traverse()?;
+        old = old.unfreeze();
         let edge = cursor.here();
 
         loop {
             match edge.compare_exchange(
-                (old_meta, old_data),
-                (
-                    edge::Meta {
-                        key: old_meta.key,
+                old,
+                Edge {
+                    meta: edge::Meta {
+                        key: old.meta.key,
                         frozen: false,
                         kind: node::Kind::None,
                     },
-                    old_data,
-                ),
+                    data: old.data,
+                },
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
-                Err((meta, _)) if matches!(meta.kind, node::Kind::None) => return None,
-                Err((meta, _)) if meta != old_meta => todo!(
+                Err(edge) if matches!(edge.meta.kind, node::Kind::None) => return None,
+                Err(edge) if edge.meta != old.meta => todo!(
                     "Handle metadata conflict in remove: expected {:?} but found {:?}",
-                    old_meta,
-                    meta
+                    old.meta,
+                    edge.meta,
                 ),
-                Err((meta, data)) => {
-                    old_meta = meta;
-                    old_data = data;
+                Err(edge) => {
+                    old = edge;
                 }
             }
         }
 
-        Some(old_data.to_leaf())
+        Some(old.data.to_leaf())
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
-        let (_, mut old_meta, mut old_data) = cursor.traverse()?;
-        old_meta = old_meta.unfreeze();
+        let (_, mut old) = cursor.traverse()?;
+        old = old.unfreeze();
         let edge = cursor.here();
 
         loop {
             match edge.compare_exchange(
-                (old_meta, old_data),
-                (
-                    edge::Meta {
-                        key: old_meta.key,
+                old,
+                Edge {
+                    meta: edge::Meta {
+                        key: old.meta.key,
                         frozen: false,
                         kind: node::Kind::Leaf,
                     },
-                    edge::Data::new_leaf(value),
-                ),
+                    data: edge::Data::new_leaf(value),
+                },
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
 
-                Err((meta, _))
-                    if meta.frozen
-                        || meta.key != old_meta.key
-                        || !matches!(meta.kind, node::Kind::None | node::Kind::Leaf) =>
+                Err(edge)
+                    if edge.meta.frozen
+                        || edge.meta.key != old.meta.key
+                        || !matches!(edge.meta.kind, node::Kind::None | node::Kind::Leaf) =>
                 {
                     todo!(
                         "Handle metadata conflict in update: expected {:?} but found {:?}",
-                        old_meta,
-                        meta
+                        old.meta,
+                        edge.meta,
                     )
                 }
-                Err((meta, data)) => {
-                    old_meta = meta;
-                    old_data = data;
+                Err(edge) => {
+                    old = edge;
                 }
             }
         }
 
-        Some(old_data.to_leaf())
+        Some(old.data.to_leaf())
     }
 
     pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
         self.preorder()
-            .filter_map(|(_, key, meta, data)| match meta.kind {
+            .filter_map(|(_, key, edge)| match edge.meta.kind {
                 node::Kind::None | node::Kind::Node3 | node::Kind::Node15 | node::Kind::Node256 => {
                     None
                 }
-                node::Kind::Leaf => Some((key, data.to_leaf())),
+                node::Kind::Leaf => Some((key, edge.data.to_leaf())),
             })
     }
 
@@ -191,9 +191,7 @@ impl Raw {
         self.iter().map(|(_, value)| value)
     }
 
-    pub(crate) fn preorder(
-        &mut self,
-    ) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, edge::Meta, edge::Data)> + '_ {
+    pub(crate) fn preorder(&mut self) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, Edge)> + '_ {
         EntryIter::new(&mut self.root)
     }
 
@@ -205,11 +203,11 @@ impl Raw {
             Or::R(iter) => Or::R(
                 iter.flat_map(|node| {
                     unsafe { node.iter() }.filter_map(|(_, edge)| {
-                        match edge.load_low(Ordering::Relaxed) {
-                            meta if matches!(meta.kind, node::Kind::Leaf) => {
-                                Some(edge.load_high(Ordering::Acquire).to_leaf())
-                            }
-                            _ => None,
+                        let edge = edge.load(Ordering::Relaxed);
+                        if matches!(edge.meta.kind, node::Kind::Leaf) {
+                            Some(edge.data.to_leaf())
+                        } else {
+                            None
                         }
                     })
                 })
@@ -243,7 +241,7 @@ impl Raw {
         };
 
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, prefix);
-        let Some((len, _, _)) = cursor.traverse() else {
+        let Some((len, _)) = cursor.traverse() else {
             return Or::L(None.into_iter());
         };
 
@@ -259,11 +257,11 @@ impl Raw {
                 // FIXME: root node can contain leaves outside of bounds
                 iter.flat_map(|node| {
                     unsafe { node.iter() }.filter_map(|(_, edge)| {
-                        match edge.load_low(Ordering::Relaxed) {
-                            meta if matches!(meta.kind, node::Kind::Leaf) => {
-                                Some(edge.load_high(Ordering::Acquire).to_leaf())
-                            }
-                            _ => None,
+                        let edge = edge.load(Ordering::Relaxed);
+                        if matches!(edge.meta.kind, node::Kind::Leaf) {
+                            Some(edge.data.to_leaf())
+                        } else {
+                            None
                         }
                     })
                 })
@@ -287,25 +285,19 @@ type EdgeIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a
 type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
 impl<'a> EntryIter<'a> {
-    fn new(root: &'a mut Edge) -> Self {
+    fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: Rc::new(Vec::new()),
             frontier: vec![(
                 0,
-                Or::L(
-                    iter::zip(
-                        iter::once(false),
-                        node::EdgeIter::new(core::slice::from_ref(root)),
-                    )
-                    .peekable(),
-                ),
+                Or::L(iter::zip(iter::once(false), core::slice::from_ref(root).iter()).peekable()),
             )],
         }
     }
 }
 
 impl<'a> Iterator for EntryIter<'a> {
-    type Item = (usize, Rc<Vec<u8>>, edge::Meta, edge::Data);
+    type Item = (usize, Rc<Vec<u8>>, Edge);
 
     fn next(&mut self) -> Option<Self::Item> {
         'vertical: loop {
@@ -330,27 +322,25 @@ impl<'a> Iterator for EntryIter<'a> {
                     continue 'vertical;
                 };
 
-                let (meta, data) = edge.load(Ordering::Relaxed);
+                let edge = edge.load(Ordering::Relaxed);
 
                 // Skip empty edges
-                let Some(child) = (unsafe { data.to_node(meta.kind) }) else {
+                let Some(child) = (unsafe { edge.data.to_node(edge.meta.kind) }) else {
                     iter.skip();
                     continue 'horizontal;
                 };
-
-                let data = edge.load_high(Ordering::Acquire);
 
                 // Update key for current edge
                 let key = Rc::make_mut(&mut self.key);
 
                 // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
-                    key.extend(byte.into_iter().chain(meta.key.bytes()));
-                    return Some((depth, Rc::clone(&self.key), meta, data));
+                    key.extend(byte.into_iter().chain(edge.meta.key.bytes()));
+                    return Some((depth, Rc::clone(&self.key), edge));
                 }
 
                 iter.skip();
-                let len = key.len() - meta.key.len.to_usize() - byte.is_some() as usize;
+                let len = key.len() - edge.meta.key.len.to_usize() - byte.is_some() as usize;
 
                 match child {
                     Or::L(_) => {
@@ -381,11 +371,11 @@ impl<'a> ScanIter<'a> {
     fn new(
         low: Bound<&'a [u8]>,
         high: Bound<&'a [u8]>,
-        root: &'a Edge,
+        root: &'a Atomic128<Edge>,
     ) -> Or<Option<u64>, iter::Chain<iter::Once<node::Ref<'a>>, Self>> {
-        let (meta, data) = root.load(Ordering::Acquire);
+        let edge = root.load(Ordering::Acquire);
 
-        let node = match unsafe { data.to_node(meta.kind) } {
+        let node = match unsafe { edge.data.to_node(edge.meta.kind) } {
             None => return Or::L(None),
             Some(Or::L(leaf)) => return Or::L(Some(leaf)),
             Some(Or::R(node)) => node,
@@ -427,9 +417,9 @@ impl<'a> Iterator for ScanIter<'a> {
                     continue 'vertical;
                 };
 
-                let (meta, data) = edge.load(Ordering::Relaxed);
+                let edge = edge.load(Ordering::Relaxed);
 
-                let node = match unsafe { data.to_node(meta.kind) } {
+                let node = match unsafe { edge.data.to_node(edge.meta.kind) } {
                     None | Some(Or::L(_)) => {
                         iter.next();
                         continue 'horizontal;
@@ -437,14 +427,18 @@ impl<'a> Iterator for ScanIter<'a> {
                     Some(Or::R(node)) => node,
                 };
 
-                if !meta.key.with_bytes(Some(*key), |key| self.window.push(key)) {
+                if !edge
+                    .meta
+                    .key
+                    .with_bytes(Some(*key), |key| self.window.push(key))
+                {
                     iter.next();
                     continue 'horizontal;
                 }
 
                 if !mem::replace(descend, true) {
                     self.frontier.push((
-                        1 + meta.key.len.to_usize(),
+                        1 + edge.meta.key.len.to_usize(),
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
                     ));
                     return Some(node);

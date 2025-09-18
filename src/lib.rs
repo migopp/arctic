@@ -3,7 +3,6 @@ mod edge;
 mod key;
 mod node;
 mod raw;
-mod split;
 pub mod stat;
 
 pub use raw::Raw;
@@ -14,7 +13,6 @@ use std::rc::Rc;
 
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
-pub(crate) use split::Split;
 
 pub struct Map<K, V> {
     raw: Raw,

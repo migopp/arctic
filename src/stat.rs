@@ -19,12 +19,12 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_15 = Histogram::new();
     let mut node_256 = Histogram::new();
 
-    map.raw.preorder().for_each(|(depth_, _, meta, data)| {
-        let Some(child) = (unsafe { data.to_node(meta.kind) }) else {
+    map.raw.preorder().for_each(|(depth_, _, edge)| {
+        let Some(child) = (unsafe { edge.data.to_node(edge.meta.kind) }) else {
             return;
         };
 
-        compression.record(meta.key.len.to_usize() as u64);
+        compression.record(edge.meta.key.len.to_usize() as u64);
 
         match child {
             Or::L(_) => {
@@ -39,8 +39,8 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
 
                 let children = unsafe { node.iter() }
                     .filter(|(_, edge)| {
-                        let meta = edge.load_low(Ordering::Relaxed);
-                        !matches!(meta.kind, node::Kind::None)
+                        let edge = edge.load(Ordering::Relaxed);
+                        !matches!(edge.meta.kind, node::Kind::None)
                     })
                     .count();
 

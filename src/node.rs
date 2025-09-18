@@ -9,20 +9,21 @@ use linear::Linear;
 pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
+use ribbit::atomic::Atomic128;
 
 use crate::edge;
 use crate::Edge;
 
 pub(crate) trait Node {
-    fn get(&self, key: u8) -> Option<&Edge>;
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Edge>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
 
     fn freeze(&self);
 
-    fn replace(&self, meta: &edge::Meta) -> (Op, edge::Meta, edge::Data);
+    fn replace(&self, meta: &edge::Meta) -> (Op, Edge);
 }
 
 pub(crate) trait Info: Node + Default {
@@ -86,7 +87,7 @@ impl<'a> Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'a Edge> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
         match self {
             Ref::Node3(node) => node.get(key),
             Ref::Node15(node) => node.get(key),
@@ -95,7 +96,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Result<&'a Edge, Frozen> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Result<&'a Atomic128<Edge>, Frozen> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
@@ -113,7 +114,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn replace(&self, meta: &edge::Meta) -> (Op, edge::Meta, edge::Data) {
+    pub(crate) fn replace(&self, meta: &edge::Meta) -> (Op, Edge) {
         match self {
             Ref::Node3(node) => node.replace(meta),
             Ref::Node15(node) => node.replace(meta),
@@ -153,27 +154,9 @@ impl Default for Kind {
     }
 }
 
+pub(crate) type EdgeIter<'a> = core::slice::Iter<'a, Atomic128<Edge>>;
+
 pub(crate) type Iter<'a> = core::iter::Zip<KeyIter, EdgeIter<'a>>;
-
-pub(crate) struct EdgeIter<'a> {
-    edges: &'a [Edge],
-    next: usize,
-}
-
-impl<'a> EdgeIter<'a> {
-    pub(crate) fn new(edges: &'a [Edge]) -> Self {
-        Self { edges, next: 0 }
-    }
-}
-
-impl<'a> Iterator for EdgeIter<'a> {
-    type Item = &'a Edge;
-    fn next(&mut self) -> Option<Self::Item> {
-        let edge = self.edges.get(self.next)?;
-        self.next += 1;
-        Some(edge)
-    }
-}
 
 pub(crate) enum KeyIter {
     K3(core::iter::Take<core::array::IntoIter<u8, 4>>),

@@ -89,10 +89,10 @@ impl linear::Header for Atomic128<Header> {
 }
 
 impl<'a> IntoIterator for &'a Node15 {
-    type Item = (u8, &'a Edge);
+    type Item = (u8, &'a Atomic128<Edge>);
     type IntoIter = super::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        self.header.keys().zip(super::EdgeIter::new(&self.edges))
+        self.header.keys().zip(self.edges.as_slice().iter())
     }
 }
 

@@ -1,3 +1,5 @@
+use ribbit::atomic::Atomic128;
+
 use crate::edge;
 use crate::node;
 use crate::node::Edge;
@@ -8,31 +10,31 @@ use crate::Node;
 
 #[repr(C, align(4096))]
 #[derive(Debug)]
-pub(crate) struct Node256([Edge; 256]);
+pub(crate) struct Node256([Atomic128<Edge>; 256]);
 
 const _: () = assert!(core::mem::size_of::<Node256>() == 4096);
 const _: () = assert!(core::mem::align_of::<Node256>() == 4096);
 
 impl Default for Node256 {
     fn default() -> Self {
-        Self(core::array::from_fn(|_| Edge::default()))
+        Self(core::array::from_fn(|_| Atomic128::default()))
     }
 }
 
 impl Node for Node256 {
     #[inline]
-    fn get(&self, key: u8) -> Option<&Edge> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked(key as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
         self.get(key).ok_or(Frozen)
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Edge> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
@@ -42,16 +44,16 @@ impl Node for Node256 {
         self.0.iter().for_each(Edge::freeze);
     }
 
-    fn replace(&self, _snapshot: &edge::Meta) -> (Op, edge::Meta, edge::Data) {
+    fn replace(&self, _snapshot: &edge::Meta) -> (Op, Edge) {
         todo!()
     }
 }
 
 impl<'a> IntoIterator for &'a Node256 {
-    type Item = (u8, &'a Edge);
+    type Item = (u8, &'a Atomic128<Edge>);
     type IntoIter = node::Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        super::KeyIter::new_256().zip(super::EdgeIter::new(&self.0))
+        super::KeyIter::new_256().zip(self.0.as_slice().iter())
     }
 }
 
