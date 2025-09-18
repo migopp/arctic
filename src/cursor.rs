@@ -4,7 +4,6 @@ use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Unpack as _;
 
 use crate::edge;
 use crate::key;
@@ -56,7 +55,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    pub(crate) fn traverse(&mut self) -> Option<(usize, Edge)> {
+    pub(crate) fn traverse(&mut self) -> Option<(usize, ribbit::Packed<Edge>)> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -75,7 +74,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 Or::L(_) => (),
             }
 
-            return Some((self.index, edge.unpack()));
+            return Some((self.index, edge));
         }
     }
 

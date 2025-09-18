@@ -22,11 +22,8 @@ pub(crate) struct Edge {
 impl Edge {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
-    pub(crate) fn unfreeze(&self) -> Self {
-        Self {
-            meta: self.meta.unfreeze(),
-            data: self.data,
-        }
+    pub(crate) fn unfreeze(edge: ribbit::Packed<Self>) -> ribbit::Packed<Self> {
+        edge.with_meta(edge.meta().with_frozen(false))
     }
 
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
@@ -95,7 +92,7 @@ impl Edge {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 63, eq)]
+#[ribbit::pack(size = 63, debug, eq)]
 pub(crate) struct Meta {
     #[ribbit(size = 59)]
     pub(crate) key: key::Array,
@@ -113,13 +110,6 @@ impl Meta {
 
     const LEAF: ribbit::Packed<Self> =
         Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
-
-    fn unfreeze(&self) -> Self {
-        Self {
-            frozen: false,
-            ..*self
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug)]

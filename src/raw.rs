@@ -7,6 +7,7 @@ use core::sync::atomic::Ordering;
 use std::rc::Rc;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
 use crate::cursor;
@@ -57,7 +58,7 @@ impl Raw {
             let (op, old, new) = cursor.traverse_or_insert(value);
 
             let edge = match cursor.here().compare_exchange_packed(
-                old.with_meta(old.meta().with_frozen(false)),
+                Edge::unfreeze(old),
                 new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -99,29 +100,24 @@ impl Raw {
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let (_, mut old) = cursor.traverse()?;
-        old = old.unfreeze();
+        old = Edge::unfreeze(old);
         let edge = cursor.here();
 
         loop {
-            match edge.compare_exchange(
+            match edge.compare_exchange_packed(
                 old,
-                Edge {
-                    meta: edge::Meta {
-                        key: old.meta.key,
-                        frozen: false,
-                        kind: node::Kind::None,
-                    },
-                    data: old.data,
-                },
+                old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
-                Err(edge) if matches!(edge.meta.kind, node::Kind::None) => return None,
-                Err(edge) if edge.meta != old.meta => todo!(
+                Err(edge) if matches!(edge.meta().kind().unpack(), node::Kind::None) => {
+                    return None
+                }
+                Err(edge) if edge.meta() != old.meta() => todo!(
                     "Handle metadata conflict in remove: expected {:?} but found {:?}",
-                    old.meta,
-                    edge.meta,
+                    old.meta(),
+                    edge.meta(),
                 ),
                 Err(edge) => {
                     old = edge;
@@ -129,40 +125,36 @@ impl Raw {
             }
         }
 
-        Some(old.data)
+        Some(old.data())
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let (_, mut old) = cursor.traverse()?;
-        old = old.unfreeze();
+        old = Edge::unfreeze(old);
         let edge = cursor.here();
 
         loop {
-            match edge.compare_exchange(
+            match edge.compare_exchange_packed(
                 old,
-                Edge {
-                    meta: edge::Meta {
-                        key: old.meta.key,
-                        frozen: false,
-                        kind: node::Kind::Leaf,
-                    },
-                    data: value,
-                },
+                Edge::new_leaf(old.meta().key(), value),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => break,
 
                 Err(edge)
-                    if edge.meta.frozen
-                        || edge.meta.key != old.meta.key
-                        || !matches!(edge.meta.kind, node::Kind::None | node::Kind::Leaf) =>
+                    if edge.meta().frozen()
+                        || edge.meta().key() != old.meta().key()
+                        || !matches!(
+                            edge.meta().kind().unpack(),
+                            node::Kind::None | node::Kind::Leaf
+                        ) =>
                 {
                     todo!(
                         "Handle metadata conflict in update: expected {:?} but found {:?}",
-                        old.meta,
-                        edge.meta,
+                        old.meta(),
+                        edge.meta(),
                     )
                 }
                 Err(edge) => {
@@ -171,7 +163,7 @@ impl Raw {
             }
         }
 
-        Some(old.data)
+        Some(old.data())
     }
 
     pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
