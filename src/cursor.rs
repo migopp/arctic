@@ -4,6 +4,7 @@ use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::Unpack as _;
 
 use crate::edge;
 use crate::key;
@@ -38,47 +39,43 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
     pub(crate) fn get(&mut self) -> Option<u64> {
         loop {
-            let edge = self.here().load(Ordering::Relaxed);
+            let edge = self.here().load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
             let key = self.key();
+            let len = key::Array::match_prefix(key, meta.key())?;
 
-            if key::Array::from_slice_len(key, edge.meta.key.len) == edge.meta.key {
-                match unsafe { edge.data.to_node(edge.meta.kind) }? {
-                    Or::R(node) => {
-                        let byte = key.get(edge.meta.key.len.to_usize())?;
-                        let next = node.get(*byte)?;
-                        self.push(edge.meta.key.len, node, next);
-                        continue;
-                    }
-                    Or::L(leaf) => return Some(leaf),
+            match unsafe { edge.data().unpack().to_node(meta.kind().unpack()) }? {
+                Or::R(node) => {
+                    let byte = key.get(len)?;
+                    let next = node.get(*byte)?;
+                    self.push(len, node, next);
+                    continue;
                 }
+                Or::L(leaf) => return Some(leaf),
             }
-
-            return None;
         }
     }
 
     pub(crate) fn traverse(&mut self) -> Option<(usize, Edge)> {
         loop {
-            let edge = self.here().load(Ordering::Relaxed);
+            let edge = self.here().load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
             let key = self.key();
 
-            match unsafe { edge.data.to_node(edge.meta.kind)? } {
+            match unsafe { edge.data().unpack().to_node(meta.kind().unpack())? } {
                 // Continue traversal only if exact match
-                Or::R(node)
-                    if key::Array::from_slice_len(key, edge.meta.key.len) == edge.meta.key =>
-                {
-                    if let Some(next) = key
-                        .get(edge.meta.key.len.to_usize())
-                        .and_then(|byte| node.get(*byte))
-                    {
-                        self.push(edge.meta.key.len, node, next);
-                        continue;
+                Or::R(node) => {
+                    if let Some(len) = key::Array::match_prefix(key, meta.key()) {
+                        if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
+                            self.push(len, node, next);
+                            continue;
+                        }
                     }
                 }
-                Or::L(_) | Or::R(_) => (),
+                Or::L(_) => (),
             }
 
-            return Some((self.index, edge));
+            return Some((self.index, edge.unpack()));
         }
     }
 
@@ -86,24 +83,25 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     /// the tree on the way to inserting the leaf.
     pub(crate) fn traverse_or_insert(&mut self, value: u64) -> (Op, Edge, Edge) {
         loop {
-            let old = self.here().load(Ordering::Relaxed);
+            let old = self.here().load_packed(Ordering::Relaxed);
+            let old_meta = old.meta();
             let key = self.key();
 
-            let (op, new) = match old.meta.match_or_insert(key) {
-                edge::Match::Full => {
-                    match unsafe { old.data.to_node(old.meta.kind) } {
+            let (op, new) = match key::Array::match_split(key, old_meta.key()) {
+                key::Match::Full(len) => {
+                    match unsafe { old.data().unpack().to_node(old_meta.kind().unpack()) } {
                         Some(Or::R(node)) => {
                             match self.history.freeze() {
                                 Some(freeze) if freeze == node => (),
                                 None | Some(_) => {
                                     // Must be more bytes left by no-prefix precondition
-                                    let byte = key[old.meta.key.len.to_usize()];
+                                    let byte = key[len];
 
                                     #[allow(clippy::single_match)]
                                     match node.get_or_reserve(byte) {
                                         // Fast path: no need to replace
                                         Ok(edge) => {
-                                            self.push(old.meta.key.len, node, edge);
+                                            self.push(len, node, edge);
                                             continue;
                                         }
                                         Err(Frozen) => (),
@@ -112,7 +110,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                             }
 
                             node.freeze();
-                            let (op, new) = node.replace(&old.meta);
+                            let (op, new) = node.replace(&old.meta().unpack());
                             (Op::Node(op), new)
                         }
                         None if key.len() > key::Len::MAX => (
@@ -139,11 +137,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         ),
                     }
                 }
-                edge::Match::Partial { start, middle, end } => (
+                key::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge {
                         meta: edge::Meta {
-                            key: start,
+                            key: start.unpack(),
                             frozen: false,
                             kind: node::Kind::Node3,
                         },
@@ -151,23 +149,23 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                             middle,
                             edge::Edge {
                                 meta: edge::Meta {
-                                    key: end,
+                                    key: end.unpack(),
                                     frozen: false,
-                                    kind: old.meta.kind,
+                                    kind: old_meta.kind().unpack(),
                                 },
-                                data: old.data,
+                                data: old.data().unpack(),
                             },
                         ))),
                     },
                 ),
             };
 
-            return (op, old, new);
+            return (op, old.unpack(), new);
         }
     }
 
-    fn push(&mut self, len: key::Len, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
-        self.index += len.to_usize();
+    fn push(&mut self, len: usize, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+        self.index += len;
         self.index += 1;
         self.history.push(Segment {
             len,
@@ -180,7 +178,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.index -= 1;
-        self.index -= segment.len.to_usize();
+        self.index -= segment.len;
         self.here = segment.edge;
         Ok(segment.node)
     }
@@ -255,7 +253,7 @@ impl<'a> History<'a> for Pessimistic<'a> {
 
 #[derive(Debug)]
 pub(crate) struct Segment<'a> {
-    len: key::Len,
+    len: usize,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,
 }

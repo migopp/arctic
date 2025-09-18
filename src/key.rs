@@ -1,7 +1,11 @@
 use core::fmt::Debug;
+use core::ops::BitOr as _;
+use core::ops::BitXor as _;
+use core::ops::Shr as _;
 
 use ribbit::u3;
 use ribbit::u56;
+use ribbit::Unpack as _;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[ribbit::pack(size = 3, debug, eq, ord)]
@@ -32,40 +36,76 @@ impl Array {
         Self { buffer, len }
     }
 
-    pub(crate) fn from_slice_len(key: &[u8], len: Len) -> Self {
-        let (buffer, len) = Buffer::from_slice_len(key, len);
-        Self { buffer, len }
+    pub(crate) fn match_prefix(key: &[u8], edge: ribbit::Packed<Self>) -> Option<usize> {
+        let len = key.len().min(edge.len().unpack().to_usize());
+        (unsafe { Self::copy(key, len) } == edge.value.value()).then_some(len)
     }
 
-    pub(crate) fn prefix(left: &Self, right: &Self) -> Len {
-        Len(unsafe {
-            u3::new_unchecked(
-                (((left.buffer.0 ^ right.buffer.0).trailing_zeros() >> 3) as u8)
-                    .min(left.len.0.value())
-                    .min(right.len.0.value()),
-            )
-        })
+    pub(crate) fn match_split(key: &[u8], edge: ribbit::Packed<Self>) -> Match {
+        let edge_len = edge.len().unpack().to_usize();
+        let edge = edge.value.value();
+
+        let key_len = key.len();
+        let len = key_len.min(edge_len);
+
+        let key = unsafe { Self::copy(key, len) };
+
+        if key == edge {
+            return Match::Full(len);
+        }
+
+        let prefix_byte = key
+            .bitxor(edge)
+            // Guarantee `trailing_zeros` cannot produce more than `len * 8` bits
+            .bitor(1u64 << (len << 3))
+            .trailing_zeros()
+            .shr(3u32) as u8;
+
+        let prefix_bit = prefix_byte << 3;
+
+        Match::Partial {
+            start: unsafe {
+                ribbit::Packed::<Self>::new(
+                    ribbit::Packed::<super::key::Buffer>::new(u56::new_unchecked(
+                        edge & ((1u64 << prefix_bit) - 1u64),
+                    )),
+                    ribbit::Packed::<Len>::new_unchecked(u3::new_unchecked(prefix_byte)),
+                )
+            },
+            middle: (edge >> prefix_bit) as u8,
+            end: unsafe {
+                ribbit::Packed::<Self>::new(
+                    ribbit::Packed::<super::key::Buffer>::new(u56::new_unchecked(
+                        (edge & (0x00FF_FFFF_FFFF_FFFF)) >> (prefix_bit + 8),
+                    )),
+                    ribbit::Packed::<Len>::new_unchecked(u3::new_unchecked(
+                        edge_len as u8 - prefix_byte - 1,
+                    )),
+                )
+            },
+        }
     }
 
-    /// SAFETY: caller must guarantee `index < self.len` and `self.len > 0`.
-    pub(crate) unsafe fn expand(&self, index: Len) -> (Self, u8, Self) {
-        let index_byte = index.0.value();
-        let index_bit = index_byte << 3;
-        let buffer = self.buffer.0.value();
-        let len = self.len.0.value();
-        (
-            Self {
-                buffer: Buffer(unsafe {
-                    u56::new_unchecked(buffer & ((1u64 << index_bit) - 1u64))
-                }),
-                len: Len(unsafe { u3::new_unchecked(index_byte) }),
-            },
-            (buffer >> index_bit) as u8,
-            Self {
-                buffer: Buffer(unsafe { u56::new_unchecked(buffer >> (index_bit + 8)) }),
-                len: Len(unsafe { u3::new_unchecked(len - index_byte - 1) }),
-            },
-        )
+    // SAFETY: caller must ensure `len <= Len::MAX`
+    unsafe fn copy(key: &[u8], len: usize) -> u64 {
+        #[repr(C, align(8))]
+        union Buffer {
+            byte: [u8; 8],
+            word: u64,
+        }
+
+        const {
+            assert!(core::mem::size_of::<Buffer>() == 8);
+            assert!(core::mem::align_of::<Buffer>() == 8);
+        }
+
+        let mut buffer = Buffer { byte: [0u8; 8] };
+        unsafe {
+            core::hint::assert_unchecked(len <= Len::MAX);
+            buffer.byte[..len].copy_from_slice(&key[..len]);
+            buffer.byte[7] = len as u8;
+            buffer.word
+        }
     }
 
     pub(crate) fn can_compress(parent: &Self, child: &Self) -> bool {
@@ -106,6 +146,15 @@ impl Array {
             .into_iter()
             .take(self.len.0.value() as usize)
     }
+}
+
+pub(crate) enum Match {
+    Full(usize),
+    Partial {
+        start: ribbit::Packed<Array>,
+        middle: u8,
+        end: ribbit::Packed<Array>,
+    },
 }
 
 impl Debug for Array {

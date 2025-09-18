@@ -54,18 +54,6 @@ pub(crate) struct Meta {
 }
 
 impl Meta {
-    pub(crate) fn match_or_insert(&self, key: &[u8]) -> Match {
-        let key = key::Array::from_slice_len(key, self.key.len);
-
-        if key == self.key {
-            return Match::Full;
-        }
-
-        let prefix = key::Array::prefix(&key, &self.key);
-        let (start, middle, end) = unsafe { self.key.expand(prefix) };
-        Match::Partial { start, middle, end }
-    }
-
     fn unfreeze(&self) -> Self {
         Self {
             frozen: false,
@@ -147,14 +135,4 @@ pub(crate) enum Op {
 
     /// Leaf removal
     Remove,
-}
-
-#[derive(Debug)]
-pub(crate) enum Match {
-    Full,
-    Partial {
-        start: key::Array,
-        middle: u8,
-        end: key::Array,
-    },
 }
