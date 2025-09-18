@@ -1,7 +1,7 @@
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Pack as _;
+use ribbit::Unpack as _;
 
 use crate::key;
 use crate::node;
@@ -15,13 +15,12 @@ use crate::Or;
 pub(crate) struct Edge {
     #[ribbit(size = 63)]
     pub(crate) meta: Meta,
-    #[ribbit(offset = 64, size = 64)]
-    pub(crate) data: Data,
+    #[ribbit(offset = 64)]
+    pub(crate) data: u64,
 }
 
 impl Edge {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(Meta::NONE, Data::DEFAULT);
+    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
     pub(crate) fn unfreeze(&self) -> Self {
         Self {
@@ -45,48 +44,39 @@ impl Edge {
             }
         }
     }
-}
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 63, eq)]
-pub(crate) struct Meta {
-    #[ribbit(size = 59)]
-    pub(crate) key: key::Array,
-    pub(crate) frozen: bool,
-    #[ribbit(size = 3)]
-    pub(crate) kind: node::Kind,
-}
-
-impl Meta {
-    pub(crate) const NONE: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(
-        key::Array::EMPTY,
-        false,
-        ribbit::Packed::<node::Kind>::new_none(),
-    );
-
-    pub(crate) const NODE_3: ribbit::Packed<Self> =
-        Self::NONE.with_kind(ribbit::Packed::<node::Kind>::new_node3());
-
-    pub(crate) const LEAF: ribbit::Packed<Self> =
-        Self::NONE.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
-
-    fn unfreeze(&self) -> Self {
-        Self {
-            frozen: false,
-            ..*self
+    pub(crate) unsafe fn next<'a>(edge: ribbit::Packed<Edge>) -> Option<Or<u64, node::Ref<'a>>> {
+        match edge.meta().kind().unpack() {
+            node::Kind::None => None,
+            node::Kind::Leaf => Some(Or::L(edge.data())),
+            node::Kind::Node3 => unsafe { (edge.data() as *mut Node3).as_ref() }
+                .map(node::Ref::Node3)
+                .map(Or::R),
+            node::Kind::Node15 => unsafe { (edge.data() as *mut Node15).as_ref() }
+                .map(node::Ref::Node15)
+                .map(Or::R),
+            node::Kind::Node256 => unsafe { (edge.data() as *mut Node256).as_ref() }
+                .map(node::Ref::Node256)
+                .map(Or::R),
         }
     }
-}
 
-#[repr(transparent)]
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-#[ribbit::pack(size = 64)]
-pub(crate) struct Data(u64);
+    pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
+        match edge.meta().kind().unpack() {
+            node::Kind::None | node::Kind::Leaf => {
+                unreachable!()
+            }
+            node::Kind::Node3 => drop(Box::from_raw(edge.data() as *mut Node3)),
+            node::Kind::Node15 => drop(Box::from_raw(edge.data() as *mut Node15)),
+            node::Kind::Node256 => drop(Box::from_raw(edge.data() as *mut Node256)),
+        }
+    }
 
-impl Data {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(0);
+    pub(crate) fn new_leaf(key: ribbit::Packed<key::Array>, leaf: u64) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), leaf)
+    }
 
-    pub(crate) fn new_node<N, I>(edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: ribbit::Packed<key::Array>, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
@@ -100,44 +90,34 @@ impl Data {
         }
 
         let node = Box::leak(node) as *mut N;
-        Self(node as u64).pack()
+        ribbit::Packed::<Self>::new(N::META.with_key(key), node as u64)
     }
+}
 
-    pub(crate) fn new_leaf(leaf: u64) -> Self {
-        Self(leaf)
-    }
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[ribbit::pack(size = 63, eq)]
+pub(crate) struct Meta {
+    #[ribbit(size = 59)]
+    pub(crate) key: key::Array,
+    pub(crate) frozen: bool,
+    #[ribbit(size = 3)]
+    pub(crate) kind: node::Kind,
+}
 
-    pub(crate) fn to_leaf(self) -> u64 {
-        self.0
-    }
+impl Meta {
+    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(
+        key::Array::EMPTY,
+        false,
+        ribbit::Packed::<node::Kind>::new_none(),
+    );
 
-    pub(crate) unsafe fn to_node<'a>(self, kind: node::Kind) -> Option<Or<u64, node::Ref<'a>>> {
-        match kind {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(Or::L(self.0)),
-            node::Kind::Node3 => (self.0 as *mut Node3)
-                .as_ref()
-                .map(node::Ref::Node3)
-                .map(Or::R),
-            node::Kind::Node15 => (self.0 as *mut Node15)
-                .as_ref()
-                .map(node::Ref::Node15)
-                .map(Or::R),
-            node::Kind::Node256 => (self.0 as *mut Node256)
-                .as_ref()
-                .map(node::Ref::Node256)
-                .map(Or::R),
-        }
-    }
+    const LEAF: ribbit::Packed<Self> =
+        Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
 
-    pub(crate) unsafe fn deallocate(self, kind: node::Kind) {
-        match kind {
-            node::Kind::None | node::Kind::Leaf => {
-                unreachable!()
-            }
-            node::Kind::Node3 => drop(Box::from_raw(self.0 as *mut Node3)),
-            node::Kind::Node15 => drop(Box::from_raw(self.0 as *mut Node15)),
-            node::Kind::Node256 => drop(Box::from_raw(self.0 as *mut Node256)),
+    fn unfreeze(&self) -> Self {
+        Self {
+            frozen: false,
+            ..*self
         }
     }
 }

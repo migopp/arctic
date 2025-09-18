@@ -4,7 +4,6 @@ use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
 use crate::edge;
@@ -45,7 +44,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let key = self.key();
             let len = key::Array::match_prefix(key, meta.key())?;
 
-            match unsafe { edge.data().unpack().to_node(meta.kind().unpack()) }? {
+            match unsafe { Edge::next(edge) }? {
                 Or::R(node) => {
                     let byte = key.get(len)?;
                     let next = node.get(*byte)?;
@@ -63,7 +62,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let meta = edge.meta();
             let key = self.key();
 
-            match unsafe { edge.data().unpack().to_node(meta.kind().unpack())? } {
+            match unsafe { Edge::next(edge) }? {
                 // Continue traversal only if exact match
                 Or::R(node) => {
                     if let Some(len) = key::Array::match_prefix(key, meta.key()) {
@@ -93,7 +92,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
             let (op, new) = match key::Array::match_split(key, old_meta.key()) {
                 key::Match::Full(len) => {
-                    match unsafe { old.data().unpack().to_node(old_meta.kind().unpack()) } {
+                    match unsafe { Edge::next(old) } {
                         Some(Or::R(node)) => {
                             match self.history.freeze() {
                                 Some(freeze) if freeze == node => (),
@@ -119,28 +118,22 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         }
                         None if key.len() > key::Array::MAX => (
                             Op::Edge(edge::Op::Create),
-                            ribbit::Packed::<Edge>::new(
-                                edge::Meta::NODE_3.with_key(key::Array::from_slice(key)),
-                                edge::Data::new_node::<Node3, _>(None),
-                            ),
+                            Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
                         ),
                         None | Some(Or::L(_)) => (
                             Op::Edge(edge::Op::Insert),
-                            ribbit::Packed::<Edge>::new(
-                                edge::Meta::LEAF.with_key(key::Array::from_slice(key)),
-                                edge::Data::new_leaf(value).pack(),
-                            ),
+                            Edge::new_leaf(key::Array::from_slice(key), value),
                         ),
                     }
                 }
                 key::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
-                    ribbit::Packed::<Edge>::new(
-                        edge::Meta::NODE_3.with_key(start),
-                        edge::Data::new_node::<Node3, _>(Some((
+                    Edge::new_node::<Node3, _>(
+                        start,
+                        Some((
                             middle,
                             old.with_meta(old.meta().with_key(end).with_frozen(false)),
-                        ))),
+                        )),
                     ),
                 ),
             };

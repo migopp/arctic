@@ -67,7 +67,7 @@ impl Raw {
                     match (op, edge.meta().kind().unpack()) {
                         (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
                         (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
-                            return Ok(Some(edge.data().unpack().to_leaf()))
+                            return Ok(Some(edge.data()))
                         }
                         // FIXME: retire old allocation with SMR
                         _ => continue,
@@ -82,7 +82,7 @@ impl Raw {
 
                 Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
                 | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                    new.data().unpack().deallocate(new.meta().kind().unpack())
+                    Edge::deallocate(new);
                 },
             }
 
@@ -129,7 +129,7 @@ impl Raw {
             }
         }
 
-        Some(old.data.to_leaf())
+        Some(old.data)
     }
 
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
@@ -147,7 +147,7 @@ impl Raw {
                         frozen: false,
                         kind: node::Kind::Leaf,
                     },
-                    data: edge::Data::new_leaf(value),
+                    data: value,
                 },
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -171,16 +171,16 @@ impl Raw {
             }
         }
 
-        Some(old.data.to_leaf())
+        Some(old.data)
     }
 
     pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
         self.preorder()
-            .filter_map(|(_, key, edge)| match edge.meta.kind {
+            .filter_map(|(_, key, edge)| match edge.meta().kind().unpack() {
                 node::Kind::None | node::Kind::Node3 | node::Kind::Node15 | node::Kind::Node256 => {
                     None
                 }
-                node::Kind::Leaf => Some((key, edge.data.to_leaf())),
+                node::Kind::Leaf => Some((key, edge.data())),
             })
     }
 
@@ -192,7 +192,9 @@ impl Raw {
         self.iter().map(|(_, value)| value)
     }
 
-    pub(crate) fn preorder(&mut self) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, Edge)> + '_ {
+    pub(crate) fn preorder(
+        &mut self,
+    ) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, ribbit::Packed<Edge>)> + '_ {
         EntryIter::new(&mut self.root)
     }
 
@@ -206,7 +208,7 @@ impl Raw {
                     unsafe { node.iter() }.filter_map(|(_, edge)| {
                         let edge = edge.load(Ordering::Relaxed);
                         if matches!(edge.meta.kind, node::Kind::Leaf) {
-                            Some(edge.data.to_leaf())
+                            Some(edge.data)
                         } else {
                             None
                         }
@@ -260,7 +262,7 @@ impl Raw {
                     unsafe { node.iter() }.filter_map(|(_, edge)| {
                         let edge = edge.load(Ordering::Relaxed);
                         if matches!(edge.meta.kind, node::Kind::Leaf) {
-                            Some(edge.data.to_leaf())
+                            Some(edge.data)
                         } else {
                             None
                         }
@@ -298,7 +300,7 @@ impl<'a> EntryIter<'a> {
 }
 
 impl<'a> Iterator for EntryIter<'a> {
-    type Item = (usize, Rc<Vec<u8>>, Edge);
+    type Item = (usize, Rc<Vec<u8>>, ribbit::Packed<Edge>);
 
     fn next(&mut self) -> Option<Self::Item> {
         'vertical: loop {
@@ -323,10 +325,10 @@ impl<'a> Iterator for EntryIter<'a> {
                     continue 'vertical;
                 };
 
-                let edge = edge.load(Ordering::Relaxed);
+                let edge = edge.load_packed(Ordering::Relaxed);
 
                 // Skip empty edges
-                let Some(child) = (unsafe { edge.data.to_node(edge.meta.kind) }) else {
+                let Some(child) = (unsafe { Edge::next(edge) }) else {
                     iter.skip();
                     continue 'horizontal;
                 };
@@ -334,14 +336,16 @@ impl<'a> Iterator for EntryIter<'a> {
                 // Update key for current edge
                 let key = Rc::make_mut(&mut self.key);
 
+                let edge_key = edge.meta().key().unpack();
+
                 // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
-                    key.extend(byte.into_iter().chain(edge.meta.key.bytes()));
+                    key.extend(byte.into_iter().chain(edge_key.bytes()));
                     return Some((depth, Rc::clone(&self.key), edge));
                 }
 
                 iter.skip();
-                let len = key.len() - edge.meta.key.len.value() as usize - byte.is_some() as usize;
+                let len = key.len() - edge_key.len.value() as usize - byte.is_some() as usize;
 
                 match child {
                     Or::L(_) => {
@@ -374,9 +378,9 @@ impl<'a> ScanIter<'a> {
         high: Bound<&'a [u8]>,
         root: &'a Atomic128<Edge>,
     ) -> Or<Option<u64>, iter::Chain<iter::Once<node::Ref<'a>>, Self>> {
-        let edge = root.load(Ordering::Acquire);
+        let edge = root.load_packed(Ordering::Acquire);
 
-        let node = match unsafe { edge.data.to_node(edge.meta.kind) } {
+        let node = match unsafe { Edge::next(edge) } {
             None => return Or::L(None),
             Some(Or::L(leaf)) => return Or::L(Some(leaf)),
             Some(Or::R(node)) => node,
@@ -418,9 +422,9 @@ impl<'a> Iterator for ScanIter<'a> {
                     continue 'vertical;
                 };
 
-                let edge = edge.load(Ordering::Relaxed);
+                let edge = edge.load_packed(Ordering::Relaxed);
 
-                let node = match unsafe { edge.data.to_node(edge.meta.kind) } {
+                let node = match unsafe { Edge::next(edge) } {
                     None | Some(Or::L(_)) => {
                         iter.next();
                         continue 'horizontal;
@@ -429,8 +433,9 @@ impl<'a> Iterator for ScanIter<'a> {
                 };
 
                 if !edge
-                    .meta
-                    .key
+                    .meta()
+                    .key()
+                    .unpack()
                     .with_bytes(Some(*key), |key| self.window.push(key))
                 {
                     iter.next();
@@ -439,7 +444,7 @@ impl<'a> Iterator for ScanIter<'a> {
 
                 if !mem::replace(descend, true) {
                     self.frontier.push((
-                        1 + edge.meta.key.len.value() as usize,
+                        1 + edge.meta().key().len().value() as usize,
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
                     ));
                     return Some(node);

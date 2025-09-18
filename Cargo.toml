@@ -8,7 +8,6 @@ default = []
 stat = ["dep:serde", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
-opt-memcpy = []
 validate = []
 
 [dependencies]

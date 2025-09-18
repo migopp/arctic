@@ -96,25 +96,17 @@ where
             _ if len == <Self as node::Info>::GROW => {
                 return (
                     node::Op::Grow,
-                    ribbit::Packed::<Edge>::new(
-                        <<Self as node::Info>::Grow as node::Info>::META.with_key(parent.key()),
-                        edge::Data::new_node::<<Self as node::Info>::Grow, _>(
-                            edges.into_iter().take(len),
-                        ),
+                    Edge::new_node::<<Self as node::Info>::Grow, _>(
+                        parent.key(),
+                        edges.into_iter().take(len),
                     ),
                 )
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
-                if let Some(key) = key::Array::compress(parent.key(), *key, edge.meta().key()) {
-                    return (
-                        Op::Compress,
-                        edge.with_meta(ribbit::Packed::<edge::Meta>::new(
-                            key,
-                            false,
-                            parent.kind(),
-                        )),
-                    );
+                if let Some(compress) = key::Array::compress(parent.key(), *key, edge.meta().key())
+                {
+                    return (Op::Compress, edge.with_meta(edge.meta().with_key(compress)));
                 }
             }
 
@@ -124,10 +116,7 @@ where
         // Catch-all:
         (
             node::Op::Replace,
-            ribbit::Packed::<Edge>::new(
-                parent.with_frozen(false),
-                edge::Data::new_node::<Self, _>(edges.into_iter().take(len)),
-            ),
+            Edge::new_node::<Self, _>(parent.key(), edges.into_iter().take(len)),
         )
     }
 }

@@ -20,11 +20,11 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_256 = Histogram::new();
 
     map.raw.preorder().for_each(|(depth_, _, edge)| {
-        let Some(child) = (unsafe { edge.data.to_node(edge.meta.kind) }) else {
+        let Some(child) = (unsafe { crate::Edge::next(edge) }) else {
             return;
         };
 
-        compression.record(edge.meta.key.len.value() as u64);
+        compression.record(edge.meta().key().len().value() as u64);
 
         match child {
             Or::L(_) => {
