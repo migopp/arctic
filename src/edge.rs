@@ -38,10 +38,11 @@ impl Edge {
         }
     }
 
+    #[inline]
     pub(crate) unsafe fn next<'a>(edge: ribbit::Packed<Edge>) -> Option<Or<u64, node::Ref<'a>>> {
-        match edge.meta().kind().unpack() {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(Or::L(edge.data())),
+        let node = match edge.meta().kind().unpack() {
+            node::Kind::None => return None,
+            node::Kind::Leaf => return Some(Or::L(edge.data())),
             node::Kind::Node3 => unsafe { (edge.data() as *mut Node3).as_ref() }
                 .map(node::Ref::Node3)
                 .map(Or::R),
@@ -51,7 +52,12 @@ impl Edge {
             node::Kind::Node256 => unsafe { (edge.data() as *mut Node256).as_ref() }
                 .map(node::Ref::Node256)
                 .map(Or::R),
-        }
+        };
+
+        Some(match cfg!(feature = "validate") {
+            true => node.unwrap(),
+            false => unsafe { node.unwrap_unchecked() },
+        })
     }
 
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
