@@ -57,8 +57,13 @@ impl Raw {
         loop {
             let (op, old, new) = cursor.traverse_or_insert(value);
 
+            if old.meta().frozen() {
+                cursor.pop()?;
+                continue;
+            }
+
             let edge = match cursor.here().compare_exchange_packed(
-                Edge::unfreeze(old),
+                old,
                 new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
@@ -102,10 +107,13 @@ impl Raw {
     pub fn remove(&self, key: &[u8]) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut old = cursor.traverse_exact()?;
-        old = Edge::unfreeze(old);
         let edge = cursor.here();
 
         loop {
+            if old.meta().frozen() {
+                todo!()
+            }
+
             match edge.compare_exchange_packed(
                 old,
                 old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
@@ -133,10 +141,13 @@ impl Raw {
     pub fn update(&self, key: &[u8], value: u64) -> Option<u64> {
         let mut cursor = Cursor::<cursor::Optimistic>::new(&self.root, key);
         let mut old = cursor.traverse_exact()?;
-        old = Edge::unfreeze(old);
         let edge = cursor.here();
 
         loop {
+            if old.meta().frozen() {
+                todo!()
+            }
+
             match edge.compare_exchange_packed(
                 old,
                 Edge::new_leaf(old.meta().key(), value),

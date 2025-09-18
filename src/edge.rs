@@ -22,10 +22,6 @@ pub(crate) struct Edge {
 impl Edge {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
-    pub(crate) fn unfreeze(edge: ribbit::Packed<Self>) -> ribbit::Packed<Self> {
-        edge.with_meta(edge.meta().with_frozen(false))
-    }
-
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
