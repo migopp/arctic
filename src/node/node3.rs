@@ -54,7 +54,7 @@ impl linear::Header for Atomic64<Header> {
         (index < header.len().value()).then_some(index)
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<u8, node::Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Option<u8> {
         let mut old = self.load_packed(Ordering::Acquire);
 
         loop {
@@ -62,9 +62,9 @@ impl linear::Header for Atomic64<Header> {
             let len = old.len().value();
 
             if index < len {
-                return Ok(index);
+                return Some(index);
             } else if len >= 3 || old.frozen() {
-                return Err(node::Frozen);
+                return None;
             }
 
             match self.compare_exchange_packed(
@@ -77,7 +77,7 @@ impl linear::Header for Atomic64<Header> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return Ok(len),
+                Ok(_) => return Some(len),
                 Err(conflict) => old = conflict,
             }
         }

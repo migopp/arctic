@@ -17,7 +17,7 @@ use crate::Edge;
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
 
-    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>>;
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
 
@@ -34,9 +34,6 @@ pub(crate) trait Info: Node + Default {
     type Grow: Info;
     type Shrink: Info;
 }
-
-#[derive(Debug)]
-pub(crate) struct Frozen;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Op {
@@ -97,7 +94,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Result<&'a Atomic128<Edge>, Frozen> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),

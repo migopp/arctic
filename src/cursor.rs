@@ -8,7 +8,6 @@ use ribbit::atomic::Atomic128;
 use crate::edge;
 use crate::key;
 use crate::node;
-use crate::node::Frozen;
 use crate::node::Node3;
 use crate::Edge;
 use crate::Or;
@@ -96,15 +95,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                                 None | Some(_) => {
                                     // Must be more bytes left by no-prefix precondition
                                     let byte = key[len];
-
-                                    #[allow(clippy::single_match)]
-                                    match node.get_or_reserve(byte) {
+                                    if let Some(edge) = node.get_or_reserve(byte) {
                                         // Fast path: no need to replace
-                                        Ok(edge) => {
-                                            self.push(len, node, edge);
-                                            continue;
-                                        }
-                                        Err(Frozen) => (),
+                                        self.push(len, node, edge);
+                                        continue;
                                     }
                                 }
                             }

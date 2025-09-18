@@ -8,7 +8,6 @@ use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Edge;
-use crate::node::Frozen;
 use crate::node::Op;
 use crate::Node;
 
@@ -38,16 +37,14 @@ where
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.get_or_reserve(key)?;
-        Ok(unsafe { self.edges.get_unchecked(index as usize) })
+        Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
-        match self.header.get_or_reserve(key) {
-            Ok(index) => Some(unsafe { self.edges.get_unchecked_mut(index as usize) }),
-            Err(_) => None,
-        }
+        let index = self.header.get_or_reserve(key)?;
+        Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
     fn freeze(&self) {
@@ -125,6 +122,6 @@ pub(super) trait Header {
     fn is_frozen(&self) -> bool;
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
-    fn get_or_reserve(&self, key: u8) -> Result<u8, Frozen>;
+    fn get_or_reserve(&self, key: u8) -> Option<u8>;
     fn keys(&self) -> super::KeyIter;
 }

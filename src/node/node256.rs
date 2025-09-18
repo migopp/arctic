@@ -3,7 +3,6 @@ use ribbit::atomic::Atomic128;
 use crate::edge;
 use crate::node;
 use crate::node::Edge;
-use crate::node::Frozen;
 use crate::node::Node15;
 use crate::node::Op;
 use crate::Node;
@@ -29,8 +28,8 @@ impl Node for Node256 {
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Result<&Atomic128<Edge>, Frozen> {
-        self.get(key).ok_or(Frozen)
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>> {
+        self.get(key)
     }
 
     #[inline]
