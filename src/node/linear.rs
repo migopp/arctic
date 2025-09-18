@@ -31,18 +31,18 @@ where
     Self: node::Info,
 {
     fn get(&self, key: u8) -> Option<&Edge> {
-        let index = self.header.get(key);
-        self.edges.get(index)
+        let index = self.header.get(key)?;
+        Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     fn get_or_reserve(&self, key: u8) -> Result<&Edge, Frozen> {
         let index = self.header.get_or_reserve(key)?;
-        Ok(&self.edges[index])
+        Ok(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     fn reserve(&mut self, key: u8) -> Option<&mut Edge> {
         match self.header.get_or_reserve(key) {
-            Ok(index) => Some(&mut self.edges[index]),
+            Ok(index) => Some(unsafe { self.edges.get_unchecked_mut(index as usize) }),
             Err(_) => None,
         }
     }
@@ -135,7 +135,7 @@ where
 pub(super) trait Header {
     fn is_frozen(&self) -> bool;
     fn freeze(&self) -> usize;
-    fn get(&self, key: u8) -> usize;
-    fn get_or_reserve(&self, key: u8) -> Result<usize, Frozen>;
+    fn get(&self, key: u8) -> Option<u8>;
+    fn get_or_reserve(&self, key: u8) -> Result<u8, Frozen>;
     fn keys(&self) -> super::KeyIter;
 }

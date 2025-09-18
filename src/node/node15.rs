@@ -47,18 +47,20 @@ impl linear::Header for Atomic128<Header> {
         old.len().value() as usize
     }
 
-    fn get(&self, key: u8) -> usize {
-        get(self.load_packed(Ordering::Relaxed).value, key)
+    fn get(&self, key: u8) -> Option<u8> {
+        let header = self.load_packed(Ordering::Relaxed);
+        let index = get(header.value, key);
+        (index < header.len().value()).then_some(index)
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<usize, node::Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Result<u8, node::Frozen> {
         let mut old = self.load_packed(Ordering::Acquire);
 
         loop {
             let index = get(old.value, key);
             let len = old.len().value();
 
-            if index < len as usize {
+            if index < len {
                 return Ok(index);
             } else if len >= 15 || old.frozen() {
                 return Err(node::Frozen);
@@ -74,7 +76,7 @@ impl linear::Header for Atomic128<Header> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return Ok(len as usize),
+                Ok(_) => return Ok(len),
                 Err(conflict) => old = conflict,
             }
         }
@@ -102,7 +104,7 @@ impl node::Info for Node15 {
 }
 
 #[cfg(feature = "opt-node15-get")]
-fn get(array: u128, key: u8) -> usize {
+fn get(array: u128, key: u8) -> u8 {
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     compile_error!("opt-node15-get requires target_arch=x86_64 and target_feature=sse2");
 
@@ -116,13 +118,14 @@ fn get(array: u128, key: u8) -> usize {
             core::mem::transmute::<u128, __m128i>(array),
             _mm_set1_epi8(key as i8),
         ))
-        .trailing_zeros() as usize
+        .trailing_zeros() as u8
     }
 }
 
 #[cfg(not(feature = "opt-node15-get"))]
-fn get(array: u128, key: u8) -> usize {
+fn get(array: u128, key: u8) -> u8 {
     super::KeyIter::new_15(array)
         .position(|byte| byte == key)
-        .unwrap_or(usize::MAX)
+        .map(|index| index as u8)
+        .unwrap_or(u8::MAX)
 }

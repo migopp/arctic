@@ -46,18 +46,20 @@ impl linear::Header for Atomic64<Header> {
         old.len().value() as usize
     }
 
-    fn get(&self, key: u8) -> usize {
-        get(self.load_packed(Ordering::Relaxed).value, key)
+    fn get(&self, key: u8) -> Option<u8> {
+        let header = self.load_packed(Ordering::Relaxed);
+        let index = get(header.value, key);
+        (index < header.len().value()).then_some(index)
     }
 
-    fn get_or_reserve(&self, key: u8) -> Result<usize, node::Frozen> {
+    fn get_or_reserve(&self, key: u8) -> Result<u8, node::Frozen> {
         let mut old = self.load_packed(Ordering::Acquire);
 
         loop {
             let index = get(old.value, key);
             let len = old.len().value();
 
-            if index < len as usize {
+            if index < len {
                 return Ok(index);
             } else if len >= 3 || old.frozen() {
                 return Err(node::Frozen);
@@ -73,7 +75,7 @@ impl linear::Header for Atomic64<Header> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return Ok(len as usize),
+                Ok(_) => return Ok(len),
                 Err(conflict) => old = conflict,
             }
         }
@@ -101,7 +103,7 @@ impl node::Info for Node3 {
 }
 
 #[cfg(feature = "opt-node3-get")]
-fn get(array: u32, key: u8) -> usize {
+fn get(array: u32, key: u8) -> u8 {
     // https://richardstartin.github.io/posts/finding-bytes
     const PATTERN: u32 = 0x7F_7F_7F_7F;
 
@@ -114,12 +116,13 @@ fn get(array: u32, key: u8) -> usize {
     let temp = (input & PATTERN) + PATTERN;
     let temp = !(input | temp | PATTERN);
 
-    (temp.trailing_zeros() >> 3) as usize
+    (temp.trailing_zeros() >> 3) as u8
 }
 
 #[cfg(not(feature = "opt-node3-get"))]
-fn get(array: u32, key: u8) -> usize {
+fn get(array: u32, key: u8) -> u8 {
     super::KeyIter::new_3(array)
         .position(|byte| byte == key)
-        .unwrap_or(usize::MAX)
+        .map(|index| index as u8)
+        .unwrap_or(u8::MAX)
 }
