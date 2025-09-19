@@ -37,35 +37,30 @@ impl Edge {
         }
     }
 
-    #[inline]
-    pub(crate) unsafe fn next<'a>(data: u64, node: Node) -> node::Ref<'a> {
-        match node {
-            Node::Node3 => node::Ref::Node3(unsafe { Self::next_raw::<Node3>(data) }),
-            Node::Node15 => node::Ref::Node15(unsafe { Self::next_raw::<Node15>(data) }),
-            Node::Node256 => node::Ref::Node256(unsafe { Self::next_raw::<Node256>(data) }),
-        }
-    }
-
+    /// # SAFETY
+    /// Caller must ensure that:
+    /// - `data` and `kind` were loaded atomically from the same edge
+    /// - `kind >= node::Kind::NODE_3`
     #[inline]
     pub(crate) unsafe fn next_node_unchecked<'a>(
         data: u64,
         kind: ribbit::Packed<node::Kind>,
     ) -> node::Ref<'a> {
+        #[inline]
+        unsafe fn next<'a, N: node::Info + 'a>(data: u64) -> node::Ref<'a> {
+            let node = unsafe { (data as *mut N).as_ref() };
+            validate!(node.is_some());
+            N::REF(unsafe { node.unwrap_unchecked() })
+        }
+
         if kind == node::Kind::NODE_3 {
-            node::Ref::Node3(unsafe { Edge::next_raw::<Node3>(data) })
+            unsafe { next::<Node3>(data) }
         } else if kind == node::Kind::NODE_15 {
-            node::Ref::Node15(unsafe { Edge::next_raw::<Node15>(data) })
+            unsafe { next::<Node15>(data) }
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            node::Ref::Node256(unsafe { Edge::next_raw::<Node256>(data) })
+            unsafe { next::<Node256>(data) }
         }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn next_raw<'a, N: node::Info>(data: u64) -> &'a N {
-        let node = unsafe { (data as *mut N).as_ref() };
-        validate!(node.is_some());
-        unsafe { node.unwrap_unchecked() }
     }
 
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
@@ -120,28 +115,6 @@ impl Meta {
 
     const LEAF: ribbit::Packed<Self> =
         Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
-
-    #[inline]
-    pub(crate) fn child(meta: ribbit::Packed<Self>) -> Option<Child> {
-        match meta.kind().unpack() {
-            node::Kind::None => None,
-            node::Kind::Leaf => Some(Child::Leaf),
-            node::Kind::Node3 => Some(Child::Node(Node::Node3)),
-            node::Kind::Node15 => Some(Child::Node(Node::Node15)),
-            node::Kind::Node256 => Some(Child::Node(Node::Node256)),
-        }
-    }
-}
-
-pub(crate) enum Child {
-    Leaf,
-    Node(Node),
-}
-
-pub(crate) enum Node {
-    Node3,
-    Node15,
-    Node256,
 }
 
 #[derive(Copy, Clone, Debug)]

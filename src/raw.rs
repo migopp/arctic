@@ -332,12 +332,13 @@ impl<'a> Iterator for EntryIter<'a> {
 
                 let edge = edge.load_packed(Ordering::Relaxed);
                 let meta = edge.meta();
+                let kind = meta.kind();
 
                 // Skip empty edges
-                let Some(child) = edge::Meta::child(meta) else {
+                if kind == node::Kind::NONE {
                     iter.skip();
                     continue 'horizontal;
-                };
+                }
 
                 // Update key for current edge
                 let key = Rc::make_mut(&mut self.key);
@@ -353,19 +354,16 @@ impl<'a> Iterator for EntryIter<'a> {
                 iter.skip();
                 let len = key.len() - edge_key.len.value() as usize - byte.is_some() as usize;
 
-                match child {
-                    edge::Child::Leaf => {
-                        key.truncate(len);
-                        continue 'horizontal;
-                    }
-                    edge::Child::Node(node) => {
-                        let node = unsafe { Edge::next(edge.data(), node) };
-                        self.frontier.push((
-                            len,
-                            Or::R(iter::repeat(false).zip(unsafe { node.iter() }).peekable()),
-                        ));
-                        continue 'vertical;
-                    }
+                if kind == node::Kind::LEAF {
+                    key.truncate(len);
+                    continue 'horizontal;
+                } else {
+                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    self.frontier.push((
+                        len,
+                        Or::R(iter::repeat(false).zip(unsafe { node.iter() }).peekable()),
+                    ));
+                    continue 'vertical;
                 }
             }
         }
@@ -387,11 +385,14 @@ impl<'a> ScanIter<'a> {
     ) -> Or<Option<u64>, iter::Chain<iter::Once<node::Ref<'a>>, Self>> {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
+        let kind = meta.kind();
 
-        let node = match edge::Meta::child(meta) {
-            None => return Or::L(None),
-            Some(edge::Child::Leaf) => return Or::L(Some(edge.data())),
-            Some(edge::Child::Node(node)) => unsafe { Edge::next(edge.data(), node) },
+        let node = if kind == node::Kind::NONE {
+            return Or::L(None);
+        } else if kind == node::Kind::LEAF {
+            return Or::L(Some(edge.data()));
+        } else {
+            unsafe { Edge::next_node_unchecked(edge.data(), kind) }
         };
 
         Or::R(iter::once(node).chain(Self {
@@ -432,13 +433,13 @@ impl<'a> Iterator for ScanIter<'a> {
 
                 let edge = edge.load_packed(Ordering::Relaxed);
                 let meta = edge.meta();
+                let kind = meta.kind();
 
-                let node = match edge::Meta::child(meta) {
-                    None | Some(edge::Child::Leaf) => {
-                        iter.next();
-                        continue 'horizontal;
-                    }
-                    Some(edge::Child::Node(node)) => node,
+                let node = if kind < node::Kind::NODE_3 {
+                    iter.next();
+                    continue 'horizontal;
+                } else {
+                    unsafe { Edge::next_node_unchecked(edge.data(), kind) }
                 };
 
                 if !meta
@@ -451,7 +452,6 @@ impl<'a> Iterator for ScanIter<'a> {
                 }
 
                 if !mem::replace(descend, true) {
-                    let node = unsafe { Edge::next(edge.data(), node) };
                     self.frontier.push((
                         1 + edge.meta().key().len().value() as usize,
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),

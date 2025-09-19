@@ -30,6 +30,7 @@ pub(crate) trait Info: Node + Default {
     const KIND: ribbit::Packed<Kind>;
     const META: ribbit::Packed<edge::Meta> = edge::Meta::DEFAULT.with_kind(Self::KIND);
     const GROW: usize;
+    const REF: for<'a> fn(&'a Self) -> Ref<'a>;
 
     type Grow: Info;
     type Shrink: Info;

@@ -21,33 +21,32 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
 
     map.raw.preorder().for_each(|(depth_, _, edge)| {
         let meta = edge.meta();
-        let Some(child) = edge::Meta::child(meta) else {
+        let kind = meta.kind();
+
+        if kind == node::Kind::NONE {
             return;
-        };
+        }
 
         compression.record(meta.key().len().value() as u64);
 
-        match child {
-            edge::Child::Leaf => {
-                depth.record(depth_ as u64);
-            }
-            edge::Child::Node(node) => {
-                let histogram = match node {
-                    edge::Node::Node3 => &mut node_3,
-                    edge::Node::Node15 => &mut node_15,
-                    edge::Node::Node256 => &mut node_256,
-                };
+        if kind == node::Kind::LEAF {
+            depth.record(depth_ as u64);
+        } else {
+            let node = unsafe { edge::Edge::next_node_unchecked(edge.data(), kind) };
+            let histogram = match node {
+                node::Ref::Node3(_) => &mut node_3,
+                node::Ref::Node15(_) => &mut node_15,
+                node::Ref::Node256(_) => &mut node_256,
+            };
 
-                let node = unsafe { edge::Edge::next(edge.data(), node) };
-                let children = unsafe { node.iter() }
-                    .filter(|(_, edge)| {
-                        let edge = edge.load(Ordering::Relaxed);
-                        !matches!(edge.meta.kind, node::Kind::None)
-                    })
-                    .count();
+            let children = unsafe { node.iter() }
+                .filter(|(_, edge)| {
+                    let edge = edge.load(Ordering::Relaxed);
+                    !matches!(edge.meta.kind, node::Kind::None)
+                })
+                .count();
 
-                histogram.record(children as u64);
-            }
+            histogram.record(children as u64);
         }
     });
 

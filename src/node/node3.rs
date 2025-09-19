@@ -99,6 +99,7 @@ impl<'a> IntoIterator for &'a Node3 {
 impl node::Info for Node3 {
     const KIND: ribbit::Packed<node::Kind> = ribbit::Packed::<node::Kind>::new_node3();
     const GROW: usize = 3;
+    const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node3(node);
 
     type Grow = Node15;
     type Shrink = Node3;
