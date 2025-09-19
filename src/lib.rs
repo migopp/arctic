@@ -192,6 +192,26 @@ impl Key for str {
     }
 }
 
+impl Key for String {
+    #[inline]
+    fn len(&self) -> usize {
+        (*self).len()
+    }
+
+    #[inline]
+    unsafe fn get_unchecked(&self, index: usize) -> u8 {
+        *self.as_bytes().get_unchecked(index)
+    }
+
+    #[inline]
+    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
+        let mut buffer = [0u8; 8];
+        let len = len.value() as usize;
+        buffer[..len].copy_from_slice(&self.as_bytes()[index..][..len]);
+        u64::from_ne_bytes(buffer)
+    }
+}
+
 impl Key for [u8] {
     #[inline]
     fn len(&self) -> usize {
