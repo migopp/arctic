@@ -27,11 +27,13 @@ impl Array {
     const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
     pub(crate) const MAX: usize = 7;
 
+    #[inline]
     pub(crate) fn from_slice<K: Key + ?Sized>(key: &K, index: usize) -> ribbit::Packed<Self> {
         let len = unsafe { u3::new_unchecked((key.len() - index).min(Self::MAX) as u8) };
         unsafe { Self::from_key(key, index, len) }
     }
 
+    #[inline]
     unsafe fn from_key<K: Key + ?Sized>(key: &K, index: usize, len: u3) -> ribbit::Packed<Self> {
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(
@@ -40,6 +42,7 @@ impl Array {
         }
     }
 
+    #[inline]
     pub(crate) fn match_prefix<K: Key + ?Sized>(
         key: &K,
         index: usize,
@@ -51,6 +54,7 @@ impl Array {
         (unsafe { Self::from_key(key, index, len) } == edge).then_some(len.value() as usize)
     }
 
+    #[inline]
     pub(crate) fn match_split<K: Key + ?Sized>(
         key: &K,
         index: usize,

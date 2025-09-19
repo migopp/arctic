@@ -36,6 +36,7 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
         }
     }
 
+    #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
@@ -59,6 +60,7 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
         }
     }
 
+    #[inline]
     pub(crate) fn traverse_prefix(&mut self) -> Option<(usize, ribbit::Packed<Edge>)> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
@@ -87,6 +89,7 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
 
     /// Return CAS operands to either insert the leaf or structurally update
     /// the tree on the way to inserting the leaf.
+    #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
         value: u64,
@@ -148,6 +151,7 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
         }
     }
 
+    #[inline]
     fn push(&mut self, len: usize, node: node::Ref<'a>, next: &'a Atomic128<Edge>) {
         self.index += len + 1;
         self.history.push(Segment {

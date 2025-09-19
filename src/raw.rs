@@ -24,6 +24,7 @@ pub struct Raw<K: ?Sized> {
 }
 
 impl<K: ?Sized> Default for Raw<K> {
+    #[inline]
     fn default() -> Self {
         Self {
             root: Atomic128::default(),
@@ -33,10 +34,12 @@ impl<K: ?Sized> Default for Raw<K> {
 }
 
 impl<K: Key + ?Sized> Raw<K> {
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[inline]
     pub fn insert(&self, key: &K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key, value) {
             Ok(old) => old,
@@ -55,6 +58,7 @@ impl<K: Key + ?Sized> Raw<K> {
         self.insert_impl::<cursor::Pessimistic>(key, value).unwrap()
     }
 
+    #[inline]
     fn insert_impl<'a, P: cursor::History<'a>>(
         &'a self,
         key: &K,
@@ -106,12 +110,14 @@ impl<K: Key + ?Sized> Raw<K> {
         }
     }
 
+    #[inline]
     pub fn get(&self, key: &K) -> Option<u64> {
         Cursor::<K, cursor::Optimistic>::new(&self.root, key)
             .traverse_exact()
             .map(|edge| edge.data())
     }
 
+    #[inline]
     pub fn remove(&self, key: &K) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic>::new(&self.root, key);
         let mut old = cursor.traverse_exact()?;
@@ -146,6 +152,7 @@ impl<K: Key + ?Sized> Raw<K> {
         Some(old.data())
     }
 
+    #[inline]
     pub fn update(&self, key: &K, value: u64) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic>::new(&self.root, key);
         let mut old = cursor.traverse_exact()?;
