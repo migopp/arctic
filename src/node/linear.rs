@@ -32,16 +32,19 @@ where
     H: Header,
     Self: node::Info,
 {
+    #[inline]
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
+    #[inline]
     fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
+    #[inline]
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })

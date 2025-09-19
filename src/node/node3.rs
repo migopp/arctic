@@ -48,12 +48,14 @@ impl linear::Header for Atomic64<Header> {
         old.len().value() as usize
     }
 
+    #[inline]
     fn get(&self, key: u8) -> Option<u8> {
         let header = self.load_packed(Ordering::Relaxed);
         let index = get(header.value, key);
         (index < header.len().value()).then_some(index)
     }
 
+    #[inline]
     fn get_or_reserve(&self, key: u8) -> Option<u8> {
         let mut old = self.load_packed(Ordering::Acquire);
 
@@ -105,6 +107,7 @@ impl node::Info for Node3 {
     type Shrink = Node3;
 }
 
+#[inline]
 #[cfg(feature = "opt-node3-get")]
 fn get(array: u32, key: u8) -> u8 {
     // https://richardstartin.github.io/posts/finding-bytes
@@ -122,6 +125,7 @@ fn get(array: u32, key: u8) -> u8 {
     (temp.trailing_zeros() >> 3) as u8
 }
 
+#[inline]
 #[cfg(not(feature = "opt-node3-get"))]
 fn get(array: u32, key: u8) -> u8 {
     super::KeyIter::new_3(array)

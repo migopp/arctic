@@ -48,12 +48,14 @@ impl linear::Header for Atomic128<Header> {
         old.len().value() as usize
     }
 
+    #[inline]
     fn get(&self, key: u8) -> Option<u8> {
         let header = self.load_packed(Ordering::Relaxed);
         let index = get(header.value, key);
         (index < header.len().value()).then_some(index)
     }
 
+    #[inline]
     fn get_or_reserve(&self, key: u8) -> Option<u8> {
         let mut old = self.load_packed(Ordering::Acquire);
 
@@ -105,6 +107,7 @@ impl node::Info for Node15 {
     type Shrink = Node3;
 }
 
+#[inline]
 #[cfg(feature = "opt-node15-get")]
 fn get(array: u128, key: u8) -> u8 {
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
@@ -124,6 +127,7 @@ fn get(array: u128, key: u8) -> u8 {
     }
 }
 
+#[inline]
 #[cfg(not(feature = "opt-node15-get"))]
 fn get(array: u128, key: u8) -> u8 {
     super::KeyIter::new_15(array)
