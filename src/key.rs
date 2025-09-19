@@ -25,27 +25,37 @@ impl Array {
     const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
     pub(crate) const MAX: usize = 7;
 
-    pub(crate) fn from_slice(key: &[u8]) -> ribbit::Packed<Self> {
-        let len = key.len().min(Self::MAX);
-        unsafe { ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(Self::copy(key, len))) }
+    pub(crate) fn from_slice(key: &[u8], index: usize) -> ribbit::Packed<Self> {
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(Self::copy(
+                key,
+                index,
+                (key.len() - index).min(Self::MAX),
+            )))
+        }
     }
 
-    pub(crate) fn match_prefix(key: &[u8], edge: ribbit::Packed<Self>) -> Option<usize> {
-        let len = key.len().min(edge.len().value() as usize);
-        (unsafe { Self::copy(key, len) } == edge.value.value()).then_some(len)
+    pub(crate) fn match_prefix(
+        key: &[u8],
+        index: usize,
+        edge: ribbit::Packed<Self>,
+    ) -> Option<usize> {
+        let len = (key.len() - index).min(edge.len().value() as usize);
+        (unsafe { Self::copy(key, index, len) } == edge.value.value()).then_some(len)
     }
 
-    pub(crate) fn match_split(key: &[u8], edge: ribbit::Packed<Self>) -> Match {
+    pub(crate) fn match_split(key: &[u8], index: usize, edge: ribbit::Packed<Self>) -> Match {
         let edge_len = edge.len().value() as usize;
         let edge = edge.value.value();
 
-        let key_len = key.len();
+        let key_len = key.len() - index;
         let len = key_len.min(edge_len);
 
-        let key = unsafe { Self::copy(key, len) };
-
+        let key = unsafe { Self::copy(key, index, len) };
         if key == edge {
-            return Match::Full(len);
+            return Match::Full(unsafe {
+                ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(key))
+            });
         }
 
         let prefix_byte = key
@@ -74,55 +84,46 @@ impl Array {
         }
     }
 
+    /// Copy `len` bytes from `key` starting at `index`.
     /// SAFETY: caller must ensure
-    /// - `len <= key.len()`
+    /// - `index < key.len()`
+    /// - `len <= key.len() - index`
     /// - `len <= Self::MAX`
-    unsafe fn copy(key: &[u8], len: usize) -> u64 {
-        #[repr(C, align(8))]
-        union Buffer {
-            u8: [u8; 8],
-            u16: [u16; 4],
-            u32: [u32; 2],
-            u64: u64,
-        }
-
-        const {
-            assert!(core::mem::size_of::<Buffer>() == 8);
-            assert!(core::mem::align_of::<Buffer>() == 8);
-        }
-
-        validate!(len <= key.len());
+    unsafe fn copy(key: &[u8], index: usize, len: usize) -> u64 {
+        validate!(index <= key.len());
+        validate!(len <= key.len() - index);
         validate!(len <= Self::MAX);
 
-        let mut buffer = Buffer {
-            u8: [0, 0, 0, 0, 0, 0, 0, len as u8],
-        };
-
-        unsafe {
-            core::hint::assert_unchecked(len <= key.len());
-            core::hint::assert_unchecked(len <= Self::MAX);
-
-            if cfg!(feature = "opt-memcpy") {
-                if (len & 0b100) > 0 {
-                    buffer.u32[0] = key.as_ptr().cast::<u32>().read_unaligned();
-                }
-
-                if (len & 0b010) > 0 {
-                    let index = (len & 0b100) >> 1;
-                    *buffer.u16.get_unchecked_mut(index) =
-                        key.as_ptr().cast::<u16>().add(index).read_unaligned();
-                }
-
-                if (len & 0b001) > 0 {
-                    let index = len & 0b110;
-                    *buffer.u8.get_unchecked_mut(index) = key.as_ptr().add(index).read_unaligned();
-                }
-            } else {
-                buffer.u8[..len].copy_from_slice(&key[..len]);
-            }
-
-            buffer.u64
+        if len == 0 {
+            return 0;
         }
+
+        if cfg!(feature = "opt-memcpy") && key.len() >= 8 {
+            // Safe to read 8 bytes starting at `index`
+            let key = if index < key.len() - 8 {
+                let key = (key.get_unchecked(index) as *const u8)
+                    .cast::<u64>()
+                    .read_unaligned();
+                key & ((1 << (len << 3)) - 1)
+            }
+            // Start reading 8 bytes from start of key
+            else if index + len <= key.len() {
+                let key = key.as_ptr().cast::<u64>().read_unaligned();
+                (key >> (index << 3)) & ((1 << (len << 3)) - 1)
+            }
+            // Start reading 8 bytes before end of `index + len`
+            else {
+                let key = (key.get_unchecked(index + len - 8) as *const u8)
+                    .cast::<u64>()
+                    .read_unaligned();
+                key >> ((8 - len) << 3)
+            };
+            return ((len as u64) << 56) | key;
+        }
+
+        let mut buffer = [0, 0, 0, 0, 0, 0, 0, len as u8];
+        buffer[..len].copy_from_slice(&key[index..][..len]);
+        u64::from_ne_bytes(buffer)
     }
 
     pub(crate) fn compress(
@@ -172,7 +173,7 @@ impl Array {
 }
 
 pub(crate) enum Match {
-    Full(usize),
+    Full(ribbit::Packed<Array>),
     Partial {
         start: ribbit::Packed<Array>,
         middle: u8,

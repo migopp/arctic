@@ -39,12 +39,11 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let key = self.key();
-            let len = key::Array::match_prefix(key, meta.key())?;
+            let len = key::Array::match_prefix(self.prefix, self.index, meta.key())?;
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
-                let byte = *key.get(len)?;
+                let byte = *self.prefix.get(self.index + len)?;
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
                 let next = node.get(byte)?;
@@ -63,15 +62,18 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         loop {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let key = self.key();
 
             let kind = meta.kind();
 
             // Continue traversal only if exact match
             if kind >= node::Kind::NODE_3 {
-                if let Some(len) = key::Array::match_prefix(key, meta.key()) {
+                if let Some(len) = key::Array::match_prefix(self.prefix, self.index, meta.key()) {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                    if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
+                    if let Some(next) = self
+                        .prefix
+                        .get(self.index + len)
+                        .and_then(|byte| node.get(*byte))
+                    {
                         self.push(len, node, next);
                         continue;
                     }
@@ -91,11 +93,10 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         loop {
             let old = self.here().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
-            let key = self.key();
-            let r#match = key::Array::match_split(key, old_meta.key());
+            let r#match = key::Array::match_split(self.prefix, self.index, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full(len) => {
+                key::Match::Full(key) => {
                     let kind = old_meta.kind();
 
                     if kind >= node::Kind::NODE_3 {
@@ -103,7 +104,8 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         let node = unsafe { Edge::next_node_unchecked(old_data, kind) };
                         if !matches!(self.history.freeze(), Some(freeze) if freeze.get() == old_data)
                         {
-                            let byte = key[len];
+                            let len = key.len().value() as usize;
+                            let byte = self.prefix[self.index + len];
                             if let Some(next) = node.get_or_reserve(byte) {
                                 self.push(len, node, next);
                                 continue;
@@ -113,15 +115,20 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         node.freeze();
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
-                    } else if kind == node::Kind::NONE && key.len() > key::Array::MAX {
+                    } else if kind == node::Kind::NONE
+                        && self.prefix.len() - self.index > key::Array::MAX
+                    {
                         (
                             Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
+                            Edge::new_node::<Node3, _>(
+                                key::Array::from_slice(self.prefix, self.index),
+                                None,
+                            ),
                         )
                     } else {
                         (
                             Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(key::Array::from_slice(key), value),
+                            Edge::new_leaf(key::Array::from_slice(self.prefix, self.index), value),
                         )
                     }
                 }
@@ -161,11 +168,6 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
     #[inline]
     pub(crate) fn here(&self) -> &Atomic128<Edge> {
         self.here
-    }
-
-    #[inline]
-    pub(crate) fn key(&self) -> &'k [u8] {
-        &self.prefix[self.index..]
     }
 }
 
