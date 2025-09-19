@@ -119,18 +119,26 @@ impl Debug for Ref<'_> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[ribbit::pack(size = 3, debug)]
+#[ribbit::pack(size = 3, debug, eq, ord)]
 pub(crate) enum Kind {
     #[ribbit(size = 0)]
-    None,
+    None = 0,
     #[ribbit(size = 0)]
-    Leaf,
+    Leaf = 1,
     #[ribbit(size = 0)]
-    Node3,
+    Node3 = 2,
     #[ribbit(size = 0)]
-    Node15,
+    Node15 = 3,
     #[ribbit(size = 0)]
-    Node256,
+    Node256 = 4,
+}
+
+impl Kind {
+    pub(crate) const NONE: ribbit::Packed<Self> = ribbit::Packed::<Self>::new_none();
+    pub(crate) const LEAF: ribbit::Packed<Self> = ribbit::Packed::<Self>::new_leaf();
+    pub(crate) const NODE_3: ribbit::Packed<Self> = ribbit::Packed::<Self>::new_node3();
+    pub(crate) const NODE_15: ribbit::Packed<Self> = ribbit::Packed::<Self>::new_node15();
+    pub(crate) const NODE_256: ribbit::Packed<Self> = ribbit::Packed::<Self>::new_node256();
 }
 
 impl Default for Kind {

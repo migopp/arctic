@@ -1,3 +1,11 @@
+macro_rules! validate_eq {
+    ($($tt:tt)*) => {
+        if cfg!(any(feature = "validate", debug_assertions)) {
+            assert_eq!($($tt)*);
+        }
+    };
+}
+
 mod cursor;
 mod edge;
 mod key;

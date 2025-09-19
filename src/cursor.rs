@@ -42,15 +42,19 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let key = self.key();
             let len = key::Array::match_prefix(key, meta.key())?;
 
-            match edge::Meta::child(meta)? {
-                edge::Child::Node(node) => {
-                    let byte = key.get(len)?;
-                    let node = unsafe { Edge::next(edge.data(), node) };
-                    let next = node.get(*byte)?;
-                    self.push(len, node, next);
-                    continue;
-                }
-                edge::Child::Leaf => return Some(edge),
+            let kind = meta.kind();
+            if kind >= node::Kind::NODE_3 {
+                let byte = *key.get(len)?;
+                let data = edge.data();
+                let node = unsafe { Edge::next_node_unchecked(data, kind) };
+                let next = node.get(byte)?;
+                self.push(len, node, next);
+                continue;
+            } else if kind == node::Kind::LEAF {
+                return Some(edge);
+            } else {
+                validate_eq!(kind, node::Kind::NONE);
+                return None;
             }
         }
     }
@@ -60,15 +64,17 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
+
+            let kind = meta.kind();
+
             // Continue traversal only if exact match
-            if let (edge::Child::Node(node), Some(len)) = (
-                edge::Meta::child(meta)?,
-                key::Array::match_prefix(key, meta.key()),
-            ) {
-                let node = unsafe { Edge::next(edge.data(), node) };
-                if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
-                    self.push(len, node, next);
-                    continue;
+            if kind >= node::Kind::NODE_3 {
+                if let Some(len) = key::Array::match_prefix(key, meta.key()) {
+                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
+                        self.push(len, node, next);
+                        continue;
+                    }
                 }
             }
 
@@ -89,11 +95,12 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let r#match = key::Array::match_split(key, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full(len) => match edge::Meta::child(old_meta) {
-                    Some(edge::Child::Node(node)) => {
-                        let old_data = old.data();
-                        let node = unsafe { Edge::next(old_data, node) };
+                key::Match::Full(len) => {
+                    let kind = old_meta.kind();
 
+                    if kind >= node::Kind::NODE_3 {
+                        let old_data = old.data();
+                        let node = unsafe { Edge::next_node_unchecked(old_data, kind) };
                         if !matches!(self.history.freeze(), Some(freeze) if freeze.get() == old_data)
                         {
                             let byte = key[len];
@@ -106,16 +113,18 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         node.freeze();
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
+                    } else if kind == node::Kind::NONE && key.len() > key::Array::MAX {
+                        (
+                            Op::Edge(edge::Op::Create),
+                            Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
+                        )
+                    } else {
+                        (
+                            Op::Edge(edge::Op::Insert),
+                            Edge::new_leaf(key::Array::from_slice(key), value),
+                        )
                     }
-                    None if key.len() > key::Array::MAX => (
-                        Op::Edge(edge::Op::Create),
-                        Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
-                    ),
-                    None | Some(edge::Child::Leaf) => (
-                        Op::Edge(edge::Op::Insert),
-                        Edge::new_leaf(key::Array::from_slice(key), value),
-                    ),
-                },
+                }
                 key::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(

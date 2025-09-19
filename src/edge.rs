@@ -39,12 +39,31 @@ impl Edge {
 
     #[inline]
     pub(crate) unsafe fn next<'a>(data: u64, node: Node) -> node::Ref<'a> {
-        let node = match node {
-            Node::Node3 => unsafe { (data as *mut Node3).as_ref() }.map(node::Ref::Node3),
-            Node::Node15 => unsafe { (data as *mut Node15).as_ref() }.map(node::Ref::Node15),
-            Node::Node256 => unsafe { (data as *mut Node256).as_ref() }.map(node::Ref::Node256),
-        };
+        match node {
+            Node::Node3 => node::Ref::Node3(unsafe { Self::next_raw::<Node3>(data) }),
+            Node::Node15 => node::Ref::Node15(unsafe { Self::next_raw::<Node15>(data) }),
+            Node::Node256 => node::Ref::Node256(unsafe { Self::next_raw::<Node256>(data) }),
+        }
+    }
 
+    #[inline]
+    pub(crate) unsafe fn next_node_unchecked<'a>(
+        data: u64,
+        kind: ribbit::Packed<node::Kind>,
+    ) -> node::Ref<'a> {
+        if kind == node::Kind::NODE_3 {
+            node::Ref::Node3(unsafe { Edge::next_raw::<Node3>(data) })
+        } else if kind == node::Kind::NODE_15 {
+            node::Ref::Node15(unsafe { Edge::next_raw::<Node15>(data) })
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            node::Ref::Node256(unsafe { Edge::next_raw::<Node256>(data) })
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn next_raw<'a, N: node::Info>(data: u64) -> &'a N {
+        let node = unsafe { (data as *mut N).as_ref() };
         match cfg!(feature = "validate") {
             true => node.unwrap(),
             false => unsafe { node.unwrap_unchecked() },
