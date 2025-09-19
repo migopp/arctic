@@ -74,12 +74,16 @@ impl Array {
         }
     }
 
-    // SAFETY: caller must ensure `len <= Len::MAX`
+    /// SAFETY: caller must ensure
+    /// - `len <= key.len()`
+    /// - `len <= Self::MAX`
     unsafe fn copy(key: &[u8], len: usize) -> u64 {
         #[repr(C, align(8))]
         union Buffer {
-            byte: [u8; 8],
-            word: u64,
+            u8: [u8; 8],
+            u16: [u16; 4],
+            u32: [u32; 2],
+            u64: u64,
         }
 
         const {
@@ -87,12 +91,37 @@ impl Array {
             assert!(core::mem::align_of::<Buffer>() == 8);
         }
 
-        let mut buffer = Buffer { byte: [0u8; 8] };
+        validate!(len <= key.len());
+        validate!(len <= Self::MAX);
+
+        let mut buffer = Buffer {
+            u8: [0, 0, 0, 0, 0, 0, 0, len as u8],
+        };
+
         unsafe {
+            core::hint::assert_unchecked(len <= key.len());
             core::hint::assert_unchecked(len <= Self::MAX);
-            buffer.byte[..len].copy_from_slice(&key[..len]);
-            buffer.byte[7] = len as u8;
-            buffer.word
+
+            if cfg!(feature = "opt-memcpy") {
+                if (len & 0b100) > 0 {
+                    buffer.u32[0] = key.as_ptr().cast::<u32>().read_unaligned();
+                }
+
+                if (len & 0b010) > 0 {
+                    let index = (len & 0b100) >> 1;
+                    *buffer.u16.get_unchecked_mut(index) =
+                        key.as_ptr().cast::<u16>().add(index).read_unaligned();
+                }
+
+                if (len & 0b001) > 0 {
+                    let index = len & 0b110;
+                    *buffer.u8.get_unchecked_mut(index) = key.as_ptr().add(index).read_unaligned();
+                }
+            } else {
+                buffer.u8[..len].copy_from_slice(&key[..len]);
+            }
+
+            buffer.u64
         }
     }
 
