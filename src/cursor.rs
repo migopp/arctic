@@ -1,6 +1,7 @@
 use core::convert::Infallible;
 use core::marker::PhantomData;
 use core::mem;
+use core::num::NonZeroU64;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -10,7 +11,6 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::Edge;
-use crate::Or;
 
 pub(crate) struct Cursor<'a, 'k, P> {
     prefix: &'k [u8],
@@ -40,17 +40,17 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
-            let child = unsafe { Edge::next(edge) }?;
             let len = key::Array::match_prefix(key, meta.key())?;
 
-            match child {
-                Or::R(node) => {
+            match edge::Meta::child(meta)? {
+                edge::Child::Node(node) => {
                     let byte = key.get(len)?;
+                    let node = unsafe { Edge::next(edge.data(), node) };
                     let next = node.get(*byte)?;
                     self.push(len, node, next);
                     continue;
                 }
-                Or::L(_) => return Some(edge),
+                edge::Child::Leaf => return Some(edge),
             }
         }
     }
@@ -60,11 +60,12 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
-            let child = unsafe { Edge::next(edge) }?;
-            let len = key::Array::match_prefix(key, meta.key());
-
             // Continue traversal only if exact match
-            if let (Or::R(node), Some(len)) = (child, len) {
+            if let (edge::Child::Node(node), Some(len)) = (
+                edge::Meta::child(meta)?,
+                key::Array::match_prefix(key, meta.key()),
+            ) {
+                let node = unsafe { Edge::next(edge.data(), node) };
                 if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
                     self.push(len, node, next);
                     continue;
@@ -85,13 +86,16 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let old = self.here().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let key = self.key();
-            let child = unsafe { Edge::next(old) };
             let r#match = key::Array::match_split(key, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full(len) => match child {
-                    Some(Or::R(node)) => {
-                        if !matches!(self.history.freeze(), Some(freeze) if freeze == node) {
+                key::Match::Full(len) => match edge::Meta::child(old_meta) {
+                    Some(edge::Child::Node(node)) => {
+                        let old_data = old.data();
+                        let node = unsafe { Edge::next(old_data, node) };
+
+                        if !matches!(self.history.freeze(), Some(freeze) if freeze.get() == old_data)
+                        {
                             let byte = key[len];
                             if let Some(next) = node.get_or_reserve(byte) {
                                 self.push(len, node, next);
@@ -107,7 +111,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                         Op::Edge(edge::Op::Create),
                         Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
                     ),
-                    None | Some(Or::L(_)) => (
+                    None | Some(edge::Child::Leaf) => (
                         Op::Edge(edge::Op::Insert),
                         Edge::new_leaf(key::Array::from_slice(key), value),
                     ),
@@ -158,7 +162,7 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
 
 pub(crate) trait History<'a>: Default {
     type PopError;
-    fn freeze(&mut self) -> Option<node::Ref<'a>>;
+    fn freeze(&mut self) -> Option<NonZeroU64>;
 
     fn push(&mut self, segment: Segment<'a>);
     fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
@@ -171,7 +175,7 @@ impl<'a> History<'a> for Optimistic<'a> {
     type PopError = ();
 
     #[inline(always)]
-    fn freeze(&mut self) -> Option<node::Ref<'a>> {
+    fn freeze(&mut self) -> Option<NonZeroU64> {
         None
     }
 
@@ -194,8 +198,16 @@ impl<'a> History<'a> for Pessimistic<'a> {
     type PopError = Infallible;
 
     #[inline]
-    fn freeze(&mut self) -> Option<node::Ref<'a>> {
-        mem::take(&mut self.freeze)
+    fn freeze(&mut self) -> Option<NonZeroU64> {
+        Some(match mem::take(&mut self.freeze)? {
+            node::Ref::Node3(node) => unsafe { NonZeroU64::new_unchecked(node as *const _ as u64) },
+            node::Ref::Node15(node) => unsafe {
+                NonZeroU64::new_unchecked(node as *const _ as u64)
+            },
+            node::Ref::Node256(node) => unsafe {
+                NonZeroU64::new_unchecked(node as *const _ as u64)
+            },
+        })
     }
 
     #[inline]

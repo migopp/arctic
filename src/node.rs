@@ -60,19 +60,6 @@ pub(crate) enum Ref<'a> {
     Node256(&'a Node256),
 }
 
-impl<'a> PartialEq for Ref<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        match (*self, *other) {
-            (Ref::Node3(l), Ref::Node3(r)) => core::ptr::eq(l, r),
-            (Ref::Node15(l), Ref::Node15(r)) => core::ptr::eq(l, r),
-            (Ref::Node256(l), Ref::Node256(r)) => core::ptr::eq(l, r),
-            _ => false,
-        }
-    }
-}
-
-impl<'a> Eq for Ref<'a> {}
-
 impl<'a> Ref<'a> {
     pub(crate) unsafe fn iter(&self) -> Iter<'a> {
         match self {

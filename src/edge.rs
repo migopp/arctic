@@ -8,7 +8,6 @@ use crate::node;
 use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
-use crate::Or;
 
 #[ribbit::pack(size = 128)]
 #[derive(Copy, Clone, Default, Debug)]
@@ -39,25 +38,17 @@ impl Edge {
     }
 
     #[inline]
-    pub(crate) unsafe fn next<'a>(edge: ribbit::Packed<Edge>) -> Option<Or<u64, node::Ref<'a>>> {
-        let node = match edge.meta().kind().unpack() {
-            node::Kind::None => return None,
-            node::Kind::Leaf => return Some(Or::L(edge.data())),
-            node::Kind::Node3 => unsafe { (edge.data() as *mut Node3).as_ref() }
-                .map(node::Ref::Node3)
-                .map(Or::R),
-            node::Kind::Node15 => unsafe { (edge.data() as *mut Node15).as_ref() }
-                .map(node::Ref::Node15)
-                .map(Or::R),
-            node::Kind::Node256 => unsafe { (edge.data() as *mut Node256).as_ref() }
-                .map(node::Ref::Node256)
-                .map(Or::R),
+    pub(crate) unsafe fn next<'a>(data: u64, node: Node) -> node::Ref<'a> {
+        let node = match node {
+            Node::Node3 => unsafe { (data as *mut Node3).as_ref() }.map(node::Ref::Node3),
+            Node::Node15 => unsafe { (data as *mut Node15).as_ref() }.map(node::Ref::Node15),
+            Node::Node256 => unsafe { (data as *mut Node256).as_ref() }.map(node::Ref::Node256),
         };
 
-        Some(match cfg!(feature = "validate") {
+        match cfg!(feature = "validate") {
             true => node.unwrap(),
             false => unsafe { node.unwrap_unchecked() },
-        })
+        }
     }
 
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
@@ -112,6 +103,28 @@ impl Meta {
 
     const LEAF: ribbit::Packed<Self> =
         Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
+
+    #[inline]
+    pub(crate) fn child(meta: ribbit::Packed<Self>) -> Option<Child> {
+        match meta.kind().unpack() {
+            node::Kind::None => None,
+            node::Kind::Leaf => Some(Child::Leaf),
+            node::Kind::Node3 => Some(Child::Node(Node::Node3)),
+            node::Kind::Node15 => Some(Child::Node(Node::Node15)),
+            node::Kind::Node256 => Some(Child::Node(Node::Node256)),
+        }
+    }
+}
+
+pub(crate) enum Child {
+    Leaf,
+    Node(Node),
+}
+
+pub(crate) enum Node {
+    Node3,
+    Node15,
+    Node256,
 }
 
 #[derive(Copy, Clone, Debug)]

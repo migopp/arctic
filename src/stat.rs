@@ -3,8 +3,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::cursor;
+use crate::edge;
 use crate::node;
-use crate::Or;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 
@@ -20,23 +20,25 @@ pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_256 = Histogram::new();
 
     map.raw.preorder().for_each(|(depth_, _, edge)| {
-        let Some(child) = (unsafe { crate::Edge::next(edge) }) else {
+        let meta = edge.meta();
+        let Some(child) = edge::Meta::child(meta) else {
             return;
         };
 
-        compression.record(edge.meta().key().len().value() as u64);
+        compression.record(meta.key().len().value() as u64);
 
         match child {
-            Or::L(_) => {
+            edge::Child::Leaf => {
                 depth.record(depth_ as u64);
             }
-            Or::R(node) => {
+            edge::Child::Node(node) => {
                 let histogram = match node {
-                    node::Ref::Node3(_) => &mut node_3,
-                    node::Ref::Node15(_) => &mut node_15,
-                    node::Ref::Node256(_) => &mut node_256,
+                    edge::Node::Node3 => &mut node_3,
+                    edge::Node::Node15 => &mut node_15,
+                    edge::Node::Node256 => &mut node_256,
                 };
 
+                let node = unsafe { edge::Edge::next(edge.data(), node) };
                 let children = unsafe { node.iter() }
                     .filter(|(_, edge)| {
                         let edge = edge.load(Ordering::Relaxed);

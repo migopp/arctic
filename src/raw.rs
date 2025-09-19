@@ -331,9 +331,10 @@ impl<'a> Iterator for EntryIter<'a> {
                 };
 
                 let edge = edge.load_packed(Ordering::Relaxed);
+                let meta = edge.meta();
 
                 // Skip empty edges
-                let Some(child) = (unsafe { Edge::next(edge) }) else {
+                let Some(child) = edge::Meta::child(meta) else {
                     iter.skip();
                     continue 'horizontal;
                 };
@@ -341,7 +342,7 @@ impl<'a> Iterator for EntryIter<'a> {
                 // Update key for current edge
                 let key = Rc::make_mut(&mut self.key);
 
-                let edge_key = edge.meta().key().unpack();
+                let edge_key = meta.key().unpack();
 
                 // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
@@ -353,11 +354,12 @@ impl<'a> Iterator for EntryIter<'a> {
                 let len = key.len() - edge_key.len.value() as usize - byte.is_some() as usize;
 
                 match child {
-                    Or::L(_) => {
+                    edge::Child::Leaf => {
                         key.truncate(len);
                         continue 'horizontal;
                     }
-                    Or::R(node) => {
+                    edge::Child::Node(node) => {
+                        let node = unsafe { Edge::next(edge.data(), node) };
                         self.frontier.push((
                             len,
                             Or::R(iter::repeat(false).zip(unsafe { node.iter() }).peekable()),
@@ -384,11 +386,12 @@ impl<'a> ScanIter<'a> {
         root: &'a Atomic128<Edge>,
     ) -> Or<Option<u64>, iter::Chain<iter::Once<node::Ref<'a>>, Self>> {
         let edge = root.load_packed(Ordering::Acquire);
+        let meta = edge.meta();
 
-        let node = match unsafe { Edge::next(edge) } {
+        let node = match edge::Meta::child(meta) {
             None => return Or::L(None),
-            Some(Or::L(leaf)) => return Or::L(Some(leaf)),
-            Some(Or::R(node)) => node,
+            Some(edge::Child::Leaf) => return Or::L(Some(edge.data())),
+            Some(edge::Child::Node(node)) => unsafe { Edge::next(edge.data(), node) },
         };
 
         Or::R(iter::once(node).chain(Self {
@@ -428,17 +431,17 @@ impl<'a> Iterator for ScanIter<'a> {
                 };
 
                 let edge = edge.load_packed(Ordering::Relaxed);
+                let meta = edge.meta();
 
-                let node = match unsafe { Edge::next(edge) } {
-                    None | Some(Or::L(_)) => {
+                let node = match edge::Meta::child(meta) {
+                    None | Some(edge::Child::Leaf) => {
                         iter.next();
                         continue 'horizontal;
                     }
-                    Some(Or::R(node)) => node,
+                    Some(edge::Child::Node(node)) => node,
                 };
 
-                if !edge
-                    .meta()
+                if !meta
                     .key()
                     .unpack()
                     .with_bytes(Some(*key), |key| self.window.push(key))
@@ -448,6 +451,7 @@ impl<'a> Iterator for ScanIter<'a> {
                 }
 
                 if !mem::replace(descend, true) {
+                    let node = unsafe { Edge::next(edge.data(), node) };
                     self.frontier.push((
                         1 + edge.meta().key().len().value() as usize,
                         iter::repeat(false).zip(unsafe { node.iter() }).peekable(),
