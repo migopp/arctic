@@ -64,10 +64,8 @@ impl Edge {
     #[inline]
     pub(crate) unsafe fn next_raw<'a, N: node::Info>(data: u64) -> &'a N {
         let node = unsafe { (data as *mut N).as_ref() };
-        match cfg!(feature = "validate") {
-            true => node.unwrap(),
-            false => unsafe { node.unwrap_unchecked() },
-        }
+        validate!(node.is_some());
+        unsafe { node.unwrap_unchecked() }
     }
 
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {

@@ -53,13 +53,11 @@ where
     }
 
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
-        if cfg!(feature = "validate") {
-            assert!(
-                self.header.is_frozen(),
-                "{} header must be frozen before replace",
-                core::any::type_name::<Self>(),
-            );
-        }
+        validate!(
+            self.header.is_frozen(),
+            "{} header must be frozen before replace",
+            core::any::type_name::<Self>(),
+        );
 
         let mut edges: [(u8, ribbit::Packed<Edge>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
@@ -73,14 +71,11 @@ where
         )
         .filter(|(_, edge)| !matches!(edge.meta().kind().unpack(), node::Kind::None))
         .map(|(key, edge)| {
-            if cfg!(feature = "validate") {
-                assert!(
-                    edge.meta().frozen(),
-                    "{} edge must be frozen before replace",
-                    core::any::type_name::<Self>(),
-                )
-            }
-
+            validate!(
+                edge.meta().frozen(),
+                "{} edge must be frozen before replace",
+                core::any::type_name::<Self>(),
+            );
             (key, edge.with_meta(edge.meta().with_frozen(false)))
         })
         .zip(&mut edges)

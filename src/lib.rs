@@ -1,3 +1,11 @@
+macro_rules! validate {
+    ($($tt:tt)*) => {
+        if cfg!(any(feature = "validate", debug_assertions)) {
+            assert!($($tt)*);
+        }
+    };
+}
+
 macro_rules! validate_eq {
     ($($tt:tt)*) => {
         if cfg!(any(feature = "validate", debug_assertions)) {

@@ -225,10 +225,7 @@ impl<'a> History<'a> for Pessimistic<'a> {
     }
 
     fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
-        if cfg!(feature = "validate") {
-            assert!(self.freeze.is_none());
-        }
-
+        validate!(self.freeze.is_none());
         self.freeze = self.path.last().map(|segment| segment.node);
         Ok(self.path.pop())
     }
