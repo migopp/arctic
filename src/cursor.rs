@@ -10,7 +10,6 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::Edge;
-use crate::Node as _;
 use crate::Or;
 
 pub(crate) struct Cursor<'a, 'k, P> {
@@ -41,23 +40,13 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
+            let child = unsafe { Edge::next(edge) }?;
             let len = key::Array::match_prefix(key, meta.key())?;
-            match unsafe { Edge::next(edge) }? {
+
+            match child {
                 Or::R(node) => {
-                    let next = match node {
-                        node::Ref::Node3(node) => {
-                            let byte = key.get(len)?;
-                            node.get(*byte)
-                        }
-                        node::Ref::Node15(node) => {
-                            let byte = key.get(len)?;
-                            node.get(*byte)
-                        }
-                        node::Ref::Node256(node) => {
-                            let byte = key.get(len)?;
-                            node.get(*byte)
-                        }
-                    }?;
+                    let byte = key.get(len)?;
+                    let next = node.get(*byte)?;
                     self.push(len, node, next);
                     continue;
                 }
@@ -71,25 +60,15 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let edge = self.here().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let key = self.key();
-            match unsafe { Edge::next(edge) }? {
-                // Continue traversal only if exact match
-                Or::R(node) => {
-                    if let Some(len) = key::Array::match_prefix(key, meta.key()) {
-                        if let Some(next) = match node {
-                            node::Ref::Node3(node) => key.get(len).and_then(|byte| node.get(*byte)),
-                            node::Ref::Node15(node) => {
-                                key.get(len).and_then(|byte| node.get(*byte))
-                            }
-                            node::Ref::Node256(node) => {
-                                key.get(len).and_then(|byte| node.get(*byte))
-                            }
-                        } {
-                            self.push(len, node, next);
-                            continue;
-                        }
-                    }
+            let child = unsafe { Edge::next(edge) }?;
+            let len = key::Array::match_prefix(key, meta.key());
+
+            // Continue traversal only if exact match
+            if let (Or::R(node), Some(len)) = (child, len) {
+                if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
+                    self.push(len, node, next);
+                    continue;
                 }
-                Or::L(_) => (),
             }
 
             return Some((self.index, edge));
@@ -106,46 +85,33 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let old = self.here().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let key = self.key();
+            let child = unsafe { Edge::next(old) };
+            let r#match = key::Array::match_split(key, old_meta.key());
 
-            let (op, new) = match key::Array::match_split(key, old_meta.key()) {
-                key::Match::Full(len) => {
-                    match unsafe { Edge::next(old) } {
-                        Some(Or::R(node)) => {
-                            if !matches!(self.history.freeze(), Some(freeze) if freeze == node) {
-                                if let Some(next) = match node {
-                                    node::Ref::Node3(node) => {
-                                        let byte = key[len];
-                                        node.get_or_reserve(byte)
-                                    }
-                                    node::Ref::Node15(node) => {
-                                        let byte = key[len];
-                                        node.get_or_reserve(byte)
-                                    }
-                                    node::Ref::Node256(node) => {
-                                        let byte = key[len];
-                                        node.get_or_reserve(byte)
-                                    }
-                                } {
-                                    // Fast path: no need to replace
-                                    self.push(len, node, next);
-                                    continue;
-                                }
+            let (op, new) = match r#match {
+                key::Match::Full(len) => match child {
+                    Some(Or::R(node)) => {
+                        if !matches!(self.history.freeze(), Some(freeze) if freeze == node) {
+                            let byte = key[len];
+                            if let Some(next) = node.get_or_reserve(byte) {
+                                self.push(len, node, next);
+                                continue;
                             }
-
-                            node.freeze();
-                            let (op, new) = node.replace(old_meta);
-                            (Op::Node(op), new)
                         }
-                        None if key.len() > key::Array::MAX => (
-                            Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
-                        ),
-                        None | Some(Or::L(_)) => (
-                            Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(key::Array::from_slice(key), value),
-                        ),
+
+                        node.freeze();
+                        let (op, new) = node.replace(old_meta);
+                        (Op::Node(op), new)
                     }
-                }
+                    None if key.len() > key::Array::MAX => (
+                        Op::Edge(edge::Op::Create),
+                        Edge::new_node::<Node3, _>(key::Array::from_slice(key), None),
+                    ),
+                    None | Some(Or::L(_)) => (
+                        Op::Edge(edge::Op::Insert),
+                        Edge::new_leaf(key::Array::from_slice(key), value),
+                    ),
+                },
                 key::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
@@ -162,21 +128,19 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
         }
     }
 
-    fn push(&mut self, len: usize, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
-        self.index += len;
-        self.index += 1;
+    fn push(&mut self, len: usize, node: node::Ref<'a>, next: &'a Atomic128<Edge>) {
+        self.index += len + 1;
         self.history.push(Segment {
             len,
             edge: self.here,
             node,
         });
-        self.here = edge;
+        self.here = next;
     }
 
     pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.index -= 1;
-        self.index -= segment.len;
+        self.index -= segment.len + 1;
         self.here = segment.edge;
         Ok(segment.node)
     }
