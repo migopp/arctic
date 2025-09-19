@@ -10,6 +10,7 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::Edge;
+use crate::Node as _;
 use crate::Or;
 
 pub(crate) struct Cursor<'a, 'k, P> {
@@ -43,8 +44,20 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
             let len = key::Array::match_prefix(key, meta.key())?;
             match unsafe { Edge::next(edge) }? {
                 Or::R(node) => {
-                    let byte = key.get(len)?;
-                    let next = node.get(*byte)?;
+                    let next = match node {
+                        node::Ref::Node3(node) => {
+                            let byte = key.get(len)?;
+                            node.get(*byte)
+                        }
+                        node::Ref::Node15(node) => {
+                            let byte = key.get(len)?;
+                            node.get(*byte)
+                        }
+                        node::Ref::Node256(node) => {
+                            let byte = key.get(len)?;
+                            node.get(*byte)
+                        }
+                    }?;
                     self.push(len, node, next);
                     continue;
                 }
@@ -62,7 +75,15 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 // Continue traversal only if exact match
                 Or::R(node) => {
                     if let Some(len) = key::Array::match_prefix(key, meta.key()) {
-                        if let Some(next) = key.get(len).and_then(|byte| node.get(*byte)) {
+                        if let Some(next) = match node {
+                            node::Ref::Node3(node) => key.get(len).and_then(|byte| node.get(*byte)),
+                            node::Ref::Node15(node) => {
+                                key.get(len).and_then(|byte| node.get(*byte))
+                            }
+                            node::Ref::Node256(node) => {
+                                key.get(len).and_then(|byte| node.get(*byte))
+                            }
+                        } {
                             self.push(len, node, next);
                             continue;
                         }
@@ -90,16 +111,24 @@ impl<'a, 'k, P: History<'a>> Cursor<'a, 'k, P> {
                 key::Match::Full(len) => {
                     match unsafe { Edge::next(old) } {
                         Some(Or::R(node)) => {
-                            match self.history.freeze() {
-                                Some(freeze) if freeze == node => (),
-                                None | Some(_) => {
-                                    // Must be more bytes left by no-prefix precondition
-                                    let byte = key[len];
-                                    if let Some(edge) = node.get_or_reserve(byte) {
-                                        // Fast path: no need to replace
-                                        self.push(len, node, edge);
-                                        continue;
+                            if !matches!(self.history.freeze(), Some(freeze) if freeze == node) {
+                                if let Some(next) = match node {
+                                    node::Ref::Node3(node) => {
+                                        let byte = key[len];
+                                        node.get_or_reserve(byte)
                                     }
+                                    node::Ref::Node15(node) => {
+                                        let byte = key[len];
+                                        node.get_or_reserve(byte)
+                                    }
+                                    node::Ref::Node256(node) => {
+                                        let byte = key[len];
+                                        node.get_or_reserve(byte)
+                                    }
+                                } {
+                                    // Fast path: no need to replace
+                                    self.push(len, node, next);
+                                    continue;
                                 }
                             }
 

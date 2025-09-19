@@ -85,24 +85,6 @@ impl<'a> Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
-        match self {
-            Ref::Node3(node) => node.get(key),
-            Ref::Node15(node) => node.get(key),
-            Ref::Node256(node) => node.get(key),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
-        match self {
-            Ref::Node3(node) => node.get_or_reserve(key),
-            Ref::Node15(node) => node.get_or_reserve(key),
-            Ref::Node256(node) => node.get_or_reserve(key),
-        }
-    }
-
-    #[inline]
     pub(crate) fn freeze(&self) {
         match self {
             Ref::Node3(node) => node.freeze(),
