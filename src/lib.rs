@@ -30,13 +30,13 @@ use core::ops::RangeBounds;
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
 
-pub struct Map<K: Key + ?Sized, V> {
-    raw: Raw<K::IntoIter>,
+pub struct Map<K: ?Sized, V> {
+    raw: Raw,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<K: Key + ?Sized, V> Default for Map<K, V> {
+impl<K: ?Sized, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             raw: Raw::default(),
@@ -48,22 +48,22 @@ impl<K: Key + ?Sized, V> Default for Map<K, V> {
 
 impl<K: Key + ?Sized, V: Value> Map<K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.into_iter()).map(V::from_u64)
+        self.raw.get(key.iter()).map(V::from_u64)
     }
 
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
         self.raw
-            .insert(key.into_iter(), value.into_u64())
+            .insert(key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
-        self.raw.remove(key.into_iter()).map(V::from_u64)
+        self.raw.remove(key.iter()).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
         self.raw
-            .update(key.into_iter(), value.into_u64())
+            .update(key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
@@ -97,21 +97,66 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 }
 
 pub trait Key {
-    type IntoIter: key::Iterator;
-    fn into_iter(&self) -> Self::IntoIter;
+    #[allow(private_bounds)]
+    type Iter<'a>: key::Iterator
+    where
+        Self: 'a;
+    fn iter<'a>(&'a self) -> Self::Iter<'a>;
 }
 
 impl Key for u8 {
-    type IntoIter = key::Fixed;
-    fn into_iter(&self) -> Self::IntoIter {
+    type Iter<'a> = key::Fixed;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
         key::Fixed::from(*self)
     }
 }
 
 impl Key for u64 {
-    type IntoIter = key::Fixed;
-    fn into_iter(&self) -> Self::IntoIter {
+    type Iter<'a> = key::Fixed;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
         key::Fixed::from(*self)
+    }
+}
+
+impl<const N: usize> Key for [u8; N] {
+    type Iter<'a> = key::Dynamic<'a>;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        key::Dynamic::from(self.as_slice())
+    }
+}
+
+impl Key for [u8] {
+    type Iter<'a> = key::Dynamic<'a>;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        key::Dynamic::from(self)
+    }
+}
+
+impl Key for Vec<u8> {
+    type Iter<'a> = key::Dynamic<'a>;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        key::Dynamic::from(self.as_slice())
+    }
+}
+
+impl Key for str {
+    type Iter<'a> = key::Dynamic<'a>;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        key::Dynamic::from(self.as_bytes())
+    }
+}
+
+impl Key for String {
+    type Iter<'a> = key::Dynamic<'a>;
+    #[inline]
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        key::Dynamic::from(self.as_bytes())
     }
 }
 
@@ -183,20 +228,21 @@ where
 mod tests {
     use crate::Map;
 
-    // #[test]
-    // fn smoke() {
-    //     let map = Map::<[u8], _>::default();
-    //     map.insert(b"abcd", 1);
-    //     assert_eq!(map.get(b"abcd"), Some(1));
-    // }
-    //
-    // #[test]
-    // fn smoke_u64_key() {
-    //     let map = Map::default();
-    //     let key = 0xdeadbeefu64.to_be_bytes();
-    //     map.insert(&key, 1);
-    //     assert_eq!(map.get(&key), Some(1));
-    // }
+    #[test]
+    fn smoke() {
+        let map = Map::<[u8], _>::default();
+        map.insert(b"abcd", 1);
+        assert_eq!(map.get(b"abcd"), Some(1));
+    }
+
+    #[test]
+    fn smoke_u64_key() {
+        let map = Map::default();
+        let key = 0xdeadbeefu64.to_be_bytes();
+        map.insert(&key, 1);
+        assert_eq!(map.get(&key), Some(1));
+    }
+
     //
     // #[test]
     // fn scan_leaf() {
@@ -242,22 +288,23 @@ mod tests {
     //     );
     // }
     //
-    // #[test]
-    // fn node3_overwrite() {
-    //     let mut map = Map::default();
-    //
-    //     for value in [1, 2, 3] {
-    //         map.insert(&1u8, value);
-    //         assert_eq!(map.get(&1), Some(value));
-    //     }
-    //
-    //     assert_eq!(map.iter().count(), 1);
-    //
-    //     map.iter().for_each(|(key, value)| {
-    //         assert_eq!(key, 1);
-    //         assert_eq!(value, 3);
-    //     });
-    // }
+
+    #[test]
+    fn node3_overwrite() {
+        let map = Map::default();
+
+        for value in [1, 2, 3] {
+            map.insert(&1u8, value);
+            assert_eq!(map.get(&1), Some(value));
+        }
+
+        // assert_eq!(map.iter().count(), 1);
+        //
+        // map.iter().for_each(|(key, value)| {
+        //     assert_eq!(key, 1);
+        //     assert_eq!(value, 3);
+        // });
+    }
 
     #[test]
     fn node3_full() {
@@ -284,26 +331,41 @@ mod tests {
         insert_all(0u8..=255);
     }
 
+    #[test]
+    fn split_edges() {
+        let mut key = (0..100).collect::<Vec<_>>();
+        insert_all(core::iter::from_fn(|| {
+            if key.is_empty() {
+                None
+            } else {
+                let mut next = key.clone();
+                next.push(0);
+                key.pop();
+                Some(next)
+            }
+        }));
+    }
+
     fn insert_all<I, K>(iter: I) -> Map<K, u32>
     where
         I: IntoIterator<Item = K>,
-        I::IntoIter: Clone,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
     {
         let keys = iter
             .into_iter()
             .enumerate()
-            .map(|(index, key)| (key, index as u32));
+            .map(|(index, key)| (key, index as u32))
+            .collect::<Vec<_>>();
 
         let map = Map::default();
 
-        for (key, value) in keys.clone() {
-            map.insert(&key, value);
-            assert_eq!(map.get(&key), Some(value));
+        for (key, value) in &keys {
+            map.insert(key, *value);
+            assert_eq!(map.get(key), Some(*value));
         }
 
-        for (key, value) in keys.clone() {
-            assert_eq!(map.get(&key), Some(value));
+        for (key, value) in &keys {
+            assert_eq!(map.get(key), Some(*value));
         }
 
         // assert_eq!(map.iter().count(), keys.clone().count());

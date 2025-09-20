@@ -103,12 +103,17 @@ impl Array {
         ))
     }
 
-    pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, prefix: Option<u8>, with: F) -> T {
+    pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(
+        key: ribbit::Packed<Self>,
+        prefix: Option<u8>,
+        with: F,
+    ) -> T {
         let bytes = match prefix {
-            Some(prefix) => (self.buffer.value() << 8 | prefix as u64).to_ne_bytes(),
-            None => self.buffer.value().to_ne_bytes(),
+            // Implicitly shift off len
+            Some(prefix) => ((key.value.value() << 8) | prefix as u64).to_ne_bytes(),
+            None => key.buffer().value().to_ne_bytes(),
         };
-        let slice = &bytes[..self.len.value() as usize + prefix.is_some() as usize];
+        let slice = &bytes[..key.len().value() as usize + prefix.is_some() as usize];
         with(slice)
     }
 
@@ -150,6 +155,7 @@ pub struct Fixed {
 }
 
 impl From<u8> for Fixed {
+    #[inline]
     fn from(value: u8) -> Self {
         Self {
             buffer: value as u64,
@@ -159,6 +165,7 @@ impl From<u8> for Fixed {
 }
 
 impl From<u64> for Fixed {
+    #[inline]
     fn from(value: u64) -> Self {
         Self {
             buffer: if cfg!(target_endian = "little") {
@@ -172,10 +179,12 @@ impl From<u64> for Fixed {
 }
 
 impl Iterator for Fixed {
+    #[inline]
     fn len(&self) -> usize {
         self.len as usize
     }
 
+    #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<Array> {
         let bit = (len.value() as u64) << 3;
         let array = ribbit::Packed::<Array>::new(
@@ -187,11 +196,155 @@ impl Iterator for Fixed {
         array
     }
 
+    #[inline]
     fn next(&mut self) -> Option<u8> {
         let some = self.len > 0;
         let byte = self.buffer as u8;
         self.buffer >>= 8;
         self.len = self.len.saturating_sub(1);
         some.then_some(byte)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Dynamic<'a> {
+    // INVARIANT: `len > 8`
+    Large(&'a [u8]),
+    Small(Fixed),
+}
+
+impl<'a> From<&'a [u8]> for Dynamic<'a> {
+    #[inline]
+    fn from(buffer: &'a [u8]) -> Self {
+        match buffer.len() {
+            9.. => Self::Large(buffer),
+            len => Self::Small(Fixed {
+                buffer: unsafe { buffer.as_ptr().cast::<u64>().read_unaligned() },
+                len: len as u8,
+            }),
+        }
+    }
+}
+
+impl Default for Dynamic<'_> {
+    #[inline]
+    fn default() -> Self {
+        Self::Small(Fixed::default())
+    }
+}
+
+impl Iterator for Dynamic<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Dynamic::Large(large) => large.len(),
+            Dynamic::Small(small) => small.len as usize,
+        }
+    }
+
+    #[inline]
+    fn take(&mut self, len: u3) -> ribbit::Packed<Array> {
+        match self {
+            Dynamic::Large(large) => {
+                validate!(large.len() > 8);
+
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                let buffer = buffer & ((1u64 << ((len.value() as u64) << 3)) - 1);
+                let array =
+                    ribbit::Packed::<Array>::new(unsafe { u56::new_unchecked(buffer) }, len);
+
+                let after = large.len() - len.value() as usize;
+
+                if after > 8 {
+                    *self = Self::Large(&large[len.value() as usize..]);
+                    return array;
+                }
+
+                let buffer = unsafe {
+                    (&large[large.len() - 8] as *const u8)
+                        .cast::<u64>()
+                        .read_unaligned()
+                };
+
+                *self = Self::Small(Fixed {
+                    buffer: buffer >> ((8 - after) << 3),
+                    len: after as u8,
+                });
+                array
+            }
+            Dynamic::Small(small) => small.take(len),
+        }
+    }
+
+    #[inline]
+    fn next(&mut self) -> Option<u8> {
+        match self {
+            Self::Large(large) => {
+                validate!(large.len() > 8);
+
+                let byte = large[0];
+                if large.len() - 1 > 8 {
+                    *self = Self::Large(&large[1..]);
+                } else {
+                    *self = Self::Small(Fixed {
+                        buffer: unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() },
+                        len: 8,
+                    })
+                }
+
+                Some(byte)
+            }
+            Self::Small(small) => small.next(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ribbit::u3;
+
+    use crate::key::Array;
+
+    use super::Dynamic;
+    use super::Iterator as _;
+
+    #[test]
+    fn dynamic_smoke() {
+        take_all(b"0123456789", [1])
+    }
+
+    #[test]
+    fn dynamic_switch_exact() {
+        take_all(b"0123456789", [2, 2])
+    }
+
+    #[test]
+    fn dynamic_switch_inexact() {
+        take_all(b"0123456789", [4, 2])
+    }
+
+    #[test]
+    fn dynamic_long() {
+        take_all(b"abcdefghijklmnopqrstuvwxyz", [1, 2, 3, 4, 5, 4, 3, 2, 1])
+    }
+
+    fn take_all<I: IntoIterator<Item = usize>>(initial: &[u8], lens: I) {
+        let mut iter = Dynamic::from(initial);
+
+        let mut index = 0;
+        for len in lens {
+            assert_eq!(iter.len(), initial.len() - index);
+            Array::with_bytes(iter.take(u3::new(len as u8)), None, |a| {
+                assert_eq!(a, &initial[index..][..len]);
+            });
+            index += len;
+        }
+
+        assert_eq!(iter.len(), initial.len() - index);
+        if iter.len() > 0 {
+            assert_eq!(iter.next(), Some(initial[index]));
+        } else {
+            assert_eq!(iter.next(), None);
+        }
     }
 }

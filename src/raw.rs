@@ -19,29 +19,27 @@ use crate::stat;
 use crate::Edge;
 use crate::Key;
 
-pub struct Raw<K> {
+pub struct Raw {
     root: Atomic128<Edge>,
-    _key: PhantomData<K>,
 }
 
-impl<K> Default for Raw<K> {
+impl Default for Raw {
     #[inline]
     fn default() -> Self {
         Self {
             root: Atomic128::default(),
-            _key: PhantomData,
         }
     }
 }
 
-impl<K: key::Iterator> Raw<K> {
+impl Raw {
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     #[inline]
-    pub fn insert(&self, key: K, value: u64) -> Option<u64> {
+    pub fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
@@ -49,19 +47,19 @@ impl<K: key::Iterator> Raw<K> {
     }
 
     #[inline]
-    fn insert_optimistic(&self, key: K, value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<cursor::Optimistic<K>>(key, value)
+    fn insert_optimistic<K: key::Iterator>(&self, key: K, value: u64) -> Result<Option<u64>, ()> {
+        self.insert_impl::<_, cursor::Optimistic<K>>(key, value)
     }
 
     #[cold]
-    fn insert_pessimistic(&self, key: K, value: u64) -> Option<u64> {
+    fn insert_pessimistic<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::Pessimistic<K>>(key, value)
+        self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
             .unwrap()
     }
 
     #[inline]
-    fn insert_impl<'a, P: cursor::History<'a, K>>(
+    fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         &'a self,
         key: K,
         value: u64,
@@ -113,7 +111,7 @@ impl<K: key::Iterator> Raw<K> {
     }
 
     #[inline]
-    pub fn get(&self, key: K) -> Option<u64> {
+    pub fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let mut root = &self.root;
         let mut key = key;
         loop {
@@ -138,7 +136,7 @@ impl<K: key::Iterator> Raw<K> {
     }
 
     #[inline]
-    pub fn remove(&self, key: K) -> Option<u64> {
+    pub fn remove<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
@@ -172,7 +170,7 @@ impl<K: key::Iterator> Raw<K> {
     }
 
     #[inline]
-    pub fn update(&self, key: K, value: u64) -> Option<u64> {
+    pub fn update<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
