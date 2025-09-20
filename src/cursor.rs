@@ -19,7 +19,7 @@ pub(crate) struct Cursor<'a, K, P> {
     history: P,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     Node(node::Op),
     Edge(edge::Op),
@@ -111,6 +111,8 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                                 self.step(save, node, next);
                                 continue;
                             }
+
+                            crate::cold();
                         }
 
                         node.freeze();
@@ -155,6 +157,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
         })
     }
 
+    #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, P::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.key = segment.key;

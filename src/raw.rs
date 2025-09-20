@@ -80,18 +80,24 @@ impl Raw {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(edge) => {
+                Ok(edge) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-                    match (op, edge.meta().kind().unpack()) {
-                        (Op::Edge(edge::Op::Insert), node::Kind::None) => return Ok(None),
-                        (Op::Edge(edge::Op::Insert), node::Kind::Leaf) => {
-                            return Ok(Some(edge.data()))
-                        }
-                        // FIXME: retire old allocation with SMR
-                        _ => continue,
+                    if edge.meta().kind() == node::Kind::NONE {
+                        return Ok(None);
+                    } else {
+                        validate_eq!(edge.meta().kind(), node::Kind::LEAF);
+                        return Ok(Some(edge.data()));
                     }
                 }
-                Err(edge) => edge,
+                // FIXME: retire old allocation with SMR
+                Ok(_) => {
+                    crate::cold();
+                    continue;
+                }
+                Err(edge) => {
+                    crate::cold();
+                    edge
+                }
             };
 
             match op {

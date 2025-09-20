@@ -63,6 +63,7 @@ impl Edge {
         }
     }
 
+    #[cold]
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
         match edge.meta().kind().unpack() {
             node::Kind::None | node::Kind::Leaf => {
@@ -78,6 +79,7 @@ impl Edge {
         ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), leaf)
     }
 
+    #[cold]
     pub(crate) fn new_node<N, I>(key: ribbit::Packed<key::Array>, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
@@ -117,7 +119,7 @@ impl Meta {
         Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     /// Node creation
     Create,

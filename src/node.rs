@@ -36,7 +36,7 @@ pub(crate) trait Info: Node + Default {
     type Shrink: Info;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     /// Node shrink (smaller size)
     Shrink,
@@ -90,7 +90,7 @@ impl<'a> Ref<'a> {
         }
     }
 
-    #[inline]
+    #[cold]
     pub(crate) fn freeze(&self) {
         match self {
             Ref::Node3(node) => node.freeze(),
@@ -99,7 +99,7 @@ impl<'a> Ref<'a> {
         }
     }
 
-    #[inline]
+    #[cold]
     pub(crate) fn replace(&self, meta: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         match self {
             Ref::Node3(node) => node.replace(meta),

@@ -224,6 +224,11 @@ where
     }
 }
 
+/// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
+#[inline]
+#[cold]
+pub(crate) fn cold() {}
+
 #[cfg(test)]
 mod tests {
     use crate::Map;
