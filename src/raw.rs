@@ -19,7 +19,7 @@ use crate::stat;
 use crate::Edge;
 use crate::Key;
 
-pub struct Raw {
+pub(crate) struct Raw {
     root: Atomic128<Edge>,
 }
 
@@ -34,12 +34,12 @@ impl Default for Raw {
 
 impl Raw {
     #[inline]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     #[inline]
-    pub fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
@@ -111,7 +111,7 @@ impl Raw {
     }
 
     #[inline]
-    pub fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let mut root = &self.root;
         let mut key = key;
         loop {
@@ -136,7 +136,7 @@ impl Raw {
     }
 
     #[inline]
-    pub fn remove<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
@@ -170,7 +170,7 @@ impl Raw {
     }
 
     #[inline]
-    pub fn update<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 

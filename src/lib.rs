@@ -21,7 +21,7 @@ mod node;
 mod raw;
 pub mod stat;
 
-pub use raw::Raw;
+pub(crate) use raw::Raw;
 use ribbit::u3;
 
 use core::marker::PhantomData;
