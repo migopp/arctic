@@ -12,7 +12,7 @@ thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
 }
 
-pub fn process<K, V>(map: &mut crate::Map<K, V>) -> Process {
+pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut depth = Histogram::new();
     let mut compression = Histogram::new();
     let mut node_3 = Histogram::new();

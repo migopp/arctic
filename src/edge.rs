@@ -9,7 +9,7 @@ use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
 
-#[ribbit::pack(size = 128)]
+#[ribbit::pack(size = 128, debug)]
 #[derive(Copy, Clone, Default, Debug)]
 pub(crate) struct Edge {
     #[ribbit(size = 63)]

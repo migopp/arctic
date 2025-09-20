@@ -30,13 +30,13 @@ use core::ops::RangeBounds;
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
 
-pub struct Map<K: ?Sized, V> {
-    raw: Raw<K>,
+pub struct Map<K: Key + ?Sized, V> {
+    raw: Raw<K::IntoIter>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<K: ?Sized, V> Default for Map<K, V> {
+impl<K: Key + ?Sized, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             raw: Raw::default(),
@@ -48,19 +48,23 @@ impl<K: ?Sized, V> Default for Map<K, V> {
 
 impl<K: Key + ?Sized, V: Value> Map<K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        key.with_swap(|key| self.raw.get(key).map(V::from_u64))
+        self.raw.get(key.into_iter()).map(V::from_u64)
     }
 
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
-        key.with_swap(|key| self.raw.insert(key, value.into_u64()).map(V::from_u64))
+        self.raw
+            .insert(key.into_iter(), value.into_u64())
+            .map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
-        key.with_swap(|key| self.raw.remove(key).map(V::from_u64))
+        self.raw.remove(key.into_iter()).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
-        key.with_swap(|key| self.raw.update(key, value.into_u64()).map(V::from_u64))
+        self.raw
+            .update(key.into_iter(), value.into_u64())
+            .map(V::from_u64)
     }
 
     // pub fn iter(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
@@ -93,162 +97,21 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 }
 
 pub trait Key {
-    #[inline]
-    fn with_swap<F: FnOnce(&Self) -> T, T>(&self, with: F) -> T {
-        with(self)
-    }
-
-    fn len(&self) -> usize;
-
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    #[inline]
-    fn get(&self, index: usize) -> Option<u8> {
-        (index < self.len()).then(|| unsafe { self.get_unchecked(index) })
-    }
-
-    /// # SAFETY
-    ///
-    /// Caller must guarantee `index < self.len()`.
-    unsafe fn get_unchecked(&self, index: usize) -> u8;
-
-    /// Return `len` bytes starting from `index` in least significant 7 bytes.
-    ///
-    /// # SAFETY
-    ///
-    /// Caller must guarantee:
-    /// - `index <= self.len()`
-    /// - `index + len <= self.len()`
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64;
+    type IntoIter: key::Iterator;
+    fn into_iter(&self) -> Self::IntoIter;
 }
 
 impl Key for u8 {
-    #[inline]
-    fn len(&self) -> usize {
-        1
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, _index: usize) -> u8 {
-        *self
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, _index: usize, len: u3) -> u64 {
-        match len.value() {
-            0 => 0u64,
-            _ => *self as u64,
-        }
+    type IntoIter = key::Fixed;
+    fn into_iter(&self) -> Self::IntoIter {
+        key::Fixed::from(*self)
     }
 }
 
 impl Key for u64 {
-    #[inline]
-    #[cfg(target_endian = "little")]
-    fn with_swap<F: FnOnce(&Self) -> T, T>(&self, with: F) -> T {
-        with(&self.swap_bytes())
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        8
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, index: usize) -> u8 {
-        (self >> (index << 3)) as u8
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
-        if len.value() == 0 {
-            0
-        } else {
-            (self >> (index << 3)) & ((1 << ((len.value() as u64) << 3)) - 1)
-        }
-    }
-}
-
-impl Key for str {
-    #[inline]
-    fn len(&self) -> usize {
-        (*self).len()
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, index: usize) -> u8 {
-        *self.as_bytes().get_unchecked(index)
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
-        let mut buffer = [0u8; 8];
-        let len = len.value() as usize;
-        buffer[..len].copy_from_slice(&self.as_bytes()[index..][..len]);
-        u64::from_ne_bytes(buffer)
-    }
-}
-
-impl Key for String {
-    #[inline]
-    fn len(&self) -> usize {
-        (*self).len()
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, index: usize) -> u8 {
-        *self.as_bytes().get_unchecked(index)
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
-        let mut buffer = [0u8; 8];
-        let len = len.value() as usize;
-        buffer[..len].copy_from_slice(&self.as_bytes()[index..][..len]);
-        u64::from_ne_bytes(buffer)
-    }
-}
-
-impl Key for [u8] {
-    #[inline]
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, index: usize) -> u8 {
-        *self.get_unchecked(index)
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
-        let mut buffer = [0u8; 8];
-        let len = len.value() as usize;
-        buffer[..len].copy_from_slice(&self[index..][..len]);
-        u64::from_ne_bytes(buffer)
-    }
-}
-
-impl<const N: usize> Key for [u8; N] {
-    #[inline]
-    fn len(&self) -> usize {
-        N
-    }
-
-    #[inline]
-    unsafe fn get_unchecked(&self, index: usize) -> u8 {
-        *<[u8]>::get_unchecked(self, index)
-    }
-
-    #[inline]
-    unsafe fn get_array_unchecked(&self, index: usize, len: u3) -> u64 {
-        let mut buffer = [0u8; 8];
-        let len = len.value() as usize;
-        buffer[..len].copy_from_slice(&self[index..][..len]);
-        u64::from_ne_bytes(buffer)
+    type IntoIter = key::Fixed;
+    fn into_iter(&self) -> Self::IntoIter {
+        key::Fixed::from(*self)
     }
 }
 
@@ -320,20 +183,20 @@ where
 mod tests {
     use crate::Map;
 
-    #[test]
-    fn smoke() {
-        let map = Map::<[u8], _>::default();
-        map.insert(b"abcd", 1);
-        assert_eq!(map.get(b"abcd"), Some(1));
-    }
-
-    #[test]
-    fn smoke_u64_key() {
-        let map = Map::default();
-        let key = 0xdeadbeefu64.to_be_bytes();
-        map.insert(&key, 1);
-        assert_eq!(map.get(&key), Some(1));
-    }
+    // #[test]
+    // fn smoke() {
+    //     let map = Map::<[u8], _>::default();
+    //     map.insert(b"abcd", 1);
+    //     assert_eq!(map.get(b"abcd"), Some(1));
+    // }
+    //
+    // #[test]
+    // fn smoke_u64_key() {
+    //     let map = Map::default();
+    //     let key = 0xdeadbeefu64.to_be_bytes();
+    //     map.insert(&key, 1);
+    //     assert_eq!(map.get(&key), Some(1));
+    // }
     //
     // #[test]
     // fn scan_leaf() {

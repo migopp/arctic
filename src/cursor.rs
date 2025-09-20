@@ -11,12 +11,11 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::Edge;
-use crate::Key;
 
-pub(crate) struct Cursor<'a, 'k, K: ?Sized, P> {
-    prefix: &'k K,
-    index: usize,
-    here: &'a Atomic128<Edge>,
+/// Stateful traversal over tree.
+pub(crate) struct Cursor<'a, K, P> {
+    key: K,
+    root: &'a Atomic128<Edge>,
     history: P,
 }
 
@@ -26,12 +25,12 @@ pub(crate) enum Op {
     Edge(edge::Op),
 }
 
-impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
-    pub(crate) fn new(root: &'a Atomic128<Edge>, prefix: &'k K) -> Self {
+impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
+    #[inline]
+    pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
-            prefix,
-            index: 0,
-            here: root,
+            key: key.clone(),
+            root,
             history: P::default(),
         }
     }
@@ -39,17 +38,20 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
     #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
-            let edge = self.here().load_packed(Ordering::Relaxed);
+            let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let len = key::Array::match_prefix(self.prefix, self.index, meta.key())?;
+            let save = self.key.clone();
+            if !key::Array::match_prefix(&mut self.key, meta.key()) {
+                return None;
+            }
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
-                let byte = self.prefix.get(self.index + len)?;
+                let byte = self.key.next()?;
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
                 let next = node.get(byte)?;
-                self.push(len, node, next);
+                self.step(save, node, next);
                 continue;
             } else if kind == node::Kind::LEAF {
                 return Some(edge);
@@ -61,29 +63,24 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
     }
 
     #[inline]
-    pub(crate) fn traverse_prefix(&mut self) -> Option<(usize, ribbit::Packed<Edge>)> {
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
-            let edge = self.here().load_packed(Ordering::Relaxed);
+            let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-
             let kind = meta.kind();
+            let save = self.key.clone();
 
             // Continue traversal only if exact match
-            if kind >= node::Kind::NODE_3 {
-                if let Some(len) = key::Array::match_prefix(self.prefix, self.index, meta.key()) {
-                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                    if let Some(next) = self
-                        .prefix
-                        .get(self.index + len)
-                        .and_then(|byte| node.get(byte))
-                    {
-                        self.push(len, node, next);
-                        continue;
-                    }
+            if kind >= node::Kind::NODE_3 && key::Array::match_prefix(&mut self.key, meta.key()) {
+                let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
+                    self.step(save, node, next);
+                    continue;
                 }
             }
 
-            return Some((self.index, edge));
+            self.key = save;
+            return Some(edge);
         }
     }
 
@@ -95,12 +92,13 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
         value: u64,
     ) -> (Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>) {
         loop {
-            let old = self.here().load_packed(Ordering::Relaxed);
+            let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
-            let r#match = key::Array::match_split(self.prefix, self.index, old_meta.key());
+            let save = self.key.clone();
+            let r#match = key::Array::match_split(&mut self.key, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full(len) => {
+                key::Match::Full => {
                     let kind = old_meta.kind();
 
                     if kind >= node::Kind::NODE_3 {
@@ -108,9 +106,9 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
                         let node = unsafe { Edge::next_node_unchecked(old_data, kind) };
                         if !matches!(self.history.freeze(), Some(freeze) if freeze.get() == old_data)
                         {
-                            let byte = self.prefix.get(self.index + len).unwrap();
+                            let byte = self.key.next().unwrap();
                             if let Some(next) = node.get_or_reserve(byte) {
-                                self.push(len, node, next);
+                                self.step(save, node, next);
                                 continue;
                             }
                         }
@@ -118,20 +116,15 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
                         node.freeze();
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
-                    } else if kind == node::Kind::NONE
-                        && self.prefix.len() - self.index > key::Array::MAX
-                    {
+                    } else if kind == node::Kind::NONE && save.len() > key::Array::MAX {
                         (
                             Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(
-                                key::Array::from_slice(self.prefix, self.index),
-                                None,
-                            ),
+                            Edge::new_node::<Node3, _>(key::Array::from_slice(save.clone()), None),
                         )
                     } else {
                         (
                             Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(key::Array::from_slice(self.prefix, self.index), value),
+                            Edge::new_leaf(key::Array::from_slice(save.clone()), value),
                         )
                     }
                 }
@@ -147,69 +140,82 @@ impl<'a, 'k, K: Key + ?Sized, P: History<'a>> Cursor<'a, 'k, K, P> {
                 ),
             };
 
+            // Revert key to before the current edge
+            self.key = save;
             return (op, old, new);
         }
     }
 
     #[inline]
-    fn push(&mut self, len: usize, node: node::Ref<'a>, next: &'a Atomic128<Edge>) {
-        self.index += len + 1;
+    fn step(&mut self, key: K, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
         self.history.push(Segment {
-            len,
-            edge: self.here,
+            key,
+            edge: core::mem::replace(&mut self.root, edge),
             node,
-        });
-        self.here = next;
+        })
     }
 
-    pub(crate) fn pop(&mut self) -> Result<node::Ref, P::PopError> {
+    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, P::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.index -= segment.len + 1;
-        self.here = segment.edge;
+        self.key = segment.key;
+        self.root = segment.edge;
         Ok(segment.node)
     }
 
     #[inline]
-    pub(crate) fn here(&self) -> &Atomic128<Edge> {
-        self.here
+    pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
+        self.root
     }
 }
 
-pub(crate) trait History<'a>: Default {
+pub(crate) trait History<'a, K>: Default {
     type PopError;
-    fn freeze(&mut self) -> Option<NonZeroU64>;
 
-    fn push(&mut self, segment: Segment<'a>);
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError>;
+    fn freeze(&mut self) -> Option<NonZeroU64>;
+    fn push(&mut self, segment: Segment<'a, K>);
+    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError>;
 }
 
-#[derive(Default)]
-pub(crate) struct Optimistic<'a>(PhantomData<&'a ()>);
+pub(crate) struct Optimistic<K>(PhantomData<K>);
 
-impl<'a> History<'a> for Optimistic<'a> {
+impl<K> Default for Optimistic<K> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<'a, K> History<'a, K> for Optimistic<K> {
     type PopError = ();
 
-    #[inline(always)]
+    #[inline]
     fn freeze(&mut self) -> Option<NonZeroU64> {
         None
     }
 
-    #[inline(always)]
-    fn push(&mut self, _segment: Segment<'a>) {}
+    #[inline]
+    fn push(&mut self, _segment: Segment<'a, K>) {}
 
-    #[inline(always)]
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
+    #[inline]
+    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError> {
         Err(())
     }
 }
 
-#[derive(Default)]
-pub(crate) struct Pessimistic<'a> {
+pub(crate) struct Pessimistic<'a, K> {
     freeze: Option<node::Ref<'a>>,
-    path: Vec<Segment<'a>>,
+    path: Vec<Segment<'a, K>>,
 }
 
-impl<'a> History<'a> for Pessimistic<'a> {
+impl<K> Default for Pessimistic<'_, K> {
+    fn default() -> Self {
+        Self {
+            freeze: None,
+            path: Vec::default(),
+        }
+    }
+}
+
+impl<'a, K: Clone> History<'a, K> for Pessimistic<'a, K> {
     type PopError = Infallible;
 
     #[inline]
@@ -226,20 +232,25 @@ impl<'a> History<'a> for Pessimistic<'a> {
     }
 
     #[inline]
-    fn push(&mut self, segment: Segment<'a>) {
-        self.path.push(segment)
+    fn push(&mut self, segment: Segment<'a, K>) {
+        self.path.push(segment);
     }
 
-    fn pop(&mut self) -> Result<Option<Segment<'a>>, Self::PopError> {
+    #[inline]
+    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError> {
         validate!(self.freeze.is_none());
         self.freeze = self.path.last().map(|segment| segment.node);
         Ok(self.path.pop())
     }
 }
 
+/// Path segment consists of:
+/// - Current key before matching on edge
+/// - Edge to match next
+/// - Node underneath edge
 #[derive(Debug)]
-pub(crate) struct Segment<'a> {
-    len: usize,
+pub(crate) struct Segment<'a, K> {
+    key: K,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,
 }

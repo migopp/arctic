@@ -6,12 +6,9 @@ use core::ops::Shr as _;
 
 use ribbit::u3;
 use ribbit::u56;
-use ribbit::u59;
-
-use crate::Key;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 59, eq)]
+#[ribbit::pack(size = 59, debug, eq)]
 pub(crate) struct Array {
     #[ribbit(size = 56)]
     buffer: u56,
@@ -28,44 +25,25 @@ impl Array {
     pub(crate) const MAX: usize = 7;
 
     #[inline]
-    pub(crate) fn from_slice<K: Key + ?Sized>(key: &K, index: usize) -> ribbit::Packed<Self> {
-        let len = unsafe { u3::new_unchecked((key.len() - index).min(Self::MAX) as u8) };
-        unsafe { Self::from_key(key, index, len) }
+    pub(crate) fn from_slice<K: Iterator>(mut key: K) -> ribbit::Packed<Self> {
+        let len = unsafe { u3::new_unchecked(key.len().min(Self::MAX) as u8) };
+        key.take(len)
     }
 
     #[inline]
-    unsafe fn from_key<K: Key + ?Sized>(key: &K, index: usize, len: u3) -> ribbit::Packed<Self> {
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(u59::new_unchecked(
-                key.get_array_unchecked(index, len) | ((len.value() as u64) << 56),
-            ))
-        }
+    pub(crate) fn match_prefix<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> bool {
+        let len = unsafe { u3::new_unchecked(key.len().min(edge.len().value() as usize) as u8) };
+        key.take(len) == edge
     }
 
     #[inline]
-    pub(crate) fn match_prefix<K: Key + ?Sized>(
-        key: &K,
-        index: usize,
-        edge: ribbit::Packed<Self>,
-    ) -> Option<usize> {
-        let len = unsafe {
-            u3::new_unchecked((key.len() - index).min(edge.len().value() as usize) as u8)
-        };
-        (unsafe { Self::from_key(key, index, len) } == edge).then_some(len.value() as usize)
-    }
-
-    #[inline]
-    pub(crate) fn match_split<K: Key + ?Sized>(
-        key: &K,
-        index: usize,
-        edge: ribbit::Packed<Self>,
-    ) -> Match {
+    pub(crate) fn match_split<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Match {
         let edge_len = edge.len().value() as usize;
         let key_len = key.len();
         let len = unsafe { u3::new_unchecked(key_len.min(edge_len) as u8) };
-        let key = unsafe { Self::from_key(key, index, len) };
+        let key = key.take(len);
         if key == edge {
-            return Match::Full(len.value() as usize);
+            return Match::Full;
         }
 
         let edge = edge.value.value();
@@ -134,7 +112,7 @@ impl Array {
         with(slice)
     }
 
-    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> {
+    pub(crate) fn bytes(&self) -> impl core::iter::Iterator<Item = u8> {
         self.buffer
             .value()
             .to_ne_bytes()
@@ -143,8 +121,9 @@ impl Array {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum Match {
-    Full(usize),
+    Full,
     Partial {
         start: ribbit::Packed<Array>,
         middle: u8,
@@ -155,5 +134,64 @@ pub(crate) enum Match {
 impl Debug for Array {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.bytes()).finish()
+    }
+}
+
+pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
+    fn len(&self) -> usize;
+    fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
+    fn next(&mut self) -> Option<u8>;
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Fixed {
+    buffer: u64,
+    len: u8,
+}
+
+impl From<u8> for Fixed {
+    fn from(value: u8) -> Self {
+        Self {
+            buffer: value as u64,
+            len: 1,
+        }
+    }
+}
+
+impl From<u64> for Fixed {
+    fn from(value: u64) -> Self {
+        Self {
+            buffer: if cfg!(target_endian = "little") {
+                value.swap_bytes()
+            } else {
+                value
+            },
+            len: 8,
+        }
+    }
+}
+
+impl Iterator for Fixed {
+    fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    fn take(&mut self, len: u3) -> ribbit::Packed<Array> {
+        let bit = (len.value() as u64) << 3;
+        let array = ribbit::Packed::<Array>::new(
+            unsafe { u56::new_unchecked(self.buffer & ((1u64 << bit) - 1)) },
+            len,
+        );
+        self.buffer >>= bit;
+        self.len -= len.value();
+        array
+    }
+
+    fn next(&mut self) -> Option<u8> {
+        let some = self.len > 0;
+        let byte = self.buffer as u8;
+        self.buffer >>= 8;
+        self.len = self.len.saturating_sub(1);
+        some.then_some(byte)
     }
 }

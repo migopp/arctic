@@ -13,17 +13,18 @@ use crate::cursor;
 use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
+use crate::key;
 use crate::node;
 use crate::stat;
 use crate::Edge;
 use crate::Key;
 
-pub struct Raw<K: ?Sized> {
+pub struct Raw<K> {
     root: Atomic128<Edge>,
     _key: PhantomData<K>,
 }
 
-impl<K: ?Sized> Default for Raw<K> {
+impl<K> Default for Raw<K> {
     #[inline]
     fn default() -> Self {
         Self {
@@ -33,38 +34,39 @@ impl<K: ?Sized> Default for Raw<K> {
     }
 }
 
-impl<K: Key + ?Sized> Raw<K> {
+impl<K: key::Iterator> Raw<K> {
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     #[inline]
-    pub fn insert(&self, key: &K, value: u64) -> Option<u64> {
-        match self.insert_optimistic(key, value) {
+    pub fn insert(&self, key: K, value: u64) -> Option<u64> {
+        match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
         }
     }
 
     #[inline]
-    fn insert_optimistic(&self, key: &K, value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<cursor::Optimistic>(key, value)
+    fn insert_optimistic(&self, key: K, value: u64) -> Result<Option<u64>, ()> {
+        self.insert_impl::<cursor::Optimistic<K>>(key, value)
     }
 
     #[cold]
-    fn insert_pessimistic(&self, key: &K, value: u64) -> Option<u64> {
+    fn insert_pessimistic(&self, key: K, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::Pessimistic>(key, value).unwrap()
+        self.insert_impl::<cursor::Pessimistic<K>>(key, value)
+            .unwrap()
     }
 
     #[inline]
-    fn insert_impl<'a, P: cursor::History<'a>>(
+    fn insert_impl<'a, P: cursor::History<'a, K>>(
         &'a self,
-        key: &K,
+        key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
-        let mut cursor = Cursor::<K, P>::new(&self.root, key);
+        let mut cursor = Cursor::<K, P>::new(key, &self.root);
 
         loop {
             let (op, old, new) = cursor.traverse_or_insert(value);
@@ -74,7 +76,7 @@ impl<K: Key + ?Sized> Raw<K> {
                 continue;
             }
 
-            let edge = match cursor.here().compare_exchange_packed(
+            let edge = match cursor.root().compare_exchange_packed(
                 old,
                 new,
                 Ordering::AcqRel,
@@ -111,24 +113,41 @@ impl<K: Key + ?Sized> Raw<K> {
     }
 
     #[inline]
-    pub fn get(&self, key: &K) -> Option<u64> {
-        Cursor::<K, cursor::Optimistic>::new(&self.root, key)
-            .traverse_exact()
-            .map(|edge| edge.data())
+    pub fn get(&self, key: K) -> Option<u64> {
+        let mut root = &self.root;
+        let mut key = key;
+        loop {
+            let edge = root.load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
+            if !key::Array::match_prefix(&mut key, meta.key()) {
+                return None;
+            }
+            let kind = meta.kind();
+            if kind >= node::Kind::NODE_3 {
+                let byte = key.next()?;
+                let data = edge.data();
+                let node = unsafe { Edge::next_node_unchecked(data, kind) };
+                root = node.get(byte)?;
+            } else if kind == node::Kind::LEAF {
+                return Some(edge.data());
+            } else {
+                validate_eq!(kind, node::Kind::NONE);
+                return None;
+            }
+        }
     }
 
     #[inline]
-    pub fn remove(&self, key: &K) -> Option<u64> {
-        let mut cursor = Cursor::<K, cursor::Optimistic>::new(&self.root, key);
+    pub fn remove(&self, key: K) -> Option<u64> {
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
-        let edge = cursor.here();
 
         loop {
             if old.meta().frozen() {
                 todo!()
             }
 
-            match edge.compare_exchange_packed(
+            match cursor.root().compare_exchange_packed(
                 old,
                 old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
                 Ordering::AcqRel,
@@ -153,17 +172,16 @@ impl<K: Key + ?Sized> Raw<K> {
     }
 
     #[inline]
-    pub fn update(&self, key: &K, value: u64) -> Option<u64> {
-        let mut cursor = Cursor::<K, cursor::Optimistic>::new(&self.root, key);
+    pub fn update(&self, key: K, value: u64) -> Option<u64> {
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
-        let edge = cursor.here();
 
         loop {
             if old.meta().frozen() {
                 todo!()
             }
 
-            match edge.compare_exchange_packed(
+            match cursor.root().compare_exchange_packed(
                 old,
                 Edge::new_leaf(old.meta().key(), value),
                 Ordering::AcqRel,
