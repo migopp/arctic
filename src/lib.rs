@@ -51,6 +51,7 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
         self.raw.get(key.iter()).map(V::from_u64)
     }
 
+    #[inline(never)]
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
         self.raw
             .insert(key.iter(), value.into_u64())

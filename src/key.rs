@@ -154,29 +154,32 @@ pub struct Fixed {
     len: u8,
 }
 
-impl From<u8> for Fixed {
-    #[inline]
-    fn from(value: u8) -> Self {
-        Self {
-            buffer: value as u64,
-            len: 1,
-        }
-    }
+macro_rules! impl_fixed {
+    ($($from:ty: $len:expr),* $(,)?) => {
+        $(
+            impl From<$from> for Fixed {
+                #[inline]
+                fn from(value: $from) -> Self {
+                    Self {
+                        buffer: if cfg!(target_endian = "little") {
+                            value.swap_bytes()
+                        } else {
+                            value
+                        } as u64,
+                        len: $len,
+                    }
+                }
+            }
+        )*
+    };
 }
 
-impl From<u64> for Fixed {
-    #[inline]
-    fn from(value: u64) -> Self {
-        Self {
-            buffer: if cfg!(target_endian = "little") {
-                value.swap_bytes()
-            } else {
-                value
-            },
-            len: 8,
-        }
-    }
-}
+impl_fixed!(
+    u8: 1,
+    u16: 2,
+    u32: 4,
+    u64: 8,
+);
 
 impl Iterator for Fixed {
     #[inline]
@@ -215,13 +218,17 @@ pub enum Dynamic<'a> {
 
 impl<'a> From<&'a [u8]> for Dynamic<'a> {
     #[inline]
-    fn from(buffer: &'a [u8]) -> Self {
-        match buffer.len() {
-            9.. => Self::Large(buffer),
-            len => Self::Small(Fixed {
-                buffer: unsafe { buffer.as_ptr().cast::<u64>().read_unaligned() },
-                len: len as u8,
-            }),
+    fn from(key: &'a [u8]) -> Self {
+        match key.len() {
+            9.. => Self::Large(key),
+            len => {
+                let mut buffer = [0u8; 8];
+                buffer[..len].copy_from_slice(key);
+                Self::Small(Fixed {
+                    buffer: u64::from_ne_bytes(buffer),
+                    len: len as u8,
+                })
+            }
         }
     }
 }
@@ -311,6 +318,31 @@ mod tests {
     #[test]
     fn dynamic_smoke() {
         take_all(b"0123456789", [1])
+    }
+
+    #[test]
+    fn dynamic_0() {
+        take_all(b"", [0])
+    }
+
+    #[test]
+    fn dynamic_1() {
+        take_all(b"0", [1])
+    }
+
+    #[test]
+    fn dynamic_3() {
+        take_all(b"012", [1, 1, 1])
+    }
+
+    #[test]
+    fn dynamic_5() {
+        take_all(b"01234", [1, 1, 1, 1, 1])
+    }
+
+    #[test]
+    fn dynamic_7() {
+        take_all(b"0123456", [1, 1, 1, 1, 1, 1, 1])
     }
 
     #[test]
