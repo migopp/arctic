@@ -107,22 +107,28 @@ impl node::Info for Node3 {
     type Shrink = Node3;
 }
 
+/// https://richardstartin.github.io/posts/finding-bytes
+/// https://orlp.net/blog/extracting-depositing-bits/
 #[inline]
 #[cfg(feature = "opt-node3-get")]
 fn get(array: u32, key: u8) -> u8 {
-    // https://richardstartin.github.io/posts/finding-bytes
-    const PATTERN: u32 = 0x7F_7F_7F_7F;
+    const LOWER: u32 = 0x00_7F_7F_7F;
 
+    // LLVM is smart enough to turn this into an `imul`
     const fn broadcast(byte: u8) -> u32 {
         let byte = byte as u32;
         byte | (byte << 8) | (byte << 16)
     }
 
-    let input = array ^ broadcast(key);
-    let temp = (input & PATTERN) + PATTERN;
-    let temp = !(input | temp | PATTERN);
+    let diff = array ^ broadcast(key);
 
-    (temp.trailing_zeros() >> 3) as u8
+    // Carry lower 7 bits of each byte into top bit
+    let any_one_lower = (diff & LOWER) + LOWER;
+
+    // Combine top bit of `diff` with carried bit
+    let any_one = diff | any_one_lower;
+
+    ((any_one | LOWER).trailing_ones() >> 3) as u8
 }
 
 #[inline]
@@ -132,4 +138,31 @@ fn get(array: u32, key: u8) -> u8 {
         .position(|byte| byte == key)
         .map(|index| index as u8)
         .unwrap_or(u8::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn zero() {
+        test_get(0x00_00_00_00, 0, 0)
+    }
+
+    #[test]
+    fn zero_high() {
+        test_get(0x00_00_12_34, 0, 2)
+    }
+
+    #[test]
+    fn nonzero_middle() {
+        test_get(0x00_11_12_13, 0x12, 1)
+    }
+
+    #[test]
+    fn first() {
+        test_get(0x00_11_11_12, 0x11, 1)
+    }
+
+    fn test_get(array: u32, key: u8, expected: u8) {
+        assert_eq!(super::get(array, key), expected);
+    }
 }
