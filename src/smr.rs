@@ -39,6 +39,21 @@ impl Default for State {
     }
 }
 
+impl Drop for State {
+    fn drop(&mut self) {
+        for (_, data) in self.retired.iter_mut().flat_map(RefCell::get_mut) {
+            let tag = *data & 0b11u64;
+            let data = *data & !0b11u64;
+            match tag {
+                0 => drop(unsafe { Box::from_raw(data as *mut Node3) }),
+                1 => drop(unsafe { Box::from_raw(data as *mut Node15) }),
+                2 => drop(unsafe { Box::from_raw(data as *mut Node256) }),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
 pub(crate) struct Guard<'a> {
     state: &'a State,
 }
