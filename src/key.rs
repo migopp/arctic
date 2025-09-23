@@ -26,7 +26,7 @@ impl Array {
     pub(crate) const MAX_LEN: u3 = u3::new(7);
 
     #[inline]
-    pub(crate) fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
+    fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
         let bit = (len.value() as u64) << 3;
         let mask = (1u64 << bit) - 1;
         ribbit::Packed::<Self>::new(unsafe { u56::new_unchecked(array & mask) }, len)
@@ -34,7 +34,7 @@ impl Array {
 
     #[inline]
     pub(crate) fn from_slice<K: Iterator>(mut key: K) -> ribbit::Packed<Self> {
-        let len = unsafe { u3::new_unchecked(key.len().min(Self::MAX_LEN.value() as usize) as u8) };
+        let len = Self::min_len(key.len(), Self::MAX_LEN);
         key.take(len)
     }
 
@@ -53,15 +53,16 @@ impl Array {
 
     #[inline]
     pub(crate) fn match_prefix<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Option<u3> {
-        let len = unsafe { u3::new_unchecked(key.len().min(edge.len().value() as usize) as u8) };
+        let len = Self::min_len(key.len(), edge.len());
         (key.take(len) == edge).then_some(len)
     }
 
     #[inline]
     pub(crate) fn match_split<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Match {
-        let edge_len = edge.len().value() as usize;
+        let edge_len = edge.len();
         let key_len = key.len();
-        let len = unsafe { u3::new_unchecked(key_len.min(edge_len) as u8) };
+        let len = Self::min_len(key_len, edge_len);
+
         let key = key.take(len);
         if key == edge {
             return Match::Full(len);
@@ -90,7 +91,7 @@ impl Array {
             end: unsafe {
                 ribbit::Packed::<Self>::new(
                     u56::new_unchecked((edge & Self::MASK) >> (prefix_bit + 8)),
-                    u3::new_unchecked(edge_len as u8 - prefix_byte - 1),
+                    u3::new_unchecked(edge_len.value() - prefix_byte - 1),
                 )
             },
         }
@@ -122,6 +123,11 @@ impl Array {
             },
             unsafe { u3::new_unchecked(len as u8) },
         ))
+    }
+
+    fn min_len(left: usize, right: u3) -> u3 {
+        // SAFETY: `left.min(right)` can be at most `right`, which is a valid u3
+        unsafe { u3::new_unchecked(left.min(right.value() as usize) as u8) }
     }
 
     #[cfg(test)]
