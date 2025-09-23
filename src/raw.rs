@@ -16,6 +16,7 @@ use crate::stat;
 use crate::Edge;
 
 pub(crate) struct Raw {
+    smr: smr::State,
     root: Atomic128<Edge>,
 }
 
@@ -23,6 +24,7 @@ impl Default for Raw {
     #[inline]
     fn default() -> Self {
         Self {
+            smr: smr::State::default(),
             root: Atomic128::default(),
         }
     }
@@ -30,47 +32,33 @@ impl Default for Raw {
 
 impl Raw {
     #[inline]
-    pub(crate) fn insert<K: key::Iterator>(
-        &self,
-        guard: &smr::Guard,
-        key: K,
-        value: u64,
-    ) -> Option<u64> {
-        match self.insert_optimistic(guard, key.clone(), value) {
+    pub(crate) fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+        match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
-            Err(()) => self.insert_pessimistic(guard, key, value),
+            Err(()) => self.insert_pessimistic(key, value),
         }
     }
 
     #[inline]
-    fn insert_optimistic<K: key::Iterator>(
-        &self,
-        guard: &smr::Guard,
-        key: K,
-        value: u64,
-    ) -> Result<Option<u64>, ()> {
-        self.insert_impl::<_, cursor::Optimistic<K>>(guard, key, value)
+    fn insert_optimistic<K: key::Iterator>(&self, key: K, value: u64) -> Result<Option<u64>, ()> {
+        self.insert_impl::<_, cursor::Optimistic<K>>(key, value)
     }
 
     #[cold]
-    fn insert_pessimistic<K: key::Iterator>(
-        &self,
-        guard: &smr::Guard,
-        key: K,
-        value: u64,
-    ) -> Option<u64> {
+    fn insert_pessimistic<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<_, cursor::Pessimistic<K>>(guard, key, value)
+        self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
             .unwrap()
     }
 
     #[inline]
     fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         &'a self,
-        guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
+        let guard = self.smr.protect(&key);
+
         let mut cursor = Cursor::<K, P>::new(key.clone(), &self.root);
 
         loop {
@@ -102,7 +90,7 @@ impl Raw {
                     let prefix = key.prefix(u3::new_unchecked(
                         index.min(key::Array::MAX_LEN.value() as usize) as u8,
                     ));
-                    guard.defer_destroy(prefix, old);
+                    guard.retire(prefix, old);
                 },
                 Err(edge) => {
                     // Does not go through EBR because `new` is still thread-local
@@ -117,7 +105,9 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, _guard: &smr::Guard, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect(&key);
+
         let mut root = &self.root;
         let mut key = key;
         loop {
@@ -141,7 +131,8 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&self, _guard: &smr::Guard, key: K) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(&self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect(&key);
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
@@ -175,12 +166,8 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn update<K: key::Iterator>(
-        &self,
-        _guard: &smr::Guard,
-        key: K,
-        value: u64,
-    ) -> Option<u64> {
+    pub(crate) fn update<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+        let _guard = self.smr.protect(&key);
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 

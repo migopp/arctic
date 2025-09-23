@@ -1,6 +1,5 @@
 use core::cell::RefCell;
 use core::sync::atomic::Ordering;
-use std::sync::LazyLock;
 
 use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
@@ -15,34 +14,46 @@ use crate::Edge;
 
 const RETIRED_COUNT: usize = 16;
 
-thread_local! {
-    static RETIRED: RefCell<Vec<(ribbit::Packed<key::Array>, u64)>> = const { RefCell::new(Vec::new()) };
+pub(crate) struct State {
+    hazards: ThreadLocal<Atomic64<key::Array>>,
+    retired: ThreadLocal<RefCell<Vec<(ribbit::Packed<key::Array>, u64)>>>,
 }
 
-static HAZARDS: LazyLock<thread_local::ThreadLocal<Atomic64<key::Array>>> =
-    LazyLock::new(|| ThreadLocal::with_capacity(128));
-
-pub(crate) fn pin<K: key::Iterator>(key: &K) -> Guard {
-    let prefix = key.prefix(key::Array::MAX_LEN);
-    HAZARDS
-        .get_or_default()
-        .store_packed(prefix, Ordering::Relaxed);
-    BARRIER.fast();
-    Guard
+impl State {
+    pub(crate) fn protect<K: key::Iterator>(&self, key: &K) -> Guard {
+        let prefix = key.prefix(key::Array::MAX_LEN);
+        self.hazards
+            .get_or_default()
+            .store_packed(prefix, Ordering::Relaxed);
+        BARRIER.fast();
+        Guard { state: self }
+    }
 }
 
-pub(crate) struct Guard;
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            hazards: ThreadLocal::with_capacity(128),
+            retired: ThreadLocal::with_capacity(128),
+        }
+    }
+}
 
-impl Drop for Guard {
+pub(crate) struct Guard<'a> {
+    state: &'a State,
+}
+
+impl Drop for Guard<'_> {
     fn drop(&mut self) {
-        HAZARDS
+        self.state
+            .hazards
             .get_or_default()
             .store_packed(key::Array::EMPTY, Ordering::Relaxed);
     }
 }
 
-impl Guard {
-    pub(crate) unsafe fn defer_destroy(
+impl Guard<'_> {
+    pub(crate) unsafe fn retire(
         &self,
         prefix: ribbit::Packed<key::Array>,
         edge: ribbit::Packed<Edge>,
@@ -62,43 +73,48 @@ impl Guard {
         stat::increment(stat::Counter::Retire);
         let data = edge.data() | tag;
 
-        RETIRED.with_borrow_mut(|retired| {
-            retired.push((prefix, data));
-
-            if retired.len() >= RETIRED_COUNT {
-                Self::flush(retired);
-            }
-        })
+        let mut retired = self.state.retired.get_or_default().borrow_mut();
+        retired.push((prefix, data));
+        if retired.len() >= RETIRED_COUNT {
+            drop(retired);
+            self.flush();
+        }
     }
 
     #[cold]
-    fn flush(retired: &mut Vec<(ribbit::Packed<key::Array>, u64)>) {
+    fn flush(&self) {
         BARRIER.slow();
 
-        let hazards = HAZARDS
+        let hazards = self
+            .state
+            .hazards
             .iter()
             .map(|hazard| hazard.load_packed(Ordering::Relaxed))
             .collect::<Vec<_>>();
 
-        retired.retain(|(key, data)| {
-            if hazards
-                .iter()
-                .any(|hazard| key::Array::has_prefix(*hazard, *key))
-            {
-                return true;
-            }
+        self.state
+            .retired
+            .get_or_default()
+            .borrow_mut()
+            .retain(|(key, data)| {
+                if hazards
+                    .iter()
+                    .any(|hazard| key::Array::has_prefix(*hazard, *key))
+                {
+                    return true;
+                }
 
-            let tag = data & 0b11u64;
-            let data = data & !0b11u64;
-            match tag {
-                0 => drop(unsafe { Box::from_raw(data as *mut Node3) }),
-                1 => drop(unsafe { Box::from_raw(data as *mut Node15) }),
-                2 => drop(unsafe { Box::from_raw(data as *mut Node256) }),
-                _ => unreachable!(),
-            }
+                let tag = data & 0b11u64;
+                let data = data & !0b11u64;
+                match tag {
+                    0 => drop(unsafe { Box::from_raw(data as *mut Node3) }),
+                    1 => drop(unsafe { Box::from_raw(data as *mut Node15) }),
+                    2 => drop(unsafe { Box::from_raw(data as *mut Node256) }),
+                    _ => unreachable!(),
+                }
 
-            false
-        })
+                false
+            })
     }
 }
 

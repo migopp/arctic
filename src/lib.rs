@@ -84,30 +84,22 @@ pub struct MapRef<'a, K: ?Sized, V> {
 
 impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        let key = key.iter();
-        let guard = smr::pin(&key);
-        self.raw.get(&guard, key).map(V::from_u64)
+        self.raw.get(key.iter()).map(V::from_u64)
     }
 
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
-        let key = key.iter();
-        let guard = smr::pin(&key);
         self.raw
-            .insert(&guard, key, value.into_u64())
+            .insert(key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
-        let key = key.iter();
-        let guard = smr::pin(&key);
-        self.raw.remove(&guard, key).map(V::from_u64)
+        self.raw.remove(key.iter()).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
-        let key = key.iter();
-        let guard = smr::pin(&key);
         self.raw
-            .update(&guard, key, value.into_u64())
+            .update(key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
