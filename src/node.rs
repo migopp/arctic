@@ -39,6 +39,7 @@ pub(crate) trait Info: Node + Default {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     /// Node shrink (smaller size)
+    #[expect(dead_code)]
     Shrink,
 
     /// Node replacement (same size)
@@ -62,6 +63,7 @@ pub(crate) enum Ref<'a> {
 }
 
 impl<'a> Ref<'a> {
+    #[expect(dead_code)]
     pub(crate) unsafe fn iter(&self) -> Iter<'a> {
         match self {
             Ref::Node3(node) => node.into_iter(),

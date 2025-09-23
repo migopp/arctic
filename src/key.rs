@@ -103,6 +103,7 @@ impl Array {
         ))
     }
 
+    #[cfg(test)]
     pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(
         key: ribbit::Packed<Self>,
         prefix: Option<u8>,

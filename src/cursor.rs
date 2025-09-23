@@ -63,6 +63,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     }
 
     #[inline]
+    #[expect(dead_code)]
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);

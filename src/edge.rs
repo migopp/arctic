@@ -131,5 +131,6 @@ pub(crate) enum Op {
     Insert,
 
     /// Leaf removal
+    #[expect(dead_code)]
     Remove,
 }

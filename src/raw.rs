@@ -1,9 +1,4 @@
-use core::marker::PhantomData;
-use core::mem;
-use core::ops::Bound;
-use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
-use std::rc::Rc;
 
 use ribbit::atomic::Atomic128;
 use ribbit::Pack as _;
@@ -17,7 +12,6 @@ use crate::key;
 use crate::node;
 use crate::stat;
 use crate::Edge;
-use crate::Key;
 
 pub(crate) struct Raw {
     root: Atomic128<Edge>,
@@ -33,11 +27,6 @@ impl Default for Raw {
 }
 
 impl Raw {
-    #[inline]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     #[inline]
     pub(crate) fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {

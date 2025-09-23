@@ -3,7 +3,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::cursor;
-use crate::edge;
 use crate::node;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
@@ -12,13 +11,13 @@ thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
 }
 
-pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
-    let mut depth = Histogram::new();
-    let mut compression = Histogram::new();
-    let mut node_3 = Histogram::new();
-    let mut node_15 = Histogram::new();
-    let mut node_256 = Histogram::new();
-
+pub fn process<K: crate::Key, V>(_map: &mut crate::Map<K, V>) -> Process {
+    // let mut depth = Histogram::new();
+    // let mut compression = Histogram::new();
+    // let mut node_3 = Histogram::new();
+    // let mut node_15 = Histogram::new();
+    // let mut node_256 = Histogram::new();
+    //
     // map.raw.preorder().for_each(|(depth_, _, edge)| {
     //     let meta = edge.meta();
     //     let kind = meta.kind();
@@ -49,14 +48,16 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
     //         histogram.record(children as u64);
     //     }
     // });
+    //
+    // Process {
+    //     depth: depth.into(),
+    //     compression: compression.into(),
+    //     node_3: node_3.into(),
+    //     node_15: node_15.into(),
+    //     node_256: node_256.into(),
+    // }
 
-    Process {
-        depth: depth.into(),
-        compression: compression.into(),
-        node_3: node_3.into(),
-        node_15: node_15.into(),
-        node_256: node_256.into(),
-    }
+    Process::default()
 }
 
 pub fn thread() -> Thread {
@@ -110,6 +111,7 @@ struct Histogram {
     inner: hdrhistogram::Histogram<u64>,
 }
 
+#[expect(unused)]
 impl Histogram {
     fn new() -> Self {
         Self {
