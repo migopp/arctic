@@ -28,28 +28,44 @@ impl Default for Raw {
 
 impl Raw {
     #[inline]
-    pub(crate) fn insert<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
-        match self.insert_optimistic(key.clone(), value) {
+    pub(crate) fn insert<K: key::Iterator>(
+        &self,
+        guard: &crossbeam_epoch::Guard,
+        key: K,
+        value: u64,
+    ) -> Option<u64> {
+        match self.insert_optimistic(guard, key.clone(), value) {
             Ok(old) => old,
-            Err(()) => self.insert_pessimistic(key, value),
+            Err(()) => self.insert_pessimistic(guard, key, value),
         }
     }
 
     #[inline]
-    fn insert_optimistic<K: key::Iterator>(&self, key: K, value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<_, cursor::Optimistic<K>>(key, value)
+    fn insert_optimistic<K: key::Iterator>(
+        &self,
+        guard: &crossbeam_epoch::Guard,
+        key: K,
+        value: u64,
+    ) -> Result<Option<u64>, ()> {
+        self.insert_impl::<_, cursor::Optimistic<K>>(guard, key, value)
     }
 
     #[cold]
-    fn insert_pessimistic<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+    fn insert_pessimistic<K: key::Iterator>(
+        &self,
+        guard: &crossbeam_epoch::Guard,
+        key: K,
+        value: u64,
+    ) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
+        self.insert_impl::<_, cursor::Pessimistic<K>>(guard, key, value)
             .unwrap()
     }
 
     #[inline]
     fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         &'a self,
+        guard: &crossbeam_epoch::Guard,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
@@ -69,35 +85,27 @@ impl Raw {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(edge) if op == Op::Edge(edge::Op::Insert) => {
+                Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-                    if edge.meta().kind() == node::Kind::NONE {
+                    if old.meta().kind() == node::Kind::NONE {
                         return Ok(None);
                     } else {
-                        validate_eq!(edge.meta().kind(), node::Kind::LEAF);
-                        return Ok(Some(edge.data()));
+                        validate_eq!(old.meta().kind(), node::Kind::LEAF);
+                        return Ok(Some(old.data()));
                     }
                 }
-                // FIXME: retire old allocation with SMR
-                Ok(_) => {
-                    crate::cold();
+                Ok(_) => unsafe {
+                    Edge::retire(op, guard, old);
                     continue;
-                }
+                },
                 Err(edge) => {
                     crate::cold();
                     edge
                 }
             };
 
-            match op {
-                Op::Node(node::Op::Destroy | node::Op::Compress)
-                | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
-
-                Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-                | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                    Edge::deallocate(new);
-                },
-            }
+            // Does not go through EBR because `new` is still thread-local
+            unsafe { Edge::deallocate(op, new) };
 
             if edge.meta().frozen() {
                 cursor.pop()?;
@@ -106,7 +114,11 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(
+        &self,
+        _guard: &crossbeam_epoch::Guard,
+        key: K,
+    ) -> Option<u64> {
         let mut root = &self.root;
         let mut key = key;
         loop {
@@ -131,7 +143,11 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(
+        &self,
+        _guard: &crossbeam_epoch::Guard,
+        key: K,
+    ) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
@@ -165,7 +181,12 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn update<K: key::Iterator>(&self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<K: key::Iterator>(
+        &self,
+        _guard: &crossbeam_epoch::Guard,
+        key: K,
+        value: u64,
+    ) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 

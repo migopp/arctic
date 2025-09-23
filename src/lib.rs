@@ -45,24 +45,58 @@ impl<K: ?Sized, V> Default for Map<K, V> {
 }
 
 impl<K: Key + ?Sized, V: Value> Map<K, V> {
-    pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.iter()).map(V::from_u64)
+    pub fn pin(&self) -> MapRef<K, V> {
+        MapRef {
+            guard: crossbeam_epoch::pin(),
+            raw: &self.raw,
+            _key: PhantomData,
+            _value: PhantomData,
+        }
     }
 
-    #[inline(never)]
+    #[inline]
+    pub fn get(&self, key: &K) -> Option<V> {
+        self.pin().get(key)
+    }
+
+    pub fn insert(&self, key: &K, value: V) -> Option<V> {
+        self.pin().insert(key, value)
+    }
+
+    pub fn remove(&self, key: &K) -> Option<V> {
+        self.pin().remove(key)
+    }
+
+    pub fn update(&self, key: &K, value: V) -> Option<V> {
+        self.pin().update(key, value)
+    }
+}
+
+pub struct MapRef<'a, K: ?Sized, V> {
+    guard: crossbeam_epoch::Guard,
+    raw: &'a Raw,
+    _key: PhantomData<K>,
+    _value: PhantomData<V>,
+}
+
+impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
+    pub fn get(&self, key: &K) -> Option<V> {
+        self.raw.get(&self.guard, key.iter()).map(V::from_u64)
+    }
+
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
         self.raw
-            .insert(key.iter(), value.into_u64())
+            .insert(&self.guard, key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
-        self.raw.remove(key.iter()).map(V::from_u64)
+        self.raw.remove(&self.guard, key.iter()).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
         self.raw
-            .update(key.iter(), value.into_u64())
+            .update(&self.guard, key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 

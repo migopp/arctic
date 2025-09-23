@@ -12,6 +12,7 @@ opt-memcpy = []
 validate = []
 
 [dependencies]
+crossbeam-epoch = "0.9.18"
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false }
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }

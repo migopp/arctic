@@ -152,6 +152,8 @@ impl From<Histogram> for Distribution {
 pub(crate) enum Counter {
     Op(cursor::Op),
     InsertPessimistic,
+    Deallocate,
+    Retire,
 }
 
 impl From<cursor::Op> for Counter {
@@ -166,6 +168,8 @@ pub struct Thread {
     node: Node,
     edge: Edge,
     insert_pessimistic: Cell<u64>,
+    deallocate: Cell<u64>,
+    retire: Cell<u64>,
 }
 
 #[derive(Clone)]
@@ -204,6 +208,8 @@ impl Thread {
                 remove: Cell::new(0),
             },
             insert_pessimistic: Cell::new(0),
+            deallocate: Cell::new(0),
+            retire: Cell::new(0),
         }
     }
 
@@ -247,6 +253,10 @@ pub(crate) fn increment<C: Into<Counter>>(counter: C) {
             Counter::InsertPessimistic => {
                 THREAD.with(|thread| thread.insert_pessimistic.update(|count| count + 1))
             }
+            Counter::Deallocate => {
+                THREAD.with(|thread| thread.deallocate.update(|count| count + 1))
+            }
+            Counter::Retire => THREAD.with(|thread| thread.retire.update(|count| count + 1)),
         }
     }
 }
