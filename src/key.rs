@@ -1,3 +1,4 @@
+use core::cmp;
 use core::fmt::Debug;
 use core::ops::BitAnd as _;
 use core::ops::BitOr as _;
@@ -22,18 +23,38 @@ impl Array {
         ribbit::Packed::<Self>::new(u56::new(0), u3::new(0));
 
     const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
-    pub(crate) const MAX: usize = 7;
+    pub(crate) const MAX_LEN: u3 = u3::new(7);
+
+    #[inline]
+    pub(crate) fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
+        let bit = (len.value() as u64) << 3;
+        let mask = (1u64 << bit) - 1;
+        ribbit::Packed::<Self>::new(unsafe { u56::new_unchecked(array & mask) }, len)
+    }
 
     #[inline]
     pub(crate) fn from_slice<K: Iterator>(mut key: K) -> ribbit::Packed<Self> {
-        let len = unsafe { u3::new_unchecked(key.len().min(Self::MAX) as u8) };
+        let len = unsafe { u3::new_unchecked(key.len().min(Self::MAX_LEN.value() as usize) as u8) };
         key.take(len)
     }
 
     #[inline]
-    pub(crate) fn match_prefix<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> bool {
+    pub(crate) fn has_prefix(key: ribbit::Packed<Self>, prefix: ribbit::Packed<Self>) -> bool {
+        match key.len().cmp(&prefix.len()) {
+            cmp::Ordering::Less => false,
+            cmp::Ordering::Equal => key == prefix,
+            cmp::Ordering::Greater => {
+                let bit = (prefix.len().value() as u64) << 3;
+                let mask = (1u64 << bit) - 1;
+                (key.value.value() ^ prefix.value.value()) & mask == 0
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn match_prefix<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Option<u3> {
         let len = unsafe { u3::new_unchecked(key.len().min(edge.len().value() as usize) as u8) };
-        key.take(len) == edge
+        (key.take(len) == edge).then_some(len)
     }
 
     #[inline]
@@ -43,7 +64,7 @@ impl Array {
         let len = unsafe { u3::new_unchecked(key_len.min(edge_len) as u8) };
         let key = key.take(len);
         if key == edge {
-            return Match::Full;
+            return Match::Full(len);
         }
 
         let edge = edge.value.value();
@@ -83,7 +104,7 @@ impl Array {
         let parent_len = parent.len().value() as usize;
         let child_len = child.len().value() as usize;
         let len = parent_len + 1 + child_len;
-        if len > Self::MAX {
+        if len > Self::MAX_LEN.value() as usize {
             return None;
         }
 
@@ -129,7 +150,7 @@ impl Array {
 
 #[derive(Debug)]
 pub(crate) enum Match {
-    Full,
+    Full(u3),
     Partial {
         start: ribbit::Packed<Array>,
         middle: u8,
@@ -145,6 +166,8 @@ impl Debug for Array {
 
 pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
+
+    fn prefix(&self, len: u3) -> ribbit::Packed<Array>;
     fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
     fn next(&mut self) -> Option<u8>;
 }
@@ -188,14 +211,14 @@ impl Iterator for Fixed {
         self.len as usize
     }
 
+    fn prefix(&self, len: u3) -> ribbit::Packed<Array> {
+        Array::from_u64_truncate(self.buffer, len)
+    }
+
     #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<Array> {
-        let bit = (len.value() as u64) << 3;
-        let array = ribbit::Packed::<Array>::new(
-            unsafe { u56::new_unchecked(self.buffer & ((1u64 << bit) - 1)) },
-            len,
-        );
-        self.buffer >>= bit;
+        let array = Array::from_u64_truncate(self.buffer, len);
+        self.buffer >>= (len.value() as u64) << 3;
         self.len -= len.value();
         array
     }
@@ -251,16 +274,24 @@ impl Iterator for Dynamic<'_> {
     }
 
     #[inline]
+    fn prefix(&self, len: u3) -> ribbit::Packed<Array> {
+        match self {
+            Dynamic::Large(large) => {
+                validate!(large.len() > 8);
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                Array::from_u64_truncate(buffer, len)
+            }
+            Dynamic::Small(small) => small.prefix(len),
+        }
+    }
+
+    #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<Array> {
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);
-
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                let buffer = buffer & ((1u64 << ((len.value() as u64) << 3)) - 1);
-                let array =
-                    ribbit::Packed::<Array>::new(unsafe { u56::new_unchecked(buffer) }, len);
-
+                let array = Array::from_u64_truncate(buffer, len);
                 let after = large.len() - len.value() as usize;
 
                 if after > 8 {

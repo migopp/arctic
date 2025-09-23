@@ -8,14 +8,15 @@ default = []
 stat = ["dep:serde", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
-opt-memcpy = []
+opt-membarrier = ["dep:libc"]
 validate = []
 
 [dependencies]
-crossbeam-epoch = "0.9.18"
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false }
+libc = { version = "0.2.176", optional = true }
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
+thread_local = "1.1.9"
 
 [dev-dependencies]
 bustle = "0.5"

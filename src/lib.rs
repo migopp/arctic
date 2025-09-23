@@ -19,6 +19,7 @@ mod edge;
 mod key;
 mod node;
 mod raw;
+mod smr;
 pub mod stat;
 
 pub(crate) use raw::Raw;
@@ -45,9 +46,9 @@ impl<K: ?Sized, V> Default for Map<K, V> {
 }
 
 impl<K: Key + ?Sized, V: Value> Map<K, V> {
+    #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
-            guard: crossbeam_epoch::pin(),
             raw: &self.raw,
             _key: PhantomData,
             _value: PhantomData,
@@ -59,21 +60,23 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
         self.pin().get(key)
     }
 
+    #[inline]
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
         self.pin().insert(key, value)
     }
 
+    #[inline]
     pub fn remove(&self, key: &K) -> Option<V> {
         self.pin().remove(key)
     }
 
+    #[inline]
     pub fn update(&self, key: &K, value: V) -> Option<V> {
         self.pin().update(key, value)
     }
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
-    guard: crossbeam_epoch::Guard,
     raw: &'a Raw,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
@@ -81,22 +84,30 @@ pub struct MapRef<'a, K: ?Sized, V> {
 
 impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(&self.guard, key.iter()).map(V::from_u64)
+        let key = key.iter();
+        let guard = smr::pin(&key);
+        self.raw.get(&guard, key).map(V::from_u64)
     }
 
     pub fn insert(&self, key: &K, value: V) -> Option<V> {
+        let key = key.iter();
+        let guard = smr::pin(&key);
         self.raw
-            .insert(&self.guard, key.iter(), value.into_u64())
+            .insert(&guard, key, value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&self, key: &K) -> Option<V> {
-        self.raw.remove(&self.guard, key.iter()).map(V::from_u64)
+        let key = key.iter();
+        let guard = smr::pin(&key);
+        self.raw.remove(&guard, key).map(V::from_u64)
     }
 
     pub fn update(&self, key: &K, value: V) -> Option<V> {
+        let key = key.iter();
+        let guard = smr::pin(&key);
         self.raw
-            .update(&self.guard, key.iter(), value.into_u64())
+            .update(&guard, key, value.into_u64())
             .map(V::from_u64)
     }
 

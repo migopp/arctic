@@ -1,6 +1,5 @@
 use core::sync::atomic::Ordering;
 
-use crossbeam_epoch::Pointer as _;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
@@ -63,41 +62,6 @@ impl Edge {
             validate_eq!(kind, node::Kind::NODE_256);
             unsafe { next::<Node256>(data) }
         }
-    }
-
-    #[cold]
-    pub(crate) unsafe fn retire(
-        op: cursor::Op,
-        guard: &crossbeam_epoch::Guard,
-        edge: ribbit::Packed<Edge>,
-    ) {
-        let kind = edge.meta().kind();
-        if kind < node::Kind::NODE_3 {
-            return;
-        }
-
-        match op {
-            cursor::Op::Edge(Op::Create | Op::Expand | Op::Insert | Op::Remove) => return,
-            cursor::Op::Node(
-                node::Op::Shrink
-                | node::Op::Replace
-                | node::Op::Grow
-                | node::Op::Destroy
-                | node::Op::Compress,
-            ) => (),
-        }
-
-        let data = edge.data() as usize;
-        if kind == node::Kind::NODE_3 {
-            guard.defer_destroy(crossbeam_epoch::Shared::<Node3>::from_usize(data));
-        } else if kind == node::Kind::NODE_15 {
-            guard.defer_destroy(crossbeam_epoch::Shared::<Node15>::from_usize(data));
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            guard.defer_destroy(crossbeam_epoch::Shared::<Node256>::from_usize(data));
-        }
-
-        stat::increment(stat::Counter::Retire);
     }
 
     #[cold]

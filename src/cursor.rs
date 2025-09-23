@@ -5,6 +5,7 @@ use core::num::NonZeroU64;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::u3;
 
 use crate::edge;
 use crate::key;
@@ -15,6 +16,7 @@ use crate::Edge;
 /// Stateful traversal over tree.
 pub(crate) struct Cursor<'a, K, P> {
     key: K,
+    index: usize,
     root: &'a Atomic128<Edge>,
     history: P,
 }
@@ -30,6 +32,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
             key: key.clone(),
+            index: 0,
             root,
             history: P::default(),
         }
@@ -41,9 +44,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            if !key::Array::match_prefix(&mut self.key, meta.key()) {
-                return None;
-            }
+            let len = key::Array::match_prefix(&mut self.key, meta.key())?;
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
@@ -51,7 +52,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
                 let next = node.get(byte)?;
-                self.step(save, node, next);
+                self.step(save, len, node, next);
                 continue;
             } else if kind == node::Kind::LEAF {
                 return Some(edge);
@@ -72,11 +73,13 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
             let save = self.key.clone();
 
             // Continue traversal only if exact match
-            if kind >= node::Kind::NODE_3 && key::Array::match_prefix(&mut self.key, meta.key()) {
-                let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
-                    self.step(save, node, next);
-                    continue;
+            if kind >= node::Kind::NODE_3 {
+                if let Some(len) = key::Array::match_prefix(&mut self.key, meta.key()) {
+                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
+                        self.step(save, len, node, next);
+                        continue;
+                    }
                 }
             }
 
@@ -99,7 +102,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
             let r#match = key::Array::match_split(&mut self.key, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full => {
+                key::Match::Full(len) => {
                     let kind = old_meta.kind();
 
                     if kind >= node::Kind::NODE_3 {
@@ -109,7 +112,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                         {
                             let byte = self.key.next().unwrap();
                             if let Some(next) = node.get_or_reserve(byte) {
-                                self.step(save, node, next);
+                                self.step(save, len, node, next);
                                 continue;
                             }
 
@@ -119,7 +122,9 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                         node.freeze();
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
-                    } else if kind == node::Kind::NONE && save.len() > key::Array::MAX {
+                    } else if kind == node::Kind::NONE
+                        && save.len() > key::Array::MAX_LEN.value() as usize
+                    {
                         (
                             Op::Edge(edge::Op::Create),
                             Edge::new_node::<Node3, _>(key::Array::from_slice(save.clone()), None),
@@ -150,9 +155,12 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     }
 
     #[inline]
-    fn step(&mut self, key: K, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+    fn step(&mut self, key: K, len: u3, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+        // 1 extra byte for node
+        self.index += len.value() as usize + 1;
         self.history.push(Segment {
             key,
+            len,
             edge: core::mem::replace(&mut self.root, edge),
             node,
         })
@@ -161,6 +169,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, P::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
+        self.index -= segment.len.value() as usize + 1;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)
@@ -169,6 +178,11 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     #[inline]
     pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
         self.root
+    }
+
+    #[inline]
+    pub(crate) fn index(&self) -> usize {
+        self.index
     }
 }
 
@@ -250,11 +264,13 @@ impl<'a, K: Clone> History<'a, K> for Pessimistic<'a, K> {
 
 /// Path segment consists of:
 /// - Current key before matching on edge
+/// - Number of bytes matched along edge
 /// - Edge to match next
 /// - Node underneath edge
 #[derive(Debug)]
 pub(crate) struct Segment<'a, K> {
     key: K,
+    len: u3,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,
 }

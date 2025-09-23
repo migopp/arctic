@@ -1,6 +1,7 @@
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::u3;
 use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
@@ -10,6 +11,7 @@ use crate::cursor::Op;
 use crate::edge;
 use crate::key;
 use crate::node;
+use crate::smr;
 use crate::stat;
 use crate::Edge;
 
@@ -30,7 +32,7 @@ impl Raw {
     #[inline]
     pub(crate) fn insert<K: key::Iterator>(
         &self,
-        guard: &crossbeam_epoch::Guard,
+        guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Option<u64> {
@@ -43,7 +45,7 @@ impl Raw {
     #[inline]
     fn insert_optimistic<K: key::Iterator>(
         &self,
-        guard: &crossbeam_epoch::Guard,
+        guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, ()> {
@@ -53,7 +55,7 @@ impl Raw {
     #[cold]
     fn insert_pessimistic<K: key::Iterator>(
         &self,
-        guard: &crossbeam_epoch::Guard,
+        guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Option<u64> {
@@ -65,11 +67,11 @@ impl Raw {
     #[inline]
     fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         &'a self,
-        guard: &crossbeam_epoch::Guard,
+        guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
-        let mut cursor = Cursor::<K, P>::new(key, &self.root);
+        let mut cursor = Cursor::<K, P>::new(key.clone(), &self.root);
 
         loop {
             let (op, old, new) = cursor.traverse_or_insert(value);
@@ -79,7 +81,7 @@ impl Raw {
                 continue;
             }
 
-            let edge = match cursor.root().compare_exchange_packed(
+            match cursor.root().compare_exchange_packed(
                 old,
                 new,
                 Ordering::AcqRel,
@@ -94,39 +96,35 @@ impl Raw {
                         return Ok(Some(old.data()));
                     }
                 }
+                Ok(_) if matches!(op, cursor::Op::Edge(_)) => (),
                 Ok(_) => unsafe {
-                    Edge::retire(op, guard, old);
-                    continue;
+                    let index = cursor.index();
+                    let prefix = key.prefix(u3::new_unchecked(
+                        index.min(key::Array::MAX_LEN.value() as usize) as u8,
+                    ));
+                    guard.defer_destroy(prefix, old);
                 },
                 Err(edge) => {
-                    crate::cold();
-                    edge
+                    // Does not go through EBR because `new` is still thread-local
+                    unsafe { Edge::deallocate(op, new) };
+
+                    if edge.meta().frozen() {
+                        cursor.pop()?;
+                    }
                 }
-            };
-
-            // Does not go through EBR because `new` is still thread-local
-            unsafe { Edge::deallocate(op, new) };
-
-            if edge.meta().frozen() {
-                cursor.pop()?;
             }
         }
     }
 
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(
-        &self,
-        _guard: &crossbeam_epoch::Guard,
-        key: K,
-    ) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&self, _guard: &smr::Guard, key: K) -> Option<u64> {
         let mut root = &self.root;
         let mut key = key;
         loop {
             let edge = root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            if !key::Array::match_prefix(&mut key, meta.key()) {
-                return None;
-            }
+            let _ = key::Array::match_prefix(&mut key, meta.key())?;
+
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
                 let byte = key.next()?;
@@ -143,11 +141,7 @@ impl Raw {
     }
 
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(
-        &self,
-        _guard: &crossbeam_epoch::Guard,
-        key: K,
-    ) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(&self, _guard: &smr::Guard, key: K) -> Option<u64> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, &self.root);
         let mut old = cursor.traverse_exact()?;
 
@@ -183,7 +177,7 @@ impl Raw {
     #[inline]
     pub(crate) fn update<K: key::Iterator>(
         &self,
-        _guard: &crossbeam_epoch::Guard,
+        _guard: &smr::Guard,
         key: K,
         value: u64,
     ) -> Option<u64> {
