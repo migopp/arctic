@@ -25,11 +25,15 @@ impl byte::Iterator for Fixed {
 
     #[inline]
     fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
-        byte::Array::from_u64_truncate(self.buffer, byte::Array::min_len(self.len as usize, len))
+        validate!(len.value() as usize <= self.len());
+
+        byte::Array::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
+        validate!(len.value() as usize <= self.len());
+
         let array = byte::Array::from_u64_truncate(self.buffer, len);
         self.buffer >>= (len.value() as u64) << 3;
         self.len -= len.value();

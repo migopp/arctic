@@ -127,12 +127,12 @@ impl<'a, K: byte::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                     {
                         (
                             Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(byte::Array::from_slice(save.clone()), None),
+                            Edge::new_node::<Node3, _>(save.peek_all(), None),
                         )
                     } else {
                         (
                             Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(byte::Array::from_slice(save.clone()), value),
+                            Edge::new_leaf(save.peek_all(), value),
                         )
                     }
                 }

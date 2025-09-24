@@ -41,6 +41,8 @@ impl byte::Iterator for Dynamic<'_> {
 
     #[inline]
     fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
+        validate!(len.value() as usize <= self.len());
+
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);
@@ -53,6 +55,8 @@ impl byte::Iterator for Dynamic<'_> {
 
     #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
+        validate!(len.value() as usize <= self.len());
+
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);

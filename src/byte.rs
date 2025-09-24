@@ -21,7 +21,7 @@ pub(crate) struct Array {
     buffer: u56,
 
     #[ribbit(size = 3)]
-    pub(crate) len: u3,
+    len: u3,
 }
 
 impl Array {
@@ -35,13 +35,8 @@ impl Array {
     fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
         let bit = (len.value() as u64) << 3;
         let mask = (1u64 << bit) - 1;
+        // SAFETY: `len` <= 7, so `array & mask` must be within 56 bytes
         ribbit::Packed::<Self>::new(unsafe { u56::new_unchecked(array & mask) }, len)
-    }
-
-    #[inline]
-    pub(crate) fn from_slice<K: Iterator>(mut key: K) -> ribbit::Packed<Self> {
-        let len = Self::min_len(key.len(), Self::MAX_LEN);
-        key.take(len)
     }
 
     #[inline]
@@ -181,6 +176,12 @@ pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
 
     fn peek(&self, len: u3) -> ribbit::Packed<Array>;
+
+    #[inline]
+    fn peek_all(&self) -> ribbit::Packed<Array> {
+        self.peek(Array::min_len(self.len(), Array::MAX_LEN))
+    }
+
     fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
     fn next(&mut self) -> Option<u8>;
 }

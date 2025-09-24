@@ -66,7 +66,7 @@ impl Ref<'_> {
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
-        let mut guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
+        let mut guard = self.smr.protect_write(key.peek_all());
 
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.root);
 
@@ -144,7 +144,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn get<K: byte::Iterator>(&self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_read(key.peek(byte::Array::MAX_LEN));
+        let _guard = self.smr.protect_read(key.peek_all());
 
         let mut root = self.root;
         let mut key = key;
@@ -170,7 +170,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn remove<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
+        let _guard = self.smr.protect_write(key.peek_all());
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;
@@ -206,7 +206,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn update<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
+        let _guard = self.smr.protect_write(key.peek_all());
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;
