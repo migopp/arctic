@@ -24,7 +24,7 @@ impl key::Iterator for Fixed {
     }
 
     #[inline]
-    fn prefix(&self, len: u3) -> ribbit::Packed<key::Array> {
+    fn peek(&self, len: u3) -> ribbit::Packed<key::Array> {
         key::Array::from_u64_truncate(self.buffer, key::Array::min_len(self.len as usize, len))
     }
 

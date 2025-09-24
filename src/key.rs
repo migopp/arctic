@@ -180,7 +180,7 @@ impl Debug for Array {
 pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
 
-    fn prefix(&self, len: u3) -> ribbit::Packed<Array>;
+    fn peek(&self, len: u3) -> ribbit::Packed<Array>;
     fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
     fn next(&mut self) -> Option<u8>;
 }

@@ -66,7 +66,7 @@ impl Ref<'_> {
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
-        let mut guard = self.smr.protect_write(key.prefix(key::Array::MAX_LEN));
+        let mut guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.root);
 
@@ -122,7 +122,7 @@ impl Ref<'_> {
         }
 
         let index = cursor.index();
-        let prefix = key.prefix(key::Array::min_len(index, key::Array::MAX_LEN));
+        let prefix = key.peek(key::Array::min_len(index, key::Array::MAX_LEN));
 
         unsafe {
             guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
@@ -144,7 +144,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_read(key.prefix(key::Array::MAX_LEN));
+        let _guard = self.smr.protect_read(key.peek(key::Array::MAX_LEN));
 
         let mut root = self.root;
         let mut key = key;
@@ -170,7 +170,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.prefix(key::Array::MAX_LEN));
+        let _guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;
@@ -206,7 +206,7 @@ impl Ref<'_> {
 
     #[inline]
     pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.prefix(key::Array::MAX_LEN));
+        let _guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;

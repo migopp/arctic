@@ -40,14 +40,14 @@ impl key::Iterator for Dynamic<'_> {
     }
 
     #[inline]
-    fn prefix(&self, len: u3) -> ribbit::Packed<key::Array> {
+    fn peek(&self, len: u3) -> ribbit::Packed<key::Array> {
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
                 key::Array::from_u64_truncate(buffer, len)
             }
-            Dynamic::Small(small) => small.prefix(len),
+            Dynamic::Small(small) => small.peek(len),
         }
     }
 
