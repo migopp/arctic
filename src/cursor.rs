@@ -7,8 +7,8 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 use ribbit::u3;
 
+use crate::byte;
 use crate::edge;
-use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::Edge;
@@ -27,7 +27,7 @@ pub(crate) enum Op {
     Edge(edge::Op),
 }
 
-impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
+impl<'a, K: byte::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     #[inline]
     pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
@@ -44,7 +44,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            let len = key::Array::match_prefix(&mut self.key, meta.key())?;
+            let len = byte::Array::match_prefix(&mut self.key, meta.key())?;
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
@@ -74,7 +74,7 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
 
             // Continue traversal only if exact match
             if kind >= node::Kind::NODE_3 {
-                if let Some(len) = key::Array::match_prefix(&mut self.key, meta.key()) {
+                if let Some(len) = byte::Array::match_prefix(&mut self.key, meta.key()) {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                     if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
                         self.step(save, len, node, next);
@@ -99,10 +99,10 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let save = self.key.clone();
-            let r#match = key::Array::match_split(&mut self.key, old_meta.key());
+            let r#match = byte::Array::match_split(&mut self.key, old_meta.key());
 
             let (op, new) = match r#match {
-                key::Match::Full(len) => {
+                byte::Match::Full(len) => {
                     let kind = old_meta.kind();
 
                     if kind >= node::Kind::NODE_3 {
@@ -123,20 +123,20 @@ impl<'a, K: key::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
                     } else if kind == node::Kind::NONE
-                        && save.len() > key::Array::MAX_LEN.value() as usize
+                        && save.len() > byte::Array::MAX_LEN.value() as usize
                     {
                         (
                             Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(key::Array::from_slice(save.clone()), None),
+                            Edge::new_node::<Node3, _>(byte::Array::from_slice(save.clone()), None),
                         )
                     } else {
                         (
                             Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(key::Array::from_slice(save.clone()), value),
+                            Edge::new_leaf(byte::Array::from_slice(save.clone()), value),
                         )
                     }
                 }
-                key::Match::Partial { start, middle, end } => (
+                byte::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,

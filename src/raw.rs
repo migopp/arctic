@@ -4,11 +4,11 @@ use ribbit::atomic::Atomic128;
 use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
+use crate::byte;
 use crate::cursor;
 use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
-use crate::key;
 use crate::node;
 use crate::smr;
 use crate::stat;
@@ -37,7 +37,7 @@ pub(crate) struct Ref<'a> {
 
 impl Ref<'_> {
     #[inline]
-    pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
@@ -45,7 +45,7 @@ impl Ref<'_> {
     }
 
     #[inline]
-    fn insert_optimistic<K: key::Iterator>(
+    fn insert_optimistic<K: byte::Iterator>(
         &mut self,
         key: K,
         value: u64,
@@ -54,19 +54,19 @@ impl Ref<'_> {
     }
 
     #[cold]
-    fn insert_pessimistic<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    fn insert_pessimistic<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
             .unwrap()
     }
 
     #[inline]
-    fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
+    fn insert_impl<'a, K: byte::Iterator, P: cursor::History<'a, K>>(
         &'a mut self,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
-        let mut guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
+        let mut guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.root);
 
@@ -109,7 +109,7 @@ impl Ref<'_> {
     }
 
     #[cold]
-    unsafe fn retire<'a, K: key::Iterator, P: cursor::History<'a, K>>(
+    unsafe fn retire<'a, K: byte::Iterator, P: cursor::History<'a, K>>(
         guard: &mut smr::WriteGuard,
         key: &K,
         cursor: &Cursor<'a, K, P>,
@@ -122,7 +122,7 @@ impl Ref<'_> {
         }
 
         let index = cursor.index();
-        let prefix = key.peek(key::Array::min_len(index, key::Array::MAX_LEN));
+        let prefix = key.peek(byte::Array::min_len(index, byte::Array::MAX_LEN));
 
         unsafe {
             guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
@@ -143,15 +143,15 @@ impl Ref<'_> {
     }
 
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_read(key.peek(key::Array::MAX_LEN));
+    pub(crate) fn get<K: byte::Iterator>(&self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect_read(key.peek(byte::Array::MAX_LEN));
 
         let mut root = self.root;
         let mut key = key;
         loop {
             let edge = root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let _ = key::Array::match_prefix(&mut key, meta.key())?;
+            let _ = byte::Array::match_prefix(&mut key, meta.key())?;
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
@@ -169,8 +169,8 @@ impl Ref<'_> {
     }
 
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
+    pub(crate) fn remove<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;
@@ -205,8 +205,8 @@ impl Ref<'_> {
     }
 
     #[inline]
-    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek(key::Array::MAX_LEN));
+    pub(crate) fn update<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+        let _guard = self.smr.protect_write(key.peek(byte::Array::MAX_LEN));
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
         let mut old = cursor.traverse_exact()?;

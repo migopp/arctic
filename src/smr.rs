@@ -4,7 +4,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
 
-use crate::key;
+use crate::byte;
 use crate::membarrier;
 use crate::node;
 use crate::stat;
@@ -17,7 +17,7 @@ const RETIRED_COUNT: usize = 16;
 struct Cache<T>(T);
 
 pub(crate) struct Global {
-    hazards: ThreadLocal<Cache<Atomic64<key::Array>>>,
+    hazards: ThreadLocal<Cache<Atomic64<byte::Array>>>,
     edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge>>>>>,
 }
 
@@ -51,8 +51,8 @@ impl Drop for Global {
 }
 
 pub(crate) struct Local<'g> {
-    hazards: &'g ThreadLocal<Cache<Atomic64<key::Array>>>,
-    hazard: &'g Atomic64<key::Array>,
+    hazards: &'g ThreadLocal<Cache<Atomic64<byte::Array>>>,
+    hazard: &'g Atomic64<byte::Array>,
     edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge>>>,
 }
 
@@ -60,7 +60,7 @@ impl<'g> Local<'g> {
     #[inline]
     pub(crate) fn protect_read<'l>(
         &'l self,
-        prefix: ribbit::Packed<key::Array>,
+        prefix: ribbit::Packed<byte::Array>,
     ) -> ReadGuard<'g, 'l> {
         self.protect(prefix);
         ReadGuard(self)
@@ -69,14 +69,14 @@ impl<'g> Local<'g> {
     #[inline]
     pub(crate) fn protect_write<'l>(
         &'l mut self,
-        prefix: ribbit::Packed<key::Array>,
+        prefix: ribbit::Packed<byte::Array>,
     ) -> WriteGuard<'g, 'l> {
         self.protect(prefix);
         WriteGuard(self)
     }
 
     #[inline]
-    fn protect(&self, prefix: ribbit::Packed<key::Array>) {
+    fn protect(&self, prefix: ribbit::Packed<byte::Array>) {
         self.hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast();
     }
@@ -89,7 +89,7 @@ impl Drop for ReadGuard<'_, '_> {
     fn drop(&mut self) {
         self.0
             .hazard
-            .store_packed(key::Array::EMPTY, Ordering::Relaxed);
+            .store_packed(byte::Array::EMPTY, Ordering::Relaxed);
     }
 }
 
@@ -100,7 +100,7 @@ impl Drop for WriteGuard<'_, '_> {
     fn drop(&mut self) {
         self.0
             .hazard
-            .store_packed(key::Array::EMPTY, Ordering::Relaxed);
+            .store_packed(byte::Array::EMPTY, Ordering::Relaxed);
     }
 }
 
@@ -129,13 +129,13 @@ impl WriteGuard<'_, '_> {
             .hazards
             .iter()
             .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-            .filter(|hazard| *hazard != key::Array::EMPTY)
+            .filter(|hazard| *hazard != byte::Array::EMPTY)
             .collect::<Vec<_>>();
 
         self.0.edges.retain(|edge| {
             if hazards
                 .iter()
-                .any(|hazard| key::Array::has_prefix(*hazard, edge.meta().key()))
+                .any(|hazard| byte::Array::has_prefix(*hazard, edge.meta().key()))
             {
                 return true;
             }

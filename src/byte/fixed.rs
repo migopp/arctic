@@ -1,6 +1,6 @@
 use ribbit::u3;
 
-use crate::key;
+use crate::byte;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Fixed {
@@ -17,20 +17,20 @@ impl Fixed {
     }
 }
 
-impl key::Iterator for Fixed {
+impl byte::Iterator for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
     }
 
     #[inline]
-    fn peek(&self, len: u3) -> ribbit::Packed<key::Array> {
-        key::Array::from_u64_truncate(self.buffer, key::Array::min_len(self.len as usize, len))
+    fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
+        byte::Array::from_u64_truncate(self.buffer, byte::Array::min_len(self.len as usize, len))
     }
 
     #[inline]
-    fn take(&mut self, len: u3) -> ribbit::Packed<key::Array> {
-        let array = key::Array::from_u64_truncate(self.buffer, len);
+    fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
+        let array = byte::Array::from_u64_truncate(self.buffer, len);
         self.buffer >>= (len.value() as u64) << 3;
         self.len -= len.value();
         array

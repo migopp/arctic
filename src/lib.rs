@@ -14,9 +14,9 @@ macro_rules! validate_eq {
     };
 }
 
+mod byte;
 mod cursor;
 mod edge;
-mod key;
 mod membarrier;
 mod node;
 mod raw;
@@ -115,65 +115,65 @@ impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
 
 pub trait Key {
     #[allow(private_bounds)]
-    type Iter<'a>: key::Iterator
+    type Iter<'a>: byte::Iterator
     where
         Self: 'a;
     fn iter<'a>(&'a self) -> Self::Iter<'a>;
 }
 
 impl Key for u8 {
-    type Iter<'a> = key::Fixed;
+    type Iter<'a> = byte::Fixed;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Fixed::from(*self)
+        byte::Fixed::from(*self)
     }
 }
 
 impl Key for u64 {
-    type Iter<'a> = key::Fixed;
+    type Iter<'a> = byte::Fixed;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Fixed::from(*self)
+        byte::Fixed::from(*self)
     }
 }
 
 impl<const N: usize> Key for [u8; N] {
-    type Iter<'a> = key::Dynamic<'a>;
+    type Iter<'a> = byte::Dynamic<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Dynamic::from(self.as_slice())
+        byte::Dynamic::from(self.as_slice())
     }
 }
 
 impl Key for [u8] {
-    type Iter<'a> = key::Dynamic<'a>;
+    type Iter<'a> = byte::Dynamic<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Dynamic::from(self)
+        byte::Dynamic::from(self)
     }
 }
 
 impl Key for Vec<u8> {
-    type Iter<'a> = key::Dynamic<'a>;
+    type Iter<'a> = byte::Dynamic<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Dynamic::from(self.as_slice())
+        byte::Dynamic::from(self.as_slice())
     }
 }
 
 impl Key for str {
-    type Iter<'a> = key::Dynamic<'a>;
+    type Iter<'a> = byte::Dynamic<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Dynamic::from(self.as_bytes())
+        byte::Dynamic::from(self.as_bytes())
     }
 }
 
 impl Key for String {
-    type Iter<'a> = key::Dynamic<'a>;
+    type Iter<'a> = byte::Dynamic<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        key::Dynamic::from(self.as_bytes())
+        byte::Dynamic::from(self.as_bytes())
     }
 }
 

@@ -2,7 +2,7 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::key;
+use crate::byte;
 use crate::node;
 use crate::node::Node15;
 use crate::node::Node256;
@@ -82,12 +82,12 @@ impl Edge {
         stat::increment(counter);
     }
 
-    pub(crate) fn new_leaf(key: ribbit::Packed<key::Array>, leaf: u64) -> ribbit::Packed<Self> {
+    pub(crate) fn new_leaf(key: ribbit::Packed<byte::Array>, leaf: u64) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), leaf)
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: ribbit::Packed<key::Array>, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: ribbit::Packed<byte::Array>, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
@@ -109,7 +109,7 @@ impl Edge {
 #[ribbit::pack(size = 63, debug, eq)]
 pub(crate) struct Meta {
     #[ribbit(size = 59)]
-    pub(crate) key: key::Array,
+    pub(crate) key: byte::Array,
     pub(crate) frozen: bool,
     #[ribbit(size = 3)]
     pub(crate) kind: node::Kind,
@@ -117,7 +117,7 @@ pub(crate) struct Meta {
 
 impl Meta {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(
-        key::Array::EMPTY,
+        byte::Array::EMPTY,
         false,
         ribbit::Packed::<node::Kind>::new_none(),
     );

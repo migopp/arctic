@@ -4,8 +4,8 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 use ribbit::Unpack as _;
 
+use crate::byte;
 use crate::edge;
-use crate::key;
 use crate::node;
 use crate::node::Edge;
 use crate::node::Op;
@@ -99,7 +99,7 @@ where
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
-                if let Some(compress) = key::Array::compress(parent.key(), *key, edge.meta().key())
+                if let Some(compress) = byte::Array::compress(parent.key(), *key, edge.meta().key())
                 {
                     return (Op::Compress, edge.with_meta(edge.meta().with_key(compress)));
                 }

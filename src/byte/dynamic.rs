@@ -1,12 +1,12 @@
 use ribbit::u3;
 
-use crate::key;
+use crate::byte;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Dynamic<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(key::Fixed),
+    Small(byte::Fixed),
 }
 
 impl<'a> From<&'a [u8]> for Dynamic<'a> {
@@ -17,7 +17,7 @@ impl<'a> From<&'a [u8]> for Dynamic<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(key::Fixed::new(u64::from_ne_bytes(buffer), len as u8))
+                Self::Small(byte::Fixed::new(u64::from_ne_bytes(buffer), len as u8))
             }
         }
     }
@@ -26,11 +26,11 @@ impl<'a> From<&'a [u8]> for Dynamic<'a> {
 impl Default for Dynamic<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(key::Fixed::default())
+        Self::Small(byte::Fixed::default())
     }
 }
 
-impl key::Iterator for Dynamic<'_> {
+impl byte::Iterator for Dynamic<'_> {
     #[inline]
     fn len(&self) -> usize {
         match self {
@@ -40,24 +40,24 @@ impl key::Iterator for Dynamic<'_> {
     }
 
     #[inline]
-    fn peek(&self, len: u3) -> ribbit::Packed<key::Array> {
+    fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                key::Array::from_u64_truncate(buffer, len)
+                byte::Array::from_u64_truncate(buffer, len)
             }
             Dynamic::Small(small) => small.peek(len),
         }
     }
 
     #[inline]
-    fn take(&mut self, len: u3) -> ribbit::Packed<key::Array> {
+    fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
         match self {
             Dynamic::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                let array = key::Array::from_u64_truncate(buffer, len);
+                let array = byte::Array::from_u64_truncate(buffer, len);
                 let after = large.len() - len.value() as usize;
 
                 if after > 8 {
@@ -72,7 +72,7 @@ impl key::Iterator for Dynamic<'_> {
                 };
                 let buffer = buffer >> ((8 - after) << 3);
 
-                *self = Self::Small(key::Fixed::new(buffer, after as u8));
+                *self = Self::Small(byte::Fixed::new(buffer, after as u8));
                 array
             }
             Dynamic::Small(small) => small.take(len),
@@ -90,7 +90,7 @@ impl key::Iterator for Dynamic<'_> {
                 *self = if large.len() - 1 > 8 {
                     Self::Large(&large[1..])
                 } else {
-                    Self::Small(key::Fixed::new(
+                    Self::Small(byte::Fixed::new(
                         unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() },
                         8,
                     ))
@@ -107,9 +107,9 @@ impl key::Iterator for Dynamic<'_> {
 mod tests {
     use ribbit::u3;
 
-    use crate::key::Array;
-    use crate::key::Dynamic;
-    use crate::key::Iterator as _;
+    use crate::byte::Array;
+    use crate::byte::Dynamic;
+    use crate::byte::Iterator as _;
 
     #[test]
     fn dynamic_smoke() {
