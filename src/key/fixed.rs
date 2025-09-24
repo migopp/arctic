@@ -12,7 +12,7 @@ impl Fixed {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
         validate!(len <= 8);
-        validate_eq!(buffer >> (len << 3), 0);
+        validate_eq!(buffer.unbounded_shr((len as u32) << 3), 0);
         Self { buffer, len }
     }
 }
