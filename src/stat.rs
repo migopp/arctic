@@ -158,6 +158,10 @@ pub(crate) enum Counter {
     FreeDrop,
 }
 
+pub(crate) enum Max {
+    RetireCache,
+}
+
 impl From<cursor::Op> for Counter {
     fn from(op: cursor::Op) -> Self {
         Self::Op(op)
@@ -171,6 +175,7 @@ pub struct Thread {
     edge: Edge,
     insert_pessimistic: Cell<u64>,
     retire: Cell<u64>,
+    retire_cache: Cell<u64>,
     free_conflict: Cell<u64>,
     free_retire: Cell<u64>,
     free_drop: Cell<u64>,
@@ -213,6 +218,7 @@ impl Thread {
             },
             insert_pessimistic: Cell::new(0),
             retire: Cell::new(0),
+            retire_cache: Cell::new(0),
             free_conflict: Cell::new(0),
             free_retire: Cell::new(0),
             free_drop: Cell::new(0),
@@ -264,6 +270,18 @@ pub(crate) fn increment<C: Into<Counter>>(counter: C) {
                 Counter::FreeDrop => &thread.free_drop,
             }
             .update(|count| count + 1)
+        })
+    }
+}
+
+#[inline]
+pub(crate) fn max(max: Max, value: u64) {
+    if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
+        THREAD.with(|thread| {
+            match max {
+                Max::RetireCache => &thread.retire_cache,
+            }
+            .update(|count| count.max(value))
         })
     }
 }
