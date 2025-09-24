@@ -139,7 +139,7 @@ impl Ref<'_> {
             | cursor::Op::Edge(edge::Op::Create | edge::Op::Expand) => (),
         }
 
-        unsafe { Edge::deallocate(edge) }
+        unsafe { Edge::deallocate(edge, stat::Counter::FreeConflict) }
     }
 
     #[inline]

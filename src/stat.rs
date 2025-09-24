@@ -152,8 +152,10 @@ impl From<Histogram> for Distribution {
 pub(crate) enum Counter {
     Op(cursor::Op),
     InsertPessimistic,
-    Deallocate,
     Retire,
+    FreeConflict,
+    FreeRetire,
+    FreeDrop,
 }
 
 impl From<cursor::Op> for Counter {
@@ -168,8 +170,10 @@ pub struct Thread {
     node: Node,
     edge: Edge,
     insert_pessimistic: Cell<u64>,
-    deallocate: Cell<u64>,
     retire: Cell<u64>,
+    free_conflict: Cell<u64>,
+    free_retire: Cell<u64>,
+    free_drop: Cell<u64>,
 }
 
 #[derive(Clone)]
@@ -208,8 +212,10 @@ impl Thread {
                 remove: Cell::new(0),
             },
             insert_pessimistic: Cell::new(0),
-            deallocate: Cell::new(0),
             retire: Cell::new(0),
+            free_conflict: Cell::new(0),
+            free_retire: Cell::new(0),
+            free_drop: Cell::new(0),
         }
     }
 
@@ -248,15 +254,16 @@ impl Thread {
 #[inline]
 pub(crate) fn increment<C: Into<Counter>>(counter: C) {
     if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
-        match counter.into() {
-            Counter::Op(op) => THREAD.with(|thread| thread.op(op).update(|count| count + 1)),
-            Counter::InsertPessimistic => {
-                THREAD.with(|thread| thread.insert_pessimistic.update(|count| count + 1))
+        THREAD.with(|thread| {
+            match counter.into() {
+                Counter::Op(op) => thread.op(op),
+                Counter::InsertPessimistic => &thread.insert_pessimistic,
+                Counter::Retire => &thread.retire,
+                Counter::FreeConflict => &thread.free_conflict,
+                Counter::FreeRetire => &thread.free_retire,
+                Counter::FreeDrop => &thread.free_drop,
             }
-            Counter::Deallocate => {
-                THREAD.with(|thread| thread.deallocate.update(|count| count + 1))
-            }
-            Counter::Retire => THREAD.with(|thread| thread.retire.update(|count| count + 1)),
-        }
+            .update(|count| count + 1)
+        })
     }
 }

@@ -63,7 +63,8 @@ impl Edge {
         }
     }
 
-    pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
+    #[inline]
+    pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>, counter: stat::Counter) {
         let kind = edge.meta().kind();
         if kind < node::Kind::NODE_3 {
             return;
@@ -78,7 +79,7 @@ impl Edge {
             drop(Box::from_raw(edge.data() as *mut Node256))
         }
 
-        stat::increment(stat::Counter::Deallocate);
+        stat::increment(counter);
     }
 
     pub(crate) fn new_leaf(key: ribbit::Packed<key::Array>, leaf: u64) -> ribbit::Packed<Self> {
