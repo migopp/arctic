@@ -126,7 +126,7 @@ impl Array {
     }
 
     #[inline]
-    fn min_len(left: usize, right: u3) -> u3 {
+    pub(crate) fn min_len(left: usize, right: u3) -> u3 {
         // SAFETY: `left.min(right)` can be at most `right`, which is a valid u3
         unsafe { u3::new_unchecked(left.min(right.value() as usize) as u8) }
     }

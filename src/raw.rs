@@ -1,7 +1,6 @@
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::u3;
 use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
@@ -84,17 +83,12 @@ impl Raw {
                         return Ok(Some(old.data()));
                     }
                 }
-                Ok(_) if matches!(op, cursor::Op::Edge(_)) => (),
-                Ok(_) => unsafe {
-                    let index = cursor.index();
-                    let prefix = key.prefix(u3::new_unchecked(
-                        index.min(key::Array::MAX_LEN.value() as usize) as u8,
-                    ));
-                    guard.retire(prefix, old);
-                },
+                Ok(_) => {
+                    unsafe { Self::retire(&guard, &key, &cursor, op, old) };
+                }
                 Err(edge) => {
                     // Does not go through EBR because `new` is still thread-local
-                    unsafe { Edge::deallocate(op, new) };
+                    unsafe { Self::deallocate(op, new) };
 
                     if edge.meta().frozen() {
                         cursor.pop()?;
@@ -102,6 +96,40 @@ impl Raw {
                 }
             }
         }
+    }
+
+    #[cold]
+    unsafe fn retire<'a, K: key::Iterator, P: cursor::History<'a, K>>(
+        guard: &smr::Guard,
+        key: &K,
+        cursor: &Cursor<'a, K, P>,
+        op: cursor::Op,
+        edge: ribbit::Packed<Edge>,
+    ) {
+        match op {
+            cursor::Op::Edge(_) => return,
+            cursor::Op::Node(_) => (),
+        }
+
+        let index = cursor.index();
+        let prefix = key.prefix(key::Array::min_len(index, key::Array::MAX_LEN));
+
+        unsafe {
+            guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
+        }
+    }
+
+    #[cold]
+    unsafe fn deallocate(op: cursor::Op, edge: ribbit::Packed<Edge>) {
+        match op {
+            cursor::Op::Node(node::Op::Destroy | node::Op::Compress)
+            | cursor::Op::Edge(edge::Op::Insert | edge::Op::Remove) => return,
+
+            cursor::Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
+            | cursor::Op::Edge(edge::Op::Create | edge::Op::Expand) => (),
+        }
+
+        unsafe { Edge::deallocate(edge) }
     }
 
     #[inline]

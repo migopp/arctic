@@ -2,7 +2,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::cursor;
 use crate::key;
 use crate::node;
 use crate::node::Node15;
@@ -64,19 +63,10 @@ impl Edge {
         }
     }
 
-    #[cold]
-    pub(crate) unsafe fn deallocate(op: cursor::Op, edge: ribbit::Packed<Edge>) {
+    pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>) {
         let kind = edge.meta().kind();
         if kind < node::Kind::NODE_3 {
             return;
-        }
-
-        match op {
-            cursor::Op::Node(node::Op::Destroy | node::Op::Compress)
-            | cursor::Op::Edge(Op::Insert | Op::Remove) => return,
-
-            cursor::Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-            | cursor::Op::Edge(Op::Create | Op::Expand) => (),
         }
 
         if kind == node::Kind::NODE_3 {

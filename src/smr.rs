@@ -7,9 +7,6 @@ use thread_local::ThreadLocal;
 use crate::key;
 use crate::membarrier;
 use crate::node;
-use crate::node::Node15;
-use crate::node::Node256;
-use crate::node::Node3;
 use crate::stat;
 use crate::Edge;
 
@@ -21,7 +18,7 @@ struct Cache<T>(T);
 
 pub(crate) struct State {
     hazards: ThreadLocal<Cache<Atomic64<key::Array>>>,
-    retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<key::Array>, u64)>>>>,
+    retired: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge>>>>>,
 }
 
 impl State {
@@ -49,21 +46,11 @@ impl Default for State {
 
 impl Drop for State {
     fn drop(&mut self) {
-        for (_, data) in self
-            .retired
+        self.retired
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-        {
-            let tag = *data & 0b11u64;
-            let data = *data & !0b11u64;
-            match tag {
-                0 => drop(unsafe { Box::from_raw(data as *mut Node3) }),
-                1 => drop(unsafe { Box::from_raw(data as *mut Node15) }),
-                2 => drop(unsafe { Box::from_raw(data as *mut Node256) }),
-                _ => unreachable!(),
-            }
-        }
+            .for_each(|edge| unsafe { Edge::deallocate(*edge) })
     }
 }
 
@@ -81,28 +68,15 @@ impl Drop for Guard<'_> {
 }
 
 impl Guard<'_> {
-    pub(crate) unsafe fn retire(
-        &self,
-        prefix: ribbit::Packed<key::Array>,
-        edge: ribbit::Packed<Edge>,
-    ) {
-        let kind = edge.meta().kind();
-        let tag = if kind < node::Kind::NODE_3 {
+    pub(crate) unsafe fn retire(&self, edge: ribbit::Packed<Edge>) {
+        if edge.meta().kind() < node::Kind::NODE_3 {
             return;
-        } else if kind == node::Kind::NODE_3 {
-            0
-        } else if kind == node::Kind::NODE_15 {
-            1
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            2
-        };
+        }
 
         stat::increment(stat::Counter::Retire);
-        let data = edge.data() | tag;
 
         let mut retired = self.state.retired.get_or_default().0.borrow_mut();
-        retired.push((prefix, data));
+        retired.push(edge);
         if retired.len() >= RETIRED_COUNT {
             drop(retired);
             self.flush();
@@ -118,6 +92,7 @@ impl Guard<'_> {
             .hazards
             .iter()
             .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+            .filter(|hazard| *hazard != key::Array::EMPTY)
             .collect::<Vec<_>>();
 
         self.state
@@ -125,23 +100,15 @@ impl Guard<'_> {
             .get_or_default()
             .0
             .borrow_mut()
-            .retain(|(key, data)| {
+            .retain(|edge| {
                 if hazards
                     .iter()
-                    .any(|hazard| key::Array::has_prefix(*hazard, *key))
+                    .any(|hazard| key::Array::has_prefix(*hazard, edge.meta().key()))
                 {
                     return true;
                 }
 
-                let tag = data & 0b11u64;
-                let data = data & !0b11u64;
-                match tag {
-                    0 => drop(unsafe { Box::from_raw(data as *mut Node3) }),
-                    1 => drop(unsafe { Box::from_raw(data as *mut Node15) }),
-                    2 => drop(unsafe { Box::from_raw(data as *mut Node256) }),
-                    _ => unreachable!(),
-                }
-
+                unsafe { Edge::deallocate(*edge) };
                 false
             })
     }
