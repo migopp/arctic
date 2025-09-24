@@ -79,7 +79,7 @@ impl Array {
             .trailing_zeros()
             .shr(3u32) as u8;
 
-        let prefix_bit = prefix_byte << 3;
+        let prefix_bit = (prefix_byte as u32) << 3;
 
         Match::Partial {
             start: unsafe {
