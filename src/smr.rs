@@ -14,19 +14,26 @@ use crate::Edge;
 
 const RETIRED_COUNT: usize = 16;
 
+#[repr(C, align(64))]
+#[derive(Default)]
+struct Cache<T>(T);
+
 pub(crate) struct State {
-    hazards: ThreadLocal<Atomic64<key::Array>>,
-    retired: ThreadLocal<RefCell<Vec<(ribbit::Packed<key::Array>, u64)>>>,
+    hazards: ThreadLocal<Cache<Atomic64<key::Array>>>,
+    retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<key::Array>, u64)>>>>,
 }
 
 impl State {
+    #[inline]
     pub(crate) fn protect<K: key::Iterator>(&self, key: &K) -> Guard {
         let prefix = key.prefix(key::Array::MAX_LEN);
-        self.hazards
-            .get_or_default()
-            .store_packed(prefix, Ordering::Relaxed);
+        let hazard = &self.hazards.get_or_default().0;
+        hazard.store_packed(prefix, Ordering::Relaxed);
         BARRIER.fast();
-        Guard { state: self }
+        Guard {
+            state: self,
+            hazard,
+        }
     }
 }
 
@@ -41,7 +48,12 @@ impl Default for State {
 
 impl Drop for State {
     fn drop(&mut self) {
-        for (_, data) in self.retired.iter_mut().flat_map(RefCell::get_mut) {
+        for (_, data) in self
+            .retired
+            .iter_mut()
+            .map(|Cache(retired)| retired)
+            .flat_map(RefCell::get_mut)
+        {
             let tag = *data & 0b11u64;
             let data = *data & !0b11u64;
             match tag {
@@ -56,13 +68,13 @@ impl Drop for State {
 
 pub(crate) struct Guard<'a> {
     state: &'a State,
+    hazard: &'a Atomic64<key::Array>,
 }
 
 impl Drop for Guard<'_> {
+    #[inline]
     fn drop(&mut self) {
-        self.state
-            .hazards
-            .get_or_default()
+        self.hazard
             .store_packed(key::Array::EMPTY, Ordering::Relaxed);
     }
 }
@@ -88,7 +100,7 @@ impl Guard<'_> {
         stat::increment(stat::Counter::Retire);
         let data = edge.data() | tag;
 
-        let mut retired = self.state.retired.get_or_default().borrow_mut();
+        let mut retired = self.state.retired.get_or_default().0.borrow_mut();
         retired.push((prefix, data));
         if retired.len() >= RETIRED_COUNT {
             drop(retired);
@@ -104,12 +116,13 @@ impl Guard<'_> {
             .state
             .hazards
             .iter()
-            .map(|hazard| hazard.load_packed(Ordering::Relaxed))
+            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
             .collect::<Vec<_>>();
 
         self.state
             .retired
             .get_or_default()
+            .0
             .borrow_mut()
             .retain(|(key, data)| {
                 if hazards
