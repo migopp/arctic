@@ -14,6 +14,7 @@ mod fixed;
 pub(crate) use dynamic::Dynamic;
 pub(crate) use fixed::Fixed;
 
+/// Immutable fixed-size array of up to 7 bytes.
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 #[ribbit::pack(size = 59, debug, eq)]
 pub(crate) struct Array {

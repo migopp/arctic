@@ -115,13 +115,15 @@ impl WriteGuard<'_, '_> {
         self.0.edges.push(edge);
 
         if self.0.edges.len() >= RETIRED_COUNT {
-            stat::max(stat::Max::RetireCache, self.0.edges.len() as u64);
             self.flush();
         }
     }
 
     #[cold]
     fn flush(&mut self) {
+        stat::max(stat::Max::RetireCache, self.0.edges.len() as u64);
+        stat::increment(stat::Counter::Flush);
+
         membarrier::slow();
 
         let hazards = self
