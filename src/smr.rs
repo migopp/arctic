@@ -5,6 +5,7 @@ use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
 
 use crate::key;
+use crate::membarrier;
 use crate::node;
 use crate::node::Node15;
 use crate::node::Node256;
@@ -29,7 +30,7 @@ impl State {
         let prefix = key.prefix(key::Array::MAX_LEN);
         let hazard = &self.hazards.get_or_default().0;
         hazard.store_packed(prefix, Ordering::Relaxed);
-        BARRIER.fast();
+        membarrier::fast();
         Guard {
             state: self,
             hazard,
@@ -110,7 +111,7 @@ impl Guard<'_> {
 
     #[cold]
     fn flush(&self) {
-        BARRIER.slow();
+        membarrier::slow();
 
         let hazards = self
             .state
@@ -143,59 +144,5 @@ impl Guard<'_> {
 
                 false
             })
-    }
-}
-
-#[cfg(feature = "opt-membarrier")]
-static BARRIER: std::sync::LazyLock<Barrier> = std::sync::LazyLock::new(|| Barrier::new().unwrap());
-
-#[cfg(not(feature = "opt-membarrier"))]
-static BARRIER: Barrier = Barrier;
-
-/// https://pvk.ca/Blog/2020/07/07/flatter-wait-free-hazard-pointers/
-struct Barrier;
-
-impl Barrier {
-    #[cfg(feature = "opt-membarrier")]
-    fn new() -> std::io::Result<Self> {
-        unsafe {
-            match libc::syscall(
-                libc::SYS_membarrier,
-                libc::MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED,
-                0,
-                0,
-            ) {
-                0 => Ok(Self),
-                _ => Err(std::io::Error::last_os_error()),
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn fast(&self) {
-        if cfg!(feature = "opt-membarrier") {
-            core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        } else {
-            core::sync::atomic::fence(Ordering::SeqCst);
-        }
-    }
-
-    #[inline]
-    fn slow(&self) {
-        #[cfg(feature = "opt-membarrier")]
-        unsafe {
-            match libc::syscall(
-                libc::SYS_membarrier,
-                libc::MEMBARRIER_CMD_PRIVATE_EXPEDITED,
-                0,
-                0,
-            ) {
-                0 => (),
-                _ => panic!("membarrier: {:?}", std::io::Error::last_os_error()),
-            }
-        }
-
-        #[cfg(not(feature = "opt-membarrier"))]
-        core::sync::atomic::fence(Ordering::SeqCst);
     }
 }

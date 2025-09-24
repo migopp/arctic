@@ -17,6 +17,7 @@ macro_rules! validate_eq {
 mod cursor;
 mod edge;
 mod key;
+mod membarrier;
 mod node;
 mod raw;
 mod smr;
