@@ -50,35 +50,15 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
     #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
-            raw: &self.raw,
+            raw: self.raw.pin(),
             _key: PhantomData,
             _value: PhantomData,
         }
     }
-
-    #[inline]
-    pub fn get(&self, key: &K) -> Option<V> {
-        self.pin().get(key)
-    }
-
-    #[inline]
-    pub fn insert(&self, key: &K, value: V) -> Option<V> {
-        self.pin().insert(key, value)
-    }
-
-    #[inline]
-    pub fn remove(&self, key: &K) -> Option<V> {
-        self.pin().remove(key)
-    }
-
-    #[inline]
-    pub fn update(&self, key: &K, value: V) -> Option<V> {
-        self.pin().update(key, value)
-    }
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
-    raw: &'a Raw,
+    raw: raw::Ref<'a>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -88,17 +68,17 @@ impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
         self.raw.get(key.iter()).map(V::from_u64)
     }
 
-    pub fn insert(&self, key: &K, value: V) -> Option<V> {
+    pub fn insert(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
             .insert(key.iter(), value.into_u64())
             .map(V::from_u64)
     }
 
-    pub fn remove(&self, key: &K) -> Option<V> {
+    pub fn remove(&mut self, key: &K) -> Option<V> {
         self.raw.remove(key.iter()).map(V::from_u64)
     }
 
-    pub fn update(&self, key: &K, value: V) -> Option<V> {
+    pub fn update(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
             .update(key.iter(), value.into_u64())
             .map(V::from_u64)
@@ -273,6 +253,7 @@ mod tests {
     #[test]
     fn smoke() {
         let map = Map::<[u8], _>::default();
+        let mut map = map.pin();
         map.insert(b"abcd", 1);
         assert_eq!(map.get(b"abcd"), Some(1));
     }
@@ -281,6 +262,7 @@ mod tests {
     fn smoke_u64_key() {
         let map = Map::default();
         let key = 0xdeadbeefu64.to_be_bytes();
+        let mut map = map.pin();
         map.insert(&key, 1);
         assert_eq!(map.get(&key), Some(1));
     }
@@ -334,6 +316,7 @@ mod tests {
     #[test]
     fn node3_overwrite() {
         let map = Map::default();
+        let mut map = map.pin();
 
         for value in [1, 2, 3] {
             map.insert(&1u8, value);
@@ -400,14 +383,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         let map = Map::default();
+        let mut pin = map.pin();
 
         for (key, value) in &keys {
-            map.insert(key, *value);
-            assert_eq!(map.get(key), Some(*value));
+            pin.insert(key, *value);
+            assert_eq!(pin.get(key), Some(*value));
         }
 
         for (key, value) in &keys {
-            assert_eq!(map.get(key), Some(*value));
+            assert_eq!(pin.get(key), Some(*value));
         }
 
         // assert_eq!(map.iter().count(), keys.clone().count());
@@ -423,6 +407,7 @@ mod tests {
         //         assert_eq!(lv, rv);
         //     });
 
+        drop(pin);
         map
     }
 }

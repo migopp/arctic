@@ -220,7 +220,7 @@ impl Iterator for Fixed {
 
     #[inline]
     fn prefix(&self, len: u3) -> ribbit::Packed<Array> {
-        Array::from_u64_truncate(self.buffer, len)
+        Array::from_u64_truncate(self.buffer, Array::min_len(self.len as usize, len))
     }
 
     #[inline]

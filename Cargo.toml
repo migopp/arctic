@@ -19,9 +19,4 @@ serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
 [dev-dependencies]
-bustle = "0.5"
 rand = "0.9"
-
-[[bench]]
-name = "sequential"
-harness = false
