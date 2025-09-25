@@ -32,6 +32,10 @@ impl Array {
     const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
     pub(crate) const MAX_LEN: u3 = u3::new(7);
 
+    pub(crate) fn len(&self) -> usize {
+        self.len.value() as usize
+    }
+
     #[inline]
     fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
         let bit = (len.value() as u64) << 3;

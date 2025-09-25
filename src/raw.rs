@@ -1,3 +1,5 @@
+mod iter;
+
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -349,95 +351,6 @@ impl Ref<'_> {
     // }
 }
 
-// struct EntryIter<'a> {
-//     // Workaround for lending iterator
-//     // https://users.rust-lang.org/t/how-to-write-an-iterator-that-returns-references-to-itself/72386/5
-//     key: Rc<Vec<u8>>,
-//
-//     // TODO: allow starting traversal at a given prefix?
-//     frontier: Vec<(usize, Or<EdgeIter<'a>, NodeIter<'a>>)>,
-// }
-//
-// type EdgeIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
-// type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
-//
-// impl<'a> EntryIter<'a> {
-//     fn new(root: &'a mut Atomic128<Edge>) -> Self {
-//         Self {
-//             key: Rc::new(Vec::new()),
-//             frontier: vec![(
-//                 0,
-//                 Or::L(iter::zip(iter::once(false), core::slice::from_ref(root).iter()).peekable()),
-//             )],
-//         }
-//     }
-// }
-//
-// impl<'a> Iterator for EntryIter<'a> {
-//     type Item = (usize, Rc<Vec<u8>>, ribbit::Packed<Edge>);
-//
-//     fn next(&mut self) -> Option<Self::Item> {
-//         'vertical: loop {
-//             // NOTE: we use `saturating_sub` to avoid underflow.
-//             //
-//             // If `self.frontier.len()` == 0, we will immediately return at `last_mut()`.
-//             // We can't move the len call after because `self.frontier` is mutably borrowed.
-//             let depth = self.frontier.len().saturating_sub(1);
-//             let (len, iter) = self.frontier.last_mut()?;
-//
-//             'horizontal: loop {
-//                 let Some((descend, byte, edge)) = (match iter {
-//                     Or::L(iter_root) => iter_root
-//                         .peek_mut()
-//                         .map(|(descend, edge)| (descend, None, edge)),
-//                     Or::R(iter_node) => iter_node
-//                         .peek_mut()
-//                         .map(|(descend, (key, edge))| (descend, Some(*key), edge)),
-//                 }) else {
-//                     Rc::make_mut(&mut self.key).truncate(*len);
-//                     self.frontier.pop();
-//                     continue 'vertical;
-//                 };
-//
-//                 let edge = edge.load_packed(Ordering::Relaxed);
-//                 let meta = edge.meta();
-//                 let kind = meta.kind();
-//
-//                 // Skip empty edges
-//                 if kind == node::Kind::NONE {
-//                     iter.skip();
-//                     continue 'horizontal;
-//                 }
-//
-//                 // Update key for current edge
-//                 let key = Rc::make_mut(&mut self.key);
-//
-//                 let edge_key = meta.key().unpack();
-//
-//                 // Produce edge before traversing for preorder traversal
-//                 if !mem::replace(descend, true) {
-//                     key.extend(byte.into_iter().chain(edge_key.bytes()));
-//                     return Some((depth, Rc::clone(&self.key), edge));
-//                 }
-//
-//                 iter.skip();
-//                 let len = key.len() - edge_key.len.value() as usize - byte.is_some() as usize;
-//
-//                 if kind == node::Kind::LEAF {
-//                     key.truncate(len);
-//                     continue 'horizontal;
-//                 } else {
-//                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-//                     self.frontier.push((
-//                         len,
-//                         Or::R(iter::repeat(false).zip(unsafe { node.iter() }).peekable()),
-//                     ));
-//                     continue 'vertical;
-//                 }
-//             }
-//         }
-//     }
-// }
 //
 // struct ScanIter<'a, K> {
 //     window: Window<'a, K>,
