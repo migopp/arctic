@@ -118,6 +118,7 @@ impl Ref<'_> {
                     }
                 }
                 Ok(_) => {
+                    stat::increment(op);
                     unsafe { Self::retire(&mut guard, &key, &cursor, op, old) };
                 }
                 Err(edge) => {
