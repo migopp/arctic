@@ -41,6 +41,7 @@ impl Array {
     }
 
     #[inline]
+    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     pub(crate) fn has_prefix(key: ribbit::Packed<Self>, prefix: ribbit::Packed<Self>) -> bool {
         match key.len().cmp(&prefix.len()) {
             cmp::Ordering::Less => false,

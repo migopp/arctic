@@ -9,6 +9,7 @@ stat = ["dep:serde", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
 opt-membarrier = ["dep:libc"]
+smr-hazard = []
 validate = []
 
 [dependencies]

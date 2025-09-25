@@ -17,6 +17,7 @@ macro_rules! validate_eq {
 mod byte;
 mod cursor;
 mod edge;
+#[cfg(feature = "smr-hazard")]
 mod membarrier;
 mod node;
 mod raw;
