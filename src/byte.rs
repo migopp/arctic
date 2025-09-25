@@ -8,11 +8,8 @@ use core::ops::Shr as _;
 use ribbit::u3;
 use ribbit::u56;
 
-mod dynamic;
-mod fixed;
-
-pub(crate) use dynamic::Dynamic;
-pub(crate) use fixed::Fixed;
+pub(crate) mod dynamic;
+pub(crate) mod fixed;
 
 /// Immutable fixed-size array of up to 7 bytes.
 #[derive(Copy, Clone, Default, PartialEq, Eq)]

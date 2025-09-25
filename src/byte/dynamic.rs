@@ -3,13 +3,13 @@ use ribbit::u3;
 use crate::byte;
 
 #[derive(Copy, Clone, Debug)]
-pub enum Dynamic<'a> {
+pub enum Iter<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(byte::Fixed),
+    Small(byte::fixed::Iter),
 }
 
-impl<'a> From<&'a [u8]> for Dynamic<'a> {
+impl<'a> From<&'a [u8]> for Iter<'a> {
     #[inline]
     fn from(key: &'a [u8]) -> Self {
         match key.len() {
@@ -17,25 +17,28 @@ impl<'a> From<&'a [u8]> for Dynamic<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(byte::Fixed::new(u64::from_ne_bytes(buffer), len as u8))
+                Self::Small(byte::fixed::Iter::new(
+                    u64::from_ne_bytes(buffer),
+                    len as u8,
+                ))
             }
         }
     }
 }
 
-impl Default for Dynamic<'_> {
+impl Default for Iter<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(byte::Fixed::default())
+        Self::Small(byte::fixed::Iter::default())
     }
 }
 
-impl byte::Iterator for Dynamic<'_> {
+impl byte::Iterator for Iter<'_> {
     #[inline]
     fn len(&self) -> usize {
         match self {
-            Dynamic::Large(large) => large.len(),
-            Dynamic::Small(small) => small.len(),
+            Iter::Large(large) => large.len(),
+            Iter::Small(small) => small.len(),
         }
     }
 
@@ -44,12 +47,12 @@ impl byte::Iterator for Dynamic<'_> {
         validate!(len.value() as usize <= self.len());
 
         match self {
-            Dynamic::Large(large) => {
+            Iter::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
                 byte::Array::from_u64_truncate(buffer, len)
             }
-            Dynamic::Small(small) => small.peek(len),
+            Iter::Small(small) => small.peek(len),
         }
     }
 
@@ -58,7 +61,7 @@ impl byte::Iterator for Dynamic<'_> {
         validate!(len.value() as usize <= self.len());
 
         match self {
-            Dynamic::Large(large) => {
+            Iter::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
                 let array = byte::Array::from_u64_truncate(buffer, len);
@@ -76,10 +79,10 @@ impl byte::Iterator for Dynamic<'_> {
                 };
                 let buffer = buffer >> ((8 - after) << 3);
 
-                *self = Self::Small(byte::Fixed::new(buffer, after as u8));
+                *self = Self::Small(byte::fixed::Iter::new(buffer, after as u8));
                 array
             }
-            Dynamic::Small(small) => small.take(len),
+            Iter::Small(small) => small.take(len),
         }
     }
 
@@ -94,7 +97,7 @@ impl byte::Iterator for Dynamic<'_> {
                 *self = if large.len() - 1 > 8 {
                     Self::Large(&large[1..])
                 } else {
-                    Self::Small(byte::Fixed::new(
+                    Self::Small(byte::fixed::Iter::new(
                         unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() },
                         8,
                     ))
@@ -111,8 +114,8 @@ impl byte::Iterator for Dynamic<'_> {
 mod tests {
     use ribbit::u3;
 
+    use crate::byte::dynamic;
     use crate::byte::Array;
-    use crate::byte::Dynamic;
     use crate::byte::Iterator as _;
 
     #[test]
@@ -161,7 +164,7 @@ mod tests {
     }
 
     fn take_all<I: IntoIterator<Item = usize>>(initial: &[u8], lens: I) {
-        let mut iter = Dynamic::from(initial);
+        let mut iter = dynamic::Iter::from(initial);
 
         let mut index = 0;
         for len in lens {

@@ -3,12 +3,12 @@ use ribbit::u3;
 use crate::byte;
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Fixed {
+pub struct Iter {
     buffer: u64,
     len: u8,
 }
 
-impl Fixed {
+impl Iter {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
         validate!(len <= 8);
@@ -17,7 +17,7 @@ impl Fixed {
     }
 }
 
-impl byte::Iterator for Fixed {
+impl byte::Iterator for Iter {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -53,7 +53,7 @@ impl byte::Iterator for Fixed {
 macro_rules! impl_from {
     ($($from:ty: $len:expr),* $(,)?) => {
         $(
-            impl From<$from> for Fixed {
+            impl From<$from> for Iter {
                 #[inline]
                 fn from(value: $from) -> Self {
                     Self {

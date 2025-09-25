@@ -123,58 +123,58 @@ pub trait Key {
 }
 
 impl Key for u8 {
-    type Iter<'a> = byte::Fixed;
+    type Iter<'a> = byte::fixed::Iter;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Fixed::from(*self)
+        byte::fixed::Iter::from(*self)
     }
 }
 
 impl Key for u64 {
-    type Iter<'a> = byte::Fixed;
+    type Iter<'a> = byte::fixed::Iter;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Fixed::from(*self)
+        byte::fixed::Iter::from(*self)
     }
 }
 
 impl<const N: usize> Key for [u8; N] {
-    type Iter<'a> = byte::Dynamic<'a>;
+    type Iter<'a> = byte::dynamic::Iter<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Dynamic::from(self.as_slice())
+        byte::dynamic::Iter::from(self.as_slice())
     }
 }
 
 impl Key for [u8] {
-    type Iter<'a> = byte::Dynamic<'a>;
+    type Iter<'a> = byte::dynamic::Iter<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Dynamic::from(self)
+        byte::dynamic::Iter::from(self)
     }
 }
 
 impl Key for Vec<u8> {
-    type Iter<'a> = byte::Dynamic<'a>;
+    type Iter<'a> = byte::dynamic::Iter<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Dynamic::from(self.as_slice())
+        byte::dynamic::Iter::from(self.as_slice())
     }
 }
 
 impl Key for str {
-    type Iter<'a> = byte::Dynamic<'a>;
+    type Iter<'a> = byte::dynamic::Iter<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Dynamic::from(self.as_bytes())
+        byte::dynamic::Iter::from(self.as_bytes())
     }
 }
 
 impl Key for String {
-    type Iter<'a> = byte::Dynamic<'a>;
+    type Iter<'a> = byte::dynamic::Iter<'a>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Dynamic::from(self.as_bytes())
+        byte::dynamic::Iter::from(self.as_bytes())
     }
 }
 
