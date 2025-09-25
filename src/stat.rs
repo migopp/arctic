@@ -1,12 +1,11 @@
-use core::cell::Cell;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::cursor;
-use crate::node;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "stat")]
 thread_local! {
     pub(crate) static THREAD: Thread = const { Thread::new() };
 }
@@ -60,26 +59,37 @@ pub fn process<K: crate::Key, V>(_map: &mut crate::Map<K, V>) -> Process {
     Process::default()
 }
 
+#[inline]
 pub fn thread() -> Thread {
-    THREAD.with(|thread| thread.clone())
+    #[cfg(feature = "stat")]
+    {
+        THREAD.with(|thread| thread.clone())
+    }
+
+    #[cfg(not(feature = "stat"))]
+    {
+        Thread
+    }
 }
 
+#[inline]
 pub fn start() {
     if cfg!(feature = "stat") {
         RECORD.store(true, Ordering::Relaxed);
     }
 }
 
+#[inline]
 pub fn stop() {
     if cfg!(feature = "stat") {
         RECORD.store(false, Ordering::Relaxed);
     }
 }
 
+#[inline]
 pub fn reset() {
-    if cfg!(feature = "stat") {
-        THREAD.with(|thread| thread.reset());
-    }
+    #[cfg(feature = "stat")]
+    THREAD.with(|thread| thread.reset());
 }
 
 #[derive(Default)]
@@ -149,6 +159,7 @@ impl From<Histogram> for Distribution {
     }
 }
 
+#[cfg_attr(not(feature = "stat"), expect(dead_code))]
 pub(crate) enum Counter {
     Op(cursor::Op),
     InsertPessimistic,
@@ -170,64 +181,68 @@ impl From<cursor::Op> for Counter {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(feature = "stat")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
     node: Node,
     edge: Edge,
-    insert_pessimistic: Cell<u64>,
-    retire: Cell<u64>,
-    flush: Cell<u64>,
-    retire_cache: Cell<u64>,
-    free_conflict: Cell<u64>,
-    free_retire: Cell<u64>,
-    free_drop: Cell<u64>,
-    hazard_match: Cell<u64>,
+    insert_pessimistic: core::cell::Cell<u64>,
+    retire: core::cell::Cell<u64>,
+    flush: core::cell::Cell<u64>,
+    retire_cache: core::cell::Cell<u64>,
+    free_conflict: core::cell::Cell<u64>,
+    free_retire: core::cell::Cell<u64>,
+    free_drop: core::cell::Cell<u64>,
+    hazard_match: core::cell::Cell<u64>,
 }
 
-#[derive(Clone)]
-#[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(not(feature = "stat"))]
+pub struct Thread;
+
+#[cfg(feature = "stat")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Node {
-    replace: Cell<u64>,
-    shrink: Cell<u64>,
-    grow: Cell<u64>,
-    destroy: Cell<u64>,
-    compress: Cell<u64>,
+    replace: core::cell::Cell<u64>,
+    shrink: core::cell::Cell<u64>,
+    grow: core::cell::Cell<u64>,
+    destroy: core::cell::Cell<u64>,
+    compress: core::cell::Cell<u64>,
 }
 
-#[derive(Clone)]
-#[cfg_attr(feature = "stat", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(feature = "stat")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Edge {
-    create: Cell<u64>,
-    expand: Cell<u64>,
-    insert: Cell<u64>,
-    remove: Cell<u64>,
+    create: core::cell::Cell<u64>,
+    expand: core::cell::Cell<u64>,
+    insert: core::cell::Cell<u64>,
+    remove: core::cell::Cell<u64>,
 }
 
+#[cfg(feature = "stat")]
 impl Thread {
     const fn new() -> Self {
         Self {
             node: Node {
-                replace: Cell::new(0),
-                shrink: Cell::new(0),
-                grow: Cell::new(0),
-                destroy: Cell::new(0),
-                compress: Cell::new(0),
+                replace: core::cell::Cell::new(0),
+                shrink: core::cell::Cell::new(0),
+                grow: core::cell::Cell::new(0),
+                destroy: core::cell::Cell::new(0),
+                compress: core::cell::Cell::new(0),
             },
             edge: Edge {
-                create: Cell::new(0),
-                expand: Cell::new(0),
-                insert: Cell::new(0),
-                remove: Cell::new(0),
+                create: core::cell::Cell::new(0),
+                expand: core::cell::Cell::new(0),
+                insert: core::cell::Cell::new(0),
+                remove: core::cell::Cell::new(0),
             },
-            insert_pessimistic: Cell::new(0),
-            retire: Cell::new(0),
-            retire_cache: Cell::new(0),
-            flush: Cell::new(0),
-            free_conflict: Cell::new(0),
-            free_retire: Cell::new(0),
-            free_drop: Cell::new(0),
-            hazard_match: Cell::new(0),
+            insert_pessimistic: core::cell::Cell::new(0),
+            retire: core::cell::Cell::new(0),
+            retire_cache: core::cell::Cell::new(0),
+            flush: core::cell::Cell::new(0),
+            free_conflict: core::cell::Cell::new(0),
+            free_retire: core::cell::Cell::new(0),
+            free_drop: core::cell::Cell::new(0),
+            hazard_match: core::cell::Cell::new(0),
         }
     }
 
@@ -244,14 +259,14 @@ impl Thread {
         self.edge.remove.set(0);
     }
 
-    fn op(&self, op: cursor::Op) -> &Cell<u64> {
+    fn op(&self, op: cursor::Op) -> &core::cell::Cell<u64> {
         match op {
             cursor::Op::Node(op) => match op {
-                node::Op::Shrink => &self.node.shrink,
-                node::Op::Replace => &self.node.replace,
-                node::Op::Grow => &self.node.grow,
-                node::Op::Destroy => &self.node.destroy,
-                node::Op::Compress => &self.node.compress,
+                crate::node::Op::Shrink => &self.node.shrink,
+                crate::node::Op::Replace => &self.node.replace,
+                crate::node::Op::Grow => &self.node.grow,
+                crate::node::Op::Destroy => &self.node.destroy,
+                crate::node::Op::Compress => &self.node.compress,
             },
             cursor::Op::Edge(op) => match op {
                 crate::edge::Op::Create => &self.edge.create,
@@ -264,10 +279,11 @@ impl Thread {
 }
 
 #[inline]
-pub(crate) fn increment<C: Into<Counter>>(counter: C) {
-    if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
+pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
+    #[cfg(feature = "stat")]
+    if RECORD.load(Ordering::Relaxed) {
         THREAD.with(|thread| {
-            match counter.into() {
+            match _counter.into() {
                 Counter::Op(op) => thread.op(op),
                 Counter::InsertPessimistic => &thread.insert_pessimistic,
                 Counter::Retire => &thread.retire,
@@ -283,13 +299,14 @@ pub(crate) fn increment<C: Into<Counter>>(counter: C) {
 }
 
 #[inline]
-pub(crate) fn max(max: Max, value: u64) {
-    if cfg!(feature = "stat") && RECORD.load(Ordering::Relaxed) {
+pub(crate) fn max(_max: Max, _value: u64) {
+    #[cfg(feature = "stat")]
+    if RECORD.load(Ordering::Relaxed) {
         THREAD.with(|thread| {
-            match max {
+            match _max {
                 Max::RetireCache => &thread.retire_cache,
             }
-            .update(|count| count.max(value))
+            .update(|count| count.max(_value))
         })
     }
 }
