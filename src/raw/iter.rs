@@ -8,7 +8,7 @@ use ribbit::Unpack as _;
 use crate::node;
 use crate::Edge;
 
-struct EntryIter<'a> {
+pub struct EntryIter<'a> {
     key: Vec<u8>,
     frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
 }
@@ -17,7 +17,7 @@ type RootIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a
 type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
 impl<'a> EntryIter<'a> {
-    fn new(root: &'a mut Atomic128<Edge>) -> Self {
+    pub(super) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: Vec::new(),
             frontier: vec![(
@@ -27,7 +27,7 @@ impl<'a> EntryIter<'a> {
         }
     }
 
-    fn next(&mut self) -> Option<(usize, &[u8], ribbit::Packed<Edge>)> {
+    pub fn next(&mut self) -> Option<(usize, &[u8], ribbit::Packed<Edge>)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //

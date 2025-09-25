@@ -63,7 +63,7 @@ pub(crate) enum Ref<'a> {
 }
 
 impl<'a> Ref<'a> {
-    #[expect(dead_code)]
+    #[inline]
     pub(crate) unsafe fn iter(&self) -> Iter<'a> {
         match self {
             Ref::Node3(node) => node.into_iter(),

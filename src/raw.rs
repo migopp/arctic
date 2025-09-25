@@ -30,6 +30,28 @@ impl Raw {
             root: &self.root,
         }
     }
+
+    // pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
+    //     self.preorder()
+    //         .filter_map(|(_, key, edge)| match edge.meta().kind().unpack() {
+    //             node::Kind::None | node::Kind::Node3 | node::Kind::Node15 | node::Kind::Node256 => {
+    //                 None
+    //             }
+    //             node::Kind::Leaf => Some((key, edge.data())),
+    //         })
+    // }
+    //
+    // pub fn keys(&mut self) -> impl Iterator<Item = Rc<Vec<u8>>> + '_ {
+    //     self.iter().map(|(key, _)| key)
+    // }
+    //
+    // pub fn values(&mut self) -> impl Iterator<Item = u64> + '_ {
+    //     self.iter().map(|(_, value)| value)
+    // }
+
+    pub(crate) fn preorder(&mut self) -> iter::EntryIter {
+        iter::EntryIter::new(&mut self.root)
+    }
 }
 
 pub(crate) struct Ref<'a> {
@@ -248,30 +270,6 @@ impl Ref<'_> {
 
         Some(old.data())
     }
-    //
-    // pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
-    //     self.preorder()
-    //         .filter_map(|(_, key, edge)| match edge.meta().kind().unpack() {
-    //             node::Kind::None | node::Kind::Node3 | node::Kind::Node15 | node::Kind::Node256 => {
-    //                 None
-    //             }
-    //             node::Kind::Leaf => Some((key, edge.data())),
-    //         })
-    // }
-    //
-    // pub fn keys(&mut self) -> impl Iterator<Item = Rc<Vec<u8>>> + '_ {
-    //     self.iter().map(|(key, _)| key)
-    // }
-    //
-    // pub fn values(&mut self) -> impl Iterator<Item = u64> + '_ {
-    //     self.iter().map(|(_, value)| value)
-    // }
-
-    // pub(crate) fn preorder(
-    //     &mut self,
-    // ) -> impl Iterator<Item = (usize, Rc<Vec<u8>>, ribbit::Packed<Edge>)> + '_ {
-    //     EntryIter::new(&mut self.root)
-    // }
 
     // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = u64> {
     //     let iter = ScanIter::new(Bound::Included(low), Bound::Unbounded, &self.root);
