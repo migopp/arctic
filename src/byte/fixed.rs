@@ -50,6 +50,29 @@ impl byte::Iterator for Iter {
     }
 }
 
+impl byte::Stack for Iter {
+    #[inline]
+    fn push_array(&mut self, array: ribbit::Packed<byte::Array>) {
+        validate!(self.len + array.len().value() <= 8);
+        self.buffer |= array.buffer().value() << (self.len << 3);
+        self.len += array.len().value();
+    }
+
+    #[inline]
+    fn push_byte(&mut self, byte: u8) {
+        validate!(self.len < 8);
+        self.buffer |= (byte as u64) << (self.len << 3);
+        self.len += 1;
+    }
+
+    #[inline]
+    fn pop(&mut self, count: usize) {
+        validate!(self.len as usize >= count);
+        self.len -= count as u8;
+        self.buffer &= (1u64 << (self.len << 3)) - 1;
+    }
+}
+
 macro_rules! impl_from {
     ($($from:ty: $len:expr),* $(,)?) => {
         $(

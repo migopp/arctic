@@ -188,3 +188,10 @@ pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
     fn next(&mut self) -> Option<u8>;
 }
+
+pub(crate) trait Stack: core::fmt::Debug + Default {
+    fn push_array(&mut self, array: ribbit::Packed<Array>);
+    fn push_byte(&mut self, byte: u8);
+
+    fn pop(&mut self, count: usize);
+}

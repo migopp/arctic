@@ -1,4 +1,5 @@
 use ribbit::u3;
+use ribbit::Unpack as _;
 
 use crate::byte;
 
@@ -107,6 +108,24 @@ impl byte::Iterator for Iter<'_> {
             }
             Self::Small(small) => small.next(),
         }
+    }
+}
+
+impl byte::Stack for Vec<u8> {
+    #[inline]
+    fn push_array(&mut self, array: ribbit::Packed<byte::Array>) {
+        self.extend(array.unpack().bytes());
+    }
+
+    #[inline]
+    fn push_byte(&mut self, byte: u8) {
+        self.push(byte);
+    }
+
+    #[inline]
+    fn pop(&mut self, count: usize) {
+        validate!(self.len() >= count);
+        self.truncate(self.len() - count);
     }
 }
 

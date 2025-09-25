@@ -119,11 +119,16 @@ pub trait Key {
     type Iter<'a>: byte::Iterator
     where
         Self: 'a;
+
+    #[allow(private_bounds)]
+    type Stack: byte::Stack;
+
     fn iter<'a>(&'a self) -> Self::Iter<'a>;
 }
 
 impl Key for u8 {
     type Iter<'a> = byte::fixed::Iter;
+    type Stack = byte::fixed::Iter;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::fixed::Iter::from(*self)
@@ -132,6 +137,7 @@ impl Key for u8 {
 
 impl Key for u64 {
     type Iter<'a> = byte::fixed::Iter;
+    type Stack = byte::fixed::Iter;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::fixed::Iter::from(*self)
@@ -140,6 +146,7 @@ impl Key for u64 {
 
 impl<const N: usize> Key for [u8; N] {
     type Iter<'a> = byte::dynamic::Iter<'a>;
+    type Stack = Vec<u8>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::dynamic::Iter::from(self.as_slice())
@@ -148,6 +155,7 @@ impl<const N: usize> Key for [u8; N] {
 
 impl Key for [u8] {
     type Iter<'a> = byte::dynamic::Iter<'a>;
+    type Stack = Vec<u8>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::dynamic::Iter::from(self)
@@ -156,6 +164,7 @@ impl Key for [u8] {
 
 impl Key for Vec<u8> {
     type Iter<'a> = byte::dynamic::Iter<'a>;
+    type Stack = Vec<u8>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::dynamic::Iter::from(self.as_slice())
@@ -164,6 +173,7 @@ impl Key for Vec<u8> {
 
 impl Key for str {
     type Iter<'a> = byte::dynamic::Iter<'a>;
+    type Stack = Vec<u8>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::dynamic::Iter::from(self.as_bytes())
@@ -172,6 +182,7 @@ impl Key for str {
 
 impl Key for String {
     type Iter<'a> = byte::dynamic::Iter<'a>;
+    type Stack = Vec<u8>;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         byte::dynamic::Iter::from(self.as_bytes())
