@@ -157,6 +157,7 @@ pub(crate) enum Counter {
     FreeConflict,
     FreeRetire,
     FreeDrop,
+    HazardMatch,
 }
 
 pub(crate) enum Max {
@@ -181,6 +182,7 @@ pub struct Thread {
     free_conflict: Cell<u64>,
     free_retire: Cell<u64>,
     free_drop: Cell<u64>,
+    hazard_match: Cell<u64>,
 }
 
 #[derive(Clone)]
@@ -225,6 +227,7 @@ impl Thread {
             free_conflict: Cell::new(0),
             free_retire: Cell::new(0),
             free_drop: Cell::new(0),
+            hazard_match: Cell::new(0),
         }
     }
 
@@ -272,6 +275,7 @@ pub(crate) fn increment<C: Into<Counter>>(counter: C) {
                 Counter::FreeConflict => &thread.free_conflict,
                 Counter::FreeRetire => &thread.free_retire,
                 Counter::FreeDrop => &thread.free_drop,
+                Counter::HazardMatch => &thread.hazard_match,
             }
             .update(|count| count + 1)
         })

@@ -139,6 +139,7 @@ impl WriteGuard<'_, '_> {
                 .iter()
                 .any(|hazard| byte::Array::has_prefix(*hazard, edge.meta().key()))
             {
+                stat::increment(stat::Counter::HazardMatch);
                 return true;
             }
 
