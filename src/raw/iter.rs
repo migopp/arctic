@@ -1,4 +1,5 @@
 use core::iter;
+use core::marker::PhantomData;
 use core::mem;
 use core::sync::atomic::Ordering;
 
@@ -8,26 +9,28 @@ use crate::byte;
 use crate::node;
 use crate::Edge;
 
-pub struct EntryIter<'a, K> {
+pub struct EntryIter<'a, K, S> {
     key: K,
+    _select: PhantomData<S>,
     frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
 }
 
 type RootIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
 type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
-impl<'a, K: byte::Stack> EntryIter<'a, K> {
+impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
     pub(super) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
+            _select: PhantomData,
             frontier: vec![(
                 0,
-                Or::L(iter::zip(iter::once(false), core::slice::from_ref(root).iter()).peekable()),
+                Or::L(iter::zip(iter::once(true), core::slice::from_ref(root).iter()).peekable()),
             )],
         }
     }
 
-    pub fn next(&mut self) -> Option<(usize, &K, ribbit::Packed<Edge>)> {
+    pub fn next(&mut self) -> Option<(&K, S::Item)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //
@@ -37,13 +40,11 @@ impl<'a, K: byte::Stack> EntryIter<'a, K> {
             let (len, iter) = self.frontier.last_mut()?;
 
             'horizontal: loop {
-                let Some((descend, byte, edge)) = (match iter {
-                    Or::L(iter_root) => iter_root
-                        .peek_mut()
-                        .map(|(descend, edge)| (descend, None, edge)),
+                let Some((emit, byte, edge)) = (match iter {
+                    Or::L(iter_root) => iter_root.peek_mut().map(|(emit, edge)| (emit, None, edge)),
                     Or::R(iter_node) => iter_node
                         .peek_mut()
-                        .map(|(descend, (key, edge))| (descend, Some(*key), edge)),
+                        .map(|(emit, (key, edge))| (emit, Some(*key), edge)),
                 }) else {
                     self.key.pop(*len);
                     self.frontier.pop();
@@ -54,7 +55,6 @@ impl<'a, K: byte::Stack> EntryIter<'a, K> {
                 let meta = edge.meta();
                 let kind = meta.kind();
 
-                // Skip empty edges
                 if kind == node::Kind::NONE {
                     iter.skip();
                     continue 'horizontal;
@@ -62,19 +62,23 @@ impl<'a, K: byte::Stack> EntryIter<'a, K> {
 
                 let key = meta.key();
 
-                // Produce edge before traversing for preorder traversal
-                if !mem::replace(descend, true) {
+                // First time seeing edge
+                if mem::replace(emit, false) {
                     if let Some(byte) = byte {
                         self.key.push_byte(byte);
                     }
 
+                    let key = meta.key();
                     self.key.push_array(key);
-                    return Some((depth, &self.key, edge));
+
+                    if let Some(item) = S::select(depth, edge) {
+                        return Some((&self.key, item));
+                    }
                 }
 
+                // Second time seeing edge
                 iter.skip();
                 let len = byte::Array::len(key) + byte.is_some() as usize;
-
                 if kind == node::Kind::LEAF {
                     self.key.pop(len);
                     continue 'horizontal;
@@ -82,12 +86,28 @@ impl<'a, K: byte::Stack> EntryIter<'a, K> {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                     self.frontier.push((
                         len,
-                        Or::R(iter::repeat(false).zip(unsafe { node.iter() }).peekable()),
+                        Or::R(iter::repeat(true).zip(unsafe { node.iter() }).peekable()),
                     ));
                     continue 'vertical;
                 }
             }
         }
+    }
+}
+
+pub(crate) trait Selector {
+    type Item;
+    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item>;
+}
+
+pub(crate) struct SelectAll;
+
+impl Selector for SelectAll {
+    type Item = (usize, ribbit::Packed<Edge>);
+
+    #[inline]
+    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
+        Some((depth, edge))
     }
 }
 
