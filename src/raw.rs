@@ -49,7 +49,7 @@ impl Raw {
     //     self.iter().map(|(_, value)| value)
     // }
 
-    pub(crate) fn preorder(&mut self) -> iter::EntryIter {
+    pub(crate) fn preorder<K: byte::Stack>(&mut self) -> iter::EntryIter<K> {
         iter::EntryIter::new(&mut self.root)
     }
 }

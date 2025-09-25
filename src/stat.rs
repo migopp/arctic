@@ -1,8 +1,7 @@
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use ribbit::Unpack as _;
-
+use crate::byte;
 use crate::cursor;
 use crate::edge;
 use crate::node;
@@ -21,7 +20,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_15 = Histogram::new();
     let mut node_256 = Histogram::new();
 
-    let mut entries = map.raw.preorder();
+    let mut entries = map.raw.preorder::<byte::Ignore>();
     while let Some((depth_, _, edge)) = entries.next() {
         let meta = edge.meta();
         let kind = meta.kind();
@@ -30,7 +29,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
             continue;
         }
 
-        compression.record(meta.key().unpack().len() as u64);
+        compression.record(byte::Array::len(meta.key()) as u64);
 
         if kind == node::Kind::LEAF {
             depth.record(depth_ as u64);

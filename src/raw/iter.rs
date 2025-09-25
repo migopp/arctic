@@ -3,23 +3,23 @@ use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Unpack as _;
 
+use crate::byte;
 use crate::node;
 use crate::Edge;
 
-pub struct EntryIter<'a> {
-    key: Vec<u8>,
+pub struct EntryIter<'a, K> {
+    key: K,
     frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
 }
 
 type RootIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
 type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
 
-impl<'a> EntryIter<'a> {
+impl<'a, K: byte::Stack> EntryIter<'a, K> {
     pub(super) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
-            key: Vec::new(),
+            key: K::default(),
             frontier: vec![(
                 0,
                 Or::L(iter::zip(iter::once(false), core::slice::from_ref(root).iter()).peekable()),
@@ -27,7 +27,7 @@ impl<'a> EntryIter<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Option<(usize, &[u8], ribbit::Packed<Edge>)> {
+    pub fn next(&mut self) -> Option<(usize, &K, ribbit::Packed<Edge>)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //
@@ -45,7 +45,7 @@ impl<'a> EntryIter<'a> {
                         .peek_mut()
                         .map(|(descend, (key, edge))| (descend, Some(*key), edge)),
                 }) else {
-                    self.key.truncate(*len);
+                    self.key.pop(*len);
                     self.frontier.pop();
                     continue 'vertical;
                 };
@@ -60,20 +60,23 @@ impl<'a> EntryIter<'a> {
                     continue 'horizontal;
                 }
 
-                // Update key for current edge
-                let edge_key = meta.key().unpack();
+                let key = meta.key();
 
                 // Produce edge before traversing for preorder traversal
                 if !mem::replace(descend, true) {
-                    self.key.extend(byte.into_iter().chain(edge_key.bytes()));
+                    if let Some(byte) = byte {
+                        self.key.push_byte(byte);
+                    }
+
+                    self.key.push_array(key);
                     return Some((depth, &self.key, edge));
                 }
 
                 iter.skip();
-                let len = self.key.len() - edge_key.len() - byte.is_some() as usize;
+                let len = byte::Array::len(key) + byte.is_some() as usize;
 
                 if kind == node::Kind::LEAF {
-                    self.key.truncate(len);
+                    self.key.pop(len);
                     continue 'horizontal;
                 } else {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
