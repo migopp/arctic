@@ -52,14 +52,14 @@ impl byte::Iterator for Fixed {
 
 impl byte::Stack for Fixed {
     #[inline]
-    fn push_array(&mut self, array: ribbit::Packed<byte::Array>) {
+    fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len().value() <= 8);
         self.buffer |= array.buffer().value() << (self.len << 3);
         self.len += array.len().value();
     }
 
     #[inline]
-    fn push_byte(&mut self, byte: u8) {
+    fn push(&mut self, byte: u8) {
         validate!(self.len < 8);
         self.buffer |= (byte as u64) << (self.len << 3);
         self.len += 1;

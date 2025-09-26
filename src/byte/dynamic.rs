@@ -111,12 +111,12 @@ impl byte::Iterator for Iter<'_> {
 
 impl byte::Stack for Vec<u8> {
     #[inline]
-    fn push_array(&mut self, array: ribbit::Packed<byte::Array>) {
-        self.extend(array.unpack().bytes());
+    fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
+        core::iter::Extend::extend(self, array.unpack().bytes());
     }
 
     #[inline]
-    fn push_byte(&mut self, byte: u8) {
+    fn push(&mut self, byte: u8) {
         self.push(byte);
     }
 

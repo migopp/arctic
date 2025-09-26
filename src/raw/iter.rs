@@ -63,11 +63,11 @@ impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
                 // First time seeing edge
                 if mem::replace(emit, false) {
                     if let Some(byte) = byte {
-                        self.key.push_byte(byte);
+                        self.key.push(byte);
                     }
 
                     let key = meta.key();
-                    self.key.push_array(key);
+                    self.key.extend(key);
 
                     if let Some(item) = S::select(depth, edge) {
                         return Some((&self.key, item));

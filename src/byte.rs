@@ -191,8 +191,8 @@ pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
 }
 
 pub(crate) trait Stack: Clone + core::fmt::Debug + Default {
-    fn push_array(&mut self, array: ribbit::Packed<Array>);
-    fn push_byte(&mut self, byte: u8);
+    fn extend(&mut self, array: ribbit::Packed<Array>);
+    fn push(&mut self, byte: u8);
 
     fn pop(&mut self, count: usize);
 }
@@ -202,10 +202,10 @@ pub(crate) struct Ignore;
 
 impl Stack for Ignore {
     #[inline]
-    fn push_array(&mut self, _array: ribbit::Packed<Array>) {}
+    fn extend(&mut self, _array: ribbit::Packed<Array>) {}
 
     #[inline]
-    fn push_byte(&mut self, _byte: u8) {}
+    fn push(&mut self, _byte: u8) {}
 
     #[inline]
     fn pop(&mut self, _count: usize) {}
