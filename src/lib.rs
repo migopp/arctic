@@ -28,10 +28,9 @@ use core::marker::PhantomData;
 
 pub(crate) use edge::Edge;
 pub(crate) use node::Node;
-use raw::concurrent::Global;
 
 pub struct Map<K: ?Sized, V> {
-    raw: raw::concurrent::Global,
+    raw: raw::concurrent::Map,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -39,7 +38,7 @@ pub struct Map<K: ?Sized, V> {
 impl<K: ?Sized, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            raw: Global::default(),
+            raw: raw::concurrent::Map::default(),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -115,7 +114,7 @@ where
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
-    raw: raw::concurrent::Local<'a>,
+    raw: raw::concurrent::MapRef<'a>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }

@@ -5,11 +5,11 @@ use crate::raw::iter;
 use crate::Edge;
 
 #[derive(Default)]
-pub(crate) struct Raw {
+pub(crate) struct Map {
     root: Atomic128<Edge>,
 }
 
-impl Raw {
+impl Map {
     pub(crate) fn root(&self) -> &Atomic128<Edge> {
         &self.root
     }

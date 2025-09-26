@@ -17,15 +17,15 @@ use crate::stat;
 use crate::Edge;
 
 #[derive(Default)]
-pub(crate) struct Global {
+pub(crate) struct Map {
     smr: smr::Global,
-    raw: sequential::Raw,
+    raw: sequential::Map,
 }
 
-impl Global {
+impl Map {
     #[inline]
-    pub(crate) fn pin(&self) -> Local {
-        Local {
+    pub(crate) fn pin(&self) -> MapRef {
+        MapRef {
             smr: self.smr.pin(),
             raw: &self.raw,
         }
@@ -50,25 +50,25 @@ impl Global {
     // }
 }
 
-impl Deref for Global {
-    type Target = sequential::Raw;
+impl Deref for Map {
+    type Target = sequential::Map;
     fn deref(&self) -> &Self::Target {
         &self.raw
     }
 }
 
-impl DerefMut for Global {
+impl DerefMut for Map {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.raw
     }
 }
 
-pub(crate) struct Local<'a> {
+pub(crate) struct MapRef<'a> {
     smr: smr::Local<'a>,
-    raw: &'a sequential::Raw,
+    raw: &'a sequential::Map,
 }
 
-impl Local<'_> {
+impl MapRef<'_> {
     #[inline]
     pub(crate) fn insert<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
