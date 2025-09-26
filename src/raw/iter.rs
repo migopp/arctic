@@ -9,27 +9,32 @@ use crate::node;
 use crate::Edge;
 use crate::Or;
 
-pub struct Iter<'a, K, S, O> {
+pub struct Iter<'a, K, V, O, S>
+where
+    S: Iterator,
+{
     key: K,
-    _select: PhantomData<S>,
+    _select: PhantomData<V>,
     _order: PhantomData<O>,
-    frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
+    _sort: PhantomData<S>,
+    frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a, S>>)>,
 }
 
 type RootIter<'a> = iter::Peekable<iter::Once<(Visit, &'a Atomic128<Edge>)>>;
-type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<Visit>, node::SortedIter<'a>>>;
+type NodeIter<'a, S> = iter::Peekable<iter::Zip<iter::Repeat<Visit>, S>>;
 
-impl<'a, K: byte::Stack, S: Selector, O: Order> Iter<'a, K, S, O> {
+impl<'a, K: byte::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
     pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,
             _order: PhantomData,
+            _sort: PhantomData,
             frontier: vec![(0, Or::L(iter::once((O::START, &*root)).peekable()))],
         }
     }
 
-    pub fn next(&mut self) -> Option<(&K, S::Item)> {
+    pub fn next(&mut self) -> Option<(&K, V::Item)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //
@@ -72,7 +77,7 @@ impl<'a, K: byte::Stack, S: Selector, O: Order> Iter<'a, K, S, O> {
 
                 match O::step(visit) {
                     Visit::Yield => {
-                        if let Some(item) = S::select(depth, edge) {
+                        if let Some(item) = V::select(depth, edge) {
                             return Some((&self.key, item));
                         }
                     }
@@ -80,11 +85,7 @@ impl<'a, K: byte::Stack, S: Selector, O: Order> Iter<'a, K, S, O> {
                         let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                         self.frontier.push((
                             self.key.len(),
-                            Or::R(
-                                iter::repeat(O::START)
-                                    .zip(unsafe { node.iter_sorted() })
-                                    .peekable(),
-                            ),
+                            Or::R(iter::repeat(O::START).zip(S::new(node)).peekable()),
                         ));
                         continue 'vertical;
                     }
@@ -178,4 +179,20 @@ pub(crate) enum Visit {
     Yield,
     Descend,
     Done,
+}
+
+pub(crate) trait Sort<'a>: Iterator<Item = (u8, &'a Atomic128<Edge>)> {
+    fn new(node: node::Ref<'a>) -> Self;
+}
+
+impl<'a> Sort<'a> for node::SortedIter<'a> {
+    fn new(node: node::Ref) -> node::SortedIter {
+        unsafe { node.iter_sorted() }
+    }
+}
+
+impl<'a> Sort<'a> for node::UnsortedIter<'a> {
+    fn new(node: node::Ref) -> node::UnsortedIter {
+        unsafe { node.iter_unsorted() }
+    }
 }

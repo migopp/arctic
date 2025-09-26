@@ -1,6 +1,7 @@
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
+use crate::node;
 use crate::raw::iter;
 use crate::stat;
 use crate::Edge;
@@ -39,16 +40,17 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter<K: byte::Stack, S: iter::Selector, O: iter::Order>(
-        &mut self,
-    ) -> iter::Iter<K, S, O> {
+    pub(crate) fn iter<'a, K: byte::Stack, V: iter::Selector, O: iter::Order, S: iter::Sort<'a>>(
+        &'a mut self,
+    ) -> iter::Iter<'a, K, V, O, S> {
         iter::Iter::new(&mut self.root)
     }
 }
 
 impl Drop for Map {
     fn drop(&mut self) {
-        let mut iter = self.iter::<byte::Ignore, iter::SelectNode, iter::Postorder>();
+        let mut iter =
+            self.iter::<byte::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>();
         while let Some((byte::Ignore, edge)) = iter.next() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);

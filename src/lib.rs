@@ -64,7 +64,13 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 }
 
 pub struct Iter<'a, K: Key + ?Sized, V> {
-    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder>,
+    inner: raw::iter::Iter<
+        'a,
+        K::Stack,
+        raw::iter::SelectLeaf,
+        raw::iter::Preorder,
+        node::SortedIter<'a>,
+    >,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -93,7 +99,13 @@ where
 }
 
 pub struct EntryIter<'a, K: Key, V> {
-    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder>,
+    inner: raw::iter::Iter<
+        'a,
+        K::Stack,
+        raw::iter::SelectLeaf,
+        raw::iter::Preorder,
+        node::SortedIter<'a>,
+    >,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
