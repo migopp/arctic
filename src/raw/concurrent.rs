@@ -1,5 +1,3 @@
-pub(crate) mod iter;
-
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
@@ -13,7 +11,7 @@ use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
 use crate::node;
-use crate::sequential;
+use crate::raw::sequential;
 use crate::smr;
 use crate::stat;
 use crate::Edge;

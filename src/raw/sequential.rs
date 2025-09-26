@@ -1,7 +1,7 @@
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
-use crate::concurrent::iter;
+use crate::raw::iter;
 use crate::Edge;
 
 #[derive(Default)]
