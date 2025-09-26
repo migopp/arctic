@@ -16,6 +16,7 @@ macro_rules! validate_eq {
 
 mod byte;
 mod edge;
+mod key;
 mod node;
 mod raw;
 mod smr;
@@ -24,6 +25,7 @@ pub mod stat;
 use core::marker::PhantomData;
 
 pub(crate) use edge::Edge;
+pub use key::Key;
 pub(crate) use node::Node;
 
 pub struct Map<K: ?Sized, V> {
@@ -164,81 +166,6 @@ impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     //     let high = range.end_bound().map(|high| high.to_byte_array());
     //     self.raw.range((low, high)).map(V::from_u64)
     // }
-}
-
-pub trait Key {
-    #[allow(private_bounds)]
-    type Iter<'a>: byte::Iterator
-    where
-        Self: 'a;
-
-    #[allow(private_bounds)]
-    type Stack: byte::Stack;
-
-    fn iter<'a>(&'a self) -> Self::Iter<'a>;
-}
-
-impl Key for u8 {
-    type Iter<'a> = byte::Fixed;
-    type Stack = byte::Fixed;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Fixed::from(*self)
-    }
-}
-
-impl Key for u64 {
-    type Iter<'a> = byte::Fixed;
-    type Stack = byte::Fixed;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::Fixed::from(*self)
-    }
-}
-
-impl<const N: usize> Key for [u8; N] {
-    type Iter<'a> = byte::dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::dynamic::Iter::from(self.as_slice())
-    }
-}
-
-impl Key for [u8] {
-    type Iter<'a> = byte::dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::dynamic::Iter::from(self)
-    }
-}
-
-impl Key for Vec<u8> {
-    type Iter<'a> = byte::dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::dynamic::Iter::from(self.as_slice())
-    }
-}
-
-impl Key for str {
-    type Iter<'a> = byte::dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::dynamic::Iter::from(self.as_bytes())
-    }
-}
-
-impl Key for String {
-    type Iter<'a> = byte::dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
-    #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::dynamic::Iter::from(self.as_bytes())
-    }
 }
 
 pub trait Value {
