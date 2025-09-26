@@ -24,7 +24,7 @@ mod node;
 mod smr;
 pub mod stat;
 
-pub(crate) use concurrent::Raw;
+pub(crate) use concurrent::Global;
 
 use core::marker::PhantomData;
 
@@ -32,7 +32,7 @@ pub(crate) use edge::Edge;
 pub(crate) use node::Node;
 
 pub struct Map<K: ?Sized, V> {
-    raw: Raw,
+    raw: Global,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -40,7 +40,7 @@ pub struct Map<K: ?Sized, V> {
 impl<K: ?Sized, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            raw: Raw::default(),
+            raw: Global::default(),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -116,7 +116,7 @@ where
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
-    raw: concurrent::Ref<'a>,
+    raw: concurrent::Local<'a>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }

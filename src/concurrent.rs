@@ -17,15 +17,15 @@ use crate::stat;
 use crate::Edge;
 
 #[derive(Default)]
-pub(crate) struct Raw {
+pub(crate) struct Global {
     smr: smr::Global,
     root: Atomic128<Edge>,
 }
 
-impl Raw {
+impl Global {
     #[inline]
-    pub(crate) fn pin(&self) -> Ref {
-        Ref {
+    pub(crate) fn pin(&self) -> Local {
+        Local {
             smr: self.smr.pin(),
             root: &self.root,
         }
@@ -54,12 +54,12 @@ impl Raw {
     }
 }
 
-pub(crate) struct Ref<'a> {
+pub(crate) struct Local<'a> {
     smr: smr::Local<'a>,
     root: &'a Atomic128<Edge>,
 }
 
-impl Ref<'_> {
+impl Local<'_> {
     #[inline]
     pub(crate) fn insert<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
