@@ -1,4 +1,7 @@
 #[cfg(feature = "smr-hazard")]
+mod membarrier;
+
+#[cfg(feature = "smr-hazard")]
 mod hazard;
 
 #[cfg(feature = "smr-hazard")]

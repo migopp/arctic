@@ -5,8 +5,8 @@ use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
 
 use crate::byte;
-use crate::membarrier;
 use crate::node;
+use crate::smr::membarrier;
 use crate::stat;
 use crate::Edge;
 
