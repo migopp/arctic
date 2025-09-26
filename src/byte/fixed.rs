@@ -89,6 +89,25 @@ macro_rules! impl_from {
                     }
                 }
             }
+
+            impl From<&'_ Iter> for $from {
+                #[inline]
+                fn from(iter: &Iter) -> Self {
+                    validate_eq!(iter.len, $len);
+                    let value = (iter.buffer as $from);
+                    if cfg!(target_endian = "little") {
+                        value.swap_bytes()
+                    } else {
+                        value
+                    }
+                }
+            }
+
+            impl PartialEq<$from> for Iter {
+                fn eq(&self, value: &$from) -> bool {
+                    <$from>::from(self) == *value
+                }
+            }
         )*
     };
 }

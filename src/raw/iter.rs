@@ -8,6 +8,7 @@ use ribbit::atomic::Atomic128;
 use crate::byte;
 use crate::node;
 use crate::Edge;
+use crate::Or;
 
 pub struct EntryIter<'a, K, S> {
     key: K,
@@ -15,18 +16,15 @@ pub struct EntryIter<'a, K, S> {
     frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
 }
 
-type RootIter<'a> = iter::Peekable<iter::Zip<iter::Once<bool>, node::EdgeIter<'a>>>;
-type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::Iter<'a>>>;
+type RootIter<'a> = iter::Peekable<iter::Once<(bool, &'a Atomic128<Edge>)>>;
+type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::SortedIter<'a>>>;
 
 impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
     pub(super) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,
-            frontier: vec![(
-                0,
-                Or::L(iter::zip(iter::once(true), core::slice::from_ref(root).iter()).peekable()),
-            )],
+            frontier: vec![(0, Or::L(iter::once((true, &*root)).peekable()))],
         }
     }
 
@@ -86,7 +84,11 @@ impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                     self.frontier.push((
                         len,
-                        Or::R(iter::repeat(true).zip(unsafe { node.iter() }).peekable()),
+                        Or::R(
+                            iter::repeat(true)
+                                .zip(unsafe { node.iter_sorted() })
+                                .peekable(),
+                        ),
                     ));
                     continue 'vertical;
                 }
@@ -100,6 +102,17 @@ pub(crate) trait Selector {
     fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item>;
 }
 
+pub(crate) struct SelectLeaf;
+
+impl Selector for SelectLeaf {
+    type Item = u64;
+
+    #[inline]
+    fn select(_depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
+        (edge.meta().kind() == node::Kind::LEAF).then(|| edge.data())
+    }
+}
+
 pub(crate) struct SelectAll;
 
 impl Selector for SelectAll {
@@ -108,42 +121,5 @@ impl Selector for SelectAll {
     #[inline]
     fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
         Some((depth, edge))
-    }
-}
-
-#[derive(Debug)]
-enum Or<L, R> {
-    L(L),
-    R(R),
-}
-
-impl<L, R, T> Iterator for Or<L, R>
-where
-    L: Iterator<Item = T>,
-    R: Iterator<Item = T>,
-{
-    type Item = T;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Or::L(left) => left.next(),
-            Or::R(right) => right.next(),
-        }
-    }
-}
-
-impl<L, R> Or<L, R>
-where
-    L: Iterator,
-    R: Iterator,
-{
-    fn skip(&mut self) {
-        match self {
-            Or::L(left) => {
-                left.next();
-            }
-            Or::R(right) => {
-                right.next();
-            }
-        }
     }
 }

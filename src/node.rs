@@ -13,6 +13,7 @@ use ribbit::atomic::Atomic128;
 
 use crate::edge;
 use crate::Edge;
+use crate::Or;
 
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
@@ -64,11 +65,20 @@ pub(crate) enum Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) unsafe fn iter(&self) -> Iter<'a> {
+    pub(crate) unsafe fn iter_sorted(&self) -> SortedIter<'a> {
         match self {
-            Ref::Node3(node) => node.into_iter(),
-            Ref::Node15(node) => node.into_iter(),
-            Ref::Node256(node) => node.into_iter(),
+            Ref::Node3(node) => Or::L(node.iter_sorted()),
+            Ref::Node15(node) => Or::L(node.iter_sorted()),
+            Ref::Node256(node) => Or::R(node.into_iter()),
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn iter_unsorted(&self) -> UnsortedIter<'a> {
+        match self {
+            Ref::Node3(node) => Or::L(node.iter_unsorted()),
+            Ref::Node15(node) => Or::L(node.iter_unsorted()),
+            Ref::Node256(node) => Or::R(node.into_iter()),
         }
     }
 }
@@ -150,38 +160,5 @@ impl Default for Kind {
     }
 }
 
-pub(crate) type EdgeIter<'a> = core::slice::Iter<'a, Atomic128<Edge>>;
-
-pub(crate) type Iter<'a> = core::iter::Zip<KeyIter, EdgeIter<'a>>;
-
-pub(crate) enum KeyIter {
-    K3(core::iter::Take<core::array::IntoIter<u8, 4>>),
-    K15(core::iter::Take<core::array::IntoIter<u8, 16>>),
-    K256(core::ops::RangeInclusive<u8>),
-}
-
-impl KeyIter {
-    pub(crate) fn new_3(keys: u32) -> Self {
-        Self::K3(keys.to_ne_bytes().into_iter().take(3))
-    }
-
-    pub(crate) fn new_15(keys: u128) -> Self {
-        Self::K15(keys.to_ne_bytes().into_iter().take(15))
-    }
-
-    pub(crate) fn new_256() -> Self {
-        Self::K256(0..=255u8)
-    }
-}
-
-impl Iterator for KeyIter {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            KeyIter::K3(iter) => iter.next(),
-            KeyIter::K15(iter) => iter.next(),
-            KeyIter::K256(iter) => iter.next(),
-        }
-    }
-}
+pub(crate) type SortedIter<'a> = Or<linear::SortedIter<'a>, node256::Iter<'a>>;
+pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;

@@ -6,11 +6,8 @@ use ribbit::u4;
 
 use crate::node;
 use crate::node::linear;
-use crate::node::Edge;
 use crate::node::Node256;
 use crate::node::Node3;
-
-use super::linear::Header as _;
 
 pub(crate) type Node15 = super::Linear<15, Atomic128<Header>>;
 
@@ -85,16 +82,14 @@ impl linear::Header for Atomic128<Header> {
         }
     }
 
-    fn keys(&self) -> super::KeyIter {
-        super::KeyIter::new_15(self.load_packed(Ordering::Relaxed).value)
+    fn keys_sorted(&self) -> linear::SortedKeyIter {
+        let header = self.load_packed(Ordering::Relaxed);
+        linear::SortedKeyIter::new_15(header.value, header.len().value() as usize)
     }
-}
 
-impl<'a> IntoIterator for &'a Node15 {
-    type Item = (u8, &'a Atomic128<Edge>);
-    type IntoIter = super::Iter<'a>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.header.keys().zip(self.edges.as_slice().iter())
+    fn keys_unsorted(&self) -> linear::UnsortedKeyIter {
+        let header = self.load_packed(Ordering::Relaxed);
+        linear::UnsortedKeyIter::new_15(header.value, header.len().value() as usize)
     }
 }
 
@@ -130,7 +125,7 @@ fn get(array: u128, key: u8) -> u8 {
 #[inline]
 #[cfg(not(feature = "opt-node15-get"))]
 fn get(array: u128, key: u8) -> u8 {
-    super::KeyIter::new_15(array)
+    linear::UnsortedKeyIter::new_15(array, 15)
         .position(|byte| byte == key)
         .map(|index| index as u8)
         .unwrap_or(u8::MAX)

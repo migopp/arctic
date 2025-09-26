@@ -189,14 +189,14 @@ pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn next(&mut self) -> Option<u8>;
 }
 
-pub(crate) trait Stack: core::fmt::Debug + Default {
+pub(crate) trait Stack: Clone + core::fmt::Debug + Default {
     fn push_array(&mut self, array: ribbit::Packed<Array>);
     fn push_byte(&mut self, byte: u8);
 
     fn pop(&mut self, count: usize);
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Ignore;
 
 impl Stack for Ignore {

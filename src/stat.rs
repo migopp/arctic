@@ -42,7 +42,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
                 node::Ref::Node256(_) => &mut node_256,
             };
 
-            let children = unsafe { node.iter() }
+            let children = unsafe { node.iter_unsorted() }
                 .filter(|(_, edge)| {
                     let edge = edge.load(Ordering::Relaxed);
                     !matches!(edge.meta.kind, node::Kind::None)

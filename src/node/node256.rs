@@ -50,9 +50,9 @@ impl Node for Node256 {
 
 impl<'a> IntoIterator for &'a Node256 {
     type Item = (u8, &'a Atomic128<Edge>);
-    type IntoIter = node::Iter<'a>;
+    type IntoIter = Iter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        super::KeyIter::new_256().zip(self.0.as_slice().iter())
+        (0u8..=255u8).zip(self.0.as_slice().iter())
     }
 }
 
@@ -63,3 +63,6 @@ impl node::Info for Node256 {
     type Grow = Node256;
     type Shrink = Node15;
 }
+
+pub(crate) type Iter<'a> =
+    core::iter::Zip<core::ops::RangeInclusive<u8>, core::slice::Iter<'a, Atomic128<Edge>>>;

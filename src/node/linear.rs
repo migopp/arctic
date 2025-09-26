@@ -67,7 +67,7 @@ where
         let mut len = 0;
 
         core::iter::zip(
-            self.header.keys(),
+            self.header.keys_unsorted(),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
@@ -116,10 +116,100 @@ where
     }
 }
 
+#[expect(private_bounds)]
+impl<const LEN: usize, H: Header> Linear<LEN, H> {
+    pub(super) fn iter_sorted(&self) -> SortedIter {
+        SortedIter {
+            keys: self.header.keys_sorted(),
+            edges: self.edges.as_slice(),
+        }
+    }
+
+    pub(super) fn iter_unsorted(&self) -> UnsortedIter {
+        self.header.keys_unsorted().zip(self.edges.as_slice())
+    }
+}
+
 pub(super) trait Header {
     fn is_frozen(&self) -> bool;
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
-    fn keys(&self) -> super::KeyIter;
+
+    fn keys_sorted(&self) -> SortedKeyIter;
+    fn keys_unsorted(&self) -> UnsortedKeyIter;
+}
+
+pub(crate) struct SortedIter<'a> {
+    keys: SortedKeyIter,
+    edges: &'a [Atomic128<Edge>],
+}
+
+impl<'a> Iterator for SortedIter<'a> {
+    type Item = (u8, &'a Atomic128<Edge>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, index) = self.keys.next()?;
+        self.edges.get(index as usize).map(|edge| (key, edge))
+    }
+}
+
+pub(crate) type UnsortedIter<'a> =
+    core::iter::Zip<UnsortedKeyIter, core::slice::Iter<'a, Atomic128<Edge>>>;
+
+pub(crate) enum SortedKeyIter {
+    K3(core::iter::Take<core::array::IntoIter<(u8, u8), 3>>),
+    K15(core::iter::Take<core::array::IntoIter<(u8, u8), 15>>),
+}
+
+impl SortedKeyIter {
+    pub(crate) fn new_3(keys: u32, len: usize) -> Self {
+        let keys = keys.to_ne_bytes();
+        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes[..len].sort_unstable();
+        Self::K3(indexes.into_iter().take(len))
+    }
+
+    pub(crate) fn new_15(keys: u128, len: usize) -> Self {
+        let keys = keys.to_ne_bytes();
+        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes[..len].sort_unstable();
+        Self::K15(indexes.into_iter().take(len))
+    }
+}
+
+impl Iterator for SortedKeyIter {
+    type Item = (u8, u8);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SortedKeyIter::K3(iter) => iter.next(),
+            SortedKeyIter::K15(iter) => iter.next(),
+        }
+    }
+}
+
+pub(crate) enum UnsortedKeyIter {
+    K3(core::iter::Take<core::array::IntoIter<u8, 4>>),
+    K15(core::iter::Take<core::array::IntoIter<u8, 16>>),
+}
+
+impl UnsortedKeyIter {
+    pub(crate) fn new_3(keys: u32, len: usize) -> Self {
+        Self::K3(keys.to_ne_bytes().into_iter().take(len))
+    }
+
+    pub(crate) fn new_15(keys: u128, len: usize) -> Self {
+        Self::K15(keys.to_ne_bytes().into_iter().take(len))
+    }
+}
+
+impl Iterator for UnsortedKeyIter {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::K3(iter) => iter.next(),
+            Self::K15(iter) => iter.next(),
+        }
+    }
 }

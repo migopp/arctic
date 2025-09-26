@@ -56,6 +56,63 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
             _value: PhantomData,
         }
     }
+
+    pub fn iter_ref(&mut self) -> Iter<K, V> {
+        Iter {
+            inner: self.raw.preorder(),
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+}
+
+pub struct Iter<'a, K: Key + ?Sized, V> {
+    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    _key: PhantomData<K>,
+    _value: PhantomData<V>,
+}
+
+impl<'a, K: Key + ?Sized, V: Value> Iter<'a, K, V> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Option<(&K::Stack, V)> {
+        self.inner
+            .next()
+            .map(|(key, value)| (key, V::from_u64(value)))
+    }
+}
+
+impl<K, V> Map<K, V>
+where
+    K: Key + for<'s> From<&'s K::Stack>,
+    V: Value,
+{
+    pub fn iter(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
+        EntryIter {
+            inner: self.raw.preorder(),
+            _key: PhantomData,
+            _value: PhantomData,
+        }
+    }
+}
+
+pub struct EntryIter<'a, K: Key, V> {
+    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    _key: PhantomData<K>,
+    _value: PhantomData<V>,
+}
+
+impl<'a, K, V> Iterator for EntryIter<'a, K, V>
+where
+    K: Key,
+    K: for<'s> From<&'s K::Stack>,
+    V: Value,
+{
+    type Item = (K, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(key, value)| (K::from(key), V::from_u64(value)))
+    }
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
@@ -216,6 +273,43 @@ impl Value for () {
     }
 }
 
+#[derive(Debug)]
+enum Or<L, R> {
+    L(L),
+    R(R),
+}
+
+impl<L, R, T> Iterator for Or<L, R>
+where
+    L: Iterator<Item = T>,
+    R: Iterator<Item = T>,
+{
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Or::L(left) => left.next(),
+            Or::R(right) => right.next(),
+        }
+    }
+}
+
+impl<L, R> Or<L, R>
+where
+    L: Iterator,
+    R: Iterator,
+{
+    fn skip(&mut self) {
+        match self {
+            Or::L(left) => {
+                left.next();
+            }
+            Or::R(right) => {
+                right.next();
+            }
+        }
+    }
+}
+
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
 #[cold]
@@ -290,20 +384,21 @@ mod tests {
 
     #[test]
     fn node3_overwrite() {
-        let map = Map::default();
-        let mut map = map.pin();
+        let mut map = Map::default();
+        let mut pin = map.pin();
 
         for value in [1, 2, 3] {
-            map.insert(&1u8, value);
-            assert_eq!(map.get(&1), Some(value));
+            pin.insert(&1u8, value);
+            assert_eq!(pin.get(&1), Some(value));
         }
 
-        // assert_eq!(map.iter().count(), 1);
-        //
-        // map.iter().for_each(|(key, value)| {
-        //     assert_eq!(key, 1);
-        //     assert_eq!(value, 3);
-        // });
+        drop(pin);
+        assert_eq!(map.iter().count(), 1);
+
+        map.iter().for_each(|(key, value)| {
+            assert_eq!(key, 1);
+            assert_eq!(value, 3);
+        });
     }
 
     #[test]
@@ -350,14 +445,15 @@ mod tests {
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
+        K::Stack: PartialEq<K>,
     {
-        let keys = iter
+        let mut keys = iter
             .into_iter()
             .enumerate()
             .map(|(index, key)| (key, index as u32))
             .collect::<Vec<_>>();
 
-        let map = Map::default();
+        let mut map = Map::default();
         let mut pin = map.pin();
 
         for (key, value) in &keys {
@@ -369,20 +465,26 @@ mod tests {
             assert_eq!(pin.get(key), Some(*value));
         }
 
-        // assert_eq!(map.iter().count(), keys.clone().count());
-        //
-        // let mut sorted = keys.collect::<Vec<_>>();
-        // sorted.sort_by(|(l, _), (r, _)| l.cmp(r));
-        //
-        // sorted
-        //     .into_iter()
-        //     .zip(map.iter())
-        //     .for_each(|((lk, lv), (rk, rv))| {
-        //         assert_eq!(lk, rk);
-        //         assert_eq!(lv, rv);
-        //     });
-
         drop(pin);
+
+        let mut iter = map.iter_ref();
+        let mut count = 0;
+        while iter.next().is_some() {
+            count += 1;
+        }
+
+        assert_eq!(count, keys.len());
+
+        keys.sort_by(|(l, _), (r, _)| l.cmp(r));
+
+        let mut iter = map.iter_ref();
+        let mut keys = keys.into_iter();
+
+        while let Some(((lk, lv), (rk, rv))) = iter.next().zip(keys.next()) {
+            assert_eq!(*lk, rk);
+            assert_eq!(lv, rv);
+        }
+
         map
     }
 }
