@@ -1,8 +1,9 @@
 pub(crate) mod iter;
 
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
 use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
@@ -12,6 +13,7 @@ use crate::cursor::Cursor;
 use crate::cursor::Op;
 use crate::edge;
 use crate::node;
+use crate::sequential;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
@@ -19,7 +21,7 @@ use crate::Edge;
 #[derive(Default)]
 pub(crate) struct Global {
     smr: smr::Global,
-    root: Atomic128<Edge>,
+    raw: sequential::Raw,
 }
 
 impl Global {
@@ -27,7 +29,7 @@ impl Global {
     pub(crate) fn pin(&self) -> Local {
         Local {
             smr: self.smr.pin(),
-            root: &self.root,
+            raw: &self.raw,
         }
     }
 
@@ -48,15 +50,24 @@ impl Global {
     // pub fn values(&mut self) -> impl Iterator<Item = u64> + '_ {
     //     self.iter().map(|(_, value)| value)
     // }
+}
 
-    pub(crate) fn preorder<K: byte::Stack, S: iter::Selector>(&mut self) -> iter::EntryIter<K, S> {
-        iter::EntryIter::new(&mut self.root)
+impl Deref for Global {
+    type Target = sequential::Raw;
+    fn deref(&self) -> &Self::Target {
+        &self.raw
+    }
+}
+
+impl DerefMut for Global {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.raw
     }
 }
 
 pub(crate) struct Local<'a> {
     smr: smr::Local<'a>,
-    root: &'a Atomic128<Edge>,
+    raw: &'a sequential::Raw,
 }
 
 impl Local<'_> {
@@ -92,7 +103,7 @@ impl Local<'_> {
     ) -> Result<Option<u64>, P::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
 
-        let mut cursor = Cursor::<K, P>::new(key.clone(), self.root);
+        let mut cursor = Cursor::<K, P>::new(key.clone(), self.raw.root());
 
         loop {
             let (op, old, new) = cursor.traverse_or_insert(value);
@@ -171,7 +182,7 @@ impl Local<'_> {
     pub(crate) fn get<K: byte::Iterator>(&self, key: K) -> Option<u64> {
         let _guard = self.smr.protect_read(key.peek_all());
 
-        let mut root = self.root;
+        let mut root = self.raw.root();
         let mut key = key;
         loop {
             let edge = root.load_packed(Ordering::Relaxed);
@@ -197,7 +208,7 @@ impl Local<'_> {
     pub(crate) fn remove<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
         let _guard = self.smr.protect_write(key.peek_all());
 
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
         let mut old = cursor.traverse_exact()?;
 
         loop {
@@ -233,7 +244,7 @@ impl Local<'_> {
     pub(crate) fn update<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         let _guard = self.smr.protect_write(key.peek_all());
 
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.root);
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
         let mut old = cursor.traverse_exact()?;
 
         loop {

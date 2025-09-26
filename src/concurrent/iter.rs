@@ -20,7 +20,7 @@ type RootIter<'a> = iter::Peekable<iter::Once<(bool, &'a Atomic128<Edge>)>>;
 type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::SortedIter<'a>>>;
 
 impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
-    pub(super) fn new(root: &'a mut Atomic128<Edge>) -> Self {
+    pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,

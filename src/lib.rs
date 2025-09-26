@@ -21,6 +21,7 @@ mod edge;
 #[cfg(feature = "smr-hazard")]
 mod membarrier;
 mod node;
+mod sequential;
 mod smr;
 pub mod stat;
 
