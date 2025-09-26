@@ -15,16 +15,16 @@ macro_rules! validate_eq {
 }
 
 mod byte;
+mod concurrent;
 mod cursor;
 mod edge;
 #[cfg(feature = "smr-hazard")]
 mod membarrier;
 mod node;
-mod raw;
 mod smr;
 pub mod stat;
 
-pub(crate) use raw::Raw;
+pub(crate) use concurrent::Raw;
 
 use core::marker::PhantomData;
 
@@ -67,7 +67,7 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 }
 
 pub struct Iter<'a, K: Key + ?Sized, V> {
-    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    inner: concurrent::iter::EntryIter<'a, K::Stack, concurrent::iter::SelectLeaf>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -96,7 +96,7 @@ where
 }
 
 pub struct EntryIter<'a, K: Key, V> {
-    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    inner: concurrent::iter::EntryIter<'a, K::Stack, concurrent::iter::SelectLeaf>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -116,7 +116,7 @@ where
 }
 
 pub struct MapRef<'a, K: ?Sized, V> {
-    raw: raw::Ref<'a>,
+    raw: concurrent::Ref<'a>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
