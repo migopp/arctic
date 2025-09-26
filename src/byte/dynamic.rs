@@ -1,3 +1,4 @@
+use byte::fixed::Fixed;
 use ribbit::u3;
 use ribbit::Unpack as _;
 
@@ -7,7 +8,7 @@ use crate::byte;
 pub enum Iter<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(byte::fixed::Iter),
+    Small(Fixed),
 }
 
 impl<'a> From<&'a [u8]> for Iter<'a> {
@@ -18,10 +19,7 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(byte::fixed::Iter::new(
-                    u64::from_ne_bytes(buffer),
-                    len as u8,
-                ))
+                Self::Small(Fixed::new(u64::from_ne_bytes(buffer), len as u8))
             }
         }
     }
@@ -30,7 +28,7 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
 impl Default for Iter<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(byte::fixed::Iter::default())
+        Self::Small(Fixed::default())
     }
 }
 
@@ -80,7 +78,7 @@ impl byte::Iterator for Iter<'_> {
                 };
                 let buffer = buffer >> ((8 - after) << 3);
 
-                *self = Self::Small(byte::fixed::Iter::new(buffer, after as u8));
+                *self = Self::Small(Fixed::new(buffer, after as u8));
                 array
             }
             Iter::Small(small) => small.take(len),
@@ -98,7 +96,7 @@ impl byte::Iterator for Iter<'_> {
                 *self = if large.len() - 1 > 8 {
                     Self::Large(&large[1..])
                 } else {
-                    Self::Small(byte::fixed::Iter::new(
+                    Self::Small(Fixed::new(
                         unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() },
                         8,
                     ))

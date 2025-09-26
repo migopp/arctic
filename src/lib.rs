@@ -179,20 +179,20 @@ pub trait Key {
 }
 
 impl Key for u8 {
-    type Iter<'a> = byte::fixed::Iter;
-    type Stack = byte::fixed::Iter;
+    type Iter<'a> = byte::Fixed;
+    type Stack = byte::Fixed;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::fixed::Iter::from(*self)
+        byte::Fixed::from(*self)
     }
 }
 
 impl Key for u64 {
-    type Iter<'a> = byte::fixed::Iter;
-    type Stack = byte::fixed::Iter;
+    type Iter<'a> = byte::Fixed;
+    type Stack = byte::Fixed;
     #[inline]
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        byte::fixed::Iter::from(*self)
+        byte::Fixed::from(*self)
     }
 }
 

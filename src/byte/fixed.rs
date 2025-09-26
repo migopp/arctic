@@ -3,12 +3,12 @@ use ribbit::u3;
 use crate::byte;
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Iter {
+pub struct Fixed {
     buffer: u64,
     len: u8,
 }
 
-impl Iter {
+impl Fixed {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
         validate!(len <= 8);
@@ -17,7 +17,7 @@ impl Iter {
     }
 }
 
-impl byte::Iterator for Iter {
+impl byte::Iterator for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -50,7 +50,7 @@ impl byte::Iterator for Iter {
     }
 }
 
-impl byte::Stack for Iter {
+impl byte::Stack for Fixed {
     #[inline]
     fn push_array(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len().value() <= 8);
@@ -73,10 +73,10 @@ impl byte::Stack for Iter {
     }
 }
 
-macro_rules! impl_from {
+macro_rules! impl_unsigned_int {
     ($($from:ty: $len:expr),* $(,)?) => {
         $(
-            impl From<$from> for Iter {
+            impl From<$from> for Fixed {
                 #[inline]
                 fn from(value: $from) -> Self {
                     Self {
@@ -90,9 +90,9 @@ macro_rules! impl_from {
                 }
             }
 
-            impl From<&'_ Iter> for $from {
+            impl From<&'_ Fixed> for $from {
                 #[inline]
-                fn from(iter: &Iter) -> Self {
+                fn from(iter: &Fixed) -> Self {
                     validate_eq!(iter.len, $len);
                     let value = (iter.buffer as $from);
                     if cfg!(target_endian = "little") {
@@ -103,7 +103,7 @@ macro_rules! impl_from {
                 }
             }
 
-            impl PartialEq<$from> for Iter {
+            impl PartialEq<$from> for Fixed {
                 fn eq(&self, value: &$from) -> bool {
                     <$from>::from(self) == *value
                 }
@@ -112,7 +112,7 @@ macro_rules! impl_from {
     };
 }
 
-impl_from!(
+impl_unsigned_int!(
     u8: 1,
     u16: 2,
     u32: 4,

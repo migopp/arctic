@@ -9,7 +9,8 @@ use ribbit::u3;
 use ribbit::u56;
 
 pub(crate) mod dynamic;
-pub(crate) mod fixed;
+mod fixed;
+pub(crate) use fixed::Fixed;
 
 /// Immutable fixed-size array of up to 7 bytes.
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
