@@ -56,7 +56,7 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 
     pub fn iter_ref(&mut self) -> Iter<K, V> {
         Iter {
-            inner: self.raw.preorder(),
+            inner: self.raw.iter(),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -64,7 +64,7 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
 }
 
 pub struct Iter<'a, K: Key + ?Sized, V> {
-    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -85,7 +85,7 @@ where
 {
     pub fn iter(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
         EntryIter {
-            inner: self.raw.preorder(),
+            inner: self.raw.iter(),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -93,7 +93,7 @@ where
 }
 
 pub struct EntryIter<'a, K: Key, V> {
-    inner: raw::iter::EntryIter<'a, K::Stack, raw::iter::SelectLeaf>,
+    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }

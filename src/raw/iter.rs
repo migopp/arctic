@@ -1,6 +1,5 @@
 use core::iter;
 use core::marker::PhantomData;
-use core::mem;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -10,21 +9,23 @@ use crate::node;
 use crate::Edge;
 use crate::Or;
 
-pub struct EntryIter<'a, K, S> {
+pub struct Iter<'a, K, S, O> {
     key: K,
     _select: PhantomData<S>,
+    _order: PhantomData<O>,
     frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a>>)>,
 }
 
-type RootIter<'a> = iter::Peekable<iter::Once<(bool, &'a Atomic128<Edge>)>>;
-type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<bool>, node::SortedIter<'a>>>;
+type RootIter<'a> = iter::Peekable<iter::Once<(Visit, &'a Atomic128<Edge>)>>;
+type NodeIter<'a> = iter::Peekable<iter::Zip<iter::Repeat<Visit>, node::SortedIter<'a>>>;
 
-impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
+impl<'a, K: byte::Stack, S: Selector, O: Order> Iter<'a, K, S, O> {
     pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,
-            frontier: vec![(0, Or::L(iter::once((true, &*root)).peekable()))],
+            _order: PhantomData,
+            frontier: vec![(0, Or::L(iter::once((O::START, &*root)).peekable()))],
         }
     }
 
@@ -38,13 +39,15 @@ impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
             let (len, iter) = self.frontier.last_mut()?;
 
             'horizontal: loop {
-                let Some((emit, byte, edge)) = (match iter {
-                    Or::L(iter_root) => iter_root.peek_mut().map(|(emit, edge)| (emit, None, edge)),
+                let Some((visit, byte, edge)) = (match iter {
+                    Or::L(iter_root) => iter_root
+                        .peek_mut()
+                        .map(|(visit, edge)| (visit, None, edge)),
                     Or::R(iter_node) => iter_node
                         .peek_mut()
-                        .map(|(emit, (key, edge))| (emit, Some(*key), edge)),
+                        .map(|(visit, (key, edge))| (visit, Some(*key), edge)),
                 }) else {
-                    self.key.pop(*len);
+                    self.key.truncate(*len);
                     self.frontier.pop();
                     continue 'vertical;
                 };
@@ -58,39 +61,39 @@ impl<'a, K: byte::Stack, S: Selector> EntryIter<'a, K, S> {
                     continue 'horizontal;
                 }
 
-                let key = meta.key();
-
-                // First time seeing edge
-                if mem::replace(emit, false) {
+                // First visit
+                if *visit == O::START {
                     if let Some(byte) = byte {
                         self.key.push(byte);
                     }
 
-                    let key = meta.key();
-                    self.key.extend(key);
-
-                    if let Some(item) = S::select(depth, edge) {
-                        return Some((&self.key, item));
-                    }
+                    self.key.extend(meta.key());
                 }
 
-                // Second time seeing edge
-                iter.skip();
-                let len = byte::Array::len(key) + byte.is_some() as usize;
-                if kind == node::Kind::LEAF {
-                    self.key.pop(len);
-                    continue 'horizontal;
-                } else {
-                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                    self.frontier.push((
-                        len,
-                        Or::R(
-                            iter::repeat(true)
-                                .zip(unsafe { node.iter_sorted() })
-                                .peekable(),
-                        ),
-                    ));
-                    continue 'vertical;
+                match O::step(visit) {
+                    Visit::Yield => {
+                        if let Some(item) = S::select(depth, edge) {
+                            return Some((&self.key, item));
+                        }
+                    }
+                    Visit::Descend if kind >= node::Kind::NODE_3 => {
+                        let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                        self.frontier.push((
+                            self.key.len(),
+                            Or::R(
+                                iter::repeat(O::START)
+                                    .zip(unsafe { node.iter_sorted() })
+                                    .peekable(),
+                            ),
+                        ));
+                        continue 'vertical;
+                    }
+                    Visit::Descend => (),
+                    Visit::Done => {
+                        self.key.truncate(*len);
+                        iter.skip();
+                        continue 'horizontal;
+                    }
                 }
             }
         }
@@ -113,6 +116,17 @@ impl Selector for SelectLeaf {
     }
 }
 
+pub(crate) struct SelectNode;
+
+impl Selector for SelectNode {
+    type Item = ribbit::Packed<Edge>;
+
+    #[inline]
+    fn select(_: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
+        (edge.meta().kind() >= node::Kind::NODE_3).then_some(edge)
+    }
+}
+
 pub(crate) struct SelectAll;
 
 impl Selector for SelectAll {
@@ -122,4 +136,46 @@ impl Selector for SelectAll {
     fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
         Some((depth, edge))
     }
+}
+
+pub(crate) trait Order {
+    const START: Visit;
+    fn step(state: &mut Visit) -> Visit;
+}
+
+pub(crate) struct Preorder;
+
+impl Order for Preorder {
+    const START: Visit = Visit::Yield;
+    fn step(state: &mut Visit) -> Visit {
+        let visit = *state;
+        *state = match state {
+            Visit::Yield => Visit::Descend,
+            Visit::Descend => Visit::Done,
+            Visit::Done => Visit::Done,
+        };
+        visit
+    }
+}
+
+pub(crate) struct Postorder;
+
+impl Order for Postorder {
+    const START: Visit = Visit::Descend;
+    fn step(state: &mut Visit) -> Visit {
+        let visit = *state;
+        *state = match state {
+            Visit::Descend => Visit::Yield,
+            Visit::Yield => Visit::Done,
+            Visit::Done => Visit::Done,
+        };
+        visit
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum Visit {
+    Yield,
+    Descend,
+    Done,
 }

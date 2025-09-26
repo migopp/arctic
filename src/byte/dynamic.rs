@@ -111,19 +111,23 @@ impl byte::Iterator for Iter<'_> {
 
 impl byte::Stack for Vec<u8> {
     #[inline]
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         core::iter::Extend::extend(self, array.unpack().bytes());
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        self.push(byte);
+        Vec::push(self, byte)
     }
 
     #[inline]
-    fn pop(&mut self, count: usize) {
-        validate!(self.len() >= count);
-        self.truncate(self.len() - count);
+    fn truncate(&mut self, len: usize) {
+        Vec::truncate(self, len)
     }
 }
 

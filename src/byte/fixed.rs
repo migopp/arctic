@@ -52,6 +52,11 @@ impl byte::Iterator for Fixed {
 
 impl byte::Stack for Fixed {
     #[inline]
+    fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len().value() <= 8);
         self.buffer |= array.buffer().value() << (self.len << 3);
@@ -66,10 +71,11 @@ impl byte::Stack for Fixed {
     }
 
     #[inline]
-    fn pop(&mut self, count: usize) {
-        validate!(self.len as usize >= count);
-        self.len -= count as u8;
-        self.buffer &= (1u64 << (self.len << 3)) - 1;
+    fn truncate(&mut self, len: usize) {
+        validate!(self.len as usize >= len);
+        validate!(len <= 8);
+        self.buffer &= 1u64.unbounded_shl((len << 3) as u32).wrapping_sub(1);
+        self.len = len as u8;
     }
 }
 

@@ -20,7 +20,9 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
     let mut node_15 = Histogram::new();
     let mut node_256 = Histogram::new();
 
-    let mut entries = map.raw.preorder::<byte::Ignore, raw::iter::SelectAll>();
+    let mut entries = map
+        .raw
+        .iter::<byte::Ignore, raw::iter::SelectAll, raw::iter::Preorder>();
     while let Some((byte::Ignore, (depth_, edge))) = entries.next() {
         let meta = edge.meta();
         let kind = meta.kind();
@@ -170,7 +172,6 @@ pub(crate) enum Counter {
     FreeConflict,
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     FreeRetire,
-    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     FreeDrop,
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     HazardMatch,
