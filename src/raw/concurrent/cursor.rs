@@ -11,30 +11,25 @@ use crate::byte;
 use crate::edge;
 use crate::node;
 use crate::node::Node3;
+use crate::raw::Op;
 use crate::Edge;
 
 /// Stateful traversal over tree.
-pub(crate) struct Cursor<'a, K, P> {
+pub(crate) struct Cursor<'a, K, H> {
     key: K,
     index: usize,
     root: &'a Atomic128<Edge>,
-    history: P,
+    history: H,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Op {
-    Node(node::Op),
-    Edge(edge::Op),
-}
-
-impl<'a, K: byte::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
+impl<'a, K: byte::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     #[inline]
     pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
             key: key.clone(),
             index: 0,
             root,
-            history: P::default(),
+            history: H::default(),
         }
     }
 
@@ -167,7 +162,7 @@ impl<'a, K: byte::Iterator, P: History<'a, K>> Cursor<'a, K, P> {
     }
 
     #[cold]
-    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, P::PopError> {
+    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.index -= segment.len.value() as usize + 1;
         self.key = segment.key;

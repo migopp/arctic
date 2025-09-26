@@ -1,3 +1,5 @@
+mod cursor;
+
 use core::ops::Deref;
 use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
@@ -6,15 +8,14 @@ use ribbit::Pack as _;
 use ribbit::Unpack as _;
 
 use crate::byte;
-use crate::cursor;
-use crate::cursor::Cursor;
-use crate::cursor::Op;
 use crate::edge;
 use crate::node;
 use crate::raw::sequential;
+use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
+use cursor::Cursor;
 
 #[derive(Default)]
 pub(crate) struct Map {
@@ -147,12 +148,12 @@ impl MapRef<'_> {
         guard: &mut smr::WriteGuard,
         key: &K,
         cursor: &Cursor<'a, K, P>,
-        op: cursor::Op,
+        op: Op,
         edge: ribbit::Packed<Edge>,
     ) {
         match op {
-            cursor::Op::Edge(_) => return,
-            cursor::Op::Node(_) => (),
+            Op::Edge(_) => return,
+            Op::Node(_) => (),
         }
 
         let index = cursor.index();
@@ -164,13 +165,13 @@ impl MapRef<'_> {
     }
 
     #[cold]
-    unsafe fn deallocate(op: cursor::Op, edge: ribbit::Packed<Edge>) {
+    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge>) {
         match op {
-            cursor::Op::Node(node::Op::Destroy | node::Op::Compress)
-            | cursor::Op::Edge(edge::Op::Insert | edge::Op::Remove) => return,
+            Op::Node(node::Op::Destroy | node::Op::Compress)
+            | Op::Edge(edge::Op::Insert | edge::Op::Remove) => return,
 
-            cursor::Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-            | cursor::Op::Edge(edge::Op::Create | edge::Op::Expand) => (),
+            Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
+            | Op::Edge(edge::Op::Create | edge::Op::Expand) => (),
         }
 
         unsafe { Edge::deallocate(edge, stat::Counter::FreeConflict) }

@@ -15,7 +15,6 @@ macro_rules! validate_eq {
 }
 
 mod byte;
-mod cursor;
 mod edge;
 mod node;
 mod raw;

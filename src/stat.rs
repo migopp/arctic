@@ -2,7 +2,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::byte;
-use crate::cursor;
 use crate::edge;
 use crate::node;
 use crate::raw;
@@ -163,7 +162,7 @@ impl From<Histogram> for Distribution {
 
 #[cfg_attr(not(feature = "stat"), expect(dead_code))]
 pub(crate) enum Counter {
-    Op(cursor::Op),
+    Op(raw::Op),
     InsertPessimistic,
     Retire,
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
@@ -182,8 +181,8 @@ pub(crate) enum Max {
     RetireCache,
 }
 
-impl From<cursor::Op> for Counter {
-    fn from(op: cursor::Op) -> Self {
+impl From<raw::Op> for Counter {
+    fn from(op: raw::Op) -> Self {
         Self::Op(op)
     }
 }
@@ -266,16 +265,16 @@ impl Thread {
         self.edge.remove.set(0);
     }
 
-    fn op(&self, op: cursor::Op) -> &core::cell::Cell<u64> {
+    fn op(&self, op: raw::Op) -> &core::cell::Cell<u64> {
         match op {
-            cursor::Op::Node(op) => match op {
+            raw::Op::Node(op) => match op {
                 crate::node::Op::Shrink => &self.node.shrink,
                 crate::node::Op::Replace => &self.node.replace,
                 crate::node::Op::Grow => &self.node.grow,
                 crate::node::Op::Destroy => &self.node.destroy,
                 crate::node::Op::Compress => &self.node.compress,
             },
-            cursor::Op::Edge(op) => match op {
+            raw::Op::Edge(op) => match op {
                 crate::edge::Op::Create => &self.edge.create,
                 crate::edge::Op::Expand => &self.edge.expand,
                 crate::edge::Op::Insert => &self.edge.insert,
