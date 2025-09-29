@@ -137,22 +137,24 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 continue;
             }
 
+            // Revert key to before the current edge
+            self.key = save;
+
             let (op, new) = match r#match {
                 byte::Match::Full(_) => {
                     if kind >= node::Kind::NODE_3 {
-                        self.key = save;
                         let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
                         self.freeze(guard, Some(node))?;
                         continue;
                     } else if kind == node::Kind::NONE
-                        && save.len() > byte::Array::MAX_LEN.value() as usize
+                        && self.key.len() > byte::Array::MAX_LEN.value() as usize
                     {
                         (
                             edge::Op::Create,
-                            Edge::new_node::<Node3, _>(save.peek_all(), None),
+                            Edge::new_node::<Node3, _>(self.key.peek_all(), None),
                         )
                     } else {
-                        (edge::Op::Insert, Edge::new_leaf(save.peek_all(), value))
+                        (edge::Op::Insert, Edge::new_leaf(self.key.peek_all(), value))
                     }
                 }
                 byte::Match::Partial { start, middle, end } => (
@@ -167,8 +169,6 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 ),
             };
 
-            // Revert key to before the current edge
-            self.key = save;
             return Ok((op, old, new));
         }
     }
