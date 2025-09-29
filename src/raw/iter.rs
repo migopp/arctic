@@ -21,7 +21,7 @@ where
 
 impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
     #[inline]
-    pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,

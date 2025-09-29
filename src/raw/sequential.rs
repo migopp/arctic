@@ -16,34 +16,34 @@ impl Map {
         &self.root
     }
 
-    #[expect(dead_code, unused_variables)]
+    #[expect(unused_variables)]
     #[inline]
     pub(crate) fn get<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
         todo!()
     }
 
-    #[expect(dead_code, unused_variables)]
+    #[expect(unused_variables)]
     #[inline]
     pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         todo!()
     }
 
-    #[expect(dead_code, unused_variables)]
+    #[expect(unused_variables)]
     #[inline]
     pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
         todo!()
     }
 
-    #[expect(dead_code, unused_variables)]
+    #[expect(unused_variables)]
     #[inline]
     pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         todo!()
     }
 
     pub(crate) fn iter<'a, K: key::Stack, V: iter::Selector, O: iter::Order, S: iter::Sort<'a>>(
-        &'a mut self,
+        &'a self,
     ) -> iter::Iter<'a, K, V, O, S> {
-        iter::Iter::new(&mut self.root)
+        unsafe { iter::Iter::new(&self.root) }
     }
 }
 
