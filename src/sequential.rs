@@ -29,7 +29,7 @@ impl<K: ?Sized, V> Map<K, V> {
 }
 
 impl<K: ?Sized + Key, V: Value> Map<K, V> {
-    pub fn get(&mut self, key: &K) -> Option<V> {
+    pub fn get(&self, key: &K) -> Option<V> {
         self.raw.get(key.iter()).map(V::from_u64)
     }
 
