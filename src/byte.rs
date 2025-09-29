@@ -122,9 +122,9 @@ impl Array {
                     parent
                         .value
                         .value()
+                        .bitand(Self::MASK)
                         .bitor((byte as u64) << bit)
-                        .bitor(child.value.value() << (bit + 8))
-                        .bitand(Self::MASK),
+                        .bitor(child.value.value() << (bit + 8)),
                 )
             },
             unsafe { u3::new_unchecked(len as u8) },
