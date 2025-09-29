@@ -227,23 +227,6 @@ where
     }
 }
 
-impl<L, R> Or<L, R>
-where
-    L: Iterator,
-    R: Iterator,
-{
-    fn skip(&mut self) {
-        match self {
-            Or::L(left) => {
-                left.next();
-            }
-            Or::R(right) => {
-                right.next();
-            }
-        }
-    }
-}
-
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
 #[cold]

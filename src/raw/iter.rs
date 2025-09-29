@@ -7,33 +7,31 @@ use ribbit::atomic::Atomic128;
 use crate::key;
 use crate::node;
 use crate::Edge;
-use crate::Or;
 
 pub struct Iter<'a, K, V, O, S>
 where
-    S: Iterator,
+    S: Sort<'a>,
 {
     key: K,
     _select: PhantomData<V>,
     _order: PhantomData<O>,
     _sort: PhantomData<S>,
-    frontier: Vec<(usize, Or<RootIter<'a>, NodeIter<'a, S>>)>,
+    frontier: Vec<(usize, core::iter::Peekable<TreeIter<'a, S>>)>,
 }
 
-type RootIter<'a> = iter::Peekable<iter::Once<(Visit, &'a Atomic128<Edge>)>>;
-type NodeIter<'a, S> = iter::Peekable<iter::Zip<iter::Repeat<Visit>, S>>;
-
 impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
+    #[inline]
     pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),
             _select: PhantomData,
             _order: PhantomData,
             _sort: PhantomData,
-            frontier: vec![(0, Or::L(iter::once((O::START, &*root)).peekable()))],
+            frontier: vec![(0, TreeIter::from_root(root))],
         }
     }
 
+    #[inline]
     pub fn next(&mut self) -> Option<(&K, V::Item)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
@@ -44,57 +42,55 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
             let (len, iter) = self.frontier.last_mut()?;
 
             'horizontal: loop {
-                let Some((visit, byte, edge)) = (match iter {
-                    Or::L(iter_root) => iter_root
-                        .peek_mut()
-                        .map(|(visit, edge)| (visit, None, edge)),
-                    Or::R(iter_node) => iter_node
-                        .peek_mut()
-                        .map(|(visit, (key, edge))| (visit, Some(*key), edge)),
-                }) else {
+                let Some((visit, byte, edge)) = iter.peek_mut() else {
                     self.key.truncate(*len);
                     self.frontier.pop();
                     continue 'vertical;
                 };
 
-                let edge = edge.load_packed(Ordering::Relaxed);
+                let edge = *edge;
                 let meta = edge.meta();
                 let kind = meta.kind();
 
                 if kind == node::Kind::NONE {
-                    iter.skip();
+                    iter.next();
                     continue 'horizontal;
                 }
 
                 // First visit
-                if *visit == O::START {
+                if core::mem::take(visit) {
+                    self.key.truncate(*len);
+
                     if let Some(byte) = byte {
-                        self.key.push(byte);
+                        self.key.push(*byte);
                     }
 
                     self.key.extend(meta.key());
-                }
 
-                match O::step(visit) {
-                    Visit::Yield => {
+                    if O::PREORDER {
                         if let Some(item) = V::select(depth, edge) {
                             return Some((&self.key, item));
                         }
-                    }
-                    Visit::Descend if kind >= node::Kind::NODE_3 => {
+                    } else if kind >= node::Kind::NODE_3 {
                         let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                        self.frontier.push((
-                            self.key.len(),
-                            Or::R(iter::repeat(O::START).zip(S::new(node)).peekable()),
-                        ));
+                        self.frontier
+                            .push((self.key.len(), TreeIter::from_node(node)));
                         continue 'vertical;
                     }
-                    Visit::Descend => (),
-                    Visit::Done => {
-                        self.key.truncate(*len);
-                        iter.skip();
-                        continue 'horizontal;
+                }
+
+                // Second visit (or fallthrough)
+                iter.next();
+
+                if !O::PREORDER {
+                    if let Some(item) = V::select(depth, edge) {
+                        return Some((&self.key, item));
                     }
+                } else if kind >= node::Kind::NODE_3 {
+                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    self.frontier
+                        .push((self.key.len(), TreeIter::from_node(node)));
+                    continue 'vertical;
                 }
             }
         }
@@ -140,45 +136,17 @@ impl Selector for SelectAll {
 }
 
 pub(crate) trait Order {
-    const START: Visit;
-    fn step(state: &mut Visit) -> Visit;
+    const PREORDER: bool;
 }
 
 pub(crate) struct Preorder;
-
 impl Order for Preorder {
-    const START: Visit = Visit::Yield;
-    fn step(state: &mut Visit) -> Visit {
-        let visit = *state;
-        *state = match state {
-            Visit::Yield => Visit::Descend,
-            Visit::Descend => Visit::Done,
-            Visit::Done => Visit::Done,
-        };
-        visit
-    }
+    const PREORDER: bool = true;
 }
 
 pub(crate) struct Postorder;
-
 impl Order for Postorder {
-    const START: Visit = Visit::Descend;
-    fn step(state: &mut Visit) -> Visit {
-        let visit = *state;
-        *state = match state {
-            Visit::Descend => Visit::Yield,
-            Visit::Yield => Visit::Done,
-            Visit::Done => Visit::Done,
-        };
-        visit
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) enum Visit {
-    Yield,
-    Descend,
-    Done,
+    const PREORDER: bool = false;
 }
 
 pub(crate) trait Sort<'a>: Iterator<Item = (u8, &'a Atomic128<Edge>)> {
@@ -186,13 +154,54 @@ pub(crate) trait Sort<'a>: Iterator<Item = (u8, &'a Atomic128<Edge>)> {
 }
 
 impl<'a> Sort<'a> for node::SortedIter<'a> {
+    #[inline]
     fn new(node: node::Ref) -> node::SortedIter {
         unsafe { node.iter_sorted() }
     }
 }
 
 impl<'a> Sort<'a> for node::UnsortedIter<'a> {
+    #[inline]
     fn new(node: node::Ref) -> node::UnsortedIter {
         unsafe { node.iter_unsorted() }
+    }
+}
+
+enum TreeIter<'a, N> {
+    Root(iter::Once<(bool, &'a Atomic128<Edge>)>),
+    Node(iter::Zip<iter::Repeat<bool>, N>),
+}
+
+impl<'a, N> TreeIter<'a, N>
+where
+    N: Sort<'a>,
+{
+    #[inline]
+    fn from_root(root: &'a Atomic128<Edge>) -> core::iter::Peekable<Self> {
+        Self::Root(core::iter::once((true, root))).peekable()
+    }
+
+    #[inline]
+    fn from_node(node: node::Ref<'a>) -> core::iter::Peekable<Self> {
+        Self::Node(iter::repeat(true).zip(N::new(node))).peekable()
+    }
+}
+
+impl<'a, S> Iterator for TreeIter<'a, S>
+where
+    S: Sort<'a>,
+{
+    type Item = (bool, Option<u8>, ribbit::Packed<Edge>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            TreeIter::Root(iter) => iter
+                .next()
+                .map(|(visit, edge)| (visit, None, edge.load_packed(Ordering::Acquire))),
+            TreeIter::Node(iter) => iter.next().map(|(visit, (byte, edge))| {
+                (visit, Some(byte), edge.load_packed(Ordering::Acquire))
+            }),
+        }
     }
 }
