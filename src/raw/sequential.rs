@@ -1,6 +1,6 @@
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
+use crate::key;
 use crate::node;
 use crate::raw::iter;
 use crate::stat;
@@ -18,29 +18,29 @@ impl Map {
 
     #[expect(dead_code, unused_variables)]
     #[inline]
-    pub(crate) fn get<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
         todo!()
     }
 
     #[expect(dead_code, unused_variables)]
     #[inline]
-    pub(crate) fn insert<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         todo!()
     }
 
     #[expect(dead_code, unused_variables)]
     #[inline]
-    pub(crate) fn remove<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
         todo!()
     }
 
     #[expect(dead_code, unused_variables)]
     #[inline]
-    pub(crate) fn update<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         todo!()
     }
 
-    pub(crate) fn iter<'a, K: byte::Stack, V: iter::Selector, O: iter::Order, S: iter::Sort<'a>>(
+    pub(crate) fn iter<'a, K: key::Stack, V: iter::Selector, O: iter::Order, S: iter::Sort<'a>>(
         &'a mut self,
     ) -> iter::Iter<'a, K, V, O, S> {
         iter::Iter::new(&mut self.root)
@@ -50,8 +50,8 @@ impl Map {
 impl Drop for Map {
     fn drop(&mut self) {
         let mut iter =
-            self.iter::<byte::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>();
-        while let Some((byte::Ignore, edge)) = iter.next() {
+            self.iter::<key::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>();
+        while let Some((key::Ignore, edge)) = iter.next() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
             }

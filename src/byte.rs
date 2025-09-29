@@ -8,19 +8,17 @@ use core::ops::Shr as _;
 use ribbit::u3;
 use ribbit::u56;
 
-pub(crate) mod dynamic;
-mod fixed;
-pub(crate) use fixed::Fixed;
+use crate::key;
 
 /// Immutable fixed-size array of up to 7 bytes.
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 #[ribbit::pack(size = 59, debug, eq)]
 pub(crate) struct Array {
     #[ribbit(size = 56)]
-    buffer: u56,
+    pub(crate) buffer: u56,
 
     #[ribbit(size = 3)]
-    len: u3,
+    pub(crate) len: u3,
 }
 
 impl Array {
@@ -35,7 +33,7 @@ impl Array {
     }
 
     #[inline]
-    fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
+    pub(crate) fn from_u64_truncate(array: u64, len: u3) -> ribbit::Packed<Self> {
         let bit = (len.value() as u64) << 3;
         let mask = (1u64 << bit) - 1;
         // SAFETY: `len` <= 7, so `array & mask` must be within 56 bytes
@@ -57,13 +55,16 @@ impl Array {
     }
 
     #[inline]
-    pub(crate) fn match_prefix<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Option<u3> {
+    pub(crate) fn match_prefix<K: key::Iterator>(
+        key: &mut K,
+        edge: ribbit::Packed<Self>,
+    ) -> Option<u3> {
         let len = Self::min_len(key.len(), edge.len());
         (key.take(len) == edge).then_some(len)
     }
 
     #[inline]
-    pub(crate) fn match_split<K: Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Match {
+    pub(crate) fn match_split<K: key::Iterator>(key: &mut K, edge: ribbit::Packed<Self>) -> Match {
         let edge_len = edge.len();
         let key_len = key.len();
         let len = Self::min_len(key_len, edge_len);
@@ -174,44 +175,4 @@ impl Debug for Array {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.bytes()).finish()
     }
-}
-
-pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
-    fn len(&self) -> usize;
-
-    fn peek(&self, len: u3) -> ribbit::Packed<Array>;
-
-    #[inline]
-    fn peek_all(&self) -> ribbit::Packed<Array> {
-        self.peek(Array::min_len(self.len(), Array::MAX_LEN))
-    }
-
-    fn take(&mut self, len: u3) -> ribbit::Packed<Array>;
-    fn next(&mut self) -> Option<u8>;
-}
-
-pub(crate) trait Stack: Clone + core::fmt::Debug + Default {
-    fn len(&self) -> usize;
-    fn extend(&mut self, array: ribbit::Packed<Array>);
-    fn push(&mut self, byte: u8);
-    fn truncate(&mut self, len: usize);
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Ignore;
-
-impl Stack for Ignore {
-    #[inline]
-    fn len(&self) -> usize {
-        0
-    }
-
-    #[inline]
-    fn extend(&mut self, _array: ribbit::Packed<Array>) {}
-
-    #[inline]
-    fn push(&mut self, _byte: u8) {}
-
-    #[inline]
-    fn truncate(&mut self, _len: usize) {}
 }

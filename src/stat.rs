@@ -3,6 +3,7 @@ use core::sync::atomic::Ordering;
 
 use crate::byte;
 use crate::edge;
+use crate::key;
 use crate::node;
 use crate::raw;
 
@@ -22,8 +23,8 @@ pub fn process<K: crate::Key, V>(map: &mut crate::Map<K, V>) -> Process {
 
     let mut entries = map
         .raw
-        .iter::<byte::Ignore, raw::iter::SelectAll, raw::iter::Preorder, node::UnsortedIter>();
-    while let Some((byte::Ignore, (depth_, edge))) = entries.next() {
+        .iter::<key::Ignore, raw::iter::SelectAll, raw::iter::Preorder, node::UnsortedIter>();
+    while let Some((key::Ignore, (depth_, edge))) = entries.next() {
         let meta = edge.meta();
         let kind = meta.kind();
 

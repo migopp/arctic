@@ -4,7 +4,7 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
+use crate::key;
 use crate::node;
 use crate::Edge;
 use crate::Or;
@@ -23,7 +23,7 @@ where
 type RootIter<'a> = iter::Peekable<iter::Once<(Visit, &'a Atomic128<Edge>)>>;
 type NodeIter<'a, S> = iter::Peekable<iter::Zip<iter::Repeat<Visit>, S>>;
 
-impl<'a, K: byte::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
+impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
     pub(crate) fn new(root: &'a mut Atomic128<Edge>) -> Self {
         Self {
             key: K::default(),

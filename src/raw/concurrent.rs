@@ -9,6 +9,7 @@ use ribbit::Unpack as _;
 
 use crate::byte;
 use crate::edge;
+use crate::key;
 use crate::node;
 use crate::raw::sequential;
 use crate::raw::Op;
@@ -71,7 +72,7 @@ pub(crate) struct MapRef<'a> {
 
 impl MapRef<'_> {
     #[inline]
-    pub(crate) fn insert<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
@@ -79,7 +80,7 @@ impl MapRef<'_> {
     }
 
     #[inline]
-    fn insert_optimistic<K: byte::Iterator>(
+    fn insert_optimistic<K: key::Iterator>(
         &mut self,
         key: K,
         value: u64,
@@ -88,14 +89,14 @@ impl MapRef<'_> {
     }
 
     #[cold]
-    fn insert_pessimistic<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    fn insert_pessimistic<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
             .unwrap()
     }
 
     #[inline]
-    fn insert_impl<'a, K: byte::Iterator, P: cursor::History<'a, K>>(
+    fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         &'a mut self,
         key: K,
         value: u64,
@@ -144,7 +145,7 @@ impl MapRef<'_> {
     }
 
     #[cold]
-    unsafe fn retire<'a, K: byte::Iterator, P: cursor::History<'a, K>>(
+    unsafe fn retire<'a, K: key::Iterator, P: cursor::History<'a, K>>(
         guard: &mut smr::WriteGuard,
         key: &K,
         cursor: &Cursor<'a, K, P>,
@@ -178,7 +179,7 @@ impl MapRef<'_> {
     }
 
     #[inline]
-    pub(crate) fn get<K: byte::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let _guard = self.smr.protect_read(key.peek_all());
 
         let mut root = self.raw.root();
@@ -204,7 +205,7 @@ impl MapRef<'_> {
     }
 
     #[inline]
-    pub(crate) fn remove<K: byte::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
         let _guard = self.smr.protect_write(key.peek_all());
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
@@ -240,7 +241,7 @@ impl MapRef<'_> {
     }
 
     #[inline]
-    pub(crate) fn update<K: byte::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         let _guard = self.smr.protect_write(key.peek_all());
 
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());

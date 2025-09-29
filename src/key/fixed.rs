@@ -1,6 +1,7 @@
 use ribbit::u3;
 
 use crate::byte;
+use crate::key;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Fixed {
@@ -17,7 +18,7 @@ impl Fixed {
     }
 }
 
-impl byte::Iterator for Fixed {
+impl key::Iterator for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -50,7 +51,7 @@ impl byte::Iterator for Fixed {
     }
 }
 
-impl byte::Stack for Fixed {
+impl key::Stack for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize

@@ -9,6 +9,7 @@ use ribbit::u3;
 
 use crate::byte;
 use crate::edge;
+use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::raw::Op;
@@ -22,7 +23,7 @@ pub(crate) struct Cursor<'a, K, H> {
     history: H,
 }
 
-impl<'a, K: byte::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
+impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     #[inline]
     pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
