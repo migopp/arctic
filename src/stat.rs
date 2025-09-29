@@ -191,6 +191,18 @@ impl From<raw::Op> for Counter {
     }
 }
 
+impl From<edge::Op> for Counter {
+    fn from(op: edge::Op) -> Self {
+        Self::Op(raw::Op::Edge(op))
+    }
+}
+
+impl From<node::Op> for Counter {
+    fn from(op: node::Op) -> Self {
+        Self::Op(raw::Op::Node(op))
+    }
+}
+
 #[cfg(feature = "stat")]
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Thread {

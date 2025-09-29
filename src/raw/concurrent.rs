@@ -2,15 +2,11 @@ mod cursor;
 
 use core::sync::atomic::Ordering;
 
-use ribbit::Pack as _;
-use ribbit::Unpack as _;
-
 use crate::byte;
 use crate::edge;
 use crate::key;
 use crate::node;
 use crate::raw::sequential;
-use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
@@ -44,7 +40,7 @@ pub(crate) struct MapRef<'a> {
     raw: &'a sequential::Map,
 }
 
-impl MapRef<'_> {
+impl<'a> MapRef<'a> {
     #[inline]
     pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
         let _guard = self.smr.protect_read(key.peek_all());
@@ -73,15 +69,41 @@ impl MapRef<'_> {
 
     #[inline]
     pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek_all());
+        match self.update_optimistic(key.clone(), value) {
+            Ok(old) => old,
+            Err(()) => self.update_pessimistic(key, value),
+        }
+    }
 
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
-        let mut old = cursor.traverse_exact()?;
+    #[inline]
+    fn update_optimistic<K: key::Iterator>(
+        &mut self,
+        key: K,
+        value: u64,
+    ) -> Result<Option<u64>, ()> {
+        self.update_impl::<_, cursor::Optimistic<K>>(key, value)
+    }
+
+    #[cold]
+    fn update_pessimistic<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+        self.update_impl::<_, cursor::Pessimistic<K>>(key, value)
+            .unwrap()
+    }
+
+    #[inline]
+    fn update_impl<K: key::Iterator, H: cursor::History<'a, K>>(
+        &mut self,
+        key: K,
+        value: u64,
+    ) -> Result<Option<u64>, H::PopError> {
+        let mut guard = self.smr.protect_write(key.peek_all());
+
+        let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            if old.meta().frozen() {
-                todo!()
-            }
+            let Some(old) = cursor.traverse_exact(&mut guard)? else {
+                return Ok(None);
+            };
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -89,65 +111,76 @@ impl MapRef<'_> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break,
-
-                Err(edge)
-                    if edge.meta().frozen()
-                        || edge.meta().key() != old.meta().key()
-                        || !matches!(
-                            edge.meta().kind().unpack(),
-                            node::Kind::None | node::Kind::Leaf
-                        ) =>
-                {
-                    todo!(
-                        "Handle metadata conflict in update: expected {:?} but found {:?}",
-                        old.meta(),
-                        edge.meta(),
-                    )
+                Ok(_) => {
+                    if old.meta().kind() == node::Kind::LEAF {
+                        return Ok(Some(old.data()));
+                    } else {
+                        validate_eq!(old.meta().kind(), node::Kind::NONE);
+                        return Ok(None);
+                    }
                 }
-                Err(edge) => {
-                    old = edge;
+                Err(conflict) => {
+                    if conflict.meta().frozen() {
+                        cursor.freeze(&mut guard, None)?;
+                    }
                 }
             }
         }
-
-        Some(old.data())
     }
 
     #[inline]
     pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek_all());
+        match self.remove_optimistic(key.clone()) {
+            Ok(old) => old,
+            Err(()) => self.remove_pessimistic(key),
+        }
+    }
 
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
-        let mut old = cursor.traverse_exact()?;
+    #[inline]
+    fn remove_optimistic<K: key::Iterator>(&mut self, key: K) -> Result<Option<u64>, ()> {
+        self.remove_impl::<_, cursor::Optimistic<K>>(key)
+    }
+
+    #[cold]
+    fn remove_pessimistic<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
+        self.remove_impl::<_, cursor::Pessimistic<K>>(key).unwrap()
+    }
+
+    #[inline]
+    fn remove_impl<K: key::Iterator, H: cursor::History<'a, K>>(
+        &mut self,
+        key: K,
+    ) -> Result<Option<u64>, H::PopError> {
+        let mut guard = self.smr.protect_write(key.peek_all());
+
+        let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            if old.meta().frozen() {
-                todo!()
-            }
+            let Some(old) = cursor.traverse_exact(&mut guard)? else {
+                return Ok(None);
+            };
 
             match cursor.root().compare_exchange_packed(
                 old,
-                old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
+                Edge::DEFAULT,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break,
-                Err(edge) if matches!(edge.meta().kind().unpack(), node::Kind::None) => {
-                    return None
+                Ok(_) => {
+                    if old.meta().kind() == node::Kind::LEAF {
+                        return Ok(Some(old.data()));
+                    } else {
+                        validate_eq!(old.meta().kind(), node::Kind::NONE);
+                        return Ok(None);
+                    }
                 }
-                Err(edge) if edge.meta() != old.meta() => todo!(
-                    "Handle metadata conflict in remove: expected {:?} but found {:?}",
-                    old.meta(),
-                    edge.meta(),
-                ),
-                Err(edge) => {
-                    old = edge;
+                Err(conflict) => {
+                    if conflict.meta().frozen() {
+                        cursor.freeze(&mut guard, None)?;
+                    }
                 }
             }
         }
-
-        Some(old.data())
     }
 
     #[inline]
@@ -175,22 +208,16 @@ impl MapRef<'_> {
     }
 
     #[inline]
-    fn insert_impl<'a, K: key::Iterator, P: cursor::History<'a, K>>(
-        &'a mut self,
+    fn insert_impl<K: key::Iterator, P: cursor::History<'a, K>>(
+        &mut self,
         key: K,
         value: u64,
     ) -> Result<Option<u64>, P::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.raw.root());
 
         loop {
-            let (op, old, new) = cursor.traverse_or_insert(value);
-
-            if old.meta().frozen() {
-                cursor.pop()?;
-                continue;
-            }
+            let (op, old, new) = cursor.traverse_or_insert(&mut guard, value)?;
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -198,25 +225,24 @@ impl MapRef<'_> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) if op == Op::Edge(edge::Op::Insert) => {
-                    stat::increment(op);
-                    if old.meta().kind() == node::Kind::NONE {
-                        return Ok(None);
-                    } else {
-                        validate_eq!(old.meta().kind(), node::Kind::LEAF);
-                        return Ok(Some(old.data()));
-                    }
-                }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut guard, &key, &cursor, op, old) };
+
+                    if op == edge::Op::Insert {
+                        if old.meta().kind() == node::Kind::NONE {
+                            return Ok(None);
+                        } else {
+                            validate_eq!(old.meta().kind(), node::Kind::LEAF);
+                            return Ok(Some(old.data()));
+                        }
+                    }
                 }
                 Err(edge) => {
                     // Does not go through EBR because `new` is still thread-local
                     unsafe { Self::deallocate(op, new) };
 
                     if edge.meta().frozen() {
-                        cursor.pop()?;
+                        cursor.freeze(&mut guard, None)?;
                     }
                 }
             }
@@ -224,37 +250,13 @@ impl MapRef<'_> {
     }
 
     #[cold]
-    unsafe fn retire<'a, K: key::Iterator, P: cursor::History<'a, K>>(
-        guard: &mut smr::WriteGuard,
-        key: &K,
-        cursor: &Cursor<'a, K, P>,
-        op: Op,
-        edge: ribbit::Packed<Edge>,
-    ) {
+    unsafe fn deallocate(op: edge::Op, edge: ribbit::Packed<Edge>) {
         match op {
-            Op::Edge(_) => return,
-            Op::Node(_) => (),
+            edge::Op::Insert | edge::Op::Remove => (),
+            edge::Op::Create | edge::Op::Expand => unsafe {
+                Edge::deallocate(edge, stat::Counter::FreeConflict)
+            },
         }
-
-        let index = cursor.index();
-        let prefix = key.peek(byte::Array::min_len(index, byte::Array::MAX_LEN));
-
-        unsafe {
-            guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
-        }
-    }
-
-    #[cold]
-    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge>) {
-        match op {
-            Op::Node(node::Op::Destroy | node::Op::Compress)
-            | Op::Edge(edge::Op::Insert | edge::Op::Remove) => return,
-
-            Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-            | Op::Edge(edge::Op::Create | edge::Op::Expand) => (),
-        }
-
-        unsafe { Edge::deallocate(edge, stat::Counter::FreeConflict) }
     }
 
     // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = u64> {

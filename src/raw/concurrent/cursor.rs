@@ -1,7 +1,5 @@
 use core::convert::Infallible;
 use core::marker::PhantomData;
-use core::mem;
-use core::num::NonZeroU64;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -12,13 +10,15 @@ use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Node3;
-use crate::raw::Op;
+use crate::smr;
+use crate::stat;
 use crate::Edge;
 
 /// Stateful traversal over tree.
 pub(crate) struct Cursor<'a, K, H> {
-    key: K,
+    prefix: ribbit::Packed<byte::Array>,
     index: usize,
+    key: K,
     root: &'a Atomic128<Edge>,
     history: H,
 }
@@ -27,34 +27,54 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     #[inline]
     pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
         Self {
-            key: key.clone(),
+            prefix: key.peek_all(),
             index: 0,
+            key: key.clone(),
             root,
             history: H::default(),
         }
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
+    pub(crate) fn traverse_exact(
+        &mut self,
+        guard: &mut smr::WriteGuard,
+    ) -> Result<Option<ribbit::Packed<Edge>>, H::PopError> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            let len = byte::Array::match_prefix(&mut self.key, meta.key())?;
+            let Some(len) = byte::Array::match_prefix(&mut self.key, meta.key()) else {
+                return Ok(None);
+            };
 
             let kind = meta.kind();
+
+            // Fast path: traversal
             if kind >= node::Kind::NODE_3 {
-                let byte = self.key.next()?;
+                let Some(byte) = self.key.next() else {
+                    return Ok(None);
+                };
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
-                let next = node.get(byte)?;
+                let Some(next) = node.get(byte) else {
+                    return Ok(None);
+                };
                 self.step(save, len, node, next);
                 continue;
-            } else if kind == node::Kind::LEAF {
-                return Some(edge);
+            }
+
+            // Slow path: prepare to CAS
+            if meta.frozen() {
+                self.freeze(guard, None)?;
+                continue;
+            }
+
+            if kind == node::Kind::LEAF {
+                return Ok(Some(edge));
             } else {
                 validate_eq!(kind, node::Kind::NONE);
-                return None;
+                return Ok(None);
             }
         }
     }
@@ -89,50 +109,54 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
+        guard: &mut smr::WriteGuard,
         value: u64,
-    ) -> (Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>) {
+    ) -> Result<(edge::Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>), H::PopError> {
         loop {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let save = self.key.clone();
             let r#match = byte::Array::match_split(&mut self.key, old_meta.key());
+            let kind = old_meta.kind();
+
+            // Fast path: traverse
+            if let byte::Match::Full(len) = r#match {
+                if kind >= node::Kind::NODE_3 {
+                    let byte = self.key.next().unwrap();
+                    let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
+                    if let Some(next) = node.get_or_reserve(byte) {
+                        self.step(save, len, node, next);
+                        continue;
+                    }
+                }
+            }
+
+            // Slow path: prepare to CAS
+            if old_meta.frozen() {
+                self.freeze(guard, None)?;
+                continue;
+            }
 
             let (op, new) = match r#match {
-                byte::Match::Full(len) => {
-                    let kind = old_meta.kind();
-
+                byte::Match::Full(_) => {
                     if kind >= node::Kind::NODE_3 {
-                        let old_data = old.data();
-                        let node = unsafe { Edge::next_node_unchecked(old_data, kind) };
-                        if !matches!(self.history.freeze(), Some(freeze) if freeze.get() == old_data)
-                        {
-                            let byte = self.key.next().unwrap();
-                            if let Some(next) = node.get_or_reserve(byte) {
-                                self.step(save, len, node, next);
-                                continue;
-                            }
-
-                            crate::cold();
-                        }
-
-                        let (op, new) = node.replace(old_meta);
-                        (Op::Node(op), new)
+                        self.key = save;
+                        let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
+                        self.freeze(guard, Some(node))?;
+                        continue;
                     } else if kind == node::Kind::NONE
                         && save.len() > byte::Array::MAX_LEN.value() as usize
                     {
                         (
-                            Op::Edge(edge::Op::Create),
+                            edge::Op::Create,
                             Edge::new_node::<Node3, _>(save.peek_all(), None),
                         )
                     } else {
-                        (
-                            Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(save.peek_all(), value),
-                        )
+                        (edge::Op::Insert, Edge::new_leaf(save.peek_all(), value))
                     }
                 }
                 byte::Match::Partial { start, middle, end } => (
-                    Op::Edge(edge::Op::Expand),
+                    edge::Op::Expand,
                     Edge::new_node::<Node3, _>(
                         start,
                         Some((
@@ -145,7 +169,66 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
 
             // Revert key to before the current edge
             self.key = save;
-            return (op, old, new);
+            return Ok((op, old, new));
+        }
+    }
+
+    #[cold]
+    pub(crate) fn freeze(
+        &mut self,
+        guard: &mut smr::WriteGuard,
+        node: Option<node::Ref<'a>>,
+    ) -> Result<(), H::PopError> {
+        let mut freeze = node.map(Ok).unwrap_or_else(|| self.pop())?;
+
+        loop {
+            let edge = self.root().load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
+            let mut save = self.key.clone();
+
+            let Some(_) = byte::Array::match_prefix(&mut save, meta.key()) else {
+                return Ok(());
+            };
+
+            let kind = meta.kind();
+
+            // Already helped by another thread
+            if kind < node::Kind::NODE_3 || freeze.as_u64() != edge.data() {
+                return Ok(());
+            }
+
+            let (op, new) = freeze.replace(meta);
+
+            match self.root().compare_exchange_packed(
+                edge,
+                new,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    let prefix = byte::Array::slice(self.prefix, self.index);
+
+                    unsafe {
+                        guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
+                    }
+
+                    return Ok(());
+                }
+                Err(conflict) => {
+                    match op {
+                        node::Op::Destroy | node::Op::Compress => (),
+                        node::Op::Shrink | node::Op::Replace | node::Op::Grow => unsafe {
+                            Edge::deallocate(new, stat::Counter::FreeConflict);
+                        },
+                    }
+
+                    if conflict.meta().frozen() {
+                        freeze = self.pop()?;
+                    } else {
+                        return Ok(());
+                    }
+                }
+            };
         }
     }
 
@@ -174,17 +257,11 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
         self.root
     }
-
-    #[inline]
-    pub(crate) fn index(&self) -> usize {
-        self.index
-    }
 }
 
 pub(crate) trait History<'a, K>: Default {
     type PopError;
 
-    fn freeze(&mut self) -> Option<NonZeroU64>;
     fn push(&mut self, segment: Segment<'a, K>);
     fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError>;
 }
@@ -201,11 +278,6 @@ impl<'a, K> History<'a, K> for Optimistic<K> {
     type PopError = ();
 
     #[inline]
-    fn freeze(&mut self) -> Option<NonZeroU64> {
-        None
-    }
-
-    #[inline]
     fn push(&mut self, _segment: Segment<'a, K>) {}
 
     #[inline]
@@ -215,14 +287,12 @@ impl<'a, K> History<'a, K> for Optimistic<K> {
 }
 
 pub(crate) struct Pessimistic<'a, K> {
-    freeze: Option<node::Ref<'a>>,
     path: Vec<Segment<'a, K>>,
 }
 
 impl<K> Default for Pessimistic<'_, K> {
     fn default() -> Self {
         Self {
-            freeze: None,
             path: Vec::default(),
         }
     }
@@ -232,27 +302,12 @@ impl<'a, K: Clone> History<'a, K> for Pessimistic<'a, K> {
     type PopError = Infallible;
 
     #[inline]
-    fn freeze(&mut self) -> Option<NonZeroU64> {
-        Some(match mem::take(&mut self.freeze)? {
-            node::Ref::Node3(node) => unsafe { NonZeroU64::new_unchecked(node as *const _ as u64) },
-            node::Ref::Node15(node) => unsafe {
-                NonZeroU64::new_unchecked(node as *const _ as u64)
-            },
-            node::Ref::Node256(node) => unsafe {
-                NonZeroU64::new_unchecked(node as *const _ as u64)
-            },
-        })
-    }
-
-    #[inline]
     fn push(&mut self, segment: Segment<'a, K>) {
         self.path.push(segment);
     }
 
     #[inline]
     fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError> {
-        validate!(self.freeze.is_none());
-        self.freeze = self.path.last().map(|segment| segment.node);
         Ok(self.path.pop())
     }
 }

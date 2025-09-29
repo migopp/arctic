@@ -28,8 +28,14 @@ impl Array {
     const MASK: u64 = 0x00FF_FFFF_FFFF_FFFF;
     pub(crate) const MAX_LEN: u3 = u3::new(7);
 
+    #[inline]
     pub(crate) fn len(array: ribbit::Packed<Self>) -> usize {
         array.len().value() as usize
+    }
+
+    #[inline]
+    pub(crate) fn slice(array: ribbit::Packed<Self>, len: usize) -> ribbit::Packed<Self> {
+        Self::from_u64_truncate(array.value.value(), Self::min_len(len, array.len()))
     }
 
     #[inline]

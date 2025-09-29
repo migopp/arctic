@@ -108,6 +108,14 @@ impl<'a> Ref<'a> {
             Ref::Node256(node) => node.replace(meta),
         }
     }
+
+    pub(crate) fn as_u64(&self) -> u64 {
+        match *self {
+            Ref::Node3(node) => node as *const _ as u64,
+            Ref::Node15(node) => node as *const _ as u64,
+            Ref::Node256(node) => node as *const _ as u64,
+        }
+    }
 }
 
 impl Debug for Ref<'_> {
