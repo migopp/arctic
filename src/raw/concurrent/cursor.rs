@@ -36,45 +36,25 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(
-        &mut self,
-        guard: &mut smr::WriteGuard,
-    ) -> Result<Option<ribbit::Packed<Edge>>, H::PopError> {
+    pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            let Some(len) = byte::Array::match_prefix(&mut self.key, meta.key()) else {
-                return Ok(None);
-            };
-
+            let len = byte::Array::match_prefix(&mut self.key, meta.key())?;
             let kind = meta.kind();
-
-            // Fast path: traversal
             if kind >= node::Kind::NODE_3 {
-                let Some(byte) = self.key.next() else {
-                    return Ok(None);
-                };
+                let byte = self.key.next()?;
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
-                let Some(next) = node.get(byte) else {
-                    return Ok(None);
-                };
+                let next = node.get(byte)?;
                 self.step(save, len, node, next);
                 continue;
-            }
-
-            // Slow path: prepare to CAS
-            if meta.frozen() {
-                self.freeze(guard, None)?;
-                continue;
-            }
-
-            if kind == node::Kind::LEAF {
-                return Ok(Some(edge));
+            } else if kind == node::Kind::LEAF {
+                return Some(edge);
             } else {
                 validate_eq!(kind, node::Kind::NONE);
-                return Ok(None);
+                return None;
             }
         }
     }

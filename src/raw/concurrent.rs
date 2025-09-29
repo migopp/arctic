@@ -101,9 +101,13 @@ impl<'a> MapRef<'a> {
         let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            let Some(old) = cursor.traverse_exact(&mut guard)? else {
+            let Some(old) = cursor.traverse_exact() else {
                 return Ok(None);
             };
+
+            if old.meta().frozen() {
+                cursor.freeze(&mut guard, None)?;
+            }
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -156,9 +160,13 @@ impl<'a> MapRef<'a> {
         let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            let Some(old) = cursor.traverse_exact(&mut guard)? else {
+            let Some(old) = cursor.traverse_exact() else {
                 return Ok(None);
             };
+
+            if old.meta().frozen() {
+                cursor.freeze(&mut guard, None)?;
+            }
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -233,6 +241,7 @@ impl<'a> MapRef<'a> {
                             return Ok(None);
                         } else {
                             validate_eq!(old.meta().kind(), node::Kind::LEAF);
+
                             return Ok(Some(old.data()));
                         }
                     }
