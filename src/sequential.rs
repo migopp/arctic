@@ -5,6 +5,7 @@ use crate::raw;
 use crate::Key;
 use crate::Value;
 
+#[repr(transparent)]
 pub struct Map<K: ?Sized, V> {
     raw: raw::sequential::Map,
     _key: PhantomData<K>,
@@ -18,6 +19,12 @@ impl<K: ?Sized, V> Default for Map<K, V> {
             _key: PhantomData,
             _value: PhantomData,
         }
+    }
+}
+
+impl<K: ?Sized, V> Map<K, V> {
+    pub(crate) fn as_raw(&mut self) -> &mut raw::sequential::Map {
+        &mut self.raw
     }
 }
 

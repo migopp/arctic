@@ -1,12 +1,12 @@
 use core::marker::PhantomData;
 
-use crate::node;
 use crate::raw;
+use crate::sequential;
 use crate::Key;
 use crate::Value;
 
 pub struct Map<K: ?Sized, V> {
-    pub(crate) raw: raw::concurrent::Map,
+    raw: raw::concurrent::Map,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
@@ -21,7 +21,16 @@ impl<K: ?Sized, V> Default for Map<K, V> {
     }
 }
 
-impl<K: Key + ?Sized, V: Value> Map<K, V> {
+impl<K: ?Sized, V> Map<K, V> {
+    #[inline]
+    pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
+        unsafe {
+            core::mem::transmute::<&mut raw::sequential::Map, &mut sequential::Map<K, V>>(
+                self.raw.as_sequential(),
+            )
+        }
+    }
+
     #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
@@ -29,75 +38,6 @@ impl<K: Key + ?Sized, V: Value> Map<K, V> {
             _key: PhantomData,
             _value: PhantomData,
         }
-    }
-
-    pub fn iter_dynamic(&mut self) -> Iter<K, V> {
-        Iter {
-            inner: self.raw.iter(),
-            _key: PhantomData,
-            _value: PhantomData,
-        }
-    }
-}
-
-pub struct Iter<'a, K: Key + ?Sized, V> {
-    inner: raw::iter::Iter<
-        'a,
-        K::Stack,
-        raw::iter::SelectLeaf,
-        raw::iter::Preorder,
-        node::SortedIter<'a>,
-    >,
-    _key: PhantomData<K>,
-    _value: PhantomData<V>,
-}
-
-impl<'a, K: Key + ?Sized, V: Value> Iter<'a, K, V> {
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<(&K::Stack, V)> {
-        self.inner
-            .next()
-            .map(|(key, value)| (key, V::from_u64(value)))
-    }
-}
-
-impl<K, V> Map<K, V>
-where
-    K: Key + for<'s> From<&'s K::Stack>,
-    V: Value,
-{
-    pub fn iter_fixed(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
-        EntryIter {
-            inner: self.raw.iter(),
-            _key: PhantomData,
-            _value: PhantomData,
-        }
-    }
-}
-
-pub struct EntryIter<'a, K: Key, V> {
-    inner: raw::iter::Iter<
-        'a,
-        K::Stack,
-        raw::iter::SelectLeaf,
-        raw::iter::Preorder,
-        node::SortedIter<'a>,
-    >,
-    _key: PhantomData<K>,
-    _value: PhantomData<V>,
-}
-
-impl<'a, K, V> Iterator for EntryIter<'a, K, V>
-where
-    K: Key,
-    K: for<'s> From<&'s K::Stack>,
-    V: Value,
-{
-    type Item = (K, V);
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|(key, value)| (K::from(key), V::from_u64(value)))
     }
 }
 

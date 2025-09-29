@@ -1,3 +1,6 @@
+use core::cell::Cell;
+use core::marker::PhantomData;
+
 use ribbit::atomic::Atomic128;
 
 use crate::key;
@@ -6,9 +9,11 @@ use crate::raw::iter;
 use crate::stat;
 use crate::Edge;
 
+#[repr(transparent)]
 #[derive(Default)]
 pub(crate) struct Map {
     root: Atomic128<Edge>,
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 impl Map {
@@ -18,7 +23,7 @@ impl Map {
 
     #[expect(unused_variables)]
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
         todo!()
     }
 

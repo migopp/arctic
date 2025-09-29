@@ -1,7 +1,5 @@
 mod cursor;
 
-use core::ops::Deref;
-use core::ops::DerefMut;
 use core::sync::atomic::Ordering;
 
 use ribbit::Pack as _;
@@ -24,6 +22,8 @@ pub(crate) struct Map {
     raw: sequential::Map,
 }
 
+unsafe impl Sync for Map {}
+
 impl Map {
     #[inline]
     pub(crate) fn pin(&self) -> MapRef {
@@ -33,34 +33,8 @@ impl Map {
         }
     }
 
-    // pub fn iter(&mut self) -> impl Iterator<Item = (Rc<Vec<u8>>, u64)> + '_ {
-    //     self.preorder()
-    //         .filter_map(|(_, key, edge)| match edge.meta().kind().unpack() {
-    //             node::Kind::None | node::Kind::Node3 | node::Kind::Node15 | node::Kind::Node256 => {
-    //                 None
-    //             }
-    //             node::Kind::Leaf => Some((key, edge.data())),
-    //         })
-    // }
-    //
-    // pub fn keys(&mut self) -> impl Iterator<Item = Rc<Vec<u8>>> + '_ {
-    //     self.iter().map(|(key, _)| key)
-    // }
-    //
-    // pub fn values(&mut self) -> impl Iterator<Item = u64> + '_ {
-    //     self.iter().map(|(_, value)| value)
-    // }
-}
-
-impl Deref for Map {
-    type Target = sequential::Map;
-    fn deref(&self) -> &Self::Target {
-        &self.raw
-    }
-}
-
-impl DerefMut for Map {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    #[inline]
+    pub(crate) fn as_sequential(&mut self) -> &mut sequential::Map {
         &mut self.raw
     }
 }

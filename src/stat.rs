@@ -22,8 +22,10 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut node_256 = Histogram::new();
 
     let mut entries = map
-        .raw
+        .as_sequential()
+        .as_raw()
         .iter::<key::Ignore, raw::iter::SelectAll, raw::iter::Preorder, node::UnsortedIter>();
+
     while let Some((key::Ignore, (depth_, edge))) = entries.next() {
         let meta = edge.meta();
         let kind = meta.kind();

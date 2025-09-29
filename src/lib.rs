@@ -158,9 +158,9 @@ mod tests {
         }
 
         drop(pin);
-        assert_eq!(map.iter_fixed().count(), 1);
+        assert_eq!(map.as_sequential().iter_fixed().count(), 1);
 
-        map.iter_fixed().for_each(|(key, value)| {
+        map.as_sequential().iter_fixed().for_each(|(key, value)| {
             assert_eq!(key, 1);
             assert_eq!(value, 3);
         });
@@ -232,7 +232,7 @@ mod tests {
 
         drop(pin);
 
-        let mut iter = map.iter_dynamic();
+        let mut iter = map.as_sequential().iter_unsorted_dynamic();
         let mut count = 0;
         while iter.next().is_some() {
             count += 1;
@@ -242,7 +242,7 @@ mod tests {
 
         keys.sort_by(|(l, _), (r, _)| l.cmp(r));
 
-        let mut iter = map.iter_dynamic();
+        let mut iter = map.as_sequential().iter_dynamic();
         let mut keys = keys.into_iter();
 
         while let Some(((lk, lv), (rk, rv))) = iter.next().zip(keys.next()) {
