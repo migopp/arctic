@@ -46,6 +46,111 @@ pub(crate) struct MapRef<'a> {
 
 impl MapRef<'_> {
     #[inline]
+    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect_read(key.peek_all());
+
+        let mut root = self.raw.root();
+        let mut key = key;
+        loop {
+            let edge = root.load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
+            let _ = byte::Array::match_prefix(&mut key, meta.key())?;
+
+            let kind = meta.kind();
+            if kind >= node::Kind::NODE_3 {
+                let byte = key.next()?;
+                let data = edge.data();
+                let node = unsafe { Edge::next_node_unchecked(data, kind) };
+                root = node.get(byte)?;
+            } else if kind == node::Kind::LEAF {
+                return Some(edge.data());
+            } else {
+                validate_eq!(kind, node::Kind::NONE);
+                return None;
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+        let _guard = self.smr.protect_write(key.peek_all());
+
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
+        let mut old = cursor.traverse_exact()?;
+
+        loop {
+            if old.meta().frozen() {
+                todo!()
+            }
+
+            match cursor.root().compare_exchange_packed(
+                old,
+                Edge::new_leaf(old.meta().key(), value),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+
+                Err(edge)
+                    if edge.meta().frozen()
+                        || edge.meta().key() != old.meta().key()
+                        || !matches!(
+                            edge.meta().kind().unpack(),
+                            node::Kind::None | node::Kind::Leaf
+                        ) =>
+                {
+                    todo!(
+                        "Handle metadata conflict in update: expected {:?} but found {:?}",
+                        old.meta(),
+                        edge.meta(),
+                    )
+                }
+                Err(edge) => {
+                    old = edge;
+                }
+            }
+        }
+
+        Some(old.data())
+    }
+
+    #[inline]
+    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
+        let _guard = self.smr.protect_write(key.peek_all());
+
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
+        let mut old = cursor.traverse_exact()?;
+
+        loop {
+            if old.meta().frozen() {
+                todo!()
+            }
+
+            match cursor.root().compare_exchange_packed(
+                old,
+                old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(edge) if matches!(edge.meta().kind().unpack(), node::Kind::None) => {
+                    return None
+                }
+                Err(edge) if edge.meta() != old.meta() => todo!(
+                    "Handle metadata conflict in remove: expected {:?} but found {:?}",
+                    old.meta(),
+                    edge.meta(),
+                ),
+                Err(edge) => {
+                    old = edge;
+                }
+            }
+        }
+
+        Some(old.data())
+    }
+
+    #[inline]
     pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
@@ -150,111 +255,6 @@ impl MapRef<'_> {
         }
 
         unsafe { Edge::deallocate(edge, stat::Counter::FreeConflict) }
-    }
-
-    #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_read(key.peek_all());
-
-        let mut root = self.raw.root();
-        let mut key = key;
-        loop {
-            let edge = root.load_packed(Ordering::Relaxed);
-            let meta = edge.meta();
-            let _ = byte::Array::match_prefix(&mut key, meta.key())?;
-
-            let kind = meta.kind();
-            if kind >= node::Kind::NODE_3 {
-                let byte = key.next()?;
-                let data = edge.data();
-                let node = unsafe { Edge::next_node_unchecked(data, kind) };
-                root = node.get(byte)?;
-            } else if kind == node::Kind::LEAF {
-                return Some(edge.data());
-            } else {
-                validate_eq!(kind, node::Kind::NONE);
-                return None;
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek_all());
-
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
-        let mut old = cursor.traverse_exact()?;
-
-        loop {
-            if old.meta().frozen() {
-                todo!()
-            }
-
-            match cursor.root().compare_exchange_packed(
-                old,
-                old.with_meta(old.meta().with_kind(node::Kind::None.pack())),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(edge) if matches!(edge.meta().kind().unpack(), node::Kind::None) => {
-                    return None
-                }
-                Err(edge) if edge.meta() != old.meta() => todo!(
-                    "Handle metadata conflict in remove: expected {:?} but found {:?}",
-                    old.meta(),
-                    edge.meta(),
-                ),
-                Err(edge) => {
-                    old = edge;
-                }
-            }
-        }
-
-        Some(old.data())
-    }
-
-    #[inline]
-    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        let _guard = self.smr.protect_write(key.peek_all());
-
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(key, self.raw.root());
-        let mut old = cursor.traverse_exact()?;
-
-        loop {
-            if old.meta().frozen() {
-                todo!()
-            }
-
-            match cursor.root().compare_exchange_packed(
-                old,
-                Edge::new_leaf(old.meta().key(), value),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-
-                Err(edge)
-                    if edge.meta().frozen()
-                        || edge.meta().key() != old.meta().key()
-                        || !matches!(
-                            edge.meta().kind().unpack(),
-                            node::Kind::None | node::Kind::Leaf
-                        ) =>
-                {
-                    todo!(
-                        "Handle metadata conflict in update: expected {:?} but found {:?}",
-                        old.meta(),
-                        edge.meta(),
-                    )
-                }
-                Err(edge) => {
-                    old = edge;
-                }
-            }
-        }
-
-        Some(old.data())
     }
 
     // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = u64> {
