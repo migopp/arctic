@@ -22,8 +22,6 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
 
-    fn freeze(&self);
-
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
 }
 
@@ -99,15 +97,6 @@ impl<'a> Ref<'a> {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
             Ref::Node256(node) => node.get_or_reserve(key),
-        }
-    }
-
-    #[cold]
-    pub(crate) fn freeze(&self) {
-        match self {
-            Ref::Node3(node) => node.freeze(),
-            Ref::Node15(node) => node.freeze(),
-            Ref::Node256(node) => node.freeze(),
         }
     }
 

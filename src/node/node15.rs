@@ -23,10 +23,6 @@ pub(crate) struct Header {
 }
 
 impl linear::Header for Atomic128<Header> {
-    fn is_frozen(&self) -> bool {
-        self.load_packed(Ordering::Relaxed).frozen()
-    }
-
     fn freeze(&self) -> usize {
         let mut old = self.load_packed(Ordering::Relaxed);
 

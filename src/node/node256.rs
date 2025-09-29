@@ -38,11 +38,6 @@ impl Node for Node256 {
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    #[inline]
-    fn freeze(&self) {
-        self.0.iter().for_each(Edge::freeze);
-    }
-
     fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         todo!()
     }

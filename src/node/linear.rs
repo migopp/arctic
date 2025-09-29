@@ -50,17 +50,9 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn freeze(&self) {
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
-    }
-
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
-        validate!(
-            self.header.is_frozen(),
-            "{} header must be frozen before replace",
-            core::any::type_name::<Self>(),
-        );
 
         let mut edges: [(u8, ribbit::Packed<Edge>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
@@ -131,7 +123,6 @@ impl<const LEN: usize, H: Header> Linear<LEN, H> {
 }
 
 pub(super) trait Header {
-    fn is_frozen(&self) -> bool;
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;

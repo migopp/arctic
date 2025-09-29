@@ -115,7 +115,6 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                             crate::cold();
                         }
 
-                        node.freeze();
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
                     } else if kind == node::Kind::NONE
