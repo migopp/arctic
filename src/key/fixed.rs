@@ -28,14 +28,14 @@ impl key::Iterator for Fixed {
     fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
 
-        byte::Array::from_u64_truncate(self.buffer, len)
+        ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
 
-        let array = byte::Array::from_u64_truncate(self.buffer, len);
+        let array = ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len);
         self.buffer >>= (len.value() as u64) << 3;
         self.len -= len.value();
         array
@@ -59,9 +59,9 @@ impl key::Stack for Fixed {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        validate!(self.len + array.len().value() <= 8);
+        validate!(self.len + array.len() as u8 <= 8);
         self.buffer |= array.buffer().value() << (self.len << 3);
-        self.len += array.len().value();
+        self.len += array.len() as u8;
     }
 
     #[inline]

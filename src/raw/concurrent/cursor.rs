@@ -41,7 +41,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            let len = byte::Array::match_prefix(&mut self.key, meta.key())?;
+            let len = meta.key().match_prefix(&mut self.key)?;
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {
                 let byte = self.key.next()?;
@@ -70,7 +70,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
 
             // Continue traversal only if exact match
             if kind >= node::Kind::NODE_3 {
-                if let Some(len) = byte::Array::match_prefix(&mut self.key, meta.key()) {
+                if let Some(len) = meta.key().match_prefix(&mut self.key) {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                     if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
                         self.step(save, len, node, next);
@@ -96,7 +96,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let save = self.key.clone();
-            let r#match = byte::Array::match_split(&mut self.key, old_meta.key());
+            let r#match = old_meta.key().match_split(&mut self.key);
             let kind = old_meta.kind();
 
             // Fast path: traverse
@@ -166,7 +166,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             let meta = edge.meta();
             let mut save = self.key.clone();
 
-            let Some(_) = byte::Array::match_prefix(&mut save, meta.key()) else {
+            let Some(_) = meta.key().match_prefix(&mut save) else {
                 return Ok(());
             };
 
@@ -186,7 +186,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    let prefix = byte::Array::slice(self.prefix, self.index);
+                    let prefix = self.prefix.slice(self.index);
 
                     unsafe {
                         guard.retire(edge.with_meta(edge.meta().with_key(prefix)));

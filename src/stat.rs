@@ -1,7 +1,6 @@
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use crate::byte;
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -34,7 +33,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             continue;
         }
 
-        compression.record(byte::Array::len(meta.key()) as u64);
+        compression.record(meta.key().len() as u64);
 
         if kind == node::Kind::LEAF {
             depth.record(depth_ as u64);

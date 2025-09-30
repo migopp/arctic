@@ -2,7 +2,6 @@ mod cursor;
 
 use core::sync::atomic::Ordering;
 
-use crate::byte;
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -50,7 +49,7 @@ impl<'a> MapRef<'a> {
         loop {
             let edge = root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let _ = byte::Array::match_prefix(&mut key, meta.key())?;
+            let _ = meta.key().match_prefix(&mut key)?;
 
             let kind = meta.kind();
             if kind >= node::Kind::NODE_3 {

@@ -1,5 +1,4 @@
 use ribbit::u3;
-use ribbit::Unpack as _;
 
 use crate::byte;
 use crate::key;
@@ -50,7 +49,7 @@ impl key::Iterator for Iter<'_> {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                byte::Array::from_u64_truncate(buffer, len)
+                ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
             }
             Iter::Small(small) => small.peek(len),
         }
@@ -64,7 +63,7 @@ impl key::Iterator for Iter<'_> {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                let array = byte::Array::from_u64_truncate(buffer, len);
+                let array = ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len);
                 let after = large.len() - len.value() as usize;
 
                 if after > 8 {
@@ -118,7 +117,7 @@ impl key::Stack for Vec<u8> {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        core::iter::Extend::extend(self, array.unpack().bytes());
+        core::iter::Extend::extend(self, array.bytes());
     }
 
     #[inline]
@@ -191,7 +190,7 @@ mod tests {
         let mut index = 0;
         for len in lens {
             assert_eq!(iter.len(), initial.len() - index);
-            Array::with_bytes(iter.take(u3::new(len as u8)), None, |a| {
+            ribbit::Packed::<Array>::with_bytes(iter.take(u3::new(len as u8)), None, |a| {
                 assert_eq!(a, &initial[index..][..len]);
             });
             index += len;
