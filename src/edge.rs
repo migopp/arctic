@@ -9,8 +9,8 @@ use crate::node::Node256;
 use crate::node::Node3;
 use crate::stat;
 
-#[ribbit::pack(size = 128, debug)]
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
+#[ribbit(size = 128, debug)]
 pub(crate) struct Edge {
     #[ribbit(size = 63)]
     pub(crate) meta: Meta,
@@ -105,8 +105,8 @@ impl Edge {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 63, debug, eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 63, debug, eq)]
 pub(crate) struct Meta {
     #[ribbit(size = 59)]
     pub(crate) key: byte::Array,

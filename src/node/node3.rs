@@ -14,8 +14,8 @@ pub(crate) type Node3 = super::Linear<3, Atomic64<Header>>;
 const _: () = assert!(core::mem::size_of::<Node3>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3>() == 64);
 
-#[derive(Copy, Clone, Debug, Default)]
-#[ribbit::pack(size = 32)]
+#[derive(Copy, Clone, Debug, Default, ribbit::Pack)]
+#[ribbit(size = 32)]
 pub(crate) struct Header {
     keys: u24,
     len: u4,

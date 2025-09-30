@@ -128,8 +128,8 @@ impl Debug for Ref<'_> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[ribbit::pack(size = 3, debug, eq, ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 3, debug, eq, ord)]
 pub(crate) enum Kind {
     #[ribbit(size = 0)]
     None = 0,

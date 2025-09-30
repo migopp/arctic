@@ -11,8 +11,8 @@ use ribbit::u56;
 use crate::key;
 
 /// Immutable fixed-size array of up to 7 bytes.
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-#[ribbit::pack(size = 59, debug, eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 59, debug, eq)]
 pub(crate) struct Array {
     #[ribbit(size = 56)]
     pub(crate) buffer: u56,
