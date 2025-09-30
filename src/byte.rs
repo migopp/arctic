@@ -32,14 +32,6 @@ impl Array {
         // SAFETY: `left.min(right)` can be at most `right`, which is a valid u3
         unsafe { u3::new_unchecked(left.min(right.value() as usize) as u8) }
     }
-
-    fn bytes(&self) -> impl core::iter::Iterator<Item = u8> {
-        self.buffer
-            .value()
-            .to_ne_bytes()
-            .into_iter()
-            .take(self.len.value() as usize)
-    }
 }
 
 impl ArrayPacked {
@@ -178,6 +170,13 @@ pub(crate) enum Match {
 
 impl Debug for Array {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.bytes()).finish()
+        let bytes = self
+            .buffer
+            .value()
+            .to_ne_bytes()
+            .into_iter()
+            .take(self.len.value() as usize);
+
+        f.debug_list().entries(bytes).finish()
     }
 }
