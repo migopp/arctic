@@ -1,3 +1,6 @@
+use core::ops::BitOr as _;
+use core::ops::Shr as _;
+
 use ribbit::u3;
 
 use crate::byte;
@@ -15,6 +18,11 @@ impl Fixed {
         validate!(len <= 8);
         validate_eq!(buffer.unbounded_shr((len as u32) << 3), 0);
         Self { buffer, len }
+    }
+
+    #[inline]
+    pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
+        with(&self.buffer.to_ne_bytes()[..self.len as usize])
     }
 }
 
@@ -48,6 +56,20 @@ impl key::Iterator for Fixed {
         self.buffer >>= 8;
         self.len = self.len.saturating_sub(1);
         some.then_some(byte)
+    }
+
+    #[inline]
+    fn prefix(&self, other: &Self) -> Self {
+        let len = self.len.min(other.len);
+        let prefix = (self.buffer ^ other.buffer)
+            .bitor(1 << len)
+            .trailing_zeros()
+            .shr(3);
+        let mask = 1u64.unbounded_shl(prefix << 3).wrapping_sub(1);
+        Self {
+            buffer: self.buffer & mask,
+            len,
+        }
     }
 }
 

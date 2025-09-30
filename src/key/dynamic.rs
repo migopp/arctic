@@ -107,6 +107,26 @@ impl key::Iterator for Iter<'_> {
             Self::Small(small) => small.next(),
         }
     }
+
+    fn prefix(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Small(left), Self::Small(right)) => Self::Small(left.prefix(right)),
+            (Self::Large(left), Self::Large(right)) => {
+                let index = core::iter::zip(*left, *right)
+                    .position(|(l, r)| l != r)
+                    .unwrap_or_else(|| left.len().min(right.len()));
+                Self::Large(&left[..index])
+            }
+            (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
+                small.with_bytes(|small| {
+                    let index = core::iter::zip(small, *large)
+                        .position(|(l, r)| l != r)
+                        .unwrap_or_else(|| small.len().min(large.len()));
+                    Self::Large(&large[..index])
+                })
+            }
+        }
+    }
 }
 
 impl key::Stack for Vec<u8> {
