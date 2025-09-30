@@ -209,13 +209,13 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn insert_impl<K: key::Iterator, P: cursor::History<'a, K>>(
+    fn insert_impl<K: key::Iterator, H: cursor::History<'a, K>>(
         &mut self,
         key: K,
         value: u64,
-    ) -> Result<Option<u64>, P::PopError> {
+    ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<K, P>::new(key.clone(), self.raw.root());
+        let mut cursor = Cursor::<K, H>::new(key.clone(), self.raw.root());
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
