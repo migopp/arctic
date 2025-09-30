@@ -97,37 +97,34 @@ impl<'a> MapRef<'a> {
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-
         let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            let Some(old) = cursor.traverse_exact() else {
-                return Ok(None);
+            let old = match cursor.traverse_exact() {
+                Ok(None) => return Ok(None),
+                Ok(Some(old)) => old,
+                Err(()) => {
+                    cursor.freeze(&mut guard)?;
+                    continue;
+                }
             };
 
-            if old.meta().frozen() {
-                cursor.freeze(&mut guard)?;
-            }
-
-            match cursor.root().compare_exchange_packed(
-                old,
-                Edge::new_leaf(old.meta().key(), value),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    if old.meta().kind() == node::Kind::LEAF {
-                        return Ok(Some(old.data()));
-                    } else {
-                        validate_eq!(old.meta().kind(), node::Kind::NONE);
-                        return Ok(None);
-                    }
-                }
-                Err(conflict) => {
-                    if conflict.meta().frozen() {
-                        cursor.freeze(&mut guard)?;
-                    }
-                }
+            if cursor
+                .root()
+                .compare_exchange_packed(
+                    old,
+                    Edge::new_leaf(old.meta().key(), value),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                return if old.meta().kind() == node::Kind::LEAF {
+                    Ok(Some(old.data()))
+                } else {
+                    validate_eq!(old.meta().kind(), node::Kind::NONE);
+                    Ok(None)
+                };
             }
         }
     }
@@ -156,37 +153,29 @@ impl<'a> MapRef<'a> {
         key: K,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-
         let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
 
         loop {
-            let Some(old) = cursor.traverse_exact() else {
-                return Ok(None);
+            let old = match cursor.traverse_exact() {
+                Ok(None) => return Ok(None),
+                Ok(Some(old)) => old,
+                Err(()) => {
+                    cursor.freeze(&mut guard)?;
+                    continue;
+                }
             };
 
-            if old.meta().frozen() {
-                cursor.freeze(&mut guard)?;
-            }
-
-            match cursor.root().compare_exchange_packed(
-                old,
-                Edge::DEFAULT,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    if old.meta().kind() == node::Kind::LEAF {
-                        return Ok(Some(old.data()));
-                    } else {
-                        validate_eq!(old.meta().kind(), node::Kind::NONE);
-                        return Ok(None);
-                    }
-                }
-                Err(conflict) => {
-                    if conflict.meta().frozen() {
-                        cursor.freeze(&mut guard)?;
-                    }
-                }
+            if cursor
+                .root()
+                .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return if old.meta().kind() == node::Kind::LEAF {
+                    Ok(Some(old.data()))
+                } else {
+                    validate_eq!(old.meta().kind(), node::Kind::NONE);
+                    Ok(None)
+                };
             }
         }
     }
@@ -225,11 +214,13 @@ impl<'a> MapRef<'a> {
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.raw.root());
 
         loop {
-            let (op, old, new) = cursor.traverse_or_insert(value);
-
-            if old.meta().frozen() {
-                cursor.freeze(&mut guard)?;
-            }
+            let (op, old, new) = match cursor.traverse_or_insert(value) {
+                Ok(cas) => cas,
+                Err(()) => {
+                    cursor.freeze(&mut guard)?;
+                    continue;
+                }
+            };
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -252,13 +243,9 @@ impl<'a> MapRef<'a> {
 
                     unsafe { Self::retire(&mut guard, &cursor, op, old) };
                 }
-                Err(edge) => {
+                Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
                     unsafe { Self::deallocate(op, new) };
-
-                    if edge.meta().frozen() {
-                        cursor.freeze(&mut guard)?;
-                    }
                 }
             }
         }

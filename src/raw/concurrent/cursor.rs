@@ -47,26 +47,39 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<ribbit::Packed<Edge>> {
+    pub(crate) fn traverse_exact(&mut self) -> Result<Option<ribbit::Packed<Edge>>, ()> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key.clone();
-            let len = meta.key().match_prefix(&mut self.key)?;
+            let Some(len) = meta.key().match_prefix(&mut self.key) else {
+                return Ok(None);
+            };
             let kind = meta.kind();
+
+            // Fast path: traversal
             if kind >= node::Kind::NODE_3 {
-                let byte = self.key.next()?;
+                let Some(byte) = self.key.next() else {
+                    return Ok(None);
+                };
                 let data = edge.data();
                 let node = unsafe { Edge::next_node_unchecked(data, kind) };
-                let next = node.get(byte)?;
+                let Some(next) = node.get(byte) else {
+                    return Ok(None);
+                };
                 self.step(save, len, node, next);
                 continue;
+            }
+
+            // Prepare to CAS
+            return if meta.frozen() {
+                Err(())
             } else if kind == node::Kind::LEAF {
-                return Some(edge);
+                Ok(Some(edge))
             } else {
                 validate_eq!(kind, node::Kind::NONE);
-                return None;
-            }
+                Ok(None)
+            };
         }
     }
 
@@ -101,7 +114,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     pub(crate) fn traverse_or_insert(
         &mut self,
         value: u64,
-    ) -> (Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>) {
+    ) -> Result<(Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>), ()> {
         loop {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -119,6 +132,10 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                         continue;
                     }
                 }
+            }
+
+            if old_meta.frozen() {
+                return Err(());
             }
 
             // Revert key to before the current edge
@@ -156,7 +173,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 ),
             };
 
-            return (op, old, new);
+            return Ok((op, old, new));
         }
     }
 
