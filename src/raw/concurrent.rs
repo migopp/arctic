@@ -109,6 +109,8 @@ impl<'a> MapRef<'a> {
                 }
             };
 
+            validate!(!old.meta().frozen());
+
             if cursor
                 .root()
                 .compare_exchange_packed(
@@ -164,6 +166,8 @@ impl<'a> MapRef<'a> {
                     continue;
                 }
             };
+
+            validate!(!old.meta().frozen());
 
             if cursor
                 .root()
@@ -221,6 +225,8 @@ impl<'a> MapRef<'a> {
                     continue;
                 }
             };
+
+            validate!(!old.meta().frozen());
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -283,12 +289,10 @@ impl<'a> MapRef<'a> {
                     Self::retire(guard, cursor, Op::Node(op), edge);
                     return Ok(());
                 },
-                Err(conflict) => {
-                    unsafe {
-                        Self::deallocate(Op::Node(op), new);
-                    }
+                Err(conflict) => unsafe {
+                    Self::deallocate(Op::Node(op), new);
                     edge = conflict;
-                }
+                },
             };
         }
     }
