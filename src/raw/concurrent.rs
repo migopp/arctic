@@ -6,6 +6,7 @@ use crate::edge;
 use crate::key;
 use crate::node;
 use crate::raw::sequential;
+use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
@@ -105,7 +106,7 @@ impl<'a> MapRef<'a> {
             };
 
             if old.meta().frozen() {
-                cursor.freeze(&mut guard, None)?;
+                cursor.freeze(&mut guard)?;
             }
 
             match cursor.root().compare_exchange_packed(
@@ -124,7 +125,7 @@ impl<'a> MapRef<'a> {
                 }
                 Err(conflict) => {
                     if conflict.meta().frozen() {
-                        cursor.freeze(&mut guard, None)?;
+                        cursor.freeze(&mut guard)?;
                     }
                 }
             }
@@ -164,7 +165,7 @@ impl<'a> MapRef<'a> {
             };
 
             if old.meta().frozen() {
-                cursor.freeze(&mut guard, None)?;
+                cursor.freeze(&mut guard)?;
             }
 
             match cursor.root().compare_exchange_packed(
@@ -183,7 +184,7 @@ impl<'a> MapRef<'a> {
                 }
                 Err(conflict) => {
                     if conflict.meta().frozen() {
-                        cursor.freeze(&mut guard, None)?;
+                        cursor.freeze(&mut guard)?;
                     }
                 }
             }
@@ -224,7 +225,11 @@ impl<'a> MapRef<'a> {
         let mut cursor = Cursor::<K, P>::new(key.clone(), self.raw.root());
 
         loop {
-            let (op, old, new) = cursor.traverse_or_insert(&mut guard, value)?;
+            let (op, old, new) = cursor.traverse_or_insert(value);
+
+            if old.meta().frozen() {
+                cursor.freeze(&mut guard)?;
+            }
 
             match cursor.root().compare_exchange_packed(
                 old,
@@ -232,25 +237,27 @@ impl<'a> MapRef<'a> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
+                Ok(_) if op == Op::Edge(edge::Op::Insert) => {
+                    stat::increment(op);
+
+                    if old.meta().kind() == node::Kind::NONE {
+                        return Ok(None);
+                    } else {
+                        validate_eq!(old.meta().kind(), node::Kind::LEAF);
+                        return Ok(Some(old.data()));
+                    }
+                }
                 Ok(_) => {
                     stat::increment(op);
 
-                    if op == edge::Op::Insert {
-                        if old.meta().kind() == node::Kind::NONE {
-                            return Ok(None);
-                        } else {
-                            validate_eq!(old.meta().kind(), node::Kind::LEAF);
-
-                            return Ok(Some(old.data()));
-                        }
-                    }
+                    unsafe { Self::retire(&mut guard, &cursor, op, old) };
                 }
                 Err(edge) => {
-                    // Does not go through EBR because `new` is still thread-local
+                    // Does not go through SMR because `new` is still thread-local
                     unsafe { Self::deallocate(op, new) };
 
                     if edge.meta().frozen() {
-                        cursor.freeze(&mut guard, None)?;
+                        cursor.freeze(&mut guard)?;
                     }
                 }
             }
@@ -258,12 +265,31 @@ impl<'a> MapRef<'a> {
     }
 
     #[cold]
-    unsafe fn deallocate(op: edge::Op, edge: ribbit::Packed<Edge>) {
+    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge>) {
         match op {
-            edge::Op::Insert | edge::Op::Remove => (),
-            edge::Op::Create | edge::Op::Expand => unsafe {
+            Op::Node(node::Op::Destroy | node::Op::Compress)
+            | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
+            Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
+            | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeConflict)
             },
+        }
+    }
+
+    #[cold]
+    unsafe fn retire<K: key::Iterator, H: cursor::History<'a, K>>(
+        guard: &mut smr::WriteGuard,
+        cursor: &Cursor<'a, K, H>,
+        op: Op,
+        edge: ribbit::Packed<Edge>,
+    ) {
+        match op {
+            Op::Edge(_) => return,
+            Op::Node(_) => (),
+        }
+
+        unsafe {
+            guard.retire(edge.with_meta(edge.meta().with_key(cursor.prefix())));
         }
     }
 

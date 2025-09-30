@@ -10,6 +10,7 @@ use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Node3;
+use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
@@ -33,6 +34,16 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             root,
             history: H::default(),
         }
+    }
+
+    #[inline]
+    pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
+        self.root
+    }
+
+    #[inline]
+    pub(crate) fn prefix(&self) -> ribbit::Packed<byte::Array> {
+        self.prefix.slice(self.index)
     }
 
     #[inline]
@@ -89,9 +100,8 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
-        guard: &mut smr::WriteGuard,
         value: u64,
-    ) -> Result<(edge::Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>), H::PopError> {
+    ) -> (Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>) {
         loop {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -111,12 +121,6 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 }
             }
 
-            // Slow path: prepare to CAS
-            if old_meta.frozen() {
-                self.freeze(guard, None)?;
-                continue;
-            }
-
             // Revert key to before the current edge
             self.key = save;
 
@@ -124,21 +128,24 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 byte::Match::Full(_) => {
                     if kind >= node::Kind::NODE_3 {
                         let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
-                        self.freeze(guard, Some(node))?;
-                        continue;
+                        let (op, new) = node.replace(old_meta);
+                        (Op::Node(op), new)
                     } else if kind == node::Kind::NONE
                         && self.key.len() > byte::Array::MAX_LEN.value() as usize
                     {
                         (
-                            edge::Op::Create,
+                            Op::Edge(edge::Op::Create),
                             Edge::new_node::<Node3, _>(self.key.peek_all(), None),
                         )
                     } else {
-                        (edge::Op::Insert, Edge::new_leaf(self.key.peek_all(), value))
+                        (
+                            Op::Edge(edge::Op::Insert),
+                            Edge::new_leaf(self.key.peek_all(), value),
+                        )
                     }
                 }
                 byte::Match::Partial { start, middle, end } => (
-                    edge::Op::Expand,
+                    Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,
                         Some((
@@ -149,17 +156,13 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 ),
             };
 
-            return Ok((op, old, new));
+            return (op, old, new);
         }
     }
 
     #[cold]
-    pub(crate) fn freeze(
-        &mut self,
-        guard: &mut smr::WriteGuard,
-        node: Option<node::Ref<'a>>,
-    ) -> Result<(), H::PopError> {
-        let mut freeze = node.map(Ok).unwrap_or_else(|| self.pop())?;
+    pub(crate) fn freeze(&mut self, guard: &mut smr::WriteGuard) -> Result<(), H::PopError> {
+        let mut node = self.pop()?;
 
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
@@ -173,11 +176,11 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             let kind = meta.kind();
 
             // Already helped by another thread
-            if kind < node::Kind::NODE_3 || freeze.as_u64() != edge.data() {
+            if kind < node::Kind::NODE_3 || node.as_u64() != edge.data() {
                 return Ok(());
             }
 
-            let (op, new) = freeze.replace(meta);
+            let (op, new) = node.replace(meta);
 
             match self.root().compare_exchange_packed(
                 edge,
@@ -186,12 +189,10 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    let prefix = self.prefix.slice(self.index);
-
+                    let prefix = self.prefix();
                     unsafe {
                         guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
                     }
-
                     return Ok(());
                 }
                 Err(conflict) => {
@@ -203,7 +204,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
                     }
 
                     if conflict.meta().frozen() {
-                        freeze = self.pop()?;
+                        node = self.pop()?;
                     } else {
                         return Ok(());
                     }
@@ -225,17 +226,12 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[cold]
-    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
+    fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.index -= segment.len.value() as usize + 1;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)
-    }
-
-    #[inline]
-    pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
-        self.root
     }
 }
 
