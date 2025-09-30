@@ -104,7 +104,7 @@ impl<'a> MapRef<'a> {
                 Ok(None) => return Ok(None),
                 Ok(Some(old)) => old,
                 Err(()) => {
-                    cursor.freeze(&mut guard)?;
+                    Self::freeze(&mut guard, &mut cursor)?;
                     continue;
                 }
             };
@@ -160,7 +160,7 @@ impl<'a> MapRef<'a> {
                 Ok(None) => return Ok(None),
                 Ok(Some(old)) => old,
                 Err(()) => {
-                    cursor.freeze(&mut guard)?;
+                    Self::freeze(&mut guard, &mut cursor)?;
                     continue;
                 }
             };
@@ -217,7 +217,7 @@ impl<'a> MapRef<'a> {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    cursor.freeze(&mut guard)?;
+                    Self::freeze(&mut guard, &mut cursor)?;
                     continue;
                 }
             };
@@ -230,7 +230,6 @@ impl<'a> MapRef<'a> {
             ) {
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-
                     if old.meta().kind() == node::Kind::NONE {
                         return Ok(None);
                     } else {
@@ -240,7 +239,6 @@ impl<'a> MapRef<'a> {
                 }
                 Ok(_) => {
                     stat::increment(op);
-
                     unsafe { Self::retire(&mut guard, &cursor, op, old) };
                 }
                 Err(_) => {
@@ -248,6 +246,50 @@ impl<'a> MapRef<'a> {
                     unsafe { Self::deallocate(op, new) };
                 }
             }
+        }
+    }
+
+    #[cold]
+    fn freeze<K: key::Iterator, H: cursor::History<'a, K>>(
+        guard: &mut smr::WriteGuard,
+        cursor: &mut Cursor<'a, K, H>,
+    ) -> Result<(), H::PopError> {
+        let mut node = cursor.pop()?;
+        let mut edge = cursor.root().load_packed(Ordering::Acquire);
+
+        loop {
+            while edge.meta().frozen() {
+                node = cursor.pop()?;
+                edge = cursor.root().load_packed(Ordering::Acquire);
+            }
+            let meta = edge.meta();
+            let kind = meta.kind();
+
+            // Already helped by another thread
+            if kind < node::Kind::NODE_3 || node.as_u64() != edge.data() {
+                return Ok(());
+            }
+
+            let (op, new) = node.replace(meta);
+
+            match cursor.root().compare_exchange_packed(
+                edge,
+                new,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => unsafe {
+                    stat::increment(op);
+                    Self::retire(guard, cursor, Op::Node(op), edge);
+                    return Ok(());
+                },
+                Err(conflict) => {
+                    unsafe {
+                        Self::deallocate(Op::Node(op), new);
+                    }
+                    edge = conflict;
+                }
+            };
         }
     }
 

@@ -11,8 +11,6 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::raw::Op;
-use crate::smr;
-use crate::stat;
 use crate::Edge;
 
 /// Stateful traversal over tree.
@@ -177,59 +175,6 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
         }
     }
 
-    #[cold]
-    pub(crate) fn freeze(&mut self, guard: &mut smr::WriteGuard) -> Result<(), H::PopError> {
-        let mut node = self.pop()?;
-
-        loop {
-            let edge = self.root().load_packed(Ordering::Relaxed);
-            let meta = edge.meta();
-            let mut save = self.key.clone();
-
-            let Some(_) = meta.key().match_prefix(&mut save) else {
-                return Ok(());
-            };
-
-            let kind = meta.kind();
-
-            // Already helped by another thread
-            if kind < node::Kind::NODE_3 || node.as_u64() != edge.data() {
-                return Ok(());
-            }
-
-            let (op, new) = node.replace(meta);
-
-            match self.root().compare_exchange_packed(
-                edge,
-                new,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    let prefix = self.prefix();
-                    unsafe {
-                        guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
-                    }
-                    return Ok(());
-                }
-                Err(conflict) => {
-                    match op {
-                        node::Op::Destroy | node::Op::Compress => (),
-                        node::Op::Shrink | node::Op::Replace | node::Op::Grow => unsafe {
-                            Edge::deallocate(new, stat::Counter::FreeConflict);
-                        },
-                    }
-
-                    if conflict.meta().frozen() {
-                        node = self.pop()?;
-                    } else {
-                        return Ok(());
-                    }
-                }
-            };
-        }
-    }
-
     #[inline]
     fn step(&mut self, key: K, len: u3, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
         // 1 extra byte for node
@@ -243,7 +188,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[cold]
-    fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
+    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.index -= segment.len.value() as usize + 1;
         self.key = segment.key;
