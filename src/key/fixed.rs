@@ -1,3 +1,5 @@
+use core::cmp;
+use core::fmt;
 use core::ops::BitOr as _;
 use core::ops::Shr as _;
 
@@ -6,10 +8,10 @@ use ribbit::u3;
 use crate::byte;
 use crate::key;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Fixed {
-    len: u8,
     buffer: u64,
+    len: u8,
 }
 
 impl Fixed {
@@ -60,15 +62,15 @@ impl key::Iterator for Fixed {
 
     #[inline]
     fn prefix(&self, other: &Self) -> Self {
-        let len = self.len.min(other.len);
+        let max = self.len.min(other.len);
         let prefix = (self.buffer ^ other.buffer)
-            .bitor(1 << len)
+            .bitor(1u64.unbounded_shl((max << 3) as u32))
             .trailing_zeros()
             .shr(3);
         let mask = 1u64.unbounded_shl(prefix << 3).wrapping_sub(1);
         Self {
             buffer: self.buffer & mask,
-            len,
+            len: prefix as u8,
         }
     }
 }
@@ -82,14 +84,14 @@ impl key::Stack for Fixed {
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len() as u8 <= 8);
-        self.buffer |= array.buffer().value() << (self.len << 3);
+        self.buffer |= array.buffer().value().unbounded_shl((self.len << 3) as u32);
         self.len += array.len() as u8;
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
         validate!(self.len < 8);
-        self.buffer |= (byte as u64) << (self.len << 3);
+        self.buffer |= (byte as u64).unbounded_shl((self.len << 3) as u32);
         self.len += 1;
     }
 
@@ -99,6 +101,26 @@ impl key::Stack for Fixed {
         validate!(len <= 8);
         self.buffer &= 1u64.unbounded_shl((len << 3) as u32).wrapping_sub(1);
         self.len = len as u8;
+    }
+}
+
+impl fmt::Debug for Fixed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with_bytes(|bytes| bytes.fmt(f))
+    }
+}
+
+impl Ord for Fixed {
+    #[inline]
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.with_bytes(|left| other.with_bytes(|right| left.cmp(right)))
+    }
+}
+
+impl PartialOrd for Fixed {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 

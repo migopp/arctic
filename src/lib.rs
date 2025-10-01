@@ -88,51 +88,50 @@ mod tests {
         assert_eq!(map.get(&key), Some(1));
     }
 
-    //
-    // #[test]
-    // fn scan_leaf() {
-    //     let map = Map::default();
-    //     let key = [1];
-    //     map.insert(&key, 1);
-    //     assert_eq!(map.range(&[1]..=&[1]).collect::<Vec<_>>(), vec![1]);
-    // }
-    //
-    // #[test]
-    // fn scan_node3() {
-    //     let map = insert_all(0u64..3);
-    //     assert_eq!(
-    //         map.range(&0..=&2).collect::<Vec<_>>(),
-    //         (0..3).collect::<Vec<_>>()
-    //     );
-    // }
-    //
-    // #[test]
-    // fn scan_node256() {
-    //     let map = insert_all(0u64..256);
-    //     assert_eq!(
-    //         map.range(&0..=&255).collect::<Vec<_>>(),
-    //         (0..256).collect::<Vec<_>>()
-    //     );
-    // }
-    //
-    // #[test]
-    // fn scan_node256_exclusive() {
-    //     let map = insert_all(0u64..256);
-    //     assert_eq!(
-    //         map.range(&0..&256).collect::<Vec<_>>(),
-    //         (0..256).collect::<Vec<_>>()
-    //     );
-    // }
-    //
-    // #[test]
-    // fn scan_gap() {
-    //     let map = insert_all((0u64..512).step_by(2));
-    //     assert_eq!(
-    //         map.range(&256..=&511).collect::<Vec<_>>(),
-    //         (128..256).collect::<Vec<_>>()
-    //     );
-    // }
-    //
+    #[test]
+    fn scan_leaf() {
+        let map = Map::default();
+        let mut map = map.pin();
+        let key = 1u8;
+        map.insert(&key, 2);
+        assert_eq!(
+            map.range_non_linearizable(&1u8..=&1u8).collect::<Vec<_>>(),
+            vec![(1, 2)]
+        );
+    }
+
+    #[test]
+    fn scan_node3() {
+        insert_all(0u64..3);
+    }
+
+    #[test]
+    fn scan_node256() {
+        insert_all(0u64..256);
+    }
+
+    #[test]
+    fn scan_node256_exclusive() {
+        let map = insert_all(0u64..256);
+        let mut map = map.pin();
+        assert_eq!(
+            map.range_non_linearizable(&0..&256).collect::<Vec<_>>(),
+            (0..256).map(|key| (key, key as u32)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_gap() {
+        let map = insert_all((0u64..512).step_by(2));
+        let mut map = map.pin();
+        assert_eq!(
+            map.range_non_linearizable(&256..=&511).collect::<Vec<_>>(),
+            (256..512)
+                .step_by(2)
+                .map(|key| (key, key as u32 / 2))
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn node3_overwrite() {
@@ -229,14 +228,30 @@ mod tests {
 
         keys.sort_by(|(l, _), (r, _)| l.cmp(r));
 
-        let mut iter = map.as_sequential().iter_dynamic();
-        let mut keys = keys.into_iter();
-
-        while let Some(((lk, lv), (rk, rv))) = iter.next().zip(keys.next()) {
-            assert_eq!(*lk, rk);
-            assert_eq!(lv, rv);
+        // Sequential iteration
+        let mut iter_sequential = map.as_sequential().iter_dynamic();
+        let mut iter = keys.iter();
+        while let Some(((lk, lv), (rk, rv))) = iter_sequential.next().zip(iter.next()) {
+            assert_eq!(*lk, *rk);
+            assert_eq!(lv, *rv);
         }
 
+        let mut pin = map.pin();
+
+        let Some(((first, _), (last, _))) = keys.first().zip(keys.last()) else {
+            drop(pin);
+            return map;
+        };
+
+        // Concurrent iteration
+        let mut iter_concurrent = pin.range_non_linearizable(first..=last);
+        let mut iter = keys.iter();
+        while let Some(((lk, lv), (rk, rv))) = iter_concurrent.lend().zip(iter.next()) {
+            assert_eq!(*lk, *rk);
+            assert_eq!(lv, *rv);
+        }
+
+        drop(pin);
         map
     }
 }

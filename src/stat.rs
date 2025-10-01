@@ -27,7 +27,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             raw::iter::SelectAll,
         );
 
-    while let Some((key::Ignore, (edge, depth_))) = entries.next() {
+    while let Some((key::Ignore, (edge, depth_))) = entries.lend() {
         let meta = edge.meta();
         let kind = meta.kind();
 

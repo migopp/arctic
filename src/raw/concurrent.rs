@@ -336,7 +336,7 @@ impl<'a> MapRef<'a> {
     where
         R: RangeBounds<K>,
         K: key::Iterator + PartialOrd<S>,
-        S: key::Stack + PartialOrd<K>,
+        S: key::Stack + PartialOrd<K> + From<K>,
     {
         let prefix = match (range.start_bound(), range.end_bound()) {
             (Bound::Unbounded, _) | (_, Bound::Unbounded) => K::default(),
@@ -347,12 +347,15 @@ impl<'a> MapRef<'a> {
         };
 
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix, self.raw.root());
-        cursor.traverse_prefix();
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix.clone(), self.raw.root());
+        let index = cursor.traverse_prefix();
+        let mut stack = S::from(prefix);
+        stack.truncate(index);
 
         unsafe {
             iter::Iter::<S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter>::new(
                 cursor.root(),
+                stack,
                 iter::SelectRange::new(range),
             )
         }

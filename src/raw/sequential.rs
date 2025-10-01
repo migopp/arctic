@@ -55,7 +55,7 @@ impl Map {
         &'a self,
         selector: V,
     ) -> iter::Iter<'a, K, V, O, S> {
-        unsafe { iter::Iter::new(&self.root, selector) }
+        unsafe { iter::Iter::new(&self.root, K::default(), selector) }
     }
 }
 
@@ -65,7 +65,7 @@ impl Drop for Map {
             .iter::<key::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>(
                 iter::SelectNode,
             );
-        while let Some((key::Ignore, edge)) = iter.next() {
+        while let Some((key::Ignore, edge)) = iter.lend() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
             }

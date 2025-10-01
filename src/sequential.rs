@@ -106,7 +106,7 @@ where
     type Item = (K, V);
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
-            .next()
+            .lend()
             .map(|(key, value)| (K::from(key), V::from_u64(value)))
     }
 }
@@ -123,7 +123,7 @@ impl<'a, K: Key + ?Sized, V: Value, S: raw::iter::Sort<'a>> DynamicIter<'a, K, V
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(&K::Stack, V)> {
         self.inner
-            .next()
+            .lend()
             .map(|(key, value)| (key, V::from_u64(value)))
     }
 }

@@ -5,6 +5,7 @@ use ribbit::u3;
 use crate::byte;
 use crate::key;
 use crate::key::Fixed;
+use crate::key::Stack as _;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Iter<'a> {
@@ -39,7 +40,7 @@ impl key::Iterator for Iter<'_> {
     fn len(&self) -> usize {
         match self {
             Iter::Large(large) => large.len(),
-            Iter::Small(small) => small.len(),
+            Iter::Small(small) => key::Iterator::len(small),
         }
     }
 
@@ -117,15 +118,17 @@ impl key::Iterator for Iter<'_> {
                 let index = core::iter::zip(*left, *right)
                     .position(|(l, r)| l != r)
                     .unwrap_or_else(|| left.len().min(right.len()));
-                Self::Large(&left[..index])
+                Self::from(&left[index..])
             }
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
-                small.with_bytes(|small| {
-                    let index = core::iter::zip(small, *large)
+                let index = small.with_bytes(|small| {
+                    core::iter::zip(small, *large)
                         .position(|(l, r)| l != r)
-                        .unwrap_or_else(|| small.len().min(large.len()));
-                    Self::Large(&large[..index])
-                })
+                        .unwrap_or_else(|| small.len().min(large.len()))
+                });
+                let mut small = *small;
+                small.truncate(index);
+                Self::Small(small)
             }
         }
     }
@@ -150,6 +153,15 @@ impl key::Stack for Vec<u8> {
     #[inline]
     fn truncate(&mut self, len: usize) {
         Vec::truncate(self, len)
+    }
+}
+
+impl<'a> From<Iter<'a>> for Vec<u8> {
+    fn from(iter: Iter<'a>) -> Self {
+        match iter {
+            Iter::Large(large) => large.to_vec(),
+            Iter::Small(small) => small.with_bytes(|small| small.to_vec()),
+        }
     }
 }
 

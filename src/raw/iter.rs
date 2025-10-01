@@ -16,24 +16,23 @@ where
     key: K,
     selector: V,
     _order: PhantomData<O>,
-    _sort: PhantomData<S>,
     frontier: Vec<(usize, core::iter::Peekable<TreeIter<'a, S>>)>,
 }
 
 impl<'a, K: key::Stack, V: Selector<K>, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, selector: V) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, key: K, selector: V) -> Self {
+        let len = key.len();
         Self {
-            key: K::default(),
+            key,
             selector,
             _order: PhantomData,
-            _sort: PhantomData,
-            frontier: vec![(0, TreeIter::from_root(root))],
+            frontier: vec![(len, TreeIter::from_root(root))],
         }
     }
 
     #[inline]
-    pub fn next(&mut self) -> Option<(&K, V::Item)> {
+    pub fn lend(&mut self) -> Option<(&K, V::Item)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //
@@ -174,6 +173,7 @@ where
     S: key::Stack + PartialOrd<K>,
 {
     type Item = u64;
+    #[inline]
     fn select(&self, edge: ribbit::Packed<Edge>, key: &S, _depth: usize) -> Select<Self::Item> {
         match self.range.end_bound() {
             core::ops::Bound::Included(end) if key > end => return Select::Break,
@@ -190,7 +190,7 @@ where
         if edge.meta().kind() == node::Kind::LEAF {
             Select::Yield(edge.data())
         } else {
-            Select::Break
+            Select::Continue
         }
     }
 }

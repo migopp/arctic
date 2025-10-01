@@ -12,7 +12,7 @@ pub trait Key {
         Self: 'a;
 
     #[allow(private_bounds)]
-    type Stack: Stack + for<'a> PartialOrd<Self::Iter<'a>>;
+    type Stack: Stack + for<'a> PartialOrd<Self::Iter<'a>> + for<'a> From<Self::Iter<'a>>;
 
     fn iter<'a>(&'a self) -> Self::Iter<'a>;
 }
