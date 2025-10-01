@@ -57,6 +57,26 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
                     continue 'horizontal;
                 }
 
+                macro_rules! visit {
+                    ($condition:expr) => {
+                        if $condition {
+                            match V::select(depth, edge) {
+                                Select::Yield(item) => return Some((&self.key, item)),
+                                Select::Continue => (),
+                                Select::Break => {
+                                    self.frontier.clear();
+                                    return None;
+                                }
+                            }
+                        } else if kind >= node::Kind::NODE_3 {
+                            let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                            self.frontier
+                                .push((self.key.len(), TreeIter::from_node(node)));
+                            continue 'vertical;
+                        }
+                    };
+                }
+
                 // First visit
                 if core::mem::take(visit) {
                     self.key.truncate(*len);
@@ -67,31 +87,13 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
 
                     self.key.extend(meta.key());
 
-                    if O::PREORDER {
-                        if let Some(item) = V::select(depth, edge) {
-                            return Some((&self.key, item));
-                        }
-                    } else if kind >= node::Kind::NODE_3 {
-                        let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                        self.frontier
-                            .push((self.key.len(), TreeIter::from_node(node)));
-                        continue 'vertical;
-                    }
+                    visit!(O::PREORDER);
                 }
 
                 // Second visit (or fallthrough)
                 iter.next();
 
-                if !O::PREORDER {
-                    if let Some(item) = V::select(depth, edge) {
-                        return Some((&self.key, item));
-                    }
-                } else if kind >= node::Kind::NODE_3 {
-                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                    self.frontier
-                        .push((self.key.len(), TreeIter::from_node(node)));
-                    continue 'vertical;
-                }
+                visit!(!O::PREORDER);
             }
         }
     }
@@ -99,7 +101,14 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
 
 pub(crate) trait Selector {
     type Item;
-    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item>;
+    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item>;
+}
+
+pub(crate) enum Select<T> {
+    Yield(T),
+    Continue,
+    #[expect(dead_code)]
+    Break,
 }
 
 pub(crate) struct SelectLeaf;
@@ -108,8 +117,12 @@ impl Selector for SelectLeaf {
     type Item = u64;
 
     #[inline]
-    fn select(_depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
-        (edge.meta().kind() == node::Kind::LEAF).then(|| edge.data())
+    fn select(_depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
+        if edge.meta().kind() == node::Kind::LEAF {
+            Select::Yield(edge.data())
+        } else {
+            Select::Continue
+        }
     }
 }
 
@@ -119,8 +132,12 @@ impl Selector for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(_: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
-        (edge.meta().kind() >= node::Kind::NODE_3).then_some(edge)
+    fn select(_: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
+        if edge.meta().kind() >= node::Kind::NODE_3 {
+            Select::Yield(edge)
+        } else {
+            Select::Continue
+        }
     }
 }
 
@@ -130,8 +147,8 @@ impl Selector for SelectAll {
     type Item = (usize, ribbit::Packed<Edge>);
 
     #[inline]
-    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Option<Self::Item> {
-        Some((depth, edge))
+    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
+        Select::Yield((depth, edge))
     }
 }
 
