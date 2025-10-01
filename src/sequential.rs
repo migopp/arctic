@@ -52,7 +52,7 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     #[expect(private_interfaces)]
     pub fn iter_dynamic(&self) -> DynamicIter<K, V, node::SortedIter> {
         DynamicIter {
-            inner: self.raw.iter(),
+            inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -61,7 +61,7 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     #[expect(private_interfaces)]
     pub fn iter_unsorted_dynamic(&self) -> DynamicIter<K, V, node::UnsortedIter> {
         DynamicIter {
-            inner: self.raw.iter(),
+            inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -75,7 +75,7 @@ where
 {
     pub fn iter_fixed(&self) -> impl Iterator<Item = (K, V)> + '_ {
         FixedIter::<K, V, node::SortedIter> {
-            inner: self.raw.iter(),
+            inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -83,7 +83,7 @@ where
 
     pub fn iter_unsorted_fixed(&self) -> impl Iterator<Item = (K, V)> + '_ {
         FixedIter::<K, V, node::UnsortedIter> {
-            inner: self.raw.iter(),
+            inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }

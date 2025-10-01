@@ -1,5 +1,6 @@
 use core::iter;
 use core::marker::PhantomData;
+use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -13,18 +14,18 @@ where
     S: Sort<'a>,
 {
     key: K,
-    _select: PhantomData<V>,
+    selector: V,
     _order: PhantomData<O>,
     _sort: PhantomData<S>,
     frontier: Vec<(usize, core::iter::Peekable<TreeIter<'a, S>>)>,
 }
 
-impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
+impl<'a, K: key::Stack, V: Selector<K>, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, selector: V) -> Self {
         Self {
             key: K::default(),
-            _select: PhantomData,
+            selector,
             _order: PhantomData,
             _sort: PhantomData,
             frontier: vec![(0, TreeIter::from_root(root))],
@@ -41,7 +42,7 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
             let depth = self.frontier.len().saturating_sub(1);
             let (len, iter) = self.frontier.last_mut()?;
 
-            'horizontal: loop {
+            loop {
                 let Some((visit, byte, edge)) = iter.peek_mut() else {
                     self.key.truncate(*len);
                     self.frontier.pop();
@@ -52,15 +53,10 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
                 let meta = edge.meta();
                 let kind = meta.kind();
 
-                if kind == node::Kind::NONE {
-                    iter.next();
-                    continue 'horizontal;
-                }
-
                 macro_rules! visit {
                     ($condition:expr) => {
                         if $condition {
-                            match V::select(depth, edge) {
+                            match self.selector.select(edge, &self.key, depth) {
                                 Select::Yield(item) => return Some((&self.key, item)),
                                 Select::Continue => (),
                                 Select::Break => {
@@ -99,25 +95,24 @@ impl<'a, K: key::Stack, V: Selector, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S>
     }
 }
 
-pub(crate) trait Selector {
+pub(crate) trait Selector<K: key::Stack> {
     type Item;
-    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item>;
+    fn select(&self, edge: ribbit::Packed<Edge>, key: &K, depth: usize) -> Select<Self::Item>;
 }
 
 pub(crate) enum Select<T> {
     Yield(T),
     Continue,
-    #[expect(dead_code)]
     Break,
 }
 
 pub(crate) struct SelectLeaf;
 
-impl Selector for SelectLeaf {
+impl<K: key::Stack> Selector<K> for SelectLeaf {
     type Item = u64;
 
     #[inline]
-    fn select(_depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, _depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() == node::Kind::LEAF {
             Select::Yield(edge.data())
         } else {
@@ -128,11 +123,11 @@ impl Selector for SelectLeaf {
 
 pub(crate) struct SelectNode;
 
-impl Selector for SelectNode {
+impl<K: key::Stack> Selector<K> for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(_: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, _depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() >= node::Kind::NODE_3 {
             Select::Yield(edge)
         } else {
@@ -143,12 +138,60 @@ impl Selector for SelectNode {
 
 pub(crate) struct SelectAll;
 
-impl Selector for SelectAll {
-    type Item = (usize, ribbit::Packed<Edge>);
+impl<K: key::Stack> Selector<K> for SelectAll {
+    type Item = (ribbit::Packed<Edge>, usize);
 
     #[inline]
-    fn select(depth: usize, edge: ribbit::Packed<Edge>) -> Select<Self::Item> {
-        Select::Yield((depth, edge))
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, depth: usize) -> Select<Self::Item> {
+        if edge.meta().kind() > node::Kind::NONE {
+            Select::Yield((edge, depth))
+        } else {
+            Select::Continue
+        }
+    }
+}
+
+pub(crate) struct SelectRange<R, K, S> {
+    range: R,
+    _key: PhantomData<K>,
+    _stack: PhantomData<S>,
+}
+
+impl<R, K, S> SelectRange<R, K, S> {
+    pub(crate) fn new(range: R) -> Self {
+        Self {
+            range,
+            _key: PhantomData,
+            _stack: PhantomData,
+        }
+    }
+}
+
+impl<R, K, S> Selector<S> for SelectRange<R, K, S>
+where
+    R: RangeBounds<K>,
+    K: PartialOrd<S>,
+    S: key::Stack + PartialOrd<K>,
+{
+    type Item = u64;
+    fn select(&self, edge: ribbit::Packed<Edge>, key: &S, _depth: usize) -> Select<Self::Item> {
+        match self.range.end_bound() {
+            core::ops::Bound::Included(end) if key > end => return Select::Break,
+            core::ops::Bound::Excluded(end) if key >= end => return Select::Break,
+            _ => (),
+        }
+
+        match self.range.start_bound() {
+            core::ops::Bound::Included(start) if key < start => return Select::Continue,
+            core::ops::Bound::Excluded(start) if key <= start => return Select::Continue,
+            _ => (),
+        }
+
+        if edge.meta().kind() == node::Kind::LEAF {
+            Select::Yield(edge.data())
+        } else {
+            Select::Break
+        }
     }
 }
 

@@ -1,6 +1,5 @@
 mod cursor;
 
-use core::marker::PhantomData;
 use core::ops::Bound;
 use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
@@ -330,7 +329,10 @@ impl<'a> MapRef<'a> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<R, K, S>(&mut self, range: R) -> RangeIter<'a, R, K, S>
+    pub(crate) fn range_non_linearizable<R, K, S>(
+        &mut self,
+        range: R,
+    ) -> iter::Iter<'a, S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter<'a>>
     where
         R: RangeBounds<K>,
         K: key::Iterator + PartialOrd<S>,
@@ -348,14 +350,11 @@ impl<'a> MapRef<'a> {
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix, self.raw.root());
         cursor.traverse_prefix();
 
-        let iter = unsafe {
-            iter::Iter::<S, iter::SelectLeaf, iter::Preorder, node::SortedIter>::new(cursor.root())
-        };
-
-        RangeIter {
-            range,
-            iter,
-            _key: PhantomData,
+        unsafe {
+            iter::Iter::<S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter>::new(
+                cursor.root(),
+                iter::SelectRange::new(range),
+            )
         }
     }
 
@@ -384,29 +383,8 @@ impl<'a> MapRef<'a> {
     //
 }
 
-pub(crate) struct RangeIter<'a, R: RangeBounds<K>, K, S> {
-    range: R,
-    _key: PhantomData<K>,
-    iter: iter::Iter<'a, S, iter::SelectLeaf, iter::Preorder, node::SortedIter<'a>>,
-}
-
-impl<'a, R, K, S> RangeIter<'a, R, K, S>
-where
-    R: RangeBounds<K>,
-    K: key::Iterator + PartialOrd<S>,
-    S: key::Stack + PartialOrd<K>,
-{
-    pub(crate) fn next_with<F: FnMut(&S, u64) -> T, T>(&mut self, mut with: F) -> Option<T> {
-        // https://github.com/rust-lang/rust/issues/21906
-        loop {
-            let (key, value) = self.iter.next()?;
-            // FIXME: avoid comparing after range end
-            if self.range.contains(key) {
-                return Some(with(key, value));
-            }
-        }
-    }
-}
+pub(crate) type RangeIter<'a, R, K, S> =
+    iter::Iter<'a, S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter<'a>>;
 
 //
 // struct ScanIter<'a, K> {

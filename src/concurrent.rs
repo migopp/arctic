@@ -124,6 +124,7 @@ where
 {
     type Item = (K, u64);
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next_with(|key, value| (K::from(key), value))
+        let (key, value) = self.iter.next()?;
+        Some((K::from(key), value))
     }
 }

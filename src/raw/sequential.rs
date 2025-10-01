@@ -45,17 +45,26 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter<'a, K: key::Stack, V: iter::Selector, O: iter::Order, S: iter::Sort<'a>>(
+    pub(crate) fn iter<
+        'a,
+        K: key::Stack,
+        V: iter::Selector<K>,
+        O: iter::Order,
+        S: iter::Sort<'a>,
+    >(
         &'a self,
+        selector: V,
     ) -> iter::Iter<'a, K, V, O, S> {
-        unsafe { iter::Iter::new(&self.root) }
+        unsafe { iter::Iter::new(&self.root, selector) }
     }
 }
 
 impl Drop for Map {
     fn drop(&mut self) {
-        let mut iter =
-            self.iter::<key::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>();
+        let mut iter = self
+            .iter::<key::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>(
+                iter::SelectNode,
+            );
         while let Some((key::Ignore, edge)) = iter.next() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
