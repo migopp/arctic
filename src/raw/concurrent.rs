@@ -38,12 +38,12 @@ impl Map {
     }
 }
 
-pub(crate) struct MapRef<'a> {
-    smr: smr::Local<'a>,
-    raw: &'a sequential::Map,
+pub(crate) struct MapRef<'g> {
+    smr: smr::Local<'g>,
+    raw: &'g sequential::Map,
 }
 
-impl<'a> MapRef<'a> {
+impl<'g> MapRef<'g> {
     #[inline]
     pub(crate) fn get<R: key::Read>(&self, key: R) -> Option<u64> {
         let _guard = self.smr.protect_read(key.peek_all());
@@ -90,7 +90,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn update_impl<R: key::Read, H: cursor::History<'a, R>>(
+    fn update_impl<R: key::Read, H: cursor::History<'g, R>>(
         &mut self,
         key: R,
         value: u64,
@@ -149,7 +149,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn remove_impl<R: key::Read, H: cursor::History<'a, R>>(
+    fn remove_impl<R: key::Read, H: cursor::History<'g, R>>(
         &mut self,
         key: R,
     ) -> Result<Option<u64>, H::PopError> {
@@ -204,7 +204,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn insert_impl<R: key::Read, H: cursor::History<'a, R>>(
+    fn insert_impl<R: key::Read, H: cursor::History<'g, R>>(
         &mut self,
         key: R,
         value: u64,
@@ -251,9 +251,9 @@ impl<'a> MapRef<'a> {
     }
 
     #[cold]
-    fn freeze<R: key::Read, H: cursor::History<'a, R>>(
+    fn freeze<R: key::Read, H: cursor::History<'g, R>>(
         guard: &mut smr::WriteGuard,
-        cursor: &mut Cursor<'a, R, H>,
+        cursor: &mut Cursor<'g, R, H>,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
         let mut edge = cursor.root().load_packed(Ordering::Acquire);
@@ -305,9 +305,9 @@ impl<'a> MapRef<'a> {
     }
 
     #[cold]
-    unsafe fn retire<R: key::Read, H: cursor::History<'a, R>>(
+    unsafe fn retire<R: key::Read, H: cursor::History<'g, R>>(
         guard: &mut smr::WriteGuard,
-        cursor: &Cursor<'a, R, H>,
+        cursor: &Cursor<'g, R, H>,
         op: Op,
         edge: ribbit::Packed<Edge>,
     ) {
@@ -321,10 +321,10 @@ impl<'a> MapRef<'a> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<B, R, W>(
-        &mut self,
+    pub(crate) fn range_non_linearizable<'l, B, R, W>(
+        &'l mut self,
         range: B,
-    ) -> iter::Iter<'a, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'a>>
+    ) -> RangeIter<'g, 'l, B, R, W>
     where
         B: RangeBounds<R>,
         R: key::Read + PartialOrd<W>,
@@ -344,13 +344,15 @@ impl<'a> MapRef<'a> {
         let mut stack = W::from(prefix);
         stack.truncate(index);
 
-        unsafe {
+        let iter = unsafe {
             iter::Iter::<W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter>::new(
                 cursor.root(),
                 stack,
                 iter::SelectRange::new(range),
             )
-        }
+        };
+
+        RangeIter { iter, _guard }
     }
 
     // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = u64> {
@@ -378,8 +380,21 @@ impl<'a> MapRef<'a> {
     //
 }
 
-pub(crate) type RangeIter<'a, B, R, W> =
-    iter::Iter<'a, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'a>>;
+pub(crate) struct RangeIter<'g, 'l, B, R, W> {
+    iter: iter::Iter<'g, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'g>>,
+    _guard: smr::ReadGuard<'g, 'l>,
+}
+
+impl<'g, 'l, B, R, W> RangeIter<'g, 'l, B, R, W>
+where
+    B: RangeBounds<R>,
+    R: key::Read + PartialOrd<W>,
+    W: key::Write + PartialOrd<R>,
+{
+    pub fn lend(&mut self) -> Option<(&W, u64)> {
+        self.iter.lend()
+    }
+}
 
 //
 // struct ScanIter<'a, K> {

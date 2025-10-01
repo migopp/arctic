@@ -250,7 +250,9 @@ mod tests {
             assert_eq!(*lk, *rk);
             assert_eq!(lv, *rv);
         }
+        assert!(iter_concurrent.lend().is_none());
 
+        drop(iter_concurrent);
         drop(pin);
         map
     }

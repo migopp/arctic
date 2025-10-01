@@ -5,10 +5,10 @@ mod membarrier;
 mod hazard;
 
 #[cfg(feature = "smr-hazard")]
-pub(crate) use hazard::{Global, Local, WriteGuard};
+pub(crate) use hazard::{Global, Local, ReadGuard, WriteGuard};
 
 #[cfg(not(feature = "smr-hazard"))]
 mod no_op;
 
 #[cfg(not(feature = "smr-hazard"))]
-pub(crate) use no_op::{Global, Local, WriteGuard};
+pub(crate) use no_op::{Global, Local, ReadGuard, WriteGuard};

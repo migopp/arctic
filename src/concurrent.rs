@@ -42,13 +42,13 @@ impl<K: ?Sized, V> Map<K, V> {
     }
 }
 
-pub struct MapRef<'a, K: ?Sized, V> {
-    raw: raw::concurrent::MapRef<'a>,
+pub struct MapRef<'g, K: ?Sized, V> {
+    raw: raw::concurrent::MapRef<'g>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
+impl<'g, K: Key + ?Sized, V: Value> MapRef<'g, K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
         self.raw.get(key.read()).map(V::from_u64)
     }
@@ -96,13 +96,14 @@ impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     //     let high = range.end_bound().map(|high| high.to_byte_array());
     //     self.raw.range((low, high)).map(V::from_u64)
     // }
-}
 
-impl<'a, K: Key + ?Sized, V: Value> MapRef<'a, K, V> {
-    pub fn range_non_linearizable<'k, R: RangeBounds<&'k K>>(
-        &mut self,
+    pub fn range_non_linearizable<'l, R>(
+        &'l mut self,
         range: R,
-    ) -> RangeIter<'a, 'k, K, impl RangeBounds<K::Read<'k>>, V> {
+    ) -> RangeIter<'g, 'l, K, impl RangeBounds<K::Read<'l>>, V>
+    where
+        R: RangeBounds<&'l K>,
+    {
         let start = range.start_bound().map(|start| start.read());
         let end = range.end_bound().map(|end| end.read());
         RangeIter {
@@ -112,13 +113,13 @@ impl<'a, K: Key + ?Sized, V: Value> MapRef<'a, K, V> {
     }
 }
 
-pub struct RangeIter<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Read<'k>>, V> {
-    iter: raw::concurrent::RangeIter<'a, R, K::Read<'k>, K::Write>,
+pub struct RangeIter<'g, 'l, K: Key + ?Sized + 'l, R: RangeBounds<K::Read<'l>>, V> {
+    iter: raw::concurrent::RangeIter<'g, 'l, R, K::Read<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Read<'k>>, V: Value>
-    RangeIter<'a, 'k, K, R, V>
+impl<'g, 'l, K: Key + ?Sized + 'l, R: RangeBounds<K::Read<'l>>, V: Value>
+    RangeIter<'g, 'l, K, R, V>
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(&K::Write, V)> {
@@ -128,9 +129,9 @@ impl<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Read<'k>>, V: Value>
     }
 }
 
-impl<'a, 'k, K, R, V> Iterator for RangeIter<'a, 'k, K, R, V>
+impl<'g, 'l, K, R, V> Iterator for RangeIter<'g, 'l, K, R, V>
 where
-    R: RangeBounds<K::Read<'k>>,
+    R: RangeBounds<K::Read<'l>>,
     K: Key + for<'b> From<&'b K::Write>,
     V: Value,
 {
