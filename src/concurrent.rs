@@ -69,34 +69,6 @@ impl<'g, K: Key + ?Sized, V: Value> MapRef<'g, K, V> {
             .map(V::from_u64)
     }
 
-    // pub fn iter(&mut self) -> impl Iterator<Item = (K::Owned, V)> + '_ {
-    //     self.raw
-    //         .iter()
-    //         .map(|(key, value)| (K::from_byte_array(key), V::from_u64(value)))
-    // }
-    //
-    // pub fn keys(&mut self) -> impl Iterator<Item = K::Owned> + '_ {
-    //     self.iter().map(|(key, _)| key)
-    // }
-    //
-    // pub fn values(&mut self) -> impl Iterator<Item = V> + '_ {
-    //     self.iter().map(|(_, value)| value)
-    // }
-    //
-    // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = V> {
-    //     self.raw.scan(low, count).map(V::from_u64)
-    // }
-    //
-    // pub fn range<'a, R: RangeBounds<&'a K> + 'a>(&self, range: R) -> impl Iterator<Item = V> + 'a
-    // where
-    //     K: 'a,
-    //     V: 'a,
-    // {
-    //     let low = range.start_bound().map(|low| low.to_byte_array());
-    //     let high = range.end_bound().map(|high| high.to_byte_array());
-    //     self.raw.range((low, high)).map(V::from_u64)
-    // }
-
     pub fn range_non_linearizable<'l, R>(
         &'l mut self,
         range: R,
