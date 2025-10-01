@@ -5,7 +5,6 @@ use ribbit::u3;
 use crate::byte;
 use crate::key;
 use crate::key::Fixed;
-use crate::key::Write as _;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Iter<'a> {
@@ -112,25 +111,22 @@ impl key::Read for Iter<'_> {
     }
 
     fn prefix(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Self::Small(left), Self::Small(right)) => Self::Small(left.prefix(right)),
+        let (left, right) = match (self, other) {
             (Self::Large(left), Self::Large(right)) => {
                 let index = core::iter::zip(*left, *right)
                     .position(|(l, r)| l != r)
                     .unwrap_or_else(|| left.len().min(right.len()));
-                Self::from(&left[index..])
+                return Self::from(&left[index..]);
             }
+            (Self::Small(left), Self::Small(right)) => (*left, right),
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
-                let index = small.with_bytes(|small| {
-                    core::iter::zip(small, *large)
-                        .position(|(l, r)| l != r)
-                        .unwrap_or_else(|| small.len().min(large.len()))
-                });
-                let mut small = *small;
-                small.truncate(index);
-                Self::Small(small)
+                // SAFETY: `large.len() > 8`
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                (Fixed::new(buffer, 8), small)
             }
-        }
+        };
+
+        Self::Small(left.prefix(right))
     }
 }
 
