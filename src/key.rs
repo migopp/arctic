@@ -32,14 +32,14 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Write: Clone + core::fmt::Debug + Default {
+pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
     fn len(&self) -> usize;
     fn extend(&mut self, array: ribbit::Packed<byte::Array>);
     fn push(&mut self, byte: u8);
     fn truncate(&mut self, len: usize);
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Ignore;
 
 impl Write for Ignore {

@@ -69,25 +69,39 @@ impl<'g, K: Key + ?Sized, V: Value> MapRef<'g, K, V> {
             .map(V::from_u64)
     }
 
-    pub fn range_non_linearizable<'l, R>(&'l mut self, range: R) -> RangeIter<'g, 'l, K, V>
+    pub fn range_non_linearizable<'l, R>(
+        &'l mut self,
+        range: R,
+    ) -> RangeNonLinearizableIter<'g, 'l, K, V>
     where
         R: RangeBounds<&'l K>,
     {
         let start = range.start_bound().map(|start| start.read());
         let end = range.end_bound().map(|end| end.read());
-        RangeIter {
+        RangeNonLinearizableIter {
             iter: self.raw.range_non_linearizable(start, end),
             _value: PhantomData,
         }
     }
+
+    pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K::Write, V)>
+    where
+        R: RangeBounds<&'l K>,
+    {
+        let start = range.start_bound().map(|start| start.read());
+        let end = range.end_bound().map(|end| end.read());
+        self.raw
+            .range(start, end)
+            .map(|(key, value)| (key, V::from_u64(value)))
+    }
 }
 
-pub struct RangeIter<'g, 'l, K: Key + ?Sized + 'l, V> {
-    iter: raw::concurrent::RangeIter<'g, 'l, K::Read<'l>, K::Write>,
+pub struct RangeNonLinearizableIter<'g, 'l, K: Key + ?Sized + 'l, V> {
+    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Read<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'g, 'l, K: Key + ?Sized + 'l, V: Value> RangeIter<'g, 'l, K, V> {
+impl<'g, 'l, K: Key + ?Sized + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
     #[inline]
     pub fn lend(&mut self) -> Option<(&K::Write, V)> {
         self.iter
@@ -96,7 +110,7 @@ impl<'g, 'l, K: Key + ?Sized + 'l, V: Value> RangeIter<'g, 'l, K, V> {
     }
 }
 
-impl<'g, 'l, K, V> Iterator for RangeIter<'g, 'l, K, V>
+impl<'g, 'l, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, K, V>
 where
     K: Key + for<'b> From<&'b K::Write>,
     V: Value,

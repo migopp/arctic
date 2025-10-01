@@ -243,7 +243,7 @@ mod tests {
             return map;
         };
 
-        // Concurrent iteration
+        // Concurrent iteration, non-linearizable
         let mut iter_concurrent = pin.range_non_linearizable(first..=last);
         let mut iter = keys.iter();
         while let Some(((lk, lv), (rk, rv))) = iter_concurrent.lend().zip(iter.next()) {
@@ -251,8 +251,16 @@ mod tests {
             assert_eq!(lv, *rv);
         }
         assert!(iter_concurrent.lend().is_none());
-
         drop(iter_concurrent);
+
+        // Concurrent iteration, linearizable
+        pin.range(first..=last)
+            .zip(&keys)
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
+
         drop(pin);
         map
     }

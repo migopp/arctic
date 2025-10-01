@@ -324,19 +324,12 @@ impl<'g> MapRef<'g> {
         &'l mut self,
         start: Bound<R>,
         end: Bound<R>,
-    ) -> RangeIter<'g, 'l, R, W>
+    ) -> RangeNonLinearizableIter<'g, 'l, R, W>
     where
         R: key::Read,
         W: key::Write + PartialOrd<R> + From<R>,
     {
-        let prefix = match (&start, &end) {
-            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
-            (
-                Bound::Included(low) | Bound::Excluded(low),
-                Bound::Included(high) | Bound::Excluded(high),
-            ) => low.prefix(high),
-        };
-
+        let prefix = Self::prefix(&start, &end);
         let guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
@@ -351,23 +344,71 @@ impl<'g> MapRef<'g> {
             )
         };
 
-        RangeIter {
+        RangeNonLinearizableIter {
             iter,
             _guard: guard,
         }
     }
+
+    pub(crate) fn range<R, W>(
+        &mut self,
+        start: Bound<R>,
+        end: Bound<R>,
+    ) -> std::vec::IntoIter<(W, u64)>
+    where
+        R: key::Read,
+        W: key::Write + PartialOrd<R> + From<R>,
+    {
+        // FIXME: deduplicate prefix traversal?
+        let prefix = Self::prefix(&start, &end);
+        let _guard = self.smr.protect_read(prefix.peek_all());
+        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
+        let index = cursor.traverse_prefix();
+        let mut stack = W::from(prefix);
+        stack.truncate(index);
+
+        let mut prev: Option<Vec<(W, u64)>> = None;
+        loop {
+            let mut iter = unsafe {
+                iter::Iter::<W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter>::new(
+                    cursor.root(),
+                    stack.clone(),
+                    iter::SelectRange::new(start.clone(), end.clone()),
+                )
+            };
+
+            let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
+                .collect::<Vec<_>>();
+
+            match prev {
+                Some(prev) if prev == next => return next.into_iter(),
+                None | Some(_) => prev = Some(next),
+            }
+        }
+    }
+
+    fn prefix<R: key::Read>(start: &Bound<R>, end: &Bound<R>) -> R {
+        match (start, end) {
+            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
+            (
+                Bound::Included(low) | Bound::Excluded(low),
+                Bound::Included(high) | Bound::Excluded(high),
+            ) => low.prefix(high),
+        }
+    }
 }
 
-pub(crate) struct RangeIter<'g, 'l, R, W> {
+pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
     iter: iter::Iter<'g, W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter<'g>>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 
-impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
+impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
 where
     R: key::Read,
     W: key::Write + PartialOrd<R>,
 {
+    #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {
         self.iter.lend()
     }
