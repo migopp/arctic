@@ -5,7 +5,7 @@ use ribbit::u3;
 use crate::byte;
 use crate::key;
 use crate::key::Fixed;
-use crate::key::Stack as _;
+use crate::key::Write as _;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Iter<'a> {
@@ -35,12 +35,12 @@ impl Default for Iter<'_> {
     }
 }
 
-impl key::Iterator for Iter<'_> {
+impl key::Read for Iter<'_> {
     #[inline]
     fn len(&self) -> usize {
         match self {
             Iter::Large(large) => large.len(),
-            Iter::Small(small) => key::Iterator::len(small),
+            Iter::Small(small) => key::Read::len(small),
         }
     }
 
@@ -134,7 +134,7 @@ impl key::Iterator for Iter<'_> {
     }
 }
 
-impl key::Stack for Vec<u8> {
+impl key::Write for Vec<u8> {
     #[inline]
     fn len(&self) -> usize {
         Vec::len(self)
@@ -205,7 +205,7 @@ mod tests {
 
     use crate::byte::Array;
     use crate::key::dynamic;
-    use crate::key::Iterator as _;
+    use crate::key::Read as _;
 
     #[test]
     fn dynamic_smoke() {

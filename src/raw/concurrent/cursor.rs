@@ -14,17 +14,17 @@ use crate::raw::Op;
 use crate::Edge;
 
 /// Stateful traversal over tree.
-pub(crate) struct Cursor<'a, K, H> {
+pub(crate) struct Cursor<'a, R, H> {
     prefix: ribbit::Packed<byte::Array>,
     index: usize,
-    key: K,
+    key: R,
     root: &'a Atomic128<Edge>,
     history: H,
 }
 
-impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
+impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[inline]
-    pub(crate) fn new(key: K, root: &'a Atomic128<Edge>) -> Self {
+    pub(crate) fn new(key: R, root: &'a Atomic128<Edge>) -> Self {
         Self {
             prefix: key.peek_all(),
             index: 0,
@@ -175,7 +175,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[inline]
-    fn step(&mut self, key: K, len: u3, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+    fn step(&mut self, key: R, len: u3, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
         // 1 extra byte for node
         self.index += len.value() as usize + 1;
         self.history.push(Segment {
@@ -205,29 +205,29 @@ pub(crate) trait History<'a, K>: Default {
 
 pub(crate) struct Optimistic<K>(PhantomData<K>);
 
-impl<K> Default for Optimistic<K> {
+impl<R> Default for Optimistic<R> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<'a, K> History<'a, K> for Optimistic<K> {
+impl<'a, R> History<'a, R> for Optimistic<R> {
     type PopError = ();
 
     #[inline]
-    fn push(&mut self, _segment: Segment<'a, K>) {}
+    fn push(&mut self, _segment: Segment<'a, R>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError> {
         Err(())
     }
 }
 
-pub(crate) struct Pessimistic<'a, K> {
-    path: Vec<Segment<'a, K>>,
+pub(crate) struct Pessimistic<'a, R> {
+    path: Vec<Segment<'a, R>>,
 }
 
-impl<K> Default for Pessimistic<'_, K> {
+impl<R> Default for Pessimistic<'_, R> {
     fn default() -> Self {
         Self {
             path: Vec::default(),
@@ -235,16 +235,16 @@ impl<K> Default for Pessimistic<'_, K> {
     }
 }
 
-impl<'a, K: Clone> History<'a, K> for Pessimistic<'a, K> {
+impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
     type PopError = Infallible;
 
     #[inline]
-    fn push(&mut self, segment: Segment<'a, K>) {
+    fn push(&mut self, segment: Segment<'a, R>) {
         self.path.push(segment);
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError> {
         Ok(self.path.pop())
     }
 }
@@ -255,8 +255,8 @@ impl<'a, K: Clone> History<'a, K> for Pessimistic<'a, K> {
 /// - Edge to match next
 /// - Node underneath edge
 #[derive(Debug)]
-pub(crate) struct Segment<'a, K> {
-    key: K,
+pub(crate) struct Segment<'a, R> {
+    key: R,
     len: u3,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,

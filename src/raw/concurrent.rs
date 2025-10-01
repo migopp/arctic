@@ -45,7 +45,7 @@ pub(crate) struct MapRef<'a> {
 
 impl<'a> MapRef<'a> {
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn get<R: key::Read>(&self, key: R) -> Option<u64> {
         let _guard = self.smr.protect_read(key.peek_all());
 
         let mut root = self.raw.root();
@@ -71,7 +71,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
         match self.update_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.update_pessimistic(key, value),
@@ -79,28 +79,24 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn update_optimistic<K: key::Iterator>(
-        &mut self,
-        key: K,
-        value: u64,
-    ) -> Result<Option<u64>, ()> {
-        self.update_impl::<_, cursor::Optimistic<K>>(key, value)
+    fn update_optimistic<R: key::Read>(&mut self, key: R, value: u64) -> Result<Option<u64>, ()> {
+        self.update_impl::<_, cursor::Optimistic<R>>(key, value)
     }
 
     #[cold]
-    fn update_pessimistic<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
-        self.update_impl::<_, cursor::Pessimistic<K>>(key, value)
+    fn update_pessimistic<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
+        self.update_impl::<_, cursor::Pessimistic<R>>(key, value)
             .unwrap()
     }
 
     #[inline]
-    fn update_impl<K: key::Iterator, H: cursor::History<'a, K>>(
+    fn update_impl<R: key::Read, H: cursor::History<'a, R>>(
         &mut self,
-        key: K,
+        key: R,
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -135,7 +131,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn remove<R: key::Read>(&mut self, key: R) -> Option<u64> {
         match self.remove_optimistic(key.clone()) {
             Ok(old) => old,
             Err(()) => self.remove_pessimistic(key),
@@ -143,22 +139,22 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn remove_optimistic<K: key::Iterator>(&mut self, key: K) -> Result<Option<u64>, ()> {
-        self.remove_impl::<_, cursor::Optimistic<K>>(key)
+    fn remove_optimistic<R: key::Read>(&mut self, key: R) -> Result<Option<u64>, ()> {
+        self.remove_impl::<_, cursor::Optimistic<R>>(key)
     }
 
     #[cold]
-    fn remove_pessimistic<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
-        self.remove_impl::<_, cursor::Pessimistic<K>>(key).unwrap()
+    fn remove_pessimistic<R: key::Read>(&mut self, key: R) -> Option<u64> {
+        self.remove_impl::<_, cursor::Pessimistic<R>>(key).unwrap()
     }
 
     #[inline]
-    fn remove_impl<K: key::Iterator, H: cursor::History<'a, K>>(
+    fn remove_impl<R: key::Read, H: cursor::History<'a, R>>(
         &mut self,
-        key: K,
+        key: R,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<K, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -188,7 +184,7 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
         match self.insert_optimistic(key.clone(), value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
@@ -196,29 +192,25 @@ impl<'a> MapRef<'a> {
     }
 
     #[inline]
-    fn insert_optimistic<K: key::Iterator>(
-        &mut self,
-        key: K,
-        value: u64,
-    ) -> Result<Option<u64>, ()> {
-        self.insert_impl::<_, cursor::Optimistic<K>>(key, value)
+    fn insert_optimistic<R: key::Read>(&mut self, key: R, value: u64) -> Result<Option<u64>, ()> {
+        self.insert_impl::<_, cursor::Optimistic<R>>(key, value)
     }
 
     #[cold]
-    fn insert_pessimistic<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    fn insert_pessimistic<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<_, cursor::Pessimistic<K>>(key, value)
+        self.insert_impl::<_, cursor::Pessimistic<R>>(key, value)
             .unwrap()
     }
 
     #[inline]
-    fn insert_impl<K: key::Iterator, H: cursor::History<'a, K>>(
+    fn insert_impl<R: key::Read, H: cursor::History<'a, R>>(
         &mut self,
-        key: K,
+        key: R,
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<K, H>::new(key.clone(), self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
@@ -259,9 +251,9 @@ impl<'a> MapRef<'a> {
     }
 
     #[cold]
-    fn freeze<K: key::Iterator, H: cursor::History<'a, K>>(
+    fn freeze<R: key::Read, H: cursor::History<'a, R>>(
         guard: &mut smr::WriteGuard,
-        cursor: &mut Cursor<'a, K, H>,
+        cursor: &mut Cursor<'a, R, H>,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
         let mut edge = cursor.root().load_packed(Ordering::Acquire);
@@ -313,9 +305,9 @@ impl<'a> MapRef<'a> {
     }
 
     #[cold]
-    unsafe fn retire<K: key::Iterator, H: cursor::History<'a, K>>(
+    unsafe fn retire<R: key::Read, H: cursor::History<'a, R>>(
         guard: &mut smr::WriteGuard,
-        cursor: &Cursor<'a, K, H>,
+        cursor: &Cursor<'a, R, H>,
         op: Op,
         edge: ribbit::Packed<Edge>,
     ) {
@@ -329,17 +321,17 @@ impl<'a> MapRef<'a> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<R, K, S>(
+    pub(crate) fn range_non_linearizable<B, R, W>(
         &mut self,
-        range: R,
-    ) -> iter::Iter<'a, S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter<'a>>
+        range: B,
+    ) -> iter::Iter<'a, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'a>>
     where
-        R: RangeBounds<K>,
-        K: key::Iterator + PartialOrd<S>,
-        S: key::Stack + PartialOrd<K> + From<K>,
+        B: RangeBounds<R>,
+        R: key::Read + PartialOrd<W>,
+        W: key::Write + PartialOrd<R> + From<R>,
     {
         let prefix = match (range.start_bound(), range.end_bound()) {
-            (Bound::Unbounded, _) | (_, Bound::Unbounded) => K::default(),
+            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
             (
                 Bound::Included(low) | Bound::Excluded(low),
                 Bound::Included(high) | Bound::Excluded(high),
@@ -347,13 +339,13 @@ impl<'a> MapRef<'a> {
         };
 
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix.clone(), self.raw.root());
+        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
-        let mut stack = S::from(prefix);
+        let mut stack = W::from(prefix);
         stack.truncate(index);
 
         unsafe {
-            iter::Iter::<S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter>::new(
+            iter::Iter::<W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter>::new(
                 cursor.root(),
                 stack,
                 iter::SelectRange::new(range),
@@ -386,8 +378,8 @@ impl<'a> MapRef<'a> {
     //
 }
 
-pub(crate) type RangeIter<'a, R, K, S> =
-    iter::Iter<'a, S, iter::SelectRange<R, K, S>, iter::Preorder, node::SortedIter<'a>>;
+pub(crate) type RangeIter<'a, B, R, W> =
+    iter::Iter<'a, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'a>>;
 
 //
 // struct ScanIter<'a, K> {

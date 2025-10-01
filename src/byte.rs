@@ -70,13 +70,13 @@ impl ArrayPacked {
     }
 
     #[inline]
-    pub(crate) fn match_prefix<K: key::Iterator>(self, key: &mut K) -> Option<u3> {
+    pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<u3> {
         let len = Array::min_len(key.len(), self.len_internal());
         (key.take(len) == self).then_some(len)
     }
 
     #[inline]
-    pub(crate) fn match_split<K: key::Iterator>(self, key: &mut K) -> Match {
+    pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> Match {
         let edge_len = self.len_internal();
         let key_len = key.len();
         let len = Array::min_len(key_len, edge_len);

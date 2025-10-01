@@ -196,7 +196,7 @@ mod tests {
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
-        K::Stack: PartialEq<K>,
+        K::Write: PartialEq<K>,
     {
         let mut keys = iter
             .into_iter()

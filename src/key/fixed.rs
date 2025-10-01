@@ -28,7 +28,7 @@ impl Fixed {
     }
 }
 
-impl key::Iterator for Fixed {
+impl key::Read for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -75,7 +75,7 @@ impl key::Iterator for Fixed {
     }
 }
 
-impl key::Stack for Fixed {
+impl key::Write for Fixed {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize

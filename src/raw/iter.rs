@@ -9,19 +9,19 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub struct Iter<'a, K, V, O, S>
+pub struct Iter<'a, W, V, O, S>
 where
     S: Sort<'a>,
 {
-    key: K,
+    key: W,
     selector: V,
     _order: PhantomData<O>,
     frontier: Vec<(usize, core::iter::Peekable<TreeIter<'a, S>>)>,
 }
 
-impl<'a, K: key::Stack, V: Selector<K>, O: Order, S: Sort<'a>> Iter<'a, K, V, O, S> {
+impl<'a, W: key::Write, V: Selector<W>, O: Order, S: Sort<'a>> Iter<'a, W, V, O, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, key: K, selector: V) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, key: W, selector: V) -> Self {
         let len = key.len();
         Self {
             key,
@@ -32,7 +32,7 @@ impl<'a, K: key::Stack, V: Selector<K>, O: Order, S: Sort<'a>> Iter<'a, K, V, O,
     }
 
     #[inline]
-    pub fn lend(&mut self) -> Option<(&K, V::Item)> {
+    pub fn lend(&mut self) -> Option<(&W, V::Item)> {
         'vertical: loop {
             // NOTE: we use `saturating_sub` to avoid underflow.
             //
@@ -94,9 +94,9 @@ impl<'a, K: key::Stack, V: Selector<K>, O: Order, S: Sort<'a>> Iter<'a, K, V, O,
     }
 }
 
-pub(crate) trait Selector<K: key::Stack> {
+pub(crate) trait Selector<W: key::Write> {
     type Item;
-    fn select(&self, edge: ribbit::Packed<Edge>, key: &K, depth: usize) -> Select<Self::Item>;
+    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Select<Self::Item>;
 }
 
 pub(crate) enum Select<T> {
@@ -107,11 +107,11 @@ pub(crate) enum Select<T> {
 
 pub(crate) struct SelectLeaf;
 
-impl<K: key::Stack> Selector<K> for SelectLeaf {
+impl<W: key::Write> Selector<W> for SelectLeaf {
     type Item = u64;
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, _depth: usize) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() == node::Kind::LEAF {
             Select::Yield(edge.data())
         } else {
@@ -122,11 +122,11 @@ impl<K: key::Stack> Selector<K> for SelectLeaf {
 
 pub(crate) struct SelectNode;
 
-impl<K: key::Stack> Selector<K> for SelectNode {
+impl<W: key::Write> Selector<W> for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, _depth: usize) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() >= node::Kind::NODE_3 {
             Select::Yield(edge)
         } else {
@@ -137,11 +137,11 @@ impl<K: key::Stack> Selector<K> for SelectNode {
 
 pub(crate) struct SelectAll;
 
-impl<K: key::Stack> Selector<K> for SelectAll {
+impl<W: key::Write> Selector<W> for SelectAll {
     type Item = (ribbit::Packed<Edge>, usize);
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &K, depth: usize) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() > node::Kind::NONE {
             Select::Yield((edge, depth))
         } else {
@@ -150,14 +150,14 @@ impl<K: key::Stack> Selector<K> for SelectAll {
     }
 }
 
-pub(crate) struct SelectRange<R, K, S> {
-    range: R,
-    _key: PhantomData<K>,
-    _stack: PhantomData<S>,
+pub(crate) struct SelectRange<B, R, W> {
+    range: B,
+    _key: PhantomData<R>,
+    _stack: PhantomData<W>,
 }
 
-impl<R, K, S> SelectRange<R, K, S> {
-    pub(crate) fn new(range: R) -> Self {
+impl<B, R, W> SelectRange<B, R, W> {
+    pub(crate) fn new(range: B) -> Self {
         Self {
             range,
             _key: PhantomData,
@@ -166,15 +166,15 @@ impl<R, K, S> SelectRange<R, K, S> {
     }
 }
 
-impl<R, K, S> Selector<S> for SelectRange<R, K, S>
+impl<B, R, W> Selector<W> for SelectRange<B, R, W>
 where
-    R: RangeBounds<K>,
-    K: PartialOrd<S>,
-    S: key::Stack + PartialOrd<K>,
+    B: RangeBounds<R>,
+    R: PartialOrd<W>,
+    W: key::Write + PartialOrd<R>,
 {
     type Item = u64;
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, key: &S, _depth: usize) -> Select<Self::Item> {
+    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, _depth: usize) -> Select<Self::Item> {
         match self.range.end_bound() {
             core::ops::Bound::Included(end) if key > end => return Select::Break,
             core::ops::Bound::Excluded(end) if key >= end => return Select::Break,

@@ -7,17 +7,17 @@ use crate::byte;
 
 pub trait Key {
     #[allow(private_bounds)]
-    type Iter<'a>: Iterator + PartialOrd<Self::Stack>
+    type Read<'a>: Read + PartialOrd<Self::Write>
     where
         Self: 'a;
 
     #[allow(private_bounds)]
-    type Stack: Stack + for<'a> PartialOrd<Self::Iter<'a>> + for<'a> From<Self::Iter<'a>>;
+    type Write: Write + for<'a> PartialOrd<Self::Read<'a>> + for<'a> From<Self::Read<'a>>;
 
-    fn iter<'a>(&'a self) -> Self::Iter<'a>;
+    fn read<'a>(&'a self) -> Self::Read<'a>;
 }
 
-pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
+pub(crate) trait Read: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
 
     fn peek(&self, len: u3) -> ribbit::Packed<byte::Array>;
@@ -34,7 +34,7 @@ pub(crate) trait Iterator: Clone + core::fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Stack: Clone + core::fmt::Debug + Default {
+pub(crate) trait Write: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
     fn extend(&mut self, array: ribbit::Packed<byte::Array>);
     fn push(&mut self, byte: u8);
@@ -44,7 +44,7 @@ pub(crate) trait Stack: Clone + core::fmt::Debug + Default {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Ignore;
 
-impl Stack for Ignore {
+impl Write for Ignore {
     #[inline]
     fn len(&self) -> usize {
         0
@@ -64,10 +64,10 @@ macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Iter<'a> = Fixed;
-                type Stack = Fixed;
+                type Read<'a> = Fixed;
+                type Write = Fixed;
                 #[inline]
-                fn iter<'a>(&'a self) -> Self::Iter<'a> {
+                fn read<'a>(&'a self) -> Self::Read<'a> {
                     Fixed::from(*self)
                 }
             }
@@ -78,46 +78,46 @@ macro_rules! impl_unsigned_int {
 impl_unsigned_int!(u8, u16, u32, u64);
 
 impl<const N: usize> Key for [u8; N] {
-    type Iter<'a> = dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
+    type Read<'a> = dynamic::Iter<'a>;
+    type Write = Vec<u8>;
     #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+    fn read<'a>(&'a self) -> Self::Read<'a> {
         dynamic::Iter::from(self.as_slice())
     }
 }
 
 impl Key for [u8] {
-    type Iter<'a> = dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
+    type Read<'a> = dynamic::Iter<'a>;
+    type Write = Vec<u8>;
     #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+    fn read<'a>(&'a self) -> Self::Read<'a> {
         dynamic::Iter::from(self)
     }
 }
 
 impl Key for Vec<u8> {
-    type Iter<'a> = dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
+    type Read<'a> = dynamic::Iter<'a>;
+    type Write = Vec<u8>;
     #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+    fn read<'a>(&'a self) -> Self::Read<'a> {
         dynamic::Iter::from(self.as_slice())
     }
 }
 
 impl Key for str {
-    type Iter<'a> = dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
+    type Read<'a> = dynamic::Iter<'a>;
+    type Write = Vec<u8>;
     #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+    fn read<'a>(&'a self) -> Self::Read<'a> {
         dynamic::Iter::from(self.as_bytes())
     }
 }
 
 impl Key for String {
-    type Iter<'a> = dynamic::Iter<'a>;
-    type Stack = Vec<u8>;
+    type Read<'a> = dynamic::Iter<'a>;
+    type Write = Vec<u8>;
     #[inline]
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+    fn read<'a>(&'a self) -> Self::Read<'a> {
         dynamic::Iter::from(self.as_bytes())
     }
 }

@@ -30,22 +30,22 @@ impl<K: ?Sized, V> Map<K, V> {
 
 impl<K: ?Sized + Key, V: Value> Map<K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.iter()).map(V::from_u64)
+        self.raw.get(key.read()).map(V::from_u64)
     }
 
     pub fn insert(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
-            .insert(key.iter(), value.into_u64())
+            .insert(key.read(), value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.raw.remove(key.iter()).map(V::from_u64)
+        self.raw.remove(key.read()).map(V::from_u64)
     }
 
     pub fn update(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
-            .update(key.iter(), value.into_u64())
+            .update(key.read(), value.into_u64())
             .map(V::from_u64)
     }
 
@@ -69,14 +69,14 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
 }
 
 pub(crate) struct Iter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
-    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
+    inner: raw::iter::Iter<'a, K::Write, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
 impl<'a, K, V, S> Iterator for Iter<'a, K, V, S>
 where
-    K: Key + for<'s> From<&'s K::Stack>,
+    K: Key + for<'s> From<&'s K::Write>,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
@@ -95,7 +95,7 @@ where
     S: raw::iter::Sort<'a>,
 {
     #[allow(dead_code)]
-    pub fn lend(&mut self) -> Option<(&K::Stack, V)> {
+    pub fn lend(&mut self) -> Option<(&K::Write, V)> {
         self.inner
             .lend()
             .map(|(key, value)| (key, V::from_u64(value)))

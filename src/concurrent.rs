@@ -50,22 +50,22 @@ pub struct MapRef<'a, K: ?Sized, V> {
 
 impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.iter()).map(V::from_u64)
+        self.raw.get(key.read()).map(V::from_u64)
     }
 
     pub fn insert(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
-            .insert(key.iter(), value.into_u64())
+            .insert(key.read(), value.into_u64())
             .map(V::from_u64)
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.raw.remove(key.iter()).map(V::from_u64)
+        self.raw.remove(key.read()).map(V::from_u64)
     }
 
     pub fn update(&mut self, key: &K, value: V) -> Option<V> {
         self.raw
-            .update(key.iter(), value.into_u64())
+            .update(key.read(), value.into_u64())
             .map(V::from_u64)
     }
 
@@ -102,9 +102,9 @@ impl<'a, K: Key + ?Sized, V: Value> MapRef<'a, K, V> {
     pub fn range_non_linearizable<'k, R: RangeBounds<&'k K>>(
         &mut self,
         range: R,
-    ) -> RangeIter<'a, 'k, K, impl RangeBounds<K::Iter<'k>>, V> {
-        let start = range.start_bound().map(|start| start.iter());
-        let end = range.end_bound().map(|end| end.iter());
+    ) -> RangeIter<'a, 'k, K, impl RangeBounds<K::Read<'k>>, V> {
+        let start = range.start_bound().map(|start| start.read());
+        let end = range.end_bound().map(|end| end.read());
         RangeIter {
             iter: self.raw.range_non_linearizable((start, end)),
             _value: PhantomData,
@@ -112,16 +112,16 @@ impl<'a, K: Key + ?Sized, V: Value> MapRef<'a, K, V> {
     }
 }
 
-pub struct RangeIter<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Iter<'k>>, V> {
-    iter: raw::concurrent::RangeIter<'a, R, K::Iter<'k>, K::Stack>,
+pub struct RangeIter<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Read<'k>>, V> {
+    iter: raw::concurrent::RangeIter<'a, R, K::Read<'k>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Iter<'k>>, V: Value>
+impl<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Read<'k>>, V: Value>
     RangeIter<'a, 'k, K, R, V>
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(&K::Stack, V)> {
+    pub fn lend(&mut self) -> Option<(&K::Write, V)> {
         self.iter
             .lend()
             .map(|(key, value)| (key, V::from_u64(value)))
@@ -130,8 +130,8 @@ impl<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Iter<'k>>, V: Value>
 
 impl<'a, 'k, K, R, V> Iterator for RangeIter<'a, 'k, K, R, V>
 where
-    R: RangeBounds<K::Iter<'k>>,
-    K: Key + for<'b> From<&'b K::Stack>,
+    R: RangeBounds<K::Read<'k>>,
+    K: Key + for<'b> From<&'b K::Write>,
     V: Value,
 {
     type Item = (K, V);

@@ -23,39 +23,39 @@ impl Map {
 
     #[expect(unused_variables)]
     #[inline]
-    pub(crate) fn get<K: key::Iterator>(&self, key: K) -> Option<u64> {
+    pub(crate) fn get<R: key::Read>(&self, key: R) -> Option<u64> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub(crate) fn insert<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub(crate) fn remove<K: key::Iterator>(&mut self, key: K) -> Option<u64> {
+    pub(crate) fn remove<R: key::Read>(&mut self, key: R) -> Option<u64> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub(crate) fn update<K: key::Iterator>(&mut self, key: K, value: u64) -> Option<u64> {
+    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
         todo!()
     }
 
     pub(crate) fn iter<
         'a,
-        K: key::Stack,
-        V: iter::Selector<K>,
+        W: key::Write,
+        V: iter::Selector<W>,
         O: iter::Order,
         S: iter::Sort<'a>,
     >(
         &'a self,
         selector: V,
-    ) -> iter::Iter<'a, K, V, O, S> {
-        unsafe { iter::Iter::new(&self.root, K::default(), selector) }
+    ) -> iter::Iter<'a, W, V, O, S> {
+        unsafe { iter::Iter::new(&self.root, W::default(), selector) }
     }
 }
 
