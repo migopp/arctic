@@ -6,13 +6,13 @@ use crate::Key;
 use crate::Value;
 
 #[repr(transparent)]
-pub struct Map<K: ?Sized, V> {
+pub struct Map<K, V> {
     raw: raw::sequential::Map,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<K: ?Sized, V> Default for Map<K, V> {
+impl<K, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             raw: raw::sequential::Map::default(),
@@ -22,30 +22,30 @@ impl<K: ?Sized, V> Default for Map<K, V> {
     }
 }
 
-impl<K: ?Sized, V> Map<K, V> {
+impl<K, V> Map<K, V> {
     pub(crate) fn as_raw(&mut self) -> &mut raw::sequential::Map {
         &mut self.raw
     }
 }
 
-impl<K: ?Sized + Key, V: Value> Map<K, V> {
-    pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.read()).map(V::from_u64)
+impl<K: Key, V: Value> Map<K, V> {
+    pub fn get<'k>(&self, key: K::Borrow<'k>) -> Option<V> {
+        self.raw.get(K::Read::from(key)).map(V::from_u64)
     }
 
-    pub fn insert(&mut self, key: &K, value: V) -> Option<V> {
+    pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
         self.raw
-            .insert(key.read(), value.into_u64())
+            .insert(K::Read::from(key), value.into_u64())
             .map(V::from_u64)
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.raw.remove(key.read()).map(V::from_u64)
+    pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
+        self.raw.remove(K::Read::from(key)).map(V::from_u64)
     }
 
-    pub fn update(&mut self, key: &K, value: V) -> Option<V> {
+    pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
         self.raw
-            .update(key.read(), value.into_u64())
+            .update(K::Read::from(key), value.into_u64())
             .map(V::from_u64)
     }
 
@@ -68,7 +68,7 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     }
 }
 
-pub(crate) struct Iter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
+pub(crate) struct Iter<'a, K: Key, V, S: raw::iter::Sort<'a>> {
     inner: raw::iter::Iter<'a, K::Write, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
@@ -76,7 +76,7 @@ pub(crate) struct Iter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
 
 impl<'a, K, V, S> Iterator for Iter<'a, K, V, S>
 where
-    K: Key + for<'s> From<&'s K::Write>,
+    K: Key,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
@@ -84,20 +84,20 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .lend()
-            .map(|(key, value)| (K::from(key), V::from_u64(value)))
+            .map(|(key, value)| (K::from_owned(key.clone()), V::from_u64(value)))
     }
 }
 
 impl<'a, K, V, S> Iter<'a, K, V, S>
 where
-    K: Key + ?Sized,
+    K: Key,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
     #[allow(dead_code)]
-    pub fn lend(&mut self) -> Option<(&K::Write, V)> {
+    pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.inner
             .lend()
-            .map(|(key, value)| (key, V::from_u64(value)))
+            .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))
     }
 }

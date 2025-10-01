@@ -27,6 +27,20 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
     }
 }
 
+impl<'a, const N: usize> From<&'a [u8; N]> for Iter<'a> {
+    #[inline]
+    fn from(value: &'a [u8; N]) -> Self {
+        Self::from(value.as_slice())
+    }
+}
+
+impl<'a> From<&'a str> for Iter<'a> {
+    #[inline]
+    fn from(value: &'a str) -> Self {
+        Self::from(value.as_bytes())
+    }
+}
+
 impl Default for Iter<'_> {
     #[inline]
     fn default() -> Self {

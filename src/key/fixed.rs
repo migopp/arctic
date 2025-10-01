@@ -141,11 +141,11 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl From<&'_ Fixed> for $from {
+            impl From<Fixed> for $from {
                 #[inline]
-                fn from(iter: &Fixed) -> Self {
-                    validate_eq!(iter.len, $len);
-                    let value = (iter.buffer as $from);
+                fn from(fixed: Fixed) -> Self {
+                    validate_eq!(fixed.len, $len);
+                    let value = (fixed.buffer as $from);
                     if cfg!(target_endian = "little") {
                         value.swap_bytes()
                     } else {
@@ -156,7 +156,7 @@ macro_rules! impl_unsigned_int {
 
             impl PartialEq<$from> for Fixed {
                 fn eq(&self, value: &$from) -> bool {
-                    <$from>::from(self) == *value
+                    <$from>::from(*self) == *value
                 }
             }
         )*

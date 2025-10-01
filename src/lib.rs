@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let map = Map::<[u8], _>::default();
+        let map = Map::<[u8; 4], _>::default();
         let mut map = map.pin();
         map.insert(b"abcd", 1);
         assert_eq!(map.get(b"abcd"), Some(1));
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn smoke_u64_key() {
-        let map = Map::default();
+        let map = Map::<[u8; 8], _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
         let mut map = map.pin();
         map.insert(&key, 1);
@@ -90,12 +90,12 @@ mod tests {
 
     #[test]
     fn scan_leaf() {
-        let map = Map::default();
+        let map = Map::<u8, _>::default();
         let mut map = map.pin();
         let key = 1u8;
-        map.insert(&key, 2);
+        map.insert(key, 2);
         assert_eq!(
-            map.range_non_linearizable(&1u8..=&1u8).collect::<Vec<_>>(),
+            map.range_non_linearizable(1u8..=1u8).collect::<Vec<_>>(),
             vec![(1, 2)]
         );
     }
@@ -135,12 +135,12 @@ mod tests {
 
     #[test]
     fn node3_overwrite() {
-        let mut map = Map::default();
+        let mut map = Map::<u8, _>::default();
         let mut pin = map.pin();
 
         for value in [1, 2, 3] {
-            pin.insert(&1u8, value);
-            assert_eq!(pin.get(&1), Some(value));
+            pin.insert(1u8, value);
+            assert_eq!(pin.get(1), Some(value));
         }
 
         drop(pin);
@@ -196,7 +196,6 @@ mod tests {
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
-        K::Write: PartialEq<K>,
     {
         let mut keys = iter
             .into_iter()
@@ -208,12 +207,12 @@ mod tests {
         let mut pin = map.pin();
 
         for (key, value) in &keys {
-            pin.insert(key, *value);
-            assert_eq!(pin.get(key), Some(*value));
+            pin.insert(key.borrow(), *value);
+            assert_eq!(pin.get(key.borrow()), Some(*value));
         }
 
         for (key, value) in &keys {
-            assert_eq!(pin.get(key), Some(*value));
+            assert_eq!(pin.get(key.borrow()), Some(*value));
         }
 
         drop(pin);
@@ -229,12 +228,13 @@ mod tests {
         keys.sort_by(|(l, _), (r, _)| l.cmp(r));
 
         // Sequential iteration
-        let mut iter_sequential = map.as_sequential().iter();
-        let mut iter = keys.iter();
-        while let Some(((lk, lv), (rk, rv))) = iter_sequential.lend().zip(iter.next()) {
-            assert_eq!(*lk, *rk);
-            assert_eq!(lv, *rv);
-        }
+        map.as_sequential()
+            .iter()
+            .zip(&keys)
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
 
         let mut pin = map.pin();
 
@@ -244,17 +244,15 @@ mod tests {
         };
 
         // Concurrent iteration, non-linearizable
-        let mut iter_concurrent = pin.range_non_linearizable(first..=last);
-        let mut iter = keys.iter();
-        while let Some(((lk, lv), (rk, rv))) = iter_concurrent.lend().zip(iter.next()) {
-            assert_eq!(*lk, *rk);
-            assert_eq!(lv, *rv);
-        }
-        assert!(iter_concurrent.lend().is_none());
-        drop(iter_concurrent);
+        pin.range_non_linearizable(first.borrow()..=last.borrow())
+            .zip(&keys)
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
 
         // Concurrent iteration, linearizable
-        pin.range(first..=last)
+        pin.range(first.borrow()..=last.borrow())
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

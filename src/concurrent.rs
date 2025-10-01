@@ -6,13 +6,13 @@ use crate::sequential;
 use crate::Key;
 use crate::Value;
 
-pub struct Map<K: ?Sized, V> {
+pub struct Map<K, V> {
     raw: raw::concurrent::Map,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<K: ?Sized, V> Default for Map<K, V> {
+impl<K, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             raw: raw::concurrent::Map::default(),
@@ -22,7 +22,7 @@ impl<K: ?Sized, V> Default for Map<K, V> {
     }
 }
 
-impl<K: ?Sized, V> Map<K, V> {
+impl<K, V> Map<K, V> {
     #[inline]
     pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
         unsafe {
@@ -42,30 +42,30 @@ impl<K: ?Sized, V> Map<K, V> {
     }
 }
 
-pub struct MapRef<'g, K: ?Sized, V> {
+pub struct MapRef<'g, K, V> {
     raw: raw::concurrent::MapRef<'g>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<'g, K: Key + ?Sized, V: Value> MapRef<'g, K, V> {
-    pub fn get(&self, key: &K) -> Option<V> {
-        self.raw.get(key.read()).map(V::from_u64)
+impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
+    pub fn get<'k>(&self, key: K::Borrow<'k>) -> Option<V> {
+        self.raw.get(K::Read::from(key)).map(V::from_u64)
     }
 
-    pub fn insert(&mut self, key: &K, value: V) -> Option<V> {
+    pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
         self.raw
-            .insert(key.read(), value.into_u64())
+            .insert(K::Read::from(key), value.into_u64())
             .map(V::from_u64)
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.raw.remove(key.read()).map(V::from_u64)
+    pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
+        self.raw.remove(K::Read::from(key)).map(V::from_u64)
     }
 
-    pub fn update(&mut self, key: &K, value: V) -> Option<V> {
+    pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
         self.raw
-            .update(key.read(), value.into_u64())
+            .update(K::Read::from(key), value.into_u64())
             .map(V::from_u64)
     }
 
@@ -74,50 +74,52 @@ impl<'g, K: Key + ?Sized, V: Value> MapRef<'g, K, V> {
         range: R,
     ) -> RangeNonLinearizableIter<'g, 'l, K, V>
     where
-        R: RangeBounds<&'l K>,
+        R: RangeBounds<K::Borrow<'l>>,
     {
-        let start = range.start_bound().map(|start| start.read());
-        let end = range.end_bound().map(|end| end.read());
+        let start = range.start_bound().map(|start| K::Read::from(*start));
+        let end = range.end_bound().map(|end| K::Read::from(*end));
         RangeNonLinearizableIter {
             iter: self.raw.range_non_linearizable(start, end),
             _value: PhantomData,
         }
     }
 
-    pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K::Write, V)>
+    pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K, V)>
     where
-        R: RangeBounds<&'l K>,
+        R: RangeBounds<K::Borrow<'l>>,
     {
-        let start = range.start_bound().map(|start| start.read());
-        let end = range.end_bound().map(|end| end.read());
+        let start = range.start_bound().map(|start| K::Read::from(*start));
+        let end = range.end_bound().map(|end| K::Read::from(*end));
         self.raw
             .range(start, end)
-            .map(|(key, value)| (key, V::from_u64(value)))
+            .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
     }
 }
 
-pub struct RangeNonLinearizableIter<'g, 'l, K: Key + ?Sized + 'l, V> {
+pub struct RangeNonLinearizableIter<'g, 'l, K: Key + 'l, V> {
     iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Read<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'g, 'l, K: Key + ?Sized + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
+impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
     #[inline]
-    pub fn lend(&mut self) -> Option<(&K::Write, V)> {
+    pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
             .lend()
-            .map(|(key, value)| (key, V::from_u64(value)))
+            .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))
     }
 }
 
 impl<'g, 'l, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, K, V>
 where
-    K: Key + for<'b> From<&'b K::Write>,
+    K: Key,
     V: Value,
 {
     type Item = (K, V);
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.lend().map(|(key, value)| (K::from(key), value))
+        self.iter
+            .lend()
+            .map(|(key, value)| (K::from_owned(key.clone()), V::from_u64(value)))
     }
 }
