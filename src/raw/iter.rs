@@ -168,7 +168,6 @@ impl<R, W> SelectRange<R, W> {
 
 impl<R, W> Selector<W> for SelectRange<R, W>
 where
-    R: PartialOrd<W>,
     W: key::Write + PartialOrd<R>,
 {
     type Item = u64;

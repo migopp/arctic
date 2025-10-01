@@ -171,13 +171,6 @@ impl<'a> PartialEq<Iter<'a>> for Vec<u8> {
     }
 }
 
-impl<'a> PartialEq<Vec<u8>> for Iter<'a> {
-    #[inline]
-    fn eq(&self, stack: &Vec<u8>) -> bool {
-        stack == self
-    }
-}
-
 impl<'a> PartialOrd<Iter<'a>> for Vec<u8> {
     #[inline]
     fn partial_cmp(&self, iter: &Iter<'a>) -> Option<cmp::Ordering> {
@@ -185,13 +178,6 @@ impl<'a> PartialOrd<Iter<'a>> for Vec<u8> {
             Iter::Small(small) => Some(small.with_bytes(|small| self.as_slice().cmp(small))),
             Iter::Large(large) => self.as_slice().partial_cmp(large),
         }
-    }
-}
-
-impl<'a> PartialOrd<Vec<u8>> for Iter<'a> {
-    #[inline]
-    fn partial_cmp(&self, stack: &Vec<u8>) -> Option<cmp::Ordering> {
-        stack.partial_cmp(self).map(cmp::Ordering::reverse)
     }
 }
 

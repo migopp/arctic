@@ -7,7 +7,7 @@ use crate::byte;
 
 pub trait Key {
     #[allow(private_bounds)]
-    type Read<'a>: Read + PartialOrd<Self::Write>
+    type Read<'a>: Read
     where
         Self: 'a;
 

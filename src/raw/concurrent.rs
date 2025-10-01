@@ -326,7 +326,7 @@ impl<'g> MapRef<'g> {
         end: Bound<R>,
     ) -> RangeIter<'g, 'l, R, W>
     where
-        R: key::Read + PartialOrd<W>,
+        R: key::Read,
         W: key::Write + PartialOrd<R> + From<R>,
     {
         let prefix = match (&start, &end) {
@@ -365,7 +365,7 @@ pub(crate) struct RangeIter<'g, 'l, R, W> {
 
 impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
 where
-    R: key::Read + PartialOrd<W>,
+    R: key::Read,
     W: key::Write + PartialOrd<R>,
 {
     pub fn lend(&mut self) -> Option<(&W, u64)> {
