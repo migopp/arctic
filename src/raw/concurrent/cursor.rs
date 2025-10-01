@@ -82,8 +82,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
     }
 
     #[inline]
-    #[expect(dead_code)]
-    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
+    pub(crate) fn traverse_prefix(&mut self) {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -102,7 +101,7 @@ impl<'a, K: key::Iterator, H: History<'a, K>> Cursor<'a, K, H> {
             }
 
             self.key = save;
-            return Some(edge);
+            return;
         }
     }
 

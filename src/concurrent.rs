@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use core::ops::RangeBounds;
 
 use crate::raw;
 use crate::sequential;
@@ -95,4 +96,34 @@ impl<K: Key + ?Sized, V: Value> MapRef<'_, K, V> {
     //     let high = range.end_bound().map(|high| high.to_byte_array());
     //     self.raw.range((low, high)).map(V::from_u64)
     // }
+}
+
+impl<'a, K: Key + ?Sized, V: Value> MapRef<'a, K, V> {
+    pub fn range<'k, R: RangeBounds<&'k K>>(
+        &'a mut self,
+        range: R,
+    ) -> RangeIter<'a, 'k, K, impl RangeBounds<K::Iter<'k>>> {
+        let start = range.start_bound().map(|start| start.iter());
+        let end = range.end_bound().map(|end| end.iter());
+        RangeIter {
+            iter: self.raw.range_non_linearizable((start, end)),
+            _key: PhantomData,
+        }
+    }
+}
+
+pub struct RangeIter<'a, 'k, K: Key + ?Sized + 'k, R: RangeBounds<K::Iter<'k>>> {
+    iter: raw::concurrent::RangeIter<'a, R, K::Iter<'k>, K::Stack>,
+    _key: PhantomData<K>,
+}
+
+impl<'a, 'k, K, R> Iterator for RangeIter<'a, 'k, K, R>
+where
+    R: RangeBounds<K::Iter<'k>>,
+    K: Key + for<'b> From<&'b K::Stack>,
+{
+    type Item = (K, u64);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next_with(|key, value| (K::from(key), value))
+    }
 }

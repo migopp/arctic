@@ -6,10 +6,10 @@ use ribbit::u3;
 use crate::byte;
 use crate::key;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Fixed {
-    buffer: u64,
     len: u8,
+    buffer: u64,
 }
 
 impl Fixed {

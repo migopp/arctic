@@ -1,10 +1,14 @@
 mod cursor;
 
+use core::marker::PhantomData;
+use core::ops::Bound;
+use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
 use crate::key;
 use crate::node;
+use crate::raw::iter;
 use crate::raw::sequential;
 use crate::raw::Op;
 use crate::smr;
@@ -326,6 +330,34 @@ impl<'a> MapRef<'a> {
         }
     }
 
+    pub(crate) fn range_non_linearizable<R, K, S>(&mut self, range: R) -> RangeIter<'a, R, K, S>
+    where
+        R: RangeBounds<K>,
+        K: key::Iterator + PartialOrd<S>,
+        S: key::Stack + PartialOrd<K>,
+    {
+        let prefix = match (range.start_bound(), range.end_bound()) {
+            (Bound::Unbounded, _) | (_, Bound::Unbounded) => K::default(),
+            (
+                Bound::Included(low) | Bound::Excluded(low),
+                Bound::Included(high) | Bound::Excluded(high),
+            ) => low.prefix(high),
+        };
+
+        let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix, self.raw.root());
+        cursor.traverse_prefix();
+
+        let iter = unsafe {
+            iter::Iter::<S, iter::SelectLeaf, iter::Preorder, node::SortedIter>::new(cursor.root())
+        };
+
+        RangeIter {
+            range,
+            iter,
+            _key: PhantomData,
+        }
+    }
+
     // pub fn scan(&self, low: &K, count: usize) -> impl Iterator<Item = u64> {
     //     let iter = ScanIter::new(Bound::Included(low), Bound::Unbounded, &self.root);
     //
@@ -349,59 +381,30 @@ impl<'a> MapRef<'a> {
     //     }
     // }
     //
-    // pub fn range<'r, R: RangeBounds<&'r K> + 'r>(&self, range: R) -> impl Iterator<Item = u64> + 'r
-    // where
-    //     K: 'r,
-    // {
-    //     let low = range.start_bound().map(|low| low);
-    //     let high = range.end_bound().map(|high| high);
-    //
-    //     let prefix = match (low, high) {
-    //         (Bound::Unbounded, _) | (_, Bound::Unbounded) => &[],
-    //         (
-    //             Bound::Included(low) | Bound::Excluded(low),
-    //             Bound::Included(high) | Bound::Excluded(high),
-    //         ) => {
-    //             let prefix = low
-    //                 .iter()
-    //                 .zip(high)
-    //                 .position(|(left, right)| left != right)
-    //                 .unwrap_or_else(|| low.len().min(high.len()));
-    //             &low[..prefix]
-    //         }
-    //     };
-    //
-    //     core::iter::empty()
-    //     // let mut cursor = Cursor::<K, cursor::Optimistic>::new(&self.root, prefix);
-    //     // let Some((len, _)) = cursor.traverse_prefix() else {
-    //     //     return Or::L(None.into_iter());
-    //     // };
-    //     //
-    //     // let iter = ScanIter::new(
-    //     //     low.map(|low| &low[len..]),
-    //     //     high.map(|high| &high[len..]),
-    //     //     cursor.here(),
-    //     // );
-    //     //
-    //     // match iter {
-    //     //     Or::L(leaf) => Or::L(leaf.into_iter()),
-    //     //     Or::R(iter) => Or::R(
-    //     //         // FIXME: root node can contain leaves outside of bounds
-    //     //         iter.flat_map(|node| {
-    //     //             unsafe { node.iter() }.filter_map(|(_, edge)| {
-    //     //                 let edge = edge.load(Ordering::Relaxed);
-    //     //                 if matches!(edge.meta.kind, node::Kind::Leaf) {
-    //     //                     Some(edge.data)
-    //     //                 } else {
-    //     //                     None
-    //     //                 }
-    //     //             })
-    //     //         })
-    //     //         .collect::<Vec<_>>()
-    //     //         .into_iter(),
-    //     //     ),
-    //     // }
-    // }
+}
+
+pub(crate) struct RangeIter<'a, R: RangeBounds<K>, K, S> {
+    range: R,
+    _key: PhantomData<K>,
+    iter: iter::Iter<'a, S, iter::SelectLeaf, iter::Preorder, node::SortedIter<'a>>,
+}
+
+impl<'a, R, K, S> RangeIter<'a, R, K, S>
+where
+    R: RangeBounds<K>,
+    K: key::Iterator + PartialOrd<S>,
+    S: key::Stack + PartialOrd<K>,
+{
+    pub(crate) fn next_with<F: FnMut(&S, u64) -> T, T>(&mut self, mut with: F) -> Option<T> {
+        // https://github.com/rust-lang/rust/issues/21906
+        loop {
+            let (key, value) = self.iter.next()?;
+            // FIXME: avoid comparing after range end
+            if self.range.contains(key) {
+                return Some(with(key, value));
+            }
+        }
+    }
 }
 
 //

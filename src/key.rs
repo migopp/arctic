@@ -7,12 +7,12 @@ use crate::byte;
 
 pub trait Key {
     #[allow(private_bounds)]
-    type Iter<'a>: Iterator
+    type Iter<'a>: Iterator + PartialOrd<Self::Stack>
     where
         Self: 'a;
 
     #[allow(private_bounds)]
-    type Stack: Stack;
+    type Stack: Stack + for<'a> PartialOrd<Self::Iter<'a>>;
 
     fn iter<'a>(&'a self) -> Self::Iter<'a>;
 }
