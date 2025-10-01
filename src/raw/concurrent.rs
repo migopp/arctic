@@ -1,7 +1,6 @@
 mod cursor;
 
 use core::ops::Bound;
-use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
@@ -321,16 +320,16 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<'l, B, R, W>(
+    pub(crate) fn range_non_linearizable<'l, R, W>(
         &'l mut self,
-        range: B,
-    ) -> RangeIter<'g, 'l, B, R, W>
+        start: Bound<R>,
+        end: Bound<R>,
+    ) -> RangeIter<'g, 'l, R, W>
     where
-        B: RangeBounds<R>,
         R: key::Read + PartialOrd<W>,
         W: key::Write + PartialOrd<R> + From<R>,
     {
-        let prefix = match (range.start_bound(), range.end_bound()) {
+        let prefix = match (&start, &end) {
             (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
             (
                 Bound::Included(low) | Bound::Excluded(low),
@@ -338,32 +337,34 @@ impl<'g> MapRef<'g> {
             ) => low.prefix(high),
         };
 
-        let _guard = self.smr.protect_read(prefix.peek_all());
+        let guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
         let mut stack = W::from(prefix);
         stack.truncate(index);
 
         let iter = unsafe {
-            iter::Iter::<W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter>::new(
+            iter::Iter::<W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter>::new(
                 cursor.root(),
                 stack,
-                iter::SelectRange::new(range),
+                iter::SelectRange::new(start, end),
             )
         };
 
-        RangeIter { iter, _guard }
+        RangeIter {
+            iter,
+            _guard: guard,
+        }
     }
 }
 
-pub(crate) struct RangeIter<'g, 'l, B, R, W> {
-    iter: iter::Iter<'g, W, iter::SelectRange<B, R, W>, iter::Preorder, node::SortedIter<'g>>,
+pub(crate) struct RangeIter<'g, 'l, R, W> {
+    iter: iter::Iter<'g, W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter<'g>>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 
-impl<'g, 'l, B, R, W> RangeIter<'g, 'l, B, R, W>
+impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
 where
-    B: RangeBounds<R>,
     R: key::Read + PartialOrd<W>,
     W: key::Write + PartialOrd<R>,
 {

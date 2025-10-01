@@ -1,6 +1,6 @@
 use core::iter;
 use core::marker::PhantomData;
-use core::ops::RangeBounds;
+use core::ops::Bound;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -150,38 +150,37 @@ impl<W: key::Write> Selector<W> for SelectAll {
     }
 }
 
-pub(crate) struct SelectRange<B, R, W> {
-    range: B,
-    _key: PhantomData<R>,
+pub(crate) struct SelectRange<R, W> {
+    start: Bound<R>,
+    end: Bound<R>,
     _stack: PhantomData<W>,
 }
 
-impl<B, R, W> SelectRange<B, R, W> {
-    pub(crate) fn new(range: B) -> Self {
+impl<R, W> SelectRange<R, W> {
+    pub(crate) fn new(start: Bound<R>, end: Bound<R>) -> Self {
         Self {
-            range,
-            _key: PhantomData,
+            start,
+            end,
             _stack: PhantomData,
         }
     }
 }
 
-impl<B, R, W> Selector<W> for SelectRange<B, R, W>
+impl<R, W> Selector<W> for SelectRange<R, W>
 where
-    B: RangeBounds<R>,
     R: PartialOrd<W>,
     W: key::Write + PartialOrd<R>,
 {
     type Item = u64;
     #[inline]
     fn select(&self, edge: ribbit::Packed<Edge>, key: &W, _depth: usize) -> Select<Self::Item> {
-        match self.range.end_bound() {
+        match &self.end {
             core::ops::Bound::Included(end) if key > end => return Select::Break,
             core::ops::Bound::Excluded(end) if key >= end => return Select::Break,
             _ => (),
         }
 
-        match self.range.start_bound() {
+        match &self.start {
             core::ops::Bound::Included(start) if key < start => return Select::Continue,
             core::ops::Bound::Excluded(start) if key <= start => return Select::Continue,
             _ => (),
