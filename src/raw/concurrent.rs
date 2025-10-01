@@ -344,6 +344,7 @@ impl<'a> MapRef<'a> {
             ) => low.prefix(high),
         };
 
+        let _guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<K, cursor::Optimistic<K>>::new(prefix, self.raw.root());
         cursor.traverse_prefix();
 
