@@ -29,8 +29,6 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
 
     fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array>;
     fn next(&mut self) -> Option<u8>;
-
-    #[allow(dead_code)]
     fn prefix(&self, other: &Self) -> Self;
 }
 
