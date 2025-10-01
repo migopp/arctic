@@ -50,8 +50,8 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     }
 
     #[expect(private_interfaces)]
-    pub fn iter_dynamic(&self) -> DynamicIter<K, V, node::SortedIter> {
-        DynamicIter {
+    pub fn iter(&self) -> Iter<K, V, node::SortedIter> {
+        Iter {
             inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
@@ -59,8 +59,8 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     }
 
     #[expect(private_interfaces)]
-    pub fn iter_unsorted_dynamic(&self) -> DynamicIter<K, V, node::UnsortedIter> {
-        DynamicIter {
+    pub fn iter_unsorted(&self) -> Iter<K, V, node::UnsortedIter> {
+        Iter {
             inner: self.raw.iter(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
@@ -68,38 +68,15 @@ impl<K: ?Sized + Key, V: Value> Map<K, V> {
     }
 }
 
-impl<K, V> Map<K, V>
-where
-    K: Key + for<'s> From<&'s K::Stack>,
-    V: Value,
-{
-    pub fn iter_fixed(&self) -> impl Iterator<Item = (K, V)> + '_ {
-        FixedIter::<K, V, node::SortedIter> {
-            inner: self.raw.iter(raw::iter::SelectLeaf),
-            _key: PhantomData,
-            _value: PhantomData,
-        }
-    }
-
-    pub fn iter_unsorted_fixed(&self) -> impl Iterator<Item = (K, V)> + '_ {
-        FixedIter::<K, V, node::UnsortedIter> {
-            inner: self.raw.iter(raw::iter::SelectLeaf),
-            _key: PhantomData,
-            _value: PhantomData,
-        }
-    }
-}
-
-pub(crate) struct FixedIter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
+pub(crate) struct Iter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
     inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<'a, K, V, S> Iterator for FixedIter<'a, K, V, S>
+impl<'a, K, V, S> Iterator for Iter<'a, K, V, S>
 where
-    K: Key,
-    K: for<'s> From<&'s K::Stack>,
+    K: Key + for<'s> From<&'s K::Stack>,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
@@ -111,17 +88,14 @@ where
     }
 }
 
-#[expect(private_bounds)]
-pub struct DynamicIter<'a, K: Key + ?Sized, V, S: raw::iter::Sort<'a>> {
-    inner: raw::iter::Iter<'a, K::Stack, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
-    _key: PhantomData<K>,
-    _value: PhantomData<V>,
-}
-
-#[expect(private_bounds)]
-impl<'a, K: Key + ?Sized, V: Value, S: raw::iter::Sort<'a>> DynamicIter<'a, K, V, S> {
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<(&K::Stack, V)> {
+impl<'a, K, V, S> Iter<'a, K, V, S>
+where
+    K: Key + ?Sized,
+    V: Value,
+    S: raw::iter::Sort<'a>,
+{
+    #[allow(dead_code)]
+    pub fn lend(&mut self) -> Option<(&K::Stack, V)> {
         self.inner
             .lend()
             .map(|(key, value)| (key, V::from_u64(value)))
