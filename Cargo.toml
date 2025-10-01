@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["opt-node3-get", "opt-node15-get", "opt-membarrier", "smr-hazard"]
 stat = ["dep:serde", "dep:serde_bytes", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
