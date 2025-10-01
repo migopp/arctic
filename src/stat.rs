@@ -131,6 +131,10 @@ pub(crate) enum Max {
     RetireCache,
 }
 
+pub(crate) enum Record {
+    RangeConflict,
+}
+
 impl From<raw::Op> for Counter {
     fn from(op: raw::Op) -> Self {
         Self::Op(op)
@@ -162,6 +166,7 @@ pub struct Thread {
     free_retire: u64,
     free_drop: u64,
     hazard_match: u64,
+    range_retry: Histogram,
 }
 
 #[cfg(not(feature = "stat"))]
@@ -236,6 +241,19 @@ pub(crate) fn max(_max: Max, _value: u64) {
                 Max::RetireCache => &mut thread.retire_cache,
             };
             *old = (*old).max(_value);
+        })
+    }
+}
+
+#[inline]
+pub(crate) fn record(_record: Record, _value: u64) {
+    #[cfg(feature = "stat")]
+    if RECORD.load(Ordering::Relaxed) {
+        THREAD.with_borrow_mut(|thread| {
+            let old = match _record {
+                Record::RangeConflict => &mut thread.range_retry,
+            };
+            old.record(_value);
         })
     }
 }

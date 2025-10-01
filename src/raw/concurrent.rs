@@ -368,7 +368,10 @@ impl<'g> MapRef<'g> {
         stack.truncate(index);
 
         let mut prev: Option<Vec<(W, u64)>> = None;
+        let mut count = 0;
         loop {
+            count += 1;
+
             let mut iter = unsafe {
                 iter::Iter::<W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter>::new(
                     cursor.root(),
@@ -381,7 +384,10 @@ impl<'g> MapRef<'g> {
                 .collect::<Vec<_>>();
 
             match prev {
-                Some(prev) if prev == next => return next.into_iter(),
+                Some(prev) if prev == next => {
+                    stat::record(stat::Record::RangeConflict, count);
+                    return next.into_iter();
+                }
                 None | Some(_) => prev = Some(next),
             }
         }
