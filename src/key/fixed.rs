@@ -113,7 +113,13 @@ impl fmt::Debug for Fixed {
 impl Ord for Fixed {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.with_bytes(|left| other.with_bytes(|right| left.cmp(right)))
+        self.len.cmp(&other.len).then_with(|| {
+            if cfg!(target_endian = "little") {
+                self.buffer.swap_bytes().cmp(&other.buffer.swap_bytes())
+            } else {
+                self.buffer.cmp(&other.buffer)
+            }
+        })
     }
 }
 
