@@ -157,6 +157,7 @@ pub(crate) struct SelectRange<R, W> {
 }
 
 impl<R, W> SelectRange<R, W> {
+    #[inline]
     pub(crate) fn new(start: Bound<R>, end: Bound<R>) -> Self {
         Self {
             start,
@@ -254,9 +255,11 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            TreeIter::Root(iter) => iter
-                .next()
-                .map(|(visit, edge)| (visit, None, edge.load_packed(Ordering::Acquire))),
+            TreeIter::Root(iter) => {
+                crate::cold();
+                iter.next()
+                    .map(|(visit, edge)| (visit, None, edge.load_packed(Ordering::Acquire)))
+            }
             TreeIter::Node(iter) => iter.next().map(|(visit, (byte, edge))| {
                 (visit, Some(byte), edge.load_packed(Ordering::Acquire))
             }),

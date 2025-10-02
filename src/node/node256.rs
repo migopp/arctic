@@ -46,8 +46,13 @@ impl Node for Node256 {
 impl<'a> IntoIterator for &'a Node256 {
     type Item = (u8, &'a Atomic128<Edge>);
     type IntoIter = Iter<'a>;
+
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        (0u8..=255u8).zip(self.0.as_slice().iter())
+        Iter {
+            key: 0,
+            edges: self.0.iter(),
+        }
     }
 }
 
@@ -59,5 +64,19 @@ impl node::Info for Node256 {
     type Shrink = Node15;
 }
 
-pub(crate) type Iter<'a> =
-    core::iter::Zip<core::ops::RangeInclusive<u8>, core::slice::Iter<'a, Atomic128<Edge>>>;
+pub(crate) struct Iter<'a> {
+    key: u8,
+    edges: core::slice::Iter<'a, Atomic128<Edge>>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (u8, &'a Atomic128<Edge>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let edge = self.edges.next()?;
+        let key = self.key;
+        self.key = self.key.wrapping_add(1);
+        Some((key, edge))
+    }
+}
