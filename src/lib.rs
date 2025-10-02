@@ -42,6 +42,8 @@ where
     R: Iterator<Item = T>,
 {
     type Item = T;
+
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Or::L(left) => left.next(),
