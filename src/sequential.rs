@@ -52,7 +52,7 @@ impl<K: Key, V: Value> Map<K, V> {
     #[expect(private_interfaces)]
     pub fn iter(&self) -> Iter<K, V, node::SortedIter> {
         Iter {
-            inner: self.raw.iter(raw::iter::SelectLeaf),
+            inner: self.raw.iter_leaves(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -61,7 +61,7 @@ impl<K: Key, V: Value> Map<K, V> {
     #[expect(private_interfaces)]
     pub fn iter_unsorted(&self) -> Iter<K, V, node::UnsortedIter> {
         Iter {
-            inner: self.raw.iter(raw::iter::SelectLeaf),
+            inner: self.raw.iter_leaves(raw::iter::SelectLeaf),
             _key: PhantomData,
             _value: PhantomData,
         }
@@ -69,7 +69,7 @@ impl<K: Key, V: Value> Map<K, V> {
 }
 
 pub(crate) struct Iter<'a, K: Key, V, S: raw::iter::Sort<'a>> {
-    inner: raw::iter::Iter<'a, K::Write, raw::iter::SelectLeaf, raw::iter::Preorder, S>,
+    inner: raw::iter::LeafIter<'a, K::Write, raw::iter::SelectLeaf, S>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }

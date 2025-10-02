@@ -337,7 +337,7 @@ impl<'g> MapRef<'g> {
         stack.truncate(index);
 
         let iter = unsafe {
-            iter::Iter::<W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter>::new(
+            iter::LeafIter::<W, iter::SelectRange<R, W>, node::SortedIter>::new(
                 cursor.root(),
                 stack,
                 iter::SelectRange::new(start, end),
@@ -373,7 +373,7 @@ impl<'g> MapRef<'g> {
             count += 1;
 
             let mut iter = unsafe {
-                iter::Iter::<W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter>::new(
+                iter::LeafIter::<W, iter::SelectRange<R, W>, node::SortedIter>::new(
                     cursor.root(),
                     stack.clone(),
                     iter::SelectRange::new(start.clone(), end.clone()),
@@ -408,7 +408,7 @@ pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W>
 where
     W: key::Write + PartialOrd<R>,
 {
-    iter: iter::Iter<'g, W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter<'g>>,
+    iter: iter::LeafIter<'g, W, iter::SelectRange<R, W>, node::SortedIter<'g>>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 

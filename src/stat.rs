@@ -23,7 +23,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut entries = map
         .as_sequential()
         .as_raw()
-        .iter::<key::Ignore, raw::iter::SelectAll, raw::iter::Preorder, node::UnsortedIter>(
+        .iter_postorder::<key::Ignore, raw::iter::SelectAll, node::UnsortedIter>(
             raw::iter::SelectAll,
         );
 

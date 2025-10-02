@@ -45,26 +45,25 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter<
-        'a,
-        W: key::Write,
-        V: iter::Selector<W>,
-        O: iter::Order,
-        S: iter::Sort<'a>,
-    >(
+    pub(crate) fn iter_leaves<'a, W: key::Write, V: iter::Selector<W>, S: iter::Sort<'a>>(
         &'a self,
         selector: V,
-    ) -> iter::Iter<'a, W, V, O, S> {
-        unsafe { iter::Iter::new(&self.root, W::default(), selector) }
+    ) -> iter::LeafIter<'a, W, V, S> {
+        unsafe { iter::LeafIter::new(&self.root, W::default(), selector) }
+    }
+
+    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>, S: iter::Sort<'a>>(
+        &'a self,
+        selector: V,
+    ) -> iter::PostorderIter<'a, W, V, S> {
+        unsafe { iter::PostorderIter::new(&self.root, W::default(), selector) }
     }
 }
 
 impl Drop for Map {
     fn drop(&mut self) {
         let mut iter = self
-            .iter::<key::Ignore, iter::SelectNode, iter::Postorder, node::UnsortedIter>(
-                iter::SelectNode,
-            );
+            .iter_postorder::<key::Ignore, iter::SelectNode, node::UnsortedIter>(iter::SelectNode);
         while let Some((key::Ignore, edge)) = iter.lend() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
