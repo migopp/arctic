@@ -404,7 +404,10 @@ impl<'g> MapRef<'g> {
     }
 }
 
-pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
+pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W>
+where
+    W: key::Write + PartialOrd<R>,
+{
     iter: iter::Iter<'g, W, iter::SelectRange<R, W>, iter::Preorder, node::SortedIter<'g>>,
     _guard: smr::ReadGuard<'g, 'l>,
 }

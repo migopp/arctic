@@ -1,4 +1,3 @@
-use core::iter;
 use core::marker::PhantomData;
 use core::ops::Bound;
 use core::sync::atomic::Ordering;
@@ -9,84 +8,117 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub struct Iter<'a, W, V, O, S>
+pub enum Iter<'a, W, V, O, S>
 where
     S: Sort<'a>,
+    V: Selector<W>,
 {
-    key: W,
-    selector: V,
-    _order: PhantomData<O>,
-    frontier: Vec<(usize, core::iter::Peekable<TreeIter<'a, S>>)>,
+    Root {
+        key: W,
+        next: Option<V::Item>,
+    },
+    Node {
+        key: W,
+        selector: V,
+        #[allow(private_interfaces)]
+        frontier: Vec<(usize, NodeIter<S>)>,
+        _order: PhantomData<O>,
+        _sort: PhantomData<&'a ()>,
+    },
 }
 
 impl<'a, W: key::Write, V: Selector<W>, O: Order, S: Sort<'a>> Iter<'a, W, V, O, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, key: W, selector: V) -> Self {
-        let len = key.len();
-        Self {
-            key,
-            selector,
-            _order: PhantomData,
-            frontier: vec![(len, TreeIter::from_root(root))],
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, selector: V) -> Self {
+        let edge = root.load_packed(Ordering::Acquire);
+        let meta = edge.meta();
+        let kind = meta.kind();
+
+        key.extend(edge.meta().key());
+
+        if kind == node::Kind::NONE {
+            Self::Root { key, next: None }
+        } else if kind == node::Kind::LEAF {
+            let next = match selector.select(edge, &key, 0) {
+                Select::Yield(value) => Some(value),
+                Select::Continue | Select::Break => None,
+            };
+            Self::Root { key, next }
+        } else {
+            let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+            Self::Node {
+                selector,
+                frontier: vec![(key.len(), NodeIter::new(node))],
+                key,
+                _order: PhantomData,
+                _sort: PhantomData,
+            }
         }
     }
 
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, V::Item)> {
+        let (key, selector, frontier) = match self {
+            Iter::Root { key, next } => {
+                crate::cold();
+                let value = next.take()?;
+                return Some((key, value));
+            }
+            Iter::Node {
+                key,
+                selector,
+                frontier,
+                _order,
+                _sort,
+            } => (key, selector, frontier),
+        };
+
         'vertical: loop {
-            // NOTE: we use `saturating_sub` to avoid underflow.
-            //
-            // If `self.frontier.len()` == 0, we will immediately return at `last_mut()`.
-            // We can't move the len call after because `self.frontier` is mutably borrowed.
-            let depth = self.frontier.len().saturating_sub(1);
-            let (len, iter) = self.frontier.last_mut()?;
+            let depth = frontier.len();
+            let (len, iter) = frontier.last_mut()?;
 
             loop {
-                let Some((visit, byte, edge)) = iter.peek_mut() else {
-                    self.key.truncate(*len);
-                    self.frontier.pop();
+                let Some((first, byte, edge)) = iter.next() else {
+                    key.truncate(*len);
+                    frontier.pop();
                     continue 'vertical;
                 };
 
-                let edge = *edge;
                 let meta = edge.meta();
                 let kind = meta.kind();
+                if kind == node::Kind::NONE {
+                    iter.skip();
+                    continue;
+                }
 
                 macro_rules! visit {
                     ($condition:expr) => {
                         if $condition {
-                            match self.selector.select(edge, &self.key, depth) {
-                                Select::Yield(item) => return Some((&self.key, item)),
+                            match selector.select(edge, &key, depth) {
+                                Select::Yield(item) => return Some((key, item)),
                                 Select::Continue => (),
                                 Select::Break => {
-                                    self.frontier.clear();
+                                    frontier.clear();
                                     return None;
                                 }
                             }
                         } else if kind >= node::Kind::NODE_3 {
                             let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
-                            self.frontier
-                                .push((self.key.len(), TreeIter::from_node(node)));
+                            frontier.push((key.len(), NodeIter::new(node)));
                             continue 'vertical;
                         }
                     };
                 }
 
-                // First visit
-                if core::mem::take(visit) {
-                    self.key.truncate(*len);
-
-                    if let Some(byte) = byte {
-                        self.key.push(*byte);
-                    }
-
-                    self.key.extend(meta.key());
-
+                if first {
+                    key.truncate(*len);
+                    key.push(byte);
+                    key.extend(meta.key());
                     visit!(O::PREORDER);
                 }
 
                 // Second visit (or fallthrough)
-                iter.next();
+                iter.skip();
 
                 visit!(!O::PREORDER);
             }
@@ -94,7 +126,7 @@ impl<'a, W: key::Write, V: Selector<W>, O: Order, S: Sort<'a>> Iter<'a, W, V, O,
     }
 }
 
-pub(crate) trait Selector<W: key::Write> {
+pub(crate) trait Selector<W> {
     type Item;
     fn select(&self, edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Select<Self::Item>;
 }
@@ -226,43 +258,46 @@ impl<'a> Sort<'a> for node::UnsortedIter<'a> {
     }
 }
 
-enum TreeIter<'a, N> {
-    Root(iter::Once<(bool, &'a Atomic128<Edge>)>),
-    Node(iter::Zip<iter::Repeat<bool>, N>),
+struct NodeIter<N> {
+    first: bool,
+    key: u8,
+    edge: ribbit::Packed<Edge>,
+    iter: N,
 }
 
-impl<'a, N> TreeIter<'a, N>
-where
-    N: Sort<'a>,
-{
+impl<'a, N: Sort<'a>> NodeIter<N> {
     #[inline]
-    fn from_root(root: &'a Atomic128<Edge>) -> core::iter::Peekable<Self> {
-        Self::Root(core::iter::once((true, root))).peekable()
-    }
-
-    #[inline]
-    fn from_node(node: node::Ref<'a>) -> core::iter::Peekable<Self> {
-        Self::Node(iter::repeat(true).zip(N::new(node))).peekable()
+    fn new(node: node::Ref<'a>) -> Self {
+        Self {
+            first: true,
+            key: 0,
+            edge: Edge::DEFAULT,
+            iter: N::new(node),
+        }
     }
 }
 
-impl<'a, S> Iterator for TreeIter<'a, S>
+impl<'a, S> NodeIter<S>
 where
     S: Sort<'a>,
 {
-    type Item = (bool, Option<u8>, ribbit::Packed<Edge>);
+    #[inline]
+    fn next(&mut self) -> Option<(bool, u8, ribbit::Packed<Edge>)> {
+        let first = self.first;
+        self.first ^= true;
+
+        if first {
+            let (key, edge) = self.iter.next()?;
+            let edge = edge.load_packed(Ordering::Acquire);
+            self.key = key;
+            self.edge = edge;
+        }
+
+        Some((first, self.key, self.edge))
+    }
 
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            TreeIter::Root(iter) => {
-                crate::cold();
-                iter.next()
-                    .map(|(visit, edge)| (visit, None, edge.load_packed(Ordering::Acquire)))
-            }
-            TreeIter::Node(iter) => iter.next().map(|(visit, (byte, edge))| {
-                (visit, Some(byte), edge.load_packed(Ordering::Acquire))
-            }),
-        }
+    fn skip(&mut self) {
+        self.first = true;
     }
 }
