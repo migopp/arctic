@@ -79,7 +79,6 @@ impl<'a, W: key::Write, V: Selector<W>, O: Order, S: Sort<'a>> Iter<'a, W, V, O,
 
             loop {
                 let Some((first, byte, edge)) = iter.next() else {
-                    key.truncate(*len);
                     frontier.pop();
                     continue 'vertical;
                 };
