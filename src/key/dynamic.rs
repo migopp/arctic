@@ -62,11 +62,7 @@ impl key::Read for Iter<'_> {
         validate!(len.value() as usize <= self.len());
 
         match self {
-            Iter::Large(large) => {
-                validate!(large.len() > 8);
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
-            }
+            Iter::Large(large) => unsafe { read_array(large, len) },
             Iter::Small(small) => small.peek(len),
         }
     }
@@ -78,8 +74,7 @@ impl key::Read for Iter<'_> {
         match self {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                let array = ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len);
+                let array = unsafe { read_array(large, len) };
                 let after = large.len() - len.value() as usize;
 
                 if after > 8 {
@@ -142,6 +137,19 @@ impl key::Read for Iter<'_> {
 
         Self::Small(left.prefix(right))
     }
+}
+
+/// # SAFETY
+///
+/// Caller must ensure `slice.len() >= 8`
+unsafe fn read_array(slice: &[u8], len: u3) -> ribbit::Packed<byte::Array> {
+    validate!(slice.len() >= 8);
+
+    let buffer = unsafe { slice.as_ptr().cast::<u64>().read_unaligned() };
+    ribbit::Packed::<byte::Array>::from_u64_truncate(
+        buffer.to_be().rotate_left((len.value() as u32) << 3),
+        len,
+    )
 }
 
 #[repr(transparent)]

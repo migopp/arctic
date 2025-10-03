@@ -1,7 +1,6 @@
-use core::cmp;
 use core::fmt;
-use core::ops::BitOr as _;
-use core::ops::BitXor as _;
+use core::ops::BitOr;
+use core::ops::Shl as _;
 use core::ops::Shr as _;
 
 use ribbit::u3;
@@ -42,39 +41,29 @@ impl ArrayPacked {
 
     #[inline]
     pub(crate) fn slice(self, len: usize) -> Self {
-        Self::from_u64_truncate(
-            self.buffer().value() << 8,
-            Array::min_len(len, self.len_internal()),
-        )
+        Self::from_u64_truncate(self.value.value(), Array::min_len(len, self.len_internal()))
     }
 
     #[inline]
     pub(crate) fn from_u64_truncate(value: u64, len: u3) -> Self {
-        let mask = !(1u64
-            .unbounded_shl((8 - len.value() as u32) << 3)
-            .wrapping_sub(1));
-
-        Self::new(unsafe { u56::new_unchecked((value & mask) >> 8) }, len)
+        let mask = (1u64 << (len.value() << 3)) - 1;
+        Self::new(unsafe { u56::new_unchecked(value & mask) }, len)
     }
 
     #[inline]
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     pub(crate) fn has_prefix(self, prefix: Self) -> bool {
-        match self.len_internal().cmp(&prefix.len_internal()) {
-            cmp::Ordering::Less => false,
-            cmp::Ordering::Equal => self == prefix,
-            cmp::Ordering::Greater => {
-                // 7 6 5 4 3 2 1 0
-                //   s s s s          self, len = 32
-                //   p p p            prefix, len = 24
-                // x x x              xor(self, prefix) << 8
-                // 0 1 2 3 4 5 6 7
-                //
-                // shift_xor = 40
-                // mask_xor = 0xFFFF_FF00_0000_0000
-                let shift_xor = 64 - (prefix.len() << 3);
-                let mask_xor = !(1u64.unbounded_shl(shift_xor as u32).wrapping_sub(1));
-                ((self.value.value() ^ prefix.value.value()) << 8) & mask_xor == 0
+        match self.len().checked_sub(prefix.len()) {
+            None => false,
+            Some(0) => self == prefix,
+            Some(len) => {
+                //  7  6  5  4  3  2  1  0
+                //           s' s' s' s  s   self, len = 5
+                //                 p  p  p   prefix, len = 3
+                //                 s' s' s'
+                let diff = (self.value.value() >> (len << 3)) ^ prefix.value.value();
+                let mask = (1u64 << (prefix.len() << 3)) - 1;
+                diff & mask == 0
             }
         }
     }
@@ -87,45 +76,39 @@ impl ArrayPacked {
 
     #[inline]
     pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> Match {
-        let edge_len = self.len_internal();
-        let key_len = key.len();
-        let len = Array::min_len(key_len, edge_len);
-
+        let len = Array::min_len(key.len(), self.len_internal());
         let key = key.take(len);
 
         if key == self {
             return Match::Full(len);
         }
 
-        let edge = self.buffer().value();
-        let prefix_byte = key.buffer().value().bitxor(edge).leading_zeros().shr(3u32) as u8;
-        let prefix_bit = (prefix_byte as u32) << 3;
-
         // 7 6 5 4 3 2 1 0
-        //   s s m e e e e
-        // 0 1 2 3 4 5 6 7
-        //       ^
-        //    prefix = 24
+        //         s s x x  self, len = 32
+        //     s s m e e e  key, len = 48
+        //         s s m e  shift key for prefix
         //
-        // shift_middle = 32
-        // mask_end     = 0x??00_0000_FFFF_FFFF
-        // mask_start   = 0x??FF_FF00_0000_0000
-        let shift_middle = 56 - prefix_bit;
-        let mask_end = (1u64 << shift_middle) - 1;
-        let mask_start = !mask_end << 8;
+        //             s s  start
+        //               m  middle
+        //           e e e  end
+        let diff = (key.buffer().value() >> ((key.len() - len.value() as usize) << 3))
+            ^ (self.buffer().value() >> ((self.len() - len.value() as usize) << 3));
+
+        let len_start = diff.leading_zeros().shr(3u32) as u8 - (8 - len.value());
+        let len_end = self.len() as u8 - len_start - 1;
 
         Match::Partial {
             start: unsafe {
                 Self::new(
-                    u56::new_unchecked(edge & mask_start),
-                    u3::new_unchecked(prefix_byte - 1),
+                    u56::new_unchecked(self.buffer().value() >> ((len_end + 1) << 3)),
+                    u3::new_unchecked(len_start),
                 )
             },
-            middle: (edge >> shift_middle) as u8,
+            middle: (self.value.value() >> (len_end << 3)) as u8,
             end: unsafe {
                 Self::new(
-                    u56::new_unchecked((edge & mask_end) << prefix_bit),
-                    u3::new_unchecked(edge_len.value() - prefix_byte),
+                    u56::new_unchecked(self.value.value() & ((1u64 << (len_end << 3)) - 1)),
+                    u3::new_unchecked(len_end),
                 )
             },
         }
@@ -139,25 +122,16 @@ impl ArrayPacked {
             return None;
         }
 
-        // 7 6 5 4 3 2 1 0
-        //   p p p p          parent_len = 32
-        //               b
-        //   c                child_len = 8
-        //   p p p p b c
-        // 0 1 2 3 4 5 6 7
-        //
-        // shift_byte = 16
-        // shift_child = 40
-        let shift_byte = 48 - (parent_len << 3);
-        let shift_child = parent_len + 8;
+        let shift = child_len << 3;
 
         Some(Self::new(
             unsafe {
                 u56::new_unchecked(
-                    self.buffer()
+                    self.value
                         .value()
-                        .bitor((byte as u64) << shift_byte)
-                        .bitor(child.buffer().value() >> shift_child),
+                        .shl(8 + shift)
+                        .bitor((byte as u64) << shift)
+                        .bitor(child.buffer().value()),
                 )
             },
             unsafe { u3::new_unchecked(len as u8) },
@@ -167,7 +141,7 @@ impl ArrayPacked {
     #[cfg(test)]
     pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, with: F) -> T {
         let bytes = self.buffer().value().to_be_bytes();
-        let slice = &bytes[1..][..self.len()];
+        let slice = &bytes[8 - self.len()..];
         with(slice)
     }
 }
@@ -184,14 +158,13 @@ pub(crate) enum Match {
 
 impl IntoIterator for ArrayPacked {
     type Item = u8;
-    type IntoIter = core::iter::Take<core::iter::Skip<core::array::IntoIter<u8, 8>>>;
+    type IntoIter = core::iter::Skip<core::array::IntoIter<u8, 8>>;
     fn into_iter(self) -> Self::IntoIter {
         self.value
             .value()
             .to_be_bytes()
             .into_iter()
-            .skip(1)
-            .take(self.len())
+            .skip(8 - self.len())
     }
 }
 

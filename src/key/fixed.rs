@@ -35,27 +35,24 @@ impl key::Read for Fixed {
     #[inline]
     fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
-
-        ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
+        let buffer = self.buffer.rotate_left((len.value() as u32) << 3);
+        ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
     }
 
     #[inline]
     fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
-
-        let array = ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len);
-        self.buffer = self.buffer.unbounded_shl((len.value() as u32) << 3);
+        self.buffer = self.buffer.rotate_left((len.value() as u32) << 3);
         self.len -= len.value();
-        array
+        ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
         let some = self.len > 0;
-        let byte = (self.buffer >> 56) as u8;
-        self.buffer <<= 8;
+        self.buffer = self.buffer.rotate_left(8);
         self.len = self.len.saturating_sub(1);
-        some.then_some(byte)
+        some.then_some(self.buffer as u8)
     }
 
     #[inline]
@@ -67,10 +64,8 @@ impl key::Read for Fixed {
             .leading_zeros()
             .shr(3);
 
-        let mask = !(1u64.unbounded_shl(64u32 - (prefix << 3)).wrapping_sub(1));
-
         Self {
-            buffer: self.buffer & mask,
+            buffer: self.buffer,
             len: prefix as u8,
         }
     }
@@ -97,8 +92,8 @@ impl key::Write for Writer {
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len() as u8 <= 8);
+        self.buffer <<= array.len() << 3;
         self.buffer |= array.buffer().value();
-        self.buffer = self.buffer.rotate_left(array.len() as u32);
         self.len += array.len() as u8;
     }
 
