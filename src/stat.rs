@@ -29,18 +29,18 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
 
     while let Some((key::Ignore, (edge, depth_))) = entries.lend() {
         let meta = edge.meta();
-        let kind = meta.kind();
+        let data = edge.data();
 
-        if kind == node::Kind::NONE {
+        if !meta.leaf() && data == 0 {
             continue;
         }
 
         compression.record(meta.key().len() as u64);
 
-        if kind == node::Kind::LEAF {
+        if meta.leaf() {
             depth.record(depth_ as u64);
         } else {
-            let node = unsafe { edge::Edge::next_node_unchecked(edge.data(), kind) };
+            let node = unsafe { edge::Edge::next_node_unchecked(data) };
             let histogram = match node {
                 node::Ref::Node3(_) => &mut node_3,
                 node::Ref::Node15(_) => &mut node_15,
@@ -49,8 +49,8 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
 
             let children = unsafe { node.iter_unsorted() }
                 .filter(|(_, edge)| {
-                    let edge = edge.load(Ordering::Relaxed);
-                    !matches!(edge.meta.kind, node::Kind::None)
+                    let edge = edge.load_packed(Ordering::Relaxed);
+                    edge.meta().leaf() || edge.data() > 0
                 })
                 .count();
 

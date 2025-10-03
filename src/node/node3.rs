@@ -92,7 +92,7 @@ impl linear::Header for Atomic64<Header> {
 }
 
 impl node::Info for Node3 {
-    const KIND: ribbit::Packed<node::Kind> = ribbit::Packed::<node::Kind>::new_node3();
+    const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
     const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node3(node);
 

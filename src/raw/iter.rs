@@ -32,13 +32,11 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
     pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, range: R) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
-        let kind = meta.kind();
+        let data = edge.data();
 
         key.extend(edge.meta().key());
 
-        if kind == node::Kind::NONE {
-            Self::Root { key, next: None }
-        } else if kind == node::Kind::LEAF {
+        if meta.leaf() {
             match range.end_bound() {
                 core::ops::Bound::Included(end) if key > *end => {
                     return Self::Root { key, next: None };
@@ -63,8 +61,10 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                 key,
                 next: Some(edge.data()),
             }
+        } else if data == 0 {
+            Self::Root { key, next: None }
         } else {
-            let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+            let node = unsafe { Edge::next_node_unchecked(data) };
             Self::Node {
                 range,
                 frontier: vec![(key.len(), S::new(node))],
@@ -103,9 +103,9 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
 
                 let edge = edge.load_packed(Ordering::Acquire);
                 let meta = edge.meta();
-                let kind = meta.kind();
+                let data = edge.data();
 
-                if kind == node::Kind::NONE {
+                if !meta.leaf() && data == 0 {
                     continue;
                 }
 
@@ -113,7 +113,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                 key.push(byte);
                 key.extend(meta.key());
 
-                if kind == node::Kind::LEAF {
+                if meta.leaf() {
                     match range.end_bound() {
                         core::ops::Bound::Included(end) if *key > *end => {
                             frontier.clear();
@@ -134,7 +134,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
 
                     return Some((key, edge.data()));
                 } else {
-                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    let node = unsafe { Edge::next_node_unchecked(data) };
                     frontier.push((key.len(), S::new(node)));
                     continue 'vertical;
                 }
@@ -166,17 +166,17 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
     pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, selector: V) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
-        let kind = meta.kind();
+        let data = edge.data();
 
         key.extend(edge.meta().key());
 
-        if kind == node::Kind::NONE {
-            Self::Root { key, next: None }
-        } else if kind == node::Kind::LEAF {
+        if meta.leaf() {
             let next = selector.select(edge, &key, 0);
             Self::Root { key, next }
+        } else if data == 0 {
+            Self::Root { key, next: None }
         } else {
-            let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+            let node = unsafe { Edge::next_node_unchecked(data) };
             Self::Node {
                 selector,
                 frontier: vec![(key.len(), RepeatIter::new(node))],
@@ -213,8 +213,9 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
                 };
 
                 let meta = edge.meta();
-                let kind = meta.kind();
-                if kind == node::Kind::NONE {
+                let data = edge.data();
+
+                if !meta.leaf() && data == 0 {
                     iter.skip();
                     continue;
                 }
@@ -224,8 +225,8 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
                     key.push(byte);
                     key.extend(meta.key());
 
-                    if kind >= node::Kind::NODE_3 {
-                        let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    if !meta.leaf() {
+                        let node = unsafe { Edge::next_node_unchecked(data) };
                         frontier.push((key.len(), RepeatIter::new(node)));
                         continue 'vertical;
                     }
@@ -254,7 +255,7 @@ impl<W: key::Write> Selector<W> for SelectNode {
 
     #[inline]
     fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Option<Self::Item> {
-        (edge.meta().kind() >= node::Kind::NODE_3).then_some(edge)
+        (!edge.meta().leaf() && edge.data() > 0).then_some(edge)
     }
 }
 
@@ -265,7 +266,7 @@ impl<W: key::Write> Selector<W> for SelectAll {
 
     #[inline]
     fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Option<Self::Item> {
-        (edge.meta().kind() > node::Kind::NONE).then_some((edge, depth))
+        (edge.meta().leaf() || edge.data() > 0).then_some((edge, depth))
     }
 }
 

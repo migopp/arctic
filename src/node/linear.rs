@@ -2,7 +2,6 @@ use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Unpack as _;
 
 use crate::edge;
 use crate::node;
@@ -63,7 +62,7 @@ where
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
         )
-        .filter(|(_, edge)| !matches!(edge.meta().kind().unpack(), node::Kind::None))
+        .filter(|(_, edge)| edge.meta().leaf() || edge.data() != 0)
         .map(|(key, edge)| {
             validate!(
                 edge.meta().frozen(),

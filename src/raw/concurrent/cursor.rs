@@ -53,15 +53,15 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let Some(len) = meta.key().match_prefix(&mut self.key) else {
                 return Ok(None);
             };
-            let kind = meta.kind();
+
+            let data = edge.data();
 
             // Fast path: traversal
-            if kind >= node::Kind::NODE_3 {
+            if !meta.leaf() && data != 0 {
                 let Some(byte) = self.key.next() else {
                     return Ok(None);
                 };
-                let data = edge.data();
-                let node = unsafe { Edge::next_node_unchecked(data, kind) };
+                let node = unsafe { Edge::next_node_unchecked(data) };
                 let Some(next) = node.get(byte) else {
                     return Ok(None);
                 };
@@ -72,10 +72,10 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             // Prepare to CAS
             return if meta.frozen() {
                 Err(())
-            } else if kind == node::Kind::LEAF {
+            } else if meta.leaf() {
                 Ok(Some(edge))
             } else {
-                validate_eq!(kind, node::Kind::NONE);
+                validate_eq!(data, 0);
                 Ok(None)
             };
         }
@@ -86,13 +86,13 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let kind = meta.kind();
+            let data = edge.data();
             let save = self.key.clone();
 
             // Continue traversal only if exact match
-            if kind >= node::Kind::NODE_3 {
+            if !meta.leaf() && data != 0 {
                 if let Some(len) = meta.key().match_prefix(&mut self.key) {
-                    let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
+                    let node = unsafe { Edge::next_node_unchecked(data) };
                     if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
                         self.step(save, len, node, next);
                         continue;
@@ -115,15 +115,15 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
         loop {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
+            let old_data = old.data();
             let save = self.key.clone();
             let r#match = old_meta.key().match_split(&mut self.key);
-            let kind = old_meta.kind();
 
             // Fast path: traverse
             if let byte::Match::Full(len) = r#match {
-                if kind >= node::Kind::NODE_3 {
+                if !old_meta.leaf() && old_data > 0 {
                     let byte = self.key.next().unwrap();
-                    let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
+                    let node = unsafe { Edge::next_node_unchecked(old_data) };
                     if let Some(next) = node.get_or_reserve(byte) {
                         self.step(save, len, node, next);
                         continue;
@@ -139,25 +139,19 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             self.key = save;
 
             let (op, new) = match r#match {
-                byte::Match::Full(_) => {
-                    if kind >= node::Kind::NODE_3 {
-                        let node = unsafe { Edge::next_node_unchecked(old.data(), kind) };
-                        let (op, new) = node.replace(old_meta);
-                        (Op::Node(op), new)
-                    } else if kind == node::Kind::NONE
-                        && self.key.len() > byte::Array::MAX_LEN.value() as usize
-                    {
-                        (
-                            Op::Edge(edge::Op::Create),
-                            Edge::new_node::<Node3, _>(self.key.peek_all(), None),
-                        )
-                    } else {
-                        (
-                            Op::Edge(edge::Op::Insert),
-                            Edge::new_leaf(self.key.peek_all(), value),
-                        )
-                    }
+                byte::Match::Full(_) if !old_meta.leaf() && old_data > 0 => {
+                    let node = unsafe { Edge::next_node_unchecked(old_data) };
+                    let (op, new) = node.replace(old_meta);
+                    (Op::Node(op), new)
                 }
+                byte::Match::Full(_) if self.key.len() > byte::Array::MAX_LEN.value() as usize => (
+                    Op::Edge(edge::Op::Create),
+                    Edge::new_node::<Node3, _>(self.key.peek_all(), None),
+                ),
+                byte::Match::Full(_) => (
+                    Op::Edge(edge::Op::Insert),
+                    Edge::new_leaf(self.key.peek_all(), value),
+                ),
                 byte::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(

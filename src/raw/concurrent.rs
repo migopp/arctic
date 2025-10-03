@@ -54,18 +54,17 @@ impl<'g> MapRef<'g> {
             let edge = root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let _ = meta.key().match_prefix(&mut key)?;
+            let data = edge.data();
 
-            let kind = meta.kind();
-            if kind >= node::Kind::NODE_3 {
+            if meta.leaf() {
+                return Some(edge.data());
+            } else if data == 0 {
+                return None;
+            } else {
                 let byte = key.next()?;
                 let data = edge.data();
-                let node = unsafe { Edge::next_node_unchecked(data, kind) };
+                let node = unsafe { Edge::next_node_unchecked(data) };
                 root = node.get(byte)?;
-            } else if kind == node::Kind::LEAF {
-                return Some(edge.data());
-            } else {
-                validate_eq!(kind, node::Kind::NONE);
-                return None;
             }
         }
     }
@@ -120,10 +119,10 @@ impl<'g> MapRef<'g> {
                 )
                 .is_ok()
             {
-                return if old.meta().kind() == node::Kind::LEAF {
+                return if old.meta().leaf() {
                     Ok(Some(old.data()))
                 } else {
-                    validate_eq!(old.meta().kind(), node::Kind::NONE);
+                    validate_eq!(old.data(), 0);
                     Ok(None)
                 };
             }
@@ -173,10 +172,10 @@ impl<'g> MapRef<'g> {
                 .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
-                return if old.meta().kind() == node::Kind::LEAF {
+                return if old.meta().leaf() {
                     Ok(Some(old.data()))
                 } else {
-                    validate_eq!(old.meta().kind(), node::Kind::NONE);
+                    validate_eq!(old.data(), 0);
                     Ok(None)
                 };
             }
@@ -231,11 +230,11 @@ impl<'g> MapRef<'g> {
             ) {
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-                    if old.meta().kind() == node::Kind::NONE {
-                        return Ok(None);
-                    } else {
-                        validate_eq!(old.meta().kind(), node::Kind::LEAF);
+                    if old.meta().leaf() {
                         return Ok(Some(old.data()));
+                    } else {
+                        validate_eq!(old.data(), 0);
+                        return Ok(None);
                     }
                 }
                 Ok(_) => {
@@ -264,10 +263,10 @@ impl<'g> MapRef<'g> {
                 edge = cursor.root().load_packed(Ordering::Acquire);
             }
             let meta = edge.meta();
-            let kind = meta.kind();
+            let data = edge.data();
 
             // Already helped by another thread
-            if kind < node::Kind::NODE_3 || node.as_u64() != edge.data() {
+            if meta.leaf() || node.as_u64() != data {
                 return Ok(());
             }
 

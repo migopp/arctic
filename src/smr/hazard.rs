@@ -5,7 +5,6 @@ use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
 
 use crate::byte;
-use crate::node;
 use crate::smr::membarrier;
 use crate::stat;
 use crate::Edge;
@@ -106,7 +105,7 @@ impl Drop for WriteGuard<'_, '_> {
 
 impl WriteGuard<'_, '_> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
-        if edge.meta().kind() < node::Kind::NODE_3 {
+        if edge.meta().leaf() || edge.data() == 0 {
             return;
         }
 

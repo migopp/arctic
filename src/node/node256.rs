@@ -57,7 +57,7 @@ impl<'a> IntoIterator for &'a Node256 {
 }
 
 impl node::Info for Node256 {
-    const KIND: ribbit::Packed<node::Kind> = ribbit::Packed::<node::Kind>::new_node256();
+    const KIND: node::Kind = node::Kind::Node256;
     const GROW: usize = 256;
     const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node256(node);
     type Grow = Node256;

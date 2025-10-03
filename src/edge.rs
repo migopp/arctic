@@ -21,6 +21,9 @@ pub(crate) struct Edge {
 impl Edge {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
+    const MASK_TAG: u64 = 0b11;
+    const MASK_PTR: u64 = !Self::MASK_TAG;
+
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
@@ -37,46 +40,47 @@ impl Edge {
         }
     }
 
-    /// # SAFETY
-    /// Caller must ensure that:
-    /// - `data` and `kind` were loaded atomically from the same edge
-    /// - `kind >= node::Kind::NODE_3`
     #[inline]
-    pub(crate) unsafe fn next_node_unchecked<'a>(
-        data: u64,
-        kind: ribbit::Packed<node::Kind>,
-    ) -> node::Ref<'a> {
+    pub(crate) unsafe fn next_node_unchecked<'a>(data: u64) -> node::Ref<'a> {
         #[inline]
-        unsafe fn next<'a, N: node::Info + 'a>(data: u64) -> node::Ref<'a> {
-            let node = unsafe { (data as *mut N).as_ref() };
+        unsafe fn next<'a, N: node::Info + 'a>(ptr: u64) -> node::Ref<'a> {
+            let node = unsafe { (ptr as *mut N).as_ref() };
             validate!(node.is_some());
             N::REF(unsafe { node.unwrap_unchecked() })
         }
 
-        if kind == node::Kind::NODE_3 {
-            unsafe { next::<Node3>(data) }
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { next::<Node15>(data) }
+        let tag = data & Self::MASK_TAG;
+        let ptr = data & Self::MASK_PTR;
+
+        if tag == node::Kind::NODE_3 {
+            unsafe { next::<Node3>(ptr) }
+        } else if tag == node::Kind::NODE_15 {
+            unsafe { next::<Node15>(ptr) }
         } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { next::<Node256>(data) }
+            validate_eq!(tag, node::Kind::NODE_256);
+            unsafe { next::<Node256>(ptr) }
         }
     }
 
     #[inline]
     pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>, counter: stat::Counter) {
-        let kind = edge.meta().kind();
-        if kind < node::Kind::NODE_3 {
+        let meta = edge.meta();
+        let data = edge.data();
+
+        if meta.leaf() || data == 0 {
             return;
         }
 
-        if kind == node::Kind::NODE_3 {
-            drop(Box::from_raw(edge.data() as *mut Node3))
-        } else if kind == node::Kind::NODE_15 {
-            drop(Box::from_raw(edge.data() as *mut Node15))
+        let tag = data & Self::MASK_TAG;
+        let ptr = data & Self::MASK_PTR;
+
+        if tag == node::Kind::NODE_3 {
+            drop(Box::from_raw(ptr as *mut Node3))
+        } else if tag == node::Kind::NODE_15 {
+            drop(Box::from_raw(ptr as *mut Node15))
         } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            drop(Box::from_raw(edge.data() as *mut Node256))
+            validate_eq!(tag, node::Kind::NODE_256);
+            drop(Box::from_raw(ptr as *mut Node256))
         }
 
         stat::increment(counter);
@@ -100,8 +104,9 @@ impl Edge {
                 .set_packed(edge);
         }
 
-        let node = Box::leak(node) as *mut N;
-        ribbit::Packed::<Self>::new(N::META.with_key(key), node as u64)
+        let ptr = Box::leak(node) as *mut N as u64;
+        let tag = N::KIND as u64;
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), ptr | tag)
     }
 }
 
@@ -111,19 +116,14 @@ pub(crate) struct Meta {
     #[ribbit(size = 59)]
     pub(crate) key: byte::Array,
     pub(crate) frozen: bool,
-    #[ribbit(size = 3)]
-    pub(crate) kind: node::Kind,
+    pub(crate) leaf: bool,
 }
 
 impl Meta {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(
-        byte::Array::EMPTY,
-        false,
-        ribbit::Packed::<node::Kind>::new_none(),
-    );
+    pub(crate) const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(byte::Array::EMPTY, false, false);
 
-    const LEAF: ribbit::Packed<Self> =
-        Self::DEFAULT.with_kind(ribbit::Packed::<node::Kind>::new_leaf());
+    const LEAF: ribbit::Packed<Self> = Self::DEFAULT.with_leaf(true);
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
