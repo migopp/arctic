@@ -1,4 +1,3 @@
-use core::cmp;
 use core::fmt;
 use core::ops::BitOr as _;
 use core::ops::Shr as _;
@@ -75,7 +74,19 @@ impl key::Read for Fixed {
     }
 }
 
-impl key::Write for Fixed {
+impl fmt::Debug for Fixed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.with_bytes(|bytes| bytes.fmt(f))
+    }
+}
+
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+pub struct Writer {
+    buffer: u64,
+    len: u8,
+}
+
+impl key::Write for Writer {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -104,29 +115,12 @@ impl key::Write for Fixed {
     }
 }
 
-impl fmt::Debug for Fixed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with_bytes(|bytes| bytes.fmt(f))
-    }
-}
-
-impl Ord for Fixed {
-    #[inline]
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.len.cmp(&other.len).then_with(|| {
-            if cfg!(target_endian = "little") {
-                self.buffer.swap_bytes().cmp(&other.buffer.swap_bytes())
-            } else {
-                self.buffer.cmp(&other.buffer)
-            }
-        })
-    }
-}
-
-impl PartialOrd for Fixed {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
+impl From<Fixed> for Writer {
+    fn from(fixed: Fixed) -> Self {
+        Self {
+            buffer: fixed.buffer,
+            len: fixed.len,
+        }
     }
 }
 
@@ -147,11 +141,11 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl From<Fixed> for $from {
+            impl From<Writer> for $from {
                 #[inline]
-                fn from(fixed: Fixed) -> Self {
-                    validate_eq!(fixed.len, $len);
-                    let value = (fixed.buffer as $from);
+                fn from(writer: Writer) -> Self {
+                    validate_eq!(writer.len, $len);
+                    let value = writer.buffer as $from;
                     if cfg!(target_endian = "little") {
                         value.swap_bytes()
                     } else {
@@ -160,7 +154,13 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl PartialEq<$from> for Fixed {
+            impl PartialOrd<$from> for Writer {
+                fn partial_cmp(&self, value: &$from) -> Option<core::cmp::Ordering> {
+                    <$from>::from(*self).partial_cmp(&value)
+                }
+            }
+
+            impl PartialEq<$from> for Writer {
                 fn eq(&self, value: &$from) -> bool {
                     <$from>::from(*self) == *value
                 }

@@ -69,39 +69,37 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
             .map(V::from_u64)
     }
 
-    pub fn range_non_linearizable<'l, R>(
+    pub fn range_non_linearizable<'l, B>(
         &'l mut self,
-        range: R,
-    ) -> RangeNonLinearizableIter<'g, 'l, K, V>
+        range: B,
+    ) -> RangeNonLinearizableIter<'g, 'l, B, K, V>
     where
-        R: RangeBounds<K::Borrow<'l>>,
+        B: RangeBounds<K::Borrow<'l>> + Clone,
     {
-        let start = range.start_bound().map(|start| K::Read::from(*start));
-        let end = range.end_bound().map(|end| K::Read::from(*end));
         RangeNonLinearizableIter {
-            iter: self.raw.range_non_linearizable(start, end),
+            iter: self.raw.range_non_linearizable(range),
             _value: PhantomData,
         }
     }
 
-    pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K, V)>
-    where
-        R: RangeBounds<K::Borrow<'l>>,
-    {
-        let start = range.start_bound().map(|start| K::Read::from(*start));
-        let end = range.end_bound().map(|end| K::Read::from(*end));
-        self.raw
-            .range(start, end)
-            .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
-    }
+    // pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K, V)>
+    // where
+    //     R: RangeBounds<K::Borrow<'l>> + Clone,
+    // {
+    //     self.raw
+    //         .range(range)
+    //         .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
+    // }
 }
 
-pub struct RangeNonLinearizableIter<'g, 'l, K: Key + 'l, V> {
-    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Read<'l>, K::Write>,
+pub struct RangeNonLinearizableIter<'g, 'l, B, K: Key + 'l, V> {
+    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, B, K::Borrow<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
+impl<'g, 'l, R: RangeBounds<K::Borrow<'l>>, K: Key + 'l, V: Value>
+    RangeNonLinearizableIter<'g, 'l, R, K, V>
+{
     #[inline]
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
@@ -110,8 +108,9 @@ impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
     }
 }
 
-impl<'g, 'l, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, K, V>
+impl<'g, 'l, R, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, R, K, V>
 where
+    R: RangeBounds<K::Borrow<'l>>,
     K: Key,
     V: Value,
 {

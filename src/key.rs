@@ -12,15 +12,15 @@ pub trait Key {
         Self: 'k;
 
     #[allow(private_bounds)]
-    type Write: Write + for<'k> PartialOrd<Self::Read<'k>> + for<'k> From<Self::Read<'k>>;
+    type Write: Write + for<'k> PartialOrd<Self::Borrow<'k>> + for<'k> From<Self::Read<'k>>;
 
     type Borrow<'k>: Copy
     where
         Self: 'k;
 
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
-    fn from_borrowed<'w>(write: &'w Self::Write) -> Self::Borrow<'w>;
-    fn from_owned(write: Self::Write) -> Self;
+    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
+    fn from_owned(writer: Self::Write) -> Self;
 }
 
 pub(crate) trait Read: Clone + core::fmt::Debug + Default {
@@ -69,7 +69,7 @@ macro_rules! impl_unsigned_int {
         $(
             impl Key for $ty {
                 type Read<'k> = Fixed;
-                type Write = Fixed;
+                type Write = fixed::Writer;
                 type Borrow<'k> = Self;
 
                 #[inline]
@@ -95,7 +95,7 @@ impl_unsigned_int!(u8, u16, u32, u64);
 
 impl<const N: usize> Key for [u8; N] {
     type Read<'a> = dynamic::Iter<'a>;
-    type Write = Vec<u8>;
+    type Write = dynamic::Writer;
     type Borrow<'a> = &'a [u8; N];
 
     #[inline]
@@ -104,16 +104,18 @@ impl<const N: usize> Key for [u8; N] {
     }
 
     #[inline]
-    fn from_borrowed<'w>(write: &'w Self::Write) -> Self::Borrow<'w> {
-        write
+    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        writer
+            .0
             .as_slice()
             .try_into()
             .expect("key::Write should have same length as key::Key")
     }
 
     #[inline]
-    fn from_owned(write: Self::Write) -> Self {
-        write
+    fn from_owned(writer: Self::Write) -> Self {
+        writer
+            .0
             .try_into()
             .expect("key::Write should have same length as key::Key")
     }
@@ -121,7 +123,7 @@ impl<const N: usize> Key for [u8; N] {
 
 impl Key for Vec<u8> {
     type Read<'a> = dynamic::Iter<'a>;
-    type Write = Vec<u8>;
+    type Write = dynamic::Writer;
     type Borrow<'a> = &'a [u8];
 
     #[inline]
@@ -130,19 +132,19 @@ impl Key for Vec<u8> {
     }
 
     #[inline]
-    fn from_borrowed<'w>(write: &'w Self::Write) -> Self::Borrow<'w> {
-        write.as_slice()
+    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        writer.0.as_slice()
     }
 
     #[inline]
-    fn from_owned(write: Self::Write) -> Self {
-        write
+    fn from_owned(writer: Self::Write) -> Self {
+        writer.0
     }
 }
 
 impl Key for String {
     type Read<'a> = dynamic::Iter<'a>;
-    type Write = Vec<u8>;
+    type Write = dynamic::Writer;
     type Borrow<'a> = &'a str;
 
     #[inline]
@@ -151,12 +153,12 @@ impl Key for String {
     }
 
     #[inline]
-    fn from_borrowed<'w>(write: &'w Self::Write) -> Self::Borrow<'w> {
-        str::from_utf8(write.as_slice()).expect("key::Write should be valid UTF-8")
+    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        str::from_utf8(writer.0.as_slice()).expect("key::Write should be valid UTF-8")
     }
 
     #[inline]
-    fn from_owned(write: Self::Write) -> Self {
-        String::from_utf8(write).expect("key::Write should be valid UTF-8")
+    fn from_owned(writer: Self::Write) -> Self {
+        String::from_utf8(writer.0).expect("key::Write should be valid UTF-8")
     }
 }

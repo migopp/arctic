@@ -1,5 +1,6 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::ops::RangeBounds;
 
 use ribbit::atomic::Atomic128;
 
@@ -45,11 +46,17 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter_leaves<'a, W: key::Write, V: iter::Selector<W>, S: iter::Sort<'a>>(
+    pub(crate) fn iter_leaves<
+        'a,
+        R: RangeBounds<K>,
+        K,
+        W: key::Write + PartialOrd<K>,
+        S: iter::Sort<'a>,
+    >(
         &'a self,
-        selector: V,
-    ) -> iter::LeafIter<'a, W, V, S> {
-        unsafe { iter::LeafIter::new(&self.root, W::default(), selector) }
+        range: R,
+    ) -> iter::LeafIter<'a, R, K, W, S> {
+        unsafe { iter::LeafIter::new(&self.root, W::default(), range) }
     }
 
     pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>, S: iter::Sort<'a>>(

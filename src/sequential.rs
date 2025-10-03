@@ -1,4 +1,6 @@
 use core::marker::PhantomData;
+use core::ops::RangeBounds;
+use core::ops::RangeFull;
 
 use crate::node;
 use crate::raw;
@@ -50,33 +52,34 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     #[expect(private_interfaces)]
-    pub fn iter(&self) -> Iter<K, V, node::SortedIter> {
+    pub fn iter(&self) -> Iter<RangeFull, K, V, node::SortedIter> {
         Iter {
-            inner: self.raw.iter_leaves(raw::iter::SelectLeaf),
+            inner: self.raw.iter_leaves(RangeFull),
             _key: PhantomData,
             _value: PhantomData,
         }
     }
 
     #[expect(private_interfaces)]
-    pub fn iter_unsorted(&self) -> Iter<K, V, node::UnsortedIter> {
+    pub fn iter_unsorted(&self) -> Iter<RangeFull, K, V, node::UnsortedIter> {
         Iter {
-            inner: self.raw.iter_leaves(raw::iter::SelectLeaf),
+            inner: self.raw.iter_leaves(RangeFull),
             _key: PhantomData,
             _value: PhantomData,
         }
     }
 }
 
-pub(crate) struct Iter<'a, K: Key, V, S: raw::iter::Sort<'a>> {
-    inner: raw::iter::LeafIter<'a, K::Write, raw::iter::SelectLeaf, S>,
+pub(crate) struct Iter<'a, 'k, R, K: Key + 'k, V, S: raw::iter::Sort<'a>> {
+    inner: raw::iter::LeafIter<'a, R, K::Borrow<'k>, K::Write, S>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
 
-impl<'a, K, V, S> Iterator for Iter<'a, K, V, S>
+impl<'a, 'k, R, K, V, S> Iterator for Iter<'a, 'k, R, K, V, S>
 where
-    K: Key,
+    R: RangeBounds<K::Borrow<'k>>,
+    K: Key + 'k,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
@@ -88,14 +91,15 @@ where
     }
 }
 
-impl<'a, K, V, S> Iter<'a, K, V, S>
+impl<'a, 'k, R, K, V, S> Iter<'a, 'k, R, K, V, S>
 where
-    K: Key,
+    R: RangeBounds<K::Borrow<'k>>,
+    K: Key + 'k,
     V: Value,
     S: raw::iter::Sort<'a>,
 {
     #[allow(dead_code)]
-    pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
+    pub fn lend<'i>(&'i mut self) -> Option<(K::Borrow<'i>, V)> {
         self.inner
             .lend()
             .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))

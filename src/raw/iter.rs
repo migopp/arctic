@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use core::ops::Bound;
+use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -8,27 +8,28 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub enum LeafIter<'a, W, V, S>
+pub enum LeafIter<'a, R, K, W, S>
 where
     S: Sort<'a>,
-    V: Selector<W>,
 {
     Root {
         key: W,
-        next: Option<V::Item>,
+        next: Option<u64>,
     },
     Node {
         key: W,
-        selector: V,
-        #[allow(private_interfaces)]
+        range: R,
         frontier: Vec<(usize, S)>,
+        _key: PhantomData<K>,
         _sort: PhantomData<&'a ()>,
     },
 }
 
-impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> LeafIter<'a, W, V, S> {
+impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
+    LeafIter<'a, R, K, W, S>
+{
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, selector: V) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, range: R) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let kind = meta.kind();
@@ -38,25 +39,45 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> LeafIter<'a, W, V, S> {
         if kind == node::Kind::NONE {
             Self::Root { key, next: None }
         } else if kind == node::Kind::LEAF {
-            let next = match selector.select(edge, &key, 0) {
-                Select::Yield(value) => Some(value),
-                Select::Continue | Select::Break => None,
-            };
-            Self::Root { key, next }
+            match range.end_bound() {
+                core::ops::Bound::Included(end) if key > *end => {
+                    return Self::Root { key, next: None };
+                }
+                core::ops::Bound::Excluded(end) if key >= *end => {
+                    return Self::Root { key, next: None };
+                }
+                _ => (),
+            }
+
+            match range.start_bound() {
+                core::ops::Bound::Included(start) if key < *start => {
+                    return Self::Root { key, next: None };
+                }
+                core::ops::Bound::Excluded(start) if key <= *start => {
+                    return Self::Root { key, next: None };
+                }
+                _ => (),
+            }
+
+            Self::Root {
+                key,
+                next: Some(edge.data()),
+            }
         } else {
             let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
             Self::Node {
-                selector,
+                range,
                 frontier: vec![(key.len(), S::new(node))],
                 key,
+                _key: PhantomData,
                 _sort: PhantomData,
             }
         }
     }
 
     #[inline]
-    pub fn lend(&mut self) -> Option<(&W, V::Item)> {
-        let (key, selector, frontier) = match self {
+    pub fn lend(&mut self) -> Option<(&W, u64)> {
+        let (key, range, frontier) = match self {
             LeafIter::Root { key, next } => {
                 crate::cold();
                 let value = next.take()?;
@@ -64,14 +85,14 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> LeafIter<'a, W, V, S> {
             }
             LeafIter::Node {
                 key,
-                selector,
+                range,
                 frontier,
                 _sort,
-            } => (key, selector, frontier),
+                ..
+            } => (key, range, frontier),
         };
 
         'vertical: loop {
-            let depth = frontier.len();
             let (len, iter) = frontier.last_mut()?;
 
             loop {
@@ -93,14 +114,25 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> LeafIter<'a, W, V, S> {
                 key.extend(meta.key());
 
                 if kind == node::Kind::LEAF {
-                    match selector.select(edge, key, depth) {
-                        Select::Yield(item) => return Some((key, item)),
-                        Select::Continue => (),
-                        Select::Break => {
+                    match range.end_bound() {
+                        core::ops::Bound::Included(end) if *key > *end => {
                             frontier.clear();
                             return None;
                         }
+                        core::ops::Bound::Excluded(end) if *key >= *end => {
+                            frontier.clear();
+                            return None;
+                        }
+                        _ => (),
                     }
+
+                    match range.start_bound() {
+                        core::ops::Bound::Included(start) if *key < *start => continue,
+                        core::ops::Bound::Excluded(start) if *key <= *start => continue,
+                        _ => (),
+                    }
+
+                    return Some((key, edge.data()));
                 } else {
                     let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
                     frontier.push((key.len(), S::new(node)));
@@ -268,50 +300,6 @@ impl<W: key::Write> Selector<W> for SelectAll {
     fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Select<Self::Item> {
         if edge.meta().kind() > node::Kind::NONE {
             Select::Yield((edge, depth))
-        } else {
-            Select::Continue
-        }
-    }
-}
-
-pub(crate) struct SelectRange<R, W> {
-    start: Bound<R>,
-    end: Bound<R>,
-    _stack: PhantomData<W>,
-}
-
-impl<R, W> SelectRange<R, W> {
-    #[inline]
-    pub(crate) fn new(start: Bound<R>, end: Bound<R>) -> Self {
-        Self {
-            start,
-            end,
-            _stack: PhantomData,
-        }
-    }
-}
-
-impl<R, W> Selector<W> for SelectRange<R, W>
-where
-    W: key::Write + PartialOrd<R>,
-{
-    type Item = u64;
-    #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, _depth: usize) -> Select<Self::Item> {
-        match &self.end {
-            core::ops::Bound::Included(end) if key > end => return Select::Break,
-            core::ops::Bound::Excluded(end) if key >= end => return Select::Break,
-            _ => (),
-        }
-
-        match &self.start {
-            core::ops::Bound::Included(start) if key < start => return Select::Continue,
-            core::ops::Bound::Excluded(start) if key <= start => return Select::Continue,
-            _ => (),
-        }
-
-        if edge.meta().kind() == node::Kind::LEAF {
-            Select::Yield(edge.data())
         } else {
             Select::Continue
         }

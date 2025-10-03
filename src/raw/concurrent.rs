@@ -1,6 +1,7 @@
 mod cursor;
 
 use core::ops::Bound;
+use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
@@ -320,16 +321,17 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<'l, R, W>(
+    pub(crate) fn range_non_linearizable<'l, B, K, R, W>(
         &'l mut self,
-        start: Bound<R>,
-        end: Bound<R>,
-    ) -> RangeNonLinearizableIter<'g, 'l, R, W>
+        range: B,
+    ) -> RangeNonLinearizableIter<'g, 'l, B, K, W>
     where
-        R: key::Read,
-        W: key::Write + PartialOrd<R> + From<R>,
+        B: RangeBounds<K> + Clone,
+        K: Copy,
+        R: key::Read + From<K>,
+        W: key::Write + PartialOrd<K> + From<R>,
     {
-        let prefix = Self::prefix(&start, &end);
+        let prefix = Self::prefix::<B, K, R>(range.clone());
         let guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
@@ -337,11 +339,7 @@ impl<'g> MapRef<'g> {
         stack.truncate(index);
 
         let iter = unsafe {
-            iter::LeafIter::<W, iter::SelectRange<R, W>, node::SortedIter>::new(
-                cursor.root(),
-                stack,
-                iter::SelectRange::new(start, end),
-            )
+            iter::LeafIter::<B, K, W, node::SortedIter>::new(cursor.root(), stack, range)
         };
 
         RangeNonLinearizableIter {
@@ -350,72 +348,73 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range<R, W>(
-        &mut self,
-        start: Bound<R>,
-        end: Bound<R>,
-    ) -> std::vec::IntoIter<(W, u64)>
+    // pub(crate) fn range<R, K, W>(&mut self, range: R) -> std::vec::IntoIter<(W, u64)>
+    // where
+    //     R: RangeBounds<K>,
+    //     W: key::Write + PartialOrd<K> + From<R>,
+    // {
+    //     // FIXME: deduplicate prefix traversal?
+    //     // let prefix = Self::prefix(&start, &end);
+    //     let _guard = self.smr.protect_read(byte::Array::EMPTY);
+    //     let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
+    //     let index = cursor.traverse_prefix();
+    //     let mut stack = W::from(prefix);
+    //     stack.truncate(index);
+    //
+    //     let mut prev: Option<Vec<(W, u64)>> = None;
+    //     let mut count = 0;
+    //     loop {
+    //         count += 1;
+    //
+    //         let mut iter = unsafe {
+    //             iter::LeafIter::<R, K, W, node::SortedIter>::new(
+    //                 cursor.root(),
+    //                 stack.clone(),
+    //                 range,
+    //             )
+    //         };
+    //
+    //         let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
+    //             .collect::<Vec<_>>();
+    //
+    //         match prev {
+    //             Some(prev) if prev == next => {
+    //                 stat::record(stat::Record::RangeConflict, count);
+    //                 return next.into_iter();
+    //             }
+    //             None | Some(_) => prev = Some(next),
+    //         }
+    //     }
+    // }
+
+    fn prefix<B: RangeBounds<K>, K, R>(range: B) -> R
     where
-        R: key::Read,
-        W: key::Write + PartialOrd<R> + From<R>,
+        K: Copy,
+        R: key::Read + From<K>,
     {
-        // FIXME: deduplicate prefix traversal?
-        let prefix = Self::prefix(&start, &end);
-        let _guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
-        let index = cursor.traverse_prefix();
-        let mut stack = W::from(prefix);
-        stack.truncate(index);
-
-        let mut prev: Option<Vec<(W, u64)>> = None;
-        let mut count = 0;
-        loop {
-            count += 1;
-
-            let mut iter = unsafe {
-                iter::LeafIter::<W, iter::SelectRange<R, W>, node::SortedIter>::new(
-                    cursor.root(),
-                    stack.clone(),
-                    iter::SelectRange::new(start.clone(), end.clone()),
-                )
-            };
-
-            let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
-                .collect::<Vec<_>>();
-
-            match prev {
-                Some(prev) if prev == next => {
-                    stat::record(stat::Record::RangeConflict, count);
-                    return next.into_iter();
-                }
-                None | Some(_) => prev = Some(next),
+        match (range.start_bound(), range.end_bound()) {
+            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
+            (
+                Bound::Included(start) | Bound::Excluded(start),
+                Bound::Included(end) | Bound::Excluded(end),
+            ) => {
+                let start = R::from(*start);
+                let end = R::from(*end);
+                dbg!(start.prefix(&end))
             }
         }
     }
-
-    fn prefix<R: key::Read>(start: &Bound<R>, end: &Bound<R>) -> R {
-        match (start, end) {
-            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
-            (
-                Bound::Included(low) | Bound::Excluded(low),
-                Bound::Included(high) | Bound::Excluded(high),
-            ) => low.prefix(high),
-        }
-    }
 }
 
-pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W>
-where
-    W: key::Write + PartialOrd<R>,
-{
-    iter: iter::LeafIter<'g, W, iter::SelectRange<R, W>, node::SortedIter<'g>>,
+pub(crate) struct RangeNonLinearizableIter<'g, 'l, B, K, W> {
+    iter: iter::LeafIter<'g, B, K, W, node::SortedIter<'g>>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 
-impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
+impl<'g, 'l, B, K, W> RangeNonLinearizableIter<'g, 'l, B, K, W>
 where
-    R: key::Read,
-    W: key::Write + PartialOrd<R>,
+    B: RangeBounds<K>,
+    W: key::Write + PartialOrd<K>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {

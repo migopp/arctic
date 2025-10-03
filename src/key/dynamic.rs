@@ -144,54 +144,52 @@ impl key::Read for Iter<'_> {
     }
 }
 
-impl key::Write for Vec<u8> {
+#[repr(transparent)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct Writer(pub(super) Vec<u8>);
+
+impl key::Write for Writer {
     #[inline]
     fn len(&self) -> usize {
-        Vec::len(self)
+        self.0.len()
     }
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        core::iter::Extend::extend(self, array.bytes());
+        self.0.extend(array.bytes())
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        Vec::push(self, byte)
+        self.0.push(byte)
     }
 
     #[inline]
     fn truncate(&mut self, len: usize) {
-        Vec::truncate(self, len)
+        self.0.truncate(len);
     }
 }
 
-impl<'a> From<Iter<'a>> for Vec<u8> {
+impl<'a> From<Iter<'a>> for Writer {
     fn from(iter: Iter<'a>) -> Self {
-        match iter {
+        Self(match iter {
             Iter::Large(large) => large.to_vec(),
             Iter::Small(small) => small.with_bytes(|small| small.to_vec()),
-        }
+        })
     }
 }
 
-impl<'a> PartialEq<Iter<'a>> for Vec<u8> {
+impl<T: AsRef<[u8]>> PartialEq<T> for Writer {
     #[inline]
-    fn eq(&self, iter: &Iter<'a>) -> bool {
-        match iter {
-            Iter::Small(small) => small.with_bytes(|small| self == small),
-            Iter::Large(large) => self.as_slice() == *large,
-        }
+    fn eq(&self, other: &T) -> bool {
+        self.0 == other.as_ref()
     }
 }
 
-impl<'a> PartialOrd<Iter<'a>> for Vec<u8> {
+impl<T: AsRef<[u8]>> PartialOrd<T> for Writer {
     #[inline]
-    fn partial_cmp(&self, iter: &Iter<'a>) -> Option<cmp::Ordering> {
-        match iter {
-            Iter::Small(small) => Some(small.with_bytes(|small| self.as_slice().cmp(small))),
-            Iter::Large(large) => self.as_slice().partial_cmp(large),
-        }
+    fn partial_cmp(&self, other: &T) -> Option<cmp::Ordering> {
+        self.0.as_slice().partial_cmp(other.as_ref())
     }
 }
 
