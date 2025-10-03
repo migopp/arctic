@@ -21,7 +21,7 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(Fixed::new(u64::from_ne_bytes(buffer), len as u8))
+                Self::Small(Fixed::new(u64::from_be_bytes(buffer), len as u8))
             }
         }
     }
@@ -64,7 +64,7 @@ impl key::Read for Iter<'_> {
         match self {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
                 ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
             }
             Iter::Small(small) => small.peek(len),
@@ -78,7 +78,7 @@ impl key::Read for Iter<'_> {
         match self {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
                 let array = ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len);
                 let after = large.len() - len.value() as usize;
 
@@ -91,10 +91,10 @@ impl key::Read for Iter<'_> {
                     (&large[large.len() - 8] as *const u8)
                         .cast::<u64>()
                         .read_unaligned()
-                };
-                let buffer = buffer >> ((8 - after) << 3);
-
-                *self = Self::Small(Fixed::new(buffer, after as u8));
+                }
+                .to_be();
+                let shift = (8 - after) << 3;
+                *self = Self::Small(Fixed::new(buffer << shift, after as u8));
                 array
             }
             Iter::Small(small) => small.take(len),
@@ -113,7 +113,7 @@ impl key::Read for Iter<'_> {
                     Self::Large(&large[1..])
                 } else {
                     Self::Small(Fixed::new(
-                        unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() },
+                        unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() }.to_be(),
                         8,
                     ))
                 };
@@ -135,7 +135,7 @@ impl key::Read for Iter<'_> {
             (Self::Small(left), Self::Small(right)) => (*left, right),
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
                 // SAFETY: `large.len() > 8`
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
                 (Fixed::new(buffer, 8), small)
             }
         };
@@ -156,7 +156,7 @@ impl key::Write for Writer {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        self.0.extend(array.bytes())
+        self.0.extend(array)
     }
 
     #[inline]
@@ -252,7 +252,7 @@ mod tests {
         let mut index = 0;
         for len in lens {
             assert_eq!(iter.len(), initial.len() - index);
-            ribbit::Packed::<Array>::with_bytes(iter.take(u3::new(len as u8)), None, |a| {
+            ribbit::Packed::<Array>::with_bytes(iter.take(u3::new(len as u8)), |a| {
                 assert_eq!(a, &initial[index..][..len]);
             });
             index += len;

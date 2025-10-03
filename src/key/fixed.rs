@@ -17,13 +17,12 @@ impl Fixed {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
         validate!(len <= 8);
-        validate_eq!(buffer.unbounded_shr((len as u32) << 3), 0);
         Self { buffer, len }
     }
 
     #[inline]
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
-        with(&self.buffer.to_ne_bytes()[..self.len as usize])
+        with(&self.buffer.to_be_bytes()[..self.len as usize])
     }
 }
 
@@ -45,7 +44,7 @@ impl key::Read for Fixed {
         validate!(len.value() as usize <= self.len());
 
         let array = ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len);
-        self.buffer >>= (len.value() as u64) << 3;
+        self.buffer = self.buffer.unbounded_shl((len.value() as u32) << 3);
         self.len -= len.value();
         array
     }
@@ -53,8 +52,8 @@ impl key::Read for Fixed {
     #[inline]
     fn next(&mut self) -> Option<u8> {
         let some = self.len > 0;
-        let byte = self.buffer as u8;
-        self.buffer >>= 8;
+        let byte = (self.buffer >> 56) as u8;
+        self.buffer <<= 8;
         self.len = self.len.saturating_sub(1);
         some.then_some(byte)
     }
@@ -62,11 +61,14 @@ impl key::Read for Fixed {
     #[inline]
     fn prefix(&self, other: &Self) -> Self {
         let max = self.len.min(other.len);
+
         let prefix = (self.buffer ^ other.buffer)
-            .bitor(1u64.unbounded_shl((max << 3) as u32))
-            .trailing_zeros()
+            .bitor(0x8000_0000_0000_0000u64.unbounded_shr((max << 3) as u32))
+            .leading_zeros()
             .shr(3);
-        let mask = 1u64.unbounded_shl(prefix << 3).wrapping_sub(1);
+
+        let mask = !(1u64.unbounded_shl(64u32 - (prefix << 3)).wrapping_sub(1));
+
         Self {
             buffer: self.buffer & mask,
             len: prefix as u8,
@@ -95,14 +97,16 @@ impl key::Write for Writer {
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         validate!(self.len + array.len() as u8 <= 8);
-        self.buffer |= array.buffer().value().unbounded_shl((self.len << 3) as u32);
+        self.buffer |= array.buffer().value();
+        self.buffer = self.buffer.rotate_left(array.len() as u32);
         self.len += array.len() as u8;
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
         validate!(self.len < 8);
-        self.buffer |= (byte as u64).unbounded_shl((self.len << 3) as u32);
+        self.buffer <<= 8;
+        self.buffer |= byte as u64;
         self.len += 1;
     }
 
@@ -110,7 +114,7 @@ impl key::Write for Writer {
     fn truncate(&mut self, len: usize) {
         validate!(self.len as usize >= len);
         validate!(len <= 8);
-        self.buffer &= 1u64.unbounded_shl((len << 3) as u32).wrapping_sub(1);
+        self.buffer >>= (self.len as usize - len) << 3;
         self.len = len as u8;
     }
 }
@@ -118,7 +122,7 @@ impl key::Write for Writer {
 impl From<Fixed> for Writer {
     fn from(fixed: Fixed) -> Self {
         Self {
-            buffer: fixed.buffer,
+            buffer: fixed.buffer.unbounded_shr(64 - ((fixed.len as u32) << 3)),
             len: fixed.len,
         }
     }
@@ -131,11 +135,7 @@ macro_rules! impl_unsigned_int {
                 #[inline]
                 fn from(value: $from) -> Self {
                     Self {
-                        buffer: if cfg!(target_endian = "little") {
-                            value.swap_bytes()
-                        } else {
-                            value
-                        } as u64,
+                        buffer: (value as u64) << (64 - ($len << 3)),
                         len: $len,
                     }
                 }
@@ -144,13 +144,7 @@ macro_rules! impl_unsigned_int {
             impl From<Writer> for $from {
                 #[inline]
                 fn from(writer: Writer) -> Self {
-                    validate_eq!(writer.len, $len);
-                    let value = writer.buffer as $from;
-                    if cfg!(target_endian = "little") {
-                        value.swap_bytes()
-                    } else {
-                        value
-                    }
+                    writer.buffer as $from
                 }
             }
 
@@ -175,3 +169,46 @@ impl_unsigned_int!(
     u32: 4,
     u64: 8,
 );
+
+#[cfg(test)]
+mod tests {
+    use ribbit::u3;
+
+    use crate::byte;
+    use crate::key::fixed;
+    use crate::key::Read as _;
+
+    #[test]
+    fn smoke() {
+        take_all(0x1234_5678_9ABC_DEF0u64, [7, 1]);
+    }
+
+    #[test]
+    fn take_0() {
+        take_all(0x1234_5678_9ABC_DEF0u64, [0, 1, 0]);
+    }
+
+    fn take_all<N, I: IntoIterator<Item = usize>>(initial: N, lens: I)
+    where
+        fixed::Fixed: From<N>,
+    {
+        let mut iter = fixed::Fixed::from(initial);
+        let initial = iter.with_bytes(|bytes| bytes.to_vec());
+
+        let mut index = 0;
+        for len in lens {
+            assert_eq!(iter.len(), initial.len() - index);
+            ribbit::Packed::<byte::Array>::with_bytes(iter.take(u3::new(len as u8)), |a| {
+                assert_eq!(a, &initial[index..][..len]);
+            });
+            index += len;
+        }
+
+        assert_eq!(iter.len(), initial.len() - index);
+        if iter.len() > 0 {
+            assert_eq!(iter.next(), Some(initial[index]));
+        } else {
+            assert_eq!(iter.next(), None);
+        }
+    }
+}

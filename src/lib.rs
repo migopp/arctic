@@ -97,12 +97,12 @@ mod tests {
 
     #[test]
     fn scan_leaf() {
-        let map = Map::<u8, _>::default();
+        let map = Map::<u64, _>::default();
         let mut map = map.pin();
-        let key = 1u8;
+        let key = 1u64;
         map.insert(key, 2);
         assert_eq!(
-            map.range_non_linearizable(1u8..=1u8).collect::<Vec<_>>(),
+            map.range_non_linearizable(1u64..=1).collect::<Vec<_>>(),
             vec![(1, 2)]
         );
     }
@@ -142,11 +142,11 @@ mod tests {
 
     #[test]
     fn node3_overwrite() {
-        let mut map = Map::<u8, _>::default();
+        let mut map = Map::<u64, _>::default();
         let mut pin = map.pin();
 
         for value in [1, 2, 3] {
-            pin.insert(1u8, value);
+            pin.insert(1, value);
             assert_eq!(pin.get(1), Some(value));
         }
 
