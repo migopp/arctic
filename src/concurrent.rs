@@ -82,14 +82,14 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         }
     }
 
-    // pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K, V)>
-    // where
-    //     R: RangeBounds<K::Borrow<'l>> + Clone,
-    // {
-    //     self.raw
-    //         .range(range)
-    //         .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
-    // }
+    pub fn range<'l, R>(&'l mut self, range: R) -> impl Iterator<Item = (K, V)>
+    where
+        R: RangeBounds<K::Borrow<'l>> + Clone,
+    {
+        self.raw
+            .range(range)
+            .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
+    }
 }
 
 pub struct RangeNonLinearizableIter<'g, 'l, B, K: Key + 'l, V> {

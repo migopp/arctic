@@ -348,44 +348,46 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    // pub(crate) fn range<R, K, W>(&mut self, range: R) -> std::vec::IntoIter<(W, u64)>
-    // where
-    //     R: RangeBounds<K>,
-    //     W: key::Write + PartialOrd<K> + From<R>,
-    // {
-    //     // FIXME: deduplicate prefix traversal?
-    //     // let prefix = Self::prefix(&start, &end);
-    //     let _guard = self.smr.protect_read(byte::Array::EMPTY);
-    //     let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
-    //     let index = cursor.traverse_prefix();
-    //     let mut stack = W::from(prefix);
-    //     stack.truncate(index);
-    //
-    //     let mut prev: Option<Vec<(W, u64)>> = None;
-    //     let mut count = 0;
-    //     loop {
-    //         count += 1;
-    //
-    //         let mut iter = unsafe {
-    //             iter::LeafIter::<R, K, W, node::SortedIter>::new(
-    //                 cursor.root(),
-    //                 stack.clone(),
-    //                 range,
-    //             )
-    //         };
-    //
-    //         let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
-    //             .collect::<Vec<_>>();
-    //
-    //         match prev {
-    //             Some(prev) if prev == next => {
-    //                 stat::record(stat::Record::RangeConflict, count);
-    //                 return next.into_iter();
-    //             }
-    //             None | Some(_) => prev = Some(next),
-    //         }
-    //     }
-    // }
+    pub(crate) fn range<B, K, R, W>(&mut self, range: B) -> std::vec::IntoIter<(W, u64)>
+    where
+        B: RangeBounds<K> + Clone,
+        K: Copy,
+        R: key::Read + From<K>,
+        W: key::Write + PartialOrd<K> + From<R>,
+    {
+        // FIXME: deduplicate prefix traversal?
+        let prefix = Self::prefix::<B, K, R>(range.clone());
+        let _guard = self.smr.protect_read(prefix.peek_all());
+        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
+        let index = cursor.traverse_prefix();
+        let mut stack = W::from(prefix);
+        stack.truncate(index);
+
+        let mut prev: Option<Vec<(W, u64)>> = None;
+        let mut count = 0;
+        loop {
+            count += 1;
+
+            let mut iter = unsafe {
+                iter::LeafIter::<B, K, W, node::SortedIter>::new(
+                    cursor.root(),
+                    stack.clone(),
+                    range.clone(),
+                )
+            };
+
+            let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
+                .collect::<Vec<_>>();
+
+            match prev {
+                Some(prev) if prev == next => {
+                    stat::record(stat::Record::RangeConflict, count);
+                    return next.into_iter();
+                }
+                None | Some(_) => prev = Some(next),
+            }
+        }
+    }
 
     fn prefix<B: RangeBounds<K>, K, R>(range: B) -> R
     where
@@ -400,7 +402,7 @@ impl<'g> MapRef<'g> {
             ) => {
                 let start = R::from(*start);
                 let end = R::from(*end);
-                dbg!(start.prefix(&end))
+                start.prefix(&end)
             }
         }
     }
