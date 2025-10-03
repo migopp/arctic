@@ -173,10 +173,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
         if kind == node::Kind::NONE {
             Self::Root { key, next: None }
         } else if kind == node::Kind::LEAF {
-            let next = match selector.select(edge, &key, 0) {
-                Select::Yield(value) => Some(value),
-                Select::Continue | Select::Break => None,
-            };
+            let next = selector.select(edge, &key, 0);
             Self::Root { key, next }
         } else {
             let node = unsafe { Edge::next_node_unchecked(edge.data(), kind) };
@@ -237,13 +234,8 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
                 // Second visit (or fallthrough)
                 iter.skip();
 
-                match selector.select(edge, key, depth) {
-                    Select::Yield(item) => return Some((key, item)),
-                    Select::Continue => (),
-                    Select::Break => {
-                        frontier.clear();
-                        return None;
-                    }
+                if let Some(item) = selector.select(edge, key, depth) {
+                    return Some((key, item));
                 }
             }
         }
@@ -252,28 +244,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
 
 pub(crate) trait Selector<W> {
     type Item;
-    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Select<Self::Item>;
-}
-
-pub(crate) enum Select<T> {
-    Yield(T),
-    Continue,
-    Break,
-}
-
-pub(crate) struct SelectLeaf;
-
-impl<W: key::Write> Selector<W> for SelectLeaf {
-    type Item = u64;
-
-    #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Select<Self::Item> {
-        if edge.meta().kind() == node::Kind::LEAF {
-            Select::Yield(edge.data())
-        } else {
-            Select::Continue
-        }
-    }
+    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Option<Self::Item>;
 }
 
 pub(crate) struct SelectNode;
@@ -282,12 +253,8 @@ impl<W: key::Write> Selector<W> for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Select<Self::Item> {
-        if edge.meta().kind() >= node::Kind::NODE_3 {
-            Select::Yield(edge)
-        } else {
-            Select::Continue
-        }
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Option<Self::Item> {
+        (edge.meta().kind() >= node::Kind::NODE_3).then_some(edge)
     }
 }
 
@@ -297,12 +264,8 @@ impl<W: key::Write> Selector<W> for SelectAll {
     type Item = (ribbit::Packed<Edge>, usize);
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Select<Self::Item> {
-        if edge.meta().kind() > node::Kind::NONE {
-            Select::Yield((edge, depth))
-        } else {
-            Select::Continue
-        }
+    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Option<Self::Item> {
+        (edge.meta().kind() > node::Kind::NONE).then_some((edge, depth))
     }
 }
 
