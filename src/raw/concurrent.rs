@@ -1,5 +1,3 @@
-mod cursor;
-
 use core::ops::Bound;
 use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
@@ -7,13 +5,14 @@ use core::sync::atomic::Ordering;
 use crate::edge;
 use crate::key;
 use crate::node;
+use crate::raw::cursor;
 use crate::raw::iter;
 use crate::raw::sequential;
+use crate::raw::Cursor;
 use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
-use cursor::Cursor;
 
 #[derive(Default)]
 pub(crate) struct Map {
