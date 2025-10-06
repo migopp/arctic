@@ -1,7 +1,6 @@
 use core::marker::PhantomData;
 
 use crate::byte;
-use crate::node;
 use crate::stat;
 use crate::Edge;
 
@@ -41,7 +40,7 @@ pub(crate) struct WriteGuard<'g, 'l>(PhantomData<&'l mut Local<'g>>);
 impl WriteGuard<'_, '_> {
     #[inline]
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
-        if edge.meta().kind() < node::Kind::NODE_3 {
+        if edge.meta().leaf() || edge.data() == 0 {
             return;
         }
 
