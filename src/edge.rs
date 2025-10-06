@@ -12,7 +12,7 @@ use crate::stat;
 #[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
 #[ribbit(size = 128, debug)]
 pub(crate) struct Edge {
-    #[ribbit(size = 63)]
+    #[ribbit(size = 64)]
     pub(crate) meta: Meta,
     #[ribbit(offset = 64)]
     pub(crate) data: u64,
@@ -111,9 +111,9 @@ impl Edge {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 63, debug, eq)]
+#[ribbit(size = 64, debug, eq)]
 pub(crate) struct Meta {
-    #[ribbit(size = 59)]
+    #[ribbit(size = 62)]
     pub(crate) key: byte::Array,
     pub(crate) frozen: bool,
     pub(crate) leaf: bool,

@@ -3,7 +3,6 @@ use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::u3;
 
 use crate::byte;
 use crate::edge;
@@ -169,9 +168,15 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    fn step(&mut self, key: R, len: u3, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+    fn step(
+        &mut self,
+        key: R,
+        len: ribbit::Packed<byte::Len>,
+        node: node::Ref<'a>,
+        edge: &'a Atomic128<Edge>,
+    ) {
         // 1 extra byte for node
-        self.index += len.value() as usize + 1;
+        self.index += len.value() as usize + 8;
         self.history.push(Segment {
             key,
             len,
@@ -183,7 +188,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.index -= segment.len.value() as usize + 1;
+        self.index -= segment.len.value() as usize + 8;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)
@@ -251,7 +256,7 @@ impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
 #[derive(Debug)]
 pub(crate) struct Segment<'a, R> {
     key: R,
-    len: u3,
+    len: ribbit::Packed<byte::Len>,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,
 }

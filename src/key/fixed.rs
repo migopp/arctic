@@ -1,8 +1,5 @@
 use core::fmt;
 use core::ops::BitOr as _;
-use core::ops::Shr as _;
-
-use ribbit::u3;
 
 use crate::byte;
 use crate::key;
@@ -16,13 +13,14 @@ pub struct Fixed {
 impl Fixed {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
-        validate!(len <= 8);
+        validate!(len <= 64);
+        validate_eq!(len & 0b111, 0);
         Self { buffer, len }
     }
 
     #[inline]
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
-        with(&self.buffer.to_be_bytes()[..self.len as usize])
+        with(&self.buffer.to_be_bytes()[..(self.len as usize) >> 3])
     }
 }
 
@@ -33,16 +31,17 @@ impl key::Read for Fixed {
     }
 
     #[inline]
-    fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
+    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
-        let buffer = self.buffer.rotate_left((len.value() as u32) << 3);
+
+        let buffer = self.buffer.rotate_left(len.value() as u32);
         ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
     }
 
     #[inline]
-    fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
+    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
-        self.buffer = self.buffer.rotate_left((len.value() as u32) << 3);
+        self.buffer = self.buffer.rotate_left(len.value() as u32);
         self.len -= len.value();
         ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
     }
@@ -51,7 +50,7 @@ impl key::Read for Fixed {
     fn next(&mut self) -> Option<u8> {
         let some = self.len > 0;
         self.buffer = self.buffer.rotate_left(8);
-        self.len = self.len.saturating_sub(1);
+        self.len = self.len.saturating_sub(8);
         some.then_some(self.buffer as u8)
     }
 
@@ -60,9 +59,9 @@ impl key::Read for Fixed {
         let max = self.len.min(other.len);
 
         let prefix = (self.buffer ^ other.buffer)
-            .bitor(0x8000_0000_0000_0000u64.unbounded_shr((max << 3) as u32))
+            .bitor(0x8000_0000_0000_0000u64.unbounded_shr(max as u32))
             .leading_zeros()
-            .shr(3);
+            & !0b111;
 
         Self {
             buffer: self.buffer,
@@ -91,25 +90,26 @@ impl key::Write for Writer {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        validate!(self.len + array.len() as u8 <= 8);
-        self.buffer <<= array.len() << 3;
+        let len = array.len().value();
+        validate!(self.len + len <= 64);
+        self.buffer <<= len;
         self.buffer |= array.buffer().value();
-        self.len += array.len() as u8;
+        self.len += len;
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        validate!(self.len < 8);
+        validate!(self.len < 64);
         self.buffer <<= 8;
         self.buffer |= byte as u64;
-        self.len += 1;
+        self.len += 8;
     }
 
     #[inline]
     fn truncate(&mut self, len: usize) {
         validate!(self.len as usize >= len);
-        validate!(len <= 8);
-        self.buffer >>= (self.len as usize - len) << 3;
+        validate!(len <= 64);
+        self.buffer >>= self.len as usize - len;
         self.len = len as u8;
     }
 }
@@ -117,7 +117,7 @@ impl key::Write for Writer {
 impl From<Fixed> for Writer {
     fn from(fixed: Fixed) -> Self {
         Self {
-            buffer: fixed.buffer.unbounded_shr(64 - ((fixed.len as u32) << 3)),
+            buffer: fixed.buffer.unbounded_shr(64u32 - (fixed.len as u32)),
             len: fixed.len,
         }
     }
@@ -129,9 +129,10 @@ macro_rules! impl_unsigned_int {
             impl From<$from> for Fixed {
                 #[inline]
                 fn from(value: $from) -> Self {
+                    let len = $len << 3;
                     Self {
-                        buffer: (value as u64) << (64 - ($len << 3)),
-                        len: $len,
+                        buffer: (value as u64) << (64 - len),
+                        len,
                     }
                 }
             }
@@ -167,7 +168,8 @@ impl_unsigned_int!(
 
 #[cfg(test)]
 mod tests {
-    use ribbit::u3;
+
+    use ribbit::u6;
 
     use crate::byte;
     use crate::key::fixed;
@@ -192,14 +194,19 @@ mod tests {
 
         let mut index = 0;
         for len in lens {
-            assert_eq!(iter.len(), initial.len() - index);
-            ribbit::Packed::<byte::Array>::with_bytes(iter.take(u3::new(len as u8)), |a| {
-                assert_eq!(a, &initial[index..][..len]);
-            });
+            assert_eq!(iter.len() >> 3, initial.len() - index);
+            ribbit::Packed::<byte::Array>::with_bytes(
+                iter.take(ribbit::Packed::<crate::byte::Len>::new(u6::new(
+                    (len as u8) << 3,
+                ))),
+                |a| {
+                    assert_eq!(a, &initial[index..][..len]);
+                },
+            );
             index += len;
         }
 
-        assert_eq!(iter.len(), initial.len() - index);
+        assert_eq!(iter.len() >> 3, initial.len() - index);
         if iter.len() > 0 {
             assert_eq!(iter.next(), Some(initial[index]));
         } else {

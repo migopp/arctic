@@ -35,7 +35,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             continue;
         }
 
-        compression.record(meta.key().len() as u64);
+        compression.record(meta.key().len().value() as u64);
 
         if meta.leaf() {
             depth.record(depth_ as u64);

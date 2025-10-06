@@ -1,7 +1,5 @@
 use core::cmp;
 
-use ribbit::u3;
-
 use crate::byte;
 use crate::key;
 use crate::key::Fixed;
@@ -21,7 +19,7 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(Fixed::new(u64::from_be_bytes(buffer), len as u8))
+                Self::Small(Fixed::new(u64::from_be_bytes(buffer), (len << 3) as u8))
             }
         }
     }
@@ -52,13 +50,13 @@ impl key::Read for Iter<'_> {
     #[inline]
     fn len(&self) -> usize {
         match self {
-            Iter::Large(large) => large.len(),
+            Iter::Large(large) => large.len() << 3,
             Iter::Small(small) => key::Read::len(small),
         }
     }
 
     #[inline]
-    fn peek(&self, len: u3) -> ribbit::Packed<byte::Array> {
+    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
 
         match self {
@@ -68,17 +66,18 @@ impl key::Read for Iter<'_> {
     }
 
     #[inline]
-    fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array> {
+    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
         validate!(len.value() as usize <= self.len());
 
         match self {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
-                let array = unsafe { read_array(large, len) };
-                let after = large.len() - len.value() as usize;
 
-                if after > 8 {
-                    *self = Self::Large(&large[len.value() as usize..]);
+                let array = unsafe { read_array(large, len) };
+                let after = (large.len() << 3) - len.value() as usize;
+
+                if after > 64 {
+                    *self = Self::Large(&large[(len.value() as usize) >> 3..]);
                     return array;
                 }
 
@@ -88,8 +87,8 @@ impl key::Read for Iter<'_> {
                         .read_unaligned()
                 }
                 .to_be();
-                let shift = (8 - after) << 3;
-                *self = Self::Small(Fixed::new(buffer << shift, after as u8));
+
+                *self = Self::Small(Fixed::new(buffer << (64 - after), after as u8));
                 array
             }
             Iter::Small(small) => small.take(len),
@@ -109,7 +108,7 @@ impl key::Read for Iter<'_> {
                 } else {
                     Self::Small(Fixed::new(
                         unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() }.to_be(),
-                        8,
+                        64,
                     ))
                 };
 
@@ -131,7 +130,7 @@ impl key::Read for Iter<'_> {
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
                 // SAFETY: `large.len() > 8`
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                (Fixed::new(buffer, 8), small)
+                (Fixed::new(buffer, 64), small)
             }
         };
 
@@ -142,12 +141,12 @@ impl key::Read for Iter<'_> {
 /// # SAFETY
 ///
 /// Caller must ensure `slice.len() >= 8`
-unsafe fn read_array(slice: &[u8], len: u3) -> ribbit::Packed<byte::Array> {
+unsafe fn read_array(slice: &[u8], len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
     validate!(slice.len() >= 8);
 
     let buffer = unsafe { slice.as_ptr().cast::<u64>().read_unaligned() };
     ribbit::Packed::<byte::Array>::from_u64_truncate(
-        buffer.to_be().rotate_left((len.value() as u32) << 3),
+        buffer.to_be().rotate_left(len.value() as u32),
         len,
     )
 }
@@ -203,7 +202,7 @@ impl<T: AsRef<[u8]>> PartialOrd<T> for Writer {
 
 #[cfg(test)]
 mod tests {
-    use ribbit::u3;
+    use ribbit::u6;
 
     use crate::byte::Array;
     use crate::key::dynamic;
@@ -259,14 +258,19 @@ mod tests {
 
         let mut index = 0;
         for len in lens {
-            assert_eq!(iter.len(), initial.len() - index);
-            ribbit::Packed::<Array>::with_bytes(iter.take(u3::new(len as u8)), |a| {
-                assert_eq!(a, &initial[index..][..len]);
-            });
+            assert_eq!(iter.len() >> 3, initial.len() - index);
+            ribbit::Packed::<Array>::with_bytes(
+                iter.take(ribbit::Packed::<crate::byte::Len>::new(u6::new(
+                    (len as u8) << 3,
+                ))),
+                |a| {
+                    assert_eq!(a, &initial[index..][..len]);
+                },
+            );
             index += len;
         }
 
-        assert_eq!(iter.len(), initial.len() - index);
+        assert_eq!(iter.len() >> 3, initial.len() - index);
         if iter.len() > 0 {
             assert_eq!(iter.next(), Some(initial[index]));
         } else {

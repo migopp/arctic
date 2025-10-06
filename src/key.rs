@@ -1,7 +1,6 @@
 pub(crate) mod dynamic;
 mod fixed;
 pub(crate) use fixed::Fixed;
-use ribbit::u3;
 
 use crate::byte;
 
@@ -26,14 +25,14 @@ pub trait Key {
 pub(crate) trait Read: Clone + core::fmt::Debug + Default {
     fn len(&self) -> usize;
 
-    fn peek(&self, len: u3) -> ribbit::Packed<byte::Array>;
+    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
 
     #[inline]
     fn peek_all(&self) -> ribbit::Packed<byte::Array> {
-        self.peek(byte::Array::min_len(self.len(), byte::Array::MAX_LEN))
+        self.peek(byte::Array::MAX_LEN.min(self.len()))
     }
 
-    fn take(&mut self, len: u3) -> ribbit::Packed<byte::Array>;
+    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
     fn next(&mut self) -> Option<u8>;
     fn prefix(&self, other: &Self) -> Self;
 }
