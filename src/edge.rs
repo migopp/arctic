@@ -106,6 +106,10 @@ impl Edge {
 
         let ptr = Box::leak(node) as *mut N as u64;
         let tag = N::KIND as u64;
+
+        validate!(ptr > 0);
+        validate_eq!(ptr & Self::MASK_TAG, 0);
+
         ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), ptr | tag)
     }
 }
