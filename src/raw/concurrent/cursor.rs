@@ -68,6 +68,8 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                 continue;
             }
 
+            self.key = save;
+
             // Prepare to CAS
             return if meta.frozen() {
                 Err(())
