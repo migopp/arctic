@@ -266,7 +266,7 @@ impl<'g> MapRef<'g> {
             let data = edge.data();
 
             // Already helped by another thread
-            if meta.leaf() || node.as_u64() != data {
+            if meta.leaf() || node.as_data() != data {
                 return Ok(());
             }
 

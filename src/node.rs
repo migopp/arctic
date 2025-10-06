@@ -108,11 +108,11 @@ impl<'a> Ref<'a> {
         }
     }
 
-    pub(crate) fn as_u64(&self) -> u64 {
+    pub(crate) fn as_data(&self) -> u64 {
         match *self {
-            Ref::Node3(node) => node as *const _ as u64,
-            Ref::Node15(node) => node as *const _ as u64,
-            Ref::Node256(node) => node as *const _ as u64,
+            Ref::Node3(node) => node as *const _ as u64 | Kind::NODE_3,
+            Ref::Node15(node) => node as *const _ as u64 | Kind::NODE_15,
+            Ref::Node256(node) => node as *const _ as u64 | Kind::NODE_256,
         }
     }
 }
