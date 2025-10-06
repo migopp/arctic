@@ -1,6 +1,5 @@
 pub(crate) mod dynamic;
 mod fixed;
-pub(crate) use fixed::Fixed;
 
 use crate::byte;
 
@@ -67,7 +66,7 @@ macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Read<'k> = Fixed;
+                type Read<'k> = fixed::Reader;
                 type Write = fixed::Writer;
                 type Borrow<'k> = Self;
 
@@ -93,7 +92,7 @@ macro_rules! impl_unsigned_int {
 impl_unsigned_int!(u8, u16, u32, u64);
 
 impl<const N: usize> Key for [u8; N] {
-    type Read<'a> = dynamic::Iter<'a>;
+    type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
     type Borrow<'a> = &'a [u8; N];
 
@@ -121,7 +120,7 @@ impl<const N: usize> Key for [u8; N] {
 }
 
 impl Key for Vec<u8> {
-    type Read<'a> = dynamic::Iter<'a>;
+    type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
     type Borrow<'a> = &'a [u8];
 
@@ -142,7 +141,7 @@ impl Key for Vec<u8> {
 }
 
 impl Key for String {
-    type Read<'a> = dynamic::Iter<'a>;
+    type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
     type Borrow<'a> = &'a str;
 

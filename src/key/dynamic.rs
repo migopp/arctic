@@ -2,16 +2,16 @@ use core::cmp;
 
 use crate::byte;
 use crate::key;
-use crate::key::Fixed;
+use crate::key::fixed;
 
 #[derive(Copy, Clone, Debug)]
-pub enum Iter<'a> {
+pub enum Reader<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(Fixed),
+    Small(fixed::Reader),
 }
 
-impl<'a> From<&'a [u8]> for Iter<'a> {
+impl<'a> From<&'a [u8]> for Reader<'a> {
     #[inline]
     fn from(key: &'a [u8]) -> Self {
         match key.len() {
@@ -19,39 +19,42 @@ impl<'a> From<&'a [u8]> for Iter<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(Fixed::new(u64::from_be_bytes(buffer), (len << 3) as u8))
+                Self::Small(fixed::Reader::new(
+                    u64::from_be_bytes(buffer),
+                    (len << 3) as u8,
+                ))
             }
         }
     }
 }
 
-impl<'a, const N: usize> From<&'a [u8; N]> for Iter<'a> {
+impl<'a, const N: usize> From<&'a [u8; N]> for Reader<'a> {
     #[inline]
     fn from(value: &'a [u8; N]) -> Self {
         Self::from(value.as_slice())
     }
 }
 
-impl<'a> From<&'a str> for Iter<'a> {
+impl<'a> From<&'a str> for Reader<'a> {
     #[inline]
     fn from(value: &'a str) -> Self {
         Self::from(value.as_bytes())
     }
 }
 
-impl Default for Iter<'_> {
+impl Default for Reader<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(Fixed::default())
+        Self::Small(fixed::Reader::default())
     }
 }
 
-impl key::Read for Iter<'_> {
+impl key::Read for Reader<'_> {
     #[inline]
     fn len(&self) -> usize {
         match self {
-            Iter::Large(large) => large.len() << 3,
-            Iter::Small(small) => key::Read::len(small),
+            Reader::Large(large) => large.len() << 3,
+            Reader::Small(small) => key::Read::len(small),
         }
     }
 
@@ -60,8 +63,8 @@ impl key::Read for Iter<'_> {
         validate!(len.bits() as usize <= self.len());
 
         match self {
-            Iter::Large(large) => unsafe { read_array(large, len) },
-            Iter::Small(small) => small.peek(len),
+            Reader::Large(large) => unsafe { read_array(large, len) },
+            Reader::Small(small) => small.peek(len),
         }
     }
 
@@ -70,7 +73,7 @@ impl key::Read for Iter<'_> {
         validate!(len.bits() as usize <= self.len());
 
         match self {
-            Iter::Large(large) => {
+            Reader::Large(large) => {
                 validate!(large.len() > 8);
 
                 let array = unsafe { read_array(large, len) };
@@ -88,10 +91,10 @@ impl key::Read for Iter<'_> {
                 }
                 .to_be();
 
-                *self = Self::Small(Fixed::new(buffer << (64 - after), after as u8));
+                *self = Self::Small(fixed::Reader::new(buffer << (64 - after), after as u8));
                 array
             }
-            Iter::Small(small) => small.take(len),
+            Reader::Small(small) => small.take(len),
         }
     }
 
@@ -106,7 +109,7 @@ impl key::Read for Iter<'_> {
                 *self = if large.len() - 1 > 8 {
                     Self::Large(&large[1..])
                 } else {
-                    Self::Small(Fixed::new(
+                    Self::Small(fixed::Reader::new(
                         unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() }.to_be(),
                         64,
                     ))
@@ -130,7 +133,7 @@ impl key::Read for Iter<'_> {
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
                 // SAFETY: `large.len() > 8`
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                (Fixed::new(buffer, 64), small)
+                (fixed::Reader::new(buffer, 64), small)
             }
         };
 
@@ -177,11 +180,11 @@ impl key::Write for Writer {
     }
 }
 
-impl<'a> From<Iter<'a>> for Writer {
-    fn from(iter: Iter<'a>) -> Self {
+impl<'a> From<Reader<'a>> for Writer {
+    fn from(iter: Reader<'a>) -> Self {
         Self(match iter {
-            Iter::Large(large) => large.to_vec(),
-            Iter::Small(small) => small.with_bytes(|small| small.to_vec()),
+            Reader::Large(large) => large.to_vec(),
+            Reader::Small(small) => small.with_bytes(|small| small.to_vec()),
         })
     }
 }
@@ -253,7 +256,7 @@ mod tests {
     }
 
     fn take_all<I: IntoIterator<Item = u8>>(initial: &[u8], lens: I) {
-        let mut iter = dynamic::Iter::from(initial);
+        let mut iter = dynamic::Reader::from(initial);
 
         let mut index = 0;
         for len in lens

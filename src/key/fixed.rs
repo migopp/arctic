@@ -5,12 +5,12 @@ use crate::byte;
 use crate::key;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct Fixed {
+pub struct Reader {
     buffer: u64,
     len: u8,
 }
 
-impl Fixed {
+impl Reader {
     #[inline]
     pub(super) fn new(buffer: u64, len: u8) -> Self {
         validate!(len <= 64);
@@ -24,7 +24,7 @@ impl Fixed {
     }
 }
 
-impl key::Read for Fixed {
+impl key::Read for Reader {
     #[inline]
     fn len(&self) -> usize {
         self.len as usize
@@ -70,7 +70,7 @@ impl key::Read for Fixed {
     }
 }
 
-impl fmt::Debug for Fixed {
+impl fmt::Debug for Reader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.with_bytes(|bytes| bytes.fmt(f))
     }
@@ -114,8 +114,8 @@ impl key::Write for Writer {
     }
 }
 
-impl From<Fixed> for Writer {
-    fn from(fixed: Fixed) -> Self {
+impl From<Reader> for Writer {
+    fn from(fixed: Reader) -> Self {
         Self {
             buffer: fixed.buffer.unbounded_shr(64u32 - (fixed.len as u32)),
             len: fixed.len,
@@ -126,7 +126,7 @@ impl From<Fixed> for Writer {
 macro_rules! impl_unsigned_int {
     ($($from:ty: $len:expr),* $(,)?) => {
         $(
-            impl From<$from> for Fixed {
+            impl From<$from> for Reader {
                 #[inline]
                 fn from(value: $from) -> Self {
                     let len = $len << 3;
@@ -184,9 +184,9 @@ mod tests {
 
     fn take_all<N, I: IntoIterator<Item = u8>>(initial: N, lens: I)
     where
-        fixed::Fixed: From<N>,
+        fixed::Reader: From<N>,
     {
-        let mut iter = fixed::Fixed::from(initial);
+        let mut iter = fixed::Reader::from(initial);
         let initial = iter.with_bytes(|bytes| bytes.to_vec());
 
         let mut index = 0;
