@@ -80,7 +80,7 @@ impl fmt::Debug for Reader {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Writer {
     buffer: u64,
     bits: u8,
@@ -94,18 +94,19 @@ impl key::Write for Writer {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        let len = array.len().bits();
-        validate!(self.bits + len <= 64);
-        self.buffer <<= len;
-        self.buffer |= array.buffer().value();
-        self.bits += len;
+        let bits = array.len().bits();
+        validate!(self.bits + bits <= 64);
+        self.buffer |= array
+            .buffer()
+            .value()
+            .rotate_right((bits + self.bits) as u32);
+        self.bits += bits;
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
         validate!(self.bits < 64);
-        self.buffer <<= 8;
-        self.buffer |= byte as u64;
+        self.buffer |= (byte as u64).rotate_right((8 + self.bits) as u32);
         self.bits += 8;
     }
 
@@ -113,20 +114,26 @@ impl key::Write for Writer {
     fn truncate(&mut self, bits: usize) {
         validate!(self.bits as usize >= bits);
         validate!(bits <= 64);
-        self.buffer >>= self.bits as usize - bits;
+        self.buffer &= !u64::MAX.unbounded_shr(bits as u32);
         self.bits = bits as u8;
     }
 }
 
 impl From<Reader> for Writer {
     #[inline]
-    fn from(fixed: Reader) -> Self {
+    fn from(reader: Reader) -> Self {
         Self {
-            buffer: fixed
-                .buffer
-                .unbounded_shr(64u32 - (fixed.remaining_bits as u32)),
-            bits: fixed.remaining_bits,
+            buffer: reader.buffer & !u64::MAX.unbounded_shr(reader.remaining_bits as u32),
+            bits: reader.remaining_bits,
         }
+    }
+}
+
+impl core::fmt::Debug for Writer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let bytes = self.buffer.to_be_bytes();
+        let len = self.bits as usize >> 3;
+        f.debug_list().entries(bytes.into_iter().take(len)).finish()
     }
 }
 
@@ -147,7 +154,7 @@ macro_rules! impl_unsigned_int {
             impl From<Writer> for $from {
                 #[inline]
                 fn from(writer: Writer) -> Self {
-                    writer.buffer as $from
+                    writer.buffer.rotate_left($len << 3) as $from
                 }
             }
 

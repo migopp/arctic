@@ -36,17 +36,17 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
 
         key.extend(edge.meta().key());
 
-        if meta.leaf() {
-            match range.end_bound() {
-                core::ops::Bound::Included(end) if key > *end => {
-                    return Self::Root { key, next: None };
-                }
-                core::ops::Bound::Excluded(end) if key >= *end => {
-                    return Self::Root { key, next: None };
-                }
-                _ => (),
+        match range.end_bound() {
+            core::ops::Bound::Included(end) if key > *end => {
+                return Self::Root { key, next: None };
             }
+            core::ops::Bound::Excluded(end) if key >= *end => {
+                return Self::Root { key, next: None };
+            }
+            _ => (),
+        }
 
+        if meta.leaf() {
             match range.start_bound() {
                 core::ops::Bound::Included(start) if key < *start => {
                     return Self::Root { key, next: None };
@@ -114,19 +114,19 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                 key.push(byte);
                 key.extend(meta.key());
 
-                if meta.leaf() {
-                    match range.end_bound() {
-                        core::ops::Bound::Included(end) if *key > *end => {
-                            frontier.clear();
-                            return None;
-                        }
-                        core::ops::Bound::Excluded(end) if *key >= *end => {
-                            frontier.clear();
-                            return None;
-                        }
-                        _ => (),
+                match range.end_bound() {
+                    core::ops::Bound::Included(end) if *key > *end => {
+                        frontier.clear();
+                        return None;
                     }
+                    core::ops::Bound::Excluded(end) if *key >= *end => {
+                        frontier.clear();
+                        return None;
+                    }
+                    _ => (),
+                }
 
+                if meta.leaf() {
                     match range.start_bound() {
                         core::ops::Bound::Included(start) if *key < *start => continue,
                         core::ops::Bound::Excluded(start) if *key <= *start => continue,
