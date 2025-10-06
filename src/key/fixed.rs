@@ -119,6 +119,7 @@ impl key::Write for Writer {
 }
 
 impl From<Reader> for Writer {
+    #[inline]
     fn from(fixed: Reader) -> Self {
         Self {
             buffer: fixed

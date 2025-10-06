@@ -94,6 +94,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
 
         'vertical: loop {
             let (len, iter) = frontier.last_mut()?;
+            let len = *len;
 
             loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -109,7 +110,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                     continue;
                 }
 
-                key.truncate(*len);
+                key.truncate(len);
                 key.push(byte);
                 key.extend(meta.key());
 
