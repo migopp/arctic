@@ -314,7 +314,7 @@ impl<'g> MapRef<'g> {
             Op::Node(_) => (),
         }
 
-        let prefix = key.peek(byte::Len::MAX.min(cursor.index()));
+        let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bit()));
 
         unsafe {
             guard.retire(edge.with_meta(edge.meta().with_key(prefix)));

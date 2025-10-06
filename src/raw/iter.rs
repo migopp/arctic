@@ -67,7 +67,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
             let node = unsafe { Edge::next_node_unchecked(data) };
             Self::Node {
                 range,
-                frontier: vec![(key.len(), S::new(node))],
+                frontier: vec![(key.bits(), S::new(node))],
                 key,
                 _key: PhantomData,
                 _sort: PhantomData,
@@ -135,7 +135,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                     return Some((key, edge.data()));
                 } else {
                     let node = unsafe { Edge::next_node_unchecked(data) };
-                    frontier.push((key.len(), S::new(node)));
+                    frontier.push((key.bits(), S::new(node)));
                     continue 'vertical;
                 }
             }
@@ -179,7 +179,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
             let node = unsafe { Edge::next_node_unchecked(data) };
             Self::Node {
                 selector,
-                frontier: vec![(key.len(), RepeatIter::new(node))],
+                frontier: vec![(key.bits(), RepeatIter::new(node))],
                 key,
                 _sort: PhantomData,
             }
@@ -227,7 +227,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
 
                     if !meta.leaf() {
                         let node = unsafe { Edge::next_node_unchecked(data) };
-                        frontier.push((key.len(), RepeatIter::new(node)));
+                        frontier.push((key.bits(), RepeatIter::new(node)));
                         continue 'vertical;
                     }
                 }

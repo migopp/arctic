@@ -14,7 +14,7 @@ use crate::Edge;
 
 /// Stateful traversal over tree.
 pub(crate) struct Cursor<'a, R, H> {
-    index: usize,
+    bit: usize,
     key: R,
     root: &'a Atomic128<Edge>,
     history: H,
@@ -24,7 +24,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[inline]
     pub(crate) fn new(key: R, root: &'a Atomic128<Edge>) -> Self {
         Self {
-            index: 0,
+            bit: 0,
             key: key.clone(),
             root,
             history: H::default(),
@@ -37,8 +37,8 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    pub(crate) fn index(&self) -> usize {
-        self.index
+    pub(crate) fn bit(&self) -> usize {
+        self.bit
     }
 
     #[inline]
@@ -93,7 +93,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             }
 
             self.key = save;
-            return self.index;
+            return self.bit;
         }
     }
 
@@ -136,10 +136,14 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
-                byte::Match::Full(_) if self.key.len() > byte::Len::MAX.bits() as usize => (
-                    Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3, _>(self.key.peek_all(), None),
-                ),
+                byte::Match::Full(_)
+                    if self.key.remaining_bits() > byte::Len::MAX.bits() as usize =>
+                {
+                    (
+                        Op::Edge(edge::Op::Create),
+                        Edge::new_node::<Node3, _>(self.key.peek_all(), None),
+                    )
+                }
                 byte::Match::Full(_) => (
                     Op::Edge(edge::Op::Insert),
                     Edge::new_leaf(self.key.peek_all(), value),
@@ -169,7 +173,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
         edge: &'a Atomic128<Edge>,
     ) {
         // 1 extra byte for node
-        self.index += len.bits() as usize + 8;
+        self.bit += len.bits() as usize + 8;
         self.history.push(Segment {
             key,
             len,
@@ -181,7 +185,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.index -= segment.len.bits() as usize + 8;
+        self.bit -= segment.len.bits() as usize + 8;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)

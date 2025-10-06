@@ -22,13 +22,18 @@ pub trait Key {
 }
 
 pub(crate) trait Read: Clone + core::fmt::Debug + Default {
-    fn len(&self) -> usize;
+    fn remaining_bits(&self) -> usize;
+
+    #[inline]
+    fn remaining_bytes(&self) -> usize {
+        self.remaining_bits() >> 3
+    }
 
     fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
 
     #[inline]
     fn peek_all(&self) -> ribbit::Packed<byte::Array> {
-        self.peek(byte::Len::MAX.min(self.len()))
+        self.peek(byte::Len::MAX.min_bits(self.remaining_bits()))
     }
 
     fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
@@ -37,10 +42,10 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
 }
 
 pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
-    fn len(&self) -> usize;
+    fn bits(&self) -> usize;
     fn extend(&mut self, array: ribbit::Packed<byte::Array>);
     fn push(&mut self, byte: u8);
-    fn truncate(&mut self, len: usize);
+    fn truncate(&mut self, bits: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -48,7 +53,7 @@ pub(crate) struct Ignore;
 
 impl Write for Ignore {
     #[inline]
-    fn len(&self) -> usize {
+    fn bits(&self) -> usize {
         0
     }
 

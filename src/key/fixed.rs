@@ -3,36 +3,40 @@ use core::ops::BitOr as _;
 
 use crate::byte;
 use crate::key;
+use crate::key::Read as _;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Reader {
     buffer: u64,
-    len: u8,
+    remaining_bits: u8,
 }
 
 impl Reader {
     #[inline]
-    pub(super) fn new(buffer: u64, len: u8) -> Self {
-        validate!(len <= 64);
-        validate_eq!(len & 0b111, 0);
-        Self { buffer, len }
+    pub(super) fn new(buffer: u64, remaining_bits: u8) -> Self {
+        validate!(remaining_bits <= 64);
+        validate_eq!(remaining_bits & 0b111, 0);
+        Self {
+            buffer,
+            remaining_bits,
+        }
     }
 
     #[inline]
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
-        with(&self.buffer.to_be_bytes()[..(self.len as usize) >> 3])
+        with(&self.buffer.to_be_bytes()[..self.remaining_bytes()])
     }
 }
 
 impl key::Read for Reader {
     #[inline]
-    fn len(&self) -> usize {
-        self.len as usize
+    fn remaining_bits(&self) -> usize {
+        self.remaining_bits as usize
     }
 
     #[inline]
     fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.bits() as usize <= self.len());
+        validate!(len.bits() as usize <= self.remaining_bits());
 
         let buffer = self.buffer.rotate_left(len.bits() as u32);
         ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
@@ -40,23 +44,23 @@ impl key::Read for Reader {
 
     #[inline]
     fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.bits() as usize <= self.len());
+        validate!(len.bits() as usize <= self.remaining_bits());
         self.buffer = self.buffer.rotate_left(len.bits() as u32);
-        self.len -= len.bits();
+        self.remaining_bits -= len.bits();
         ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        let some = self.len > 0;
+        let some = self.remaining_bits > 0;
         self.buffer = self.buffer.rotate_left(8);
-        self.len = self.len.saturating_sub(8);
+        self.remaining_bits = self.remaining_bits.saturating_sub(8);
         some.then_some(self.buffer as u8)
     }
 
     #[inline]
     fn prefix(&self, other: &Self) -> Self {
-        let max = self.len.min(other.len);
+        let max = self.remaining_bits.min(other.remaining_bits);
 
         let prefix = (self.buffer ^ other.buffer)
             .bitor(0x8000_0000_0000_0000u64.unbounded_shr(max as u32))
@@ -65,7 +69,7 @@ impl key::Read for Reader {
 
         Self {
             buffer: self.buffer,
-            len: prefix as u8,
+            remaining_bits: prefix as u8,
         }
     }
 }
@@ -79,46 +83,48 @@ impl fmt::Debug for Reader {
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct Writer {
     buffer: u64,
-    len: u8,
+    bits: u8,
 }
 
 impl key::Write for Writer {
     #[inline]
-    fn len(&self) -> usize {
-        self.len as usize
+    fn bits(&self) -> usize {
+        self.bits as usize
     }
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
         let len = array.len().bits();
-        validate!(self.len + len <= 64);
+        validate!(self.bits + len <= 64);
         self.buffer <<= len;
         self.buffer |= array.buffer().value();
-        self.len += len;
+        self.bits += len;
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        validate!(self.len < 64);
+        validate!(self.bits < 64);
         self.buffer <<= 8;
         self.buffer |= byte as u64;
-        self.len += 8;
+        self.bits += 8;
     }
 
     #[inline]
-    fn truncate(&mut self, len: usize) {
-        validate!(self.len as usize >= len);
-        validate!(len <= 64);
-        self.buffer >>= self.len as usize - len;
-        self.len = len as u8;
+    fn truncate(&mut self, bits: usize) {
+        validate!(self.bits as usize >= bits);
+        validate!(bits <= 64);
+        self.buffer >>= self.bits as usize - bits;
+        self.bits = bits as u8;
     }
 }
 
 impl From<Reader> for Writer {
     fn from(fixed: Reader) -> Self {
         Self {
-            buffer: fixed.buffer.unbounded_shr(64u32 - (fixed.len as u32)),
-            len: fixed.len,
+            buffer: fixed
+                .buffer
+                .unbounded_shr(64u32 - (fixed.remaining_bits as u32)),
+            bits: fixed.remaining_bits,
         }
     }
 }
@@ -129,10 +135,10 @@ macro_rules! impl_unsigned_int {
             impl From<$from> for Reader {
                 #[inline]
                 fn from(value: $from) -> Self {
-                    let len = $len << 3;
+                    let remaining_bits = $len << 3;
                     Self {
-                        buffer: (value as u64) << (64 - len),
-                        len,
+                        buffer: (value as u64) << (64 - remaining_bits),
+                        remaining_bits,
                     }
                 }
             }
@@ -197,15 +203,15 @@ mod tests {
             .map(byte::Len::from_bytes)
             .map(Option::unwrap)
         {
-            assert_eq!(iter.len() >> 3, initial.len() - index);
+            assert_eq!(iter.remaining_bytes(), initial.len() - index);
             ribbit::Packed::<byte::Array>::with_bytes(iter.take(len), |a| {
                 assert_eq!(a, &initial[index..][..len.bytes() as usize]);
             });
             index += len.bytes() as usize;
         }
 
-        assert_eq!(iter.len() >> 3, initial.len() - index);
-        if iter.len() > 0 {
+        assert_eq!(iter.remaining_bytes(), initial.len() - index);
+        if iter.remaining_bytes() > 0 {
             assert_eq!(iter.next(), Some(initial[index]));
         } else {
             assert_eq!(iter.next(), None);

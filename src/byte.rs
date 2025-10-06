@@ -49,13 +49,13 @@ impl ArrayPacked {
 
     #[inline]
     pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<ribbit::Packed<Len>> {
-        let len = self.len().min(key.len());
+        let len = self.len().min_bits(key.remaining_bits());
         (key.take(len) == self).then_some(len)
     }
 
     #[inline]
     pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> Match {
-        let len = self.len().min(key.len());
+        let len = self.len().min_bits(key.remaining_bits());
         let key = key.take(len);
 
         if key == self {
@@ -179,8 +179,9 @@ impl Len {
 
 impl LenPacked {
     #[inline]
-    pub(crate) fn min(self, other: usize) -> Self {
-        unsafe { Len::from_bits_unchecked((self.value.value() as usize).min(other) as u8) }
+    pub(crate) fn min_bits(self, bits: usize) -> Self {
+        validate_eq!(bits & 0b111, 0);
+        unsafe { Len::from_bits_unchecked((self.value.value() as usize).min(bits) as u8) }
     }
 
     #[inline]
