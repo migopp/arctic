@@ -2,6 +2,7 @@ use core::ops::Bound;
 use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
+use crate::byte;
 use crate::edge;
 use crate::key;
 use crate::node;
@@ -95,19 +96,17 @@ impl<'g> MapRef<'g> {
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
 
         loop {
             let old = match cursor.traverse_exact() {
-                Ok(None) => return Ok(None),
-                Ok(Some(old)) => old,
-                Err(()) => {
-                    Self::freeze(&mut guard, &mut cursor)?;
+                None => return Ok(None),
+                Some(Ok(old)) => old,
+                Some(Err(())) => {
+                    Self::freeze(&mut guard, &mut cursor, &key)?;
                     continue;
                 }
             };
-
-            validate!(!old.meta().frozen());
 
             if cursor
                 .root()
@@ -153,19 +152,17 @@ impl<'g> MapRef<'g> {
         key: R,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
 
         loop {
             let old = match cursor.traverse_exact() {
-                Ok(None) => return Ok(None),
-                Ok(Some(old)) => old,
-                Err(()) => {
-                    Self::freeze(&mut guard, &mut cursor)?;
+                None => return Ok(None),
+                Some(Ok(old)) => old,
+                Some(Err(())) => {
+                    Self::freeze(&mut guard, &mut cursor, &key)?;
                     continue;
                 }
             };
-
-            validate!(!old.meta().frozen());
 
             if cursor
                 .root()
@@ -215,7 +212,7 @@ impl<'g> MapRef<'g> {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    Self::freeze(&mut guard, &mut cursor)?;
+                    Self::freeze(&mut guard, &mut cursor, &key)?;
                     continue;
                 }
             };
@@ -239,7 +236,7 @@ impl<'g> MapRef<'g> {
                 }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut guard, &cursor, op, old) };
+                    unsafe { Self::retire(&mut guard, &cursor, op, &key, old) };
                 }
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
@@ -253,6 +250,7 @@ impl<'g> MapRef<'g> {
     fn freeze<R: key::Read, H: cursor::History<'g, R>>(
         guard: &mut smr::WriteGuard,
         cursor: &mut Cursor<'g, R, H>,
+        key: &R,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
         let mut edge = cursor.root().load_packed(Ordering::Acquire);
@@ -280,7 +278,7 @@ impl<'g> MapRef<'g> {
             ) {
                 Ok(_) => unsafe {
                     stat::increment(op);
-                    Self::retire(guard, cursor, Op::Node(op), edge);
+                    Self::retire(guard, cursor, Op::Node(op), key, edge);
                     return Ok(());
                 },
                 Err(conflict) => unsafe {
@@ -308,6 +306,7 @@ impl<'g> MapRef<'g> {
         guard: &mut smr::WriteGuard,
         cursor: &Cursor<'g, R, H>,
         op: Op,
+        key: &R,
         edge: ribbit::Packed<Edge>,
     ) {
         match op {
@@ -315,8 +314,10 @@ impl<'g> MapRef<'g> {
             Op::Node(_) => (),
         }
 
+        let prefix = key.peek(byte::Len::MAX.min(cursor.index()));
+
         unsafe {
-            guard.retire(edge.with_meta(edge.meta().with_key(cursor.prefix())));
+            guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
         }
     }
 

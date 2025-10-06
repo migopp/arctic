@@ -26,11 +26,6 @@ impl Array {
 
 impl ArrayPacked {
     #[inline]
-    pub(crate) fn slice(self, len: usize) -> Self {
-        Self::from_u64_truncate(self.value.value(), self.len().min(len))
-    }
-
-    #[inline]
     pub(crate) fn from_u64_truncate(value: u64, len: ribbit::Packed<Len>) -> Self {
         Self::new(unsafe { u56::new_unchecked(value & len.mask()) }, len)
     }

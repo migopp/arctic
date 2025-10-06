@@ -14,7 +14,6 @@ use crate::Edge;
 
 /// Stateful traversal over tree.
 pub(crate) struct Cursor<'a, R, H> {
-    prefix: ribbit::Packed<byte::Array>,
     index: usize,
     key: R,
     root: &'a Atomic128<Edge>,
@@ -25,7 +24,6 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[inline]
     pub(crate) fn new(key: R, root: &'a Atomic128<Edge>) -> Self {
         Self {
-            prefix: key.peek_all(),
             index: 0,
             key: key.clone(),
             root,
@@ -39,45 +37,38 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    pub(crate) fn prefix(&self) -> ribbit::Packed<byte::Array> {
-        self.prefix.slice(self.index)
+    pub(crate) fn index(&self) -> usize {
+        self.index
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Result<Option<ribbit::Packed<Edge>>, ()> {
+    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge>, ()>> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let save = self.key.clone();
-            let Some(len) = meta.key().match_prefix(&mut self.key) else {
-                return Ok(None);
-            };
-
             let data = edge.data();
+
+            let save = self.key.clone();
+            let len = meta.key().match_prefix(&mut self.key)?;
 
             // Fast path: traversal
             if !meta.leaf() && data != 0 {
-                let Some(byte) = self.key.next() else {
-                    return Ok(None);
-                };
+                let byte = self.key.next()?;
                 let node = unsafe { Edge::next_node_unchecked(data) };
-                let Some(next) = node.get(byte) else {
-                    return Ok(None);
-                };
+                let next = node.get(byte)?;
                 self.step(save, len, node, next);
                 continue;
             }
 
             self.key = save;
 
-            // Prepare to CAS
             return if meta.frozen() {
-                Err(())
+                Some(Err(()))
             } else if meta.leaf() {
-                Ok(Some(edge))
+                Some(Ok(edge))
             } else {
                 validate_eq!(data, 0);
-                Ok(None)
+                None
             };
         }
     }
