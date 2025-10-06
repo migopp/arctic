@@ -145,12 +145,14 @@ macro_rules! impl_unsigned_int {
             }
 
             impl PartialOrd<$from> for Writer {
+                #[inline]
                 fn partial_cmp(&self, value: &$from) -> Option<core::cmp::Ordering> {
                     <$from>::from(*self).partial_cmp(&value)
                 }
             }
 
             impl PartialEq<$from> for Writer {
+                #[inline]
                 fn eq(&self, value: &$from) -> bool {
                     <$from>::from(*self) == *value
                 }
