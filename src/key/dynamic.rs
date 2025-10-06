@@ -57,7 +57,7 @@ impl key::Read for Iter<'_> {
 
     #[inline]
     fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.value() as usize <= self.len());
+        validate!(len.bits() as usize <= self.len());
 
         match self {
             Iter::Large(large) => unsafe { read_array(large, len) },
@@ -67,17 +67,17 @@ impl key::Read for Iter<'_> {
 
     #[inline]
     fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.value() as usize <= self.len());
+        validate!(len.bits() as usize <= self.len());
 
         match self {
             Iter::Large(large) => {
                 validate!(large.len() > 8);
 
                 let array = unsafe { read_array(large, len) };
-                let after = (large.len() << 3) - len.value() as usize;
+                let after = (large.len() << 3) - len.bits() as usize;
 
                 if after > 64 {
-                    *self = Self::Large(&large[(len.value() as usize) >> 3..]);
+                    *self = Self::Large(&large[len.bytes() as usize..]);
                     return array;
                 }
 
@@ -146,7 +146,7 @@ unsafe fn read_array(slice: &[u8], len: ribbit::Packed<byte::Len>) -> ribbit::Pa
 
     let buffer = unsafe { slice.as_ptr().cast::<u64>().read_unaligned() };
     ribbit::Packed::<byte::Array>::from_u64_truncate(
-        buffer.to_be().rotate_left(len.value() as u32),
+        buffer.to_be().rotate_left(len.bits() as u32),
         len,
     )
 }
@@ -202,8 +202,7 @@ impl<T: AsRef<[u8]>> PartialOrd<T> for Writer {
 
 #[cfg(test)]
 mod tests {
-    use ribbit::u6;
-
+    use crate::byte;
     use crate::byte::Array;
     use crate::key::dynamic;
     use crate::key::Read as _;
@@ -253,21 +252,20 @@ mod tests {
         take_all(b"abcdefghijklmnopqrstuvwxyz", [1, 2, 3, 4, 5, 4, 3, 2, 1])
     }
 
-    fn take_all<I: IntoIterator<Item = usize>>(initial: &[u8], lens: I) {
+    fn take_all<I: IntoIterator<Item = u8>>(initial: &[u8], lens: I) {
         let mut iter = dynamic::Iter::from(initial);
 
         let mut index = 0;
-        for len in lens {
+        for len in lens
+            .into_iter()
+            .map(byte::Len::from_bytes)
+            .map(Option::unwrap)
+        {
             assert_eq!(iter.len() >> 3, initial.len() - index);
-            ribbit::Packed::<Array>::with_bytes(
-                iter.take(ribbit::Packed::<crate::byte::Len>::new(u6::new(
-                    (len as u8) << 3,
-                ))),
-                |a| {
-                    assert_eq!(a, &initial[index..][..len]);
-                },
-            );
-            index += len;
+            ribbit::Packed::<Array>::with_bytes(iter.take(len), |a| {
+                assert_eq!(a, &initial[index..][..len.bytes() as usize]);
+            });
+            index += len.bytes() as usize;
         }
 
         assert_eq!(iter.len() >> 3, initial.len() - index);

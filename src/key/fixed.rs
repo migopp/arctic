@@ -32,17 +32,17 @@ impl key::Read for Fixed {
 
     #[inline]
     fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.value() as usize <= self.len());
+        validate!(len.bits() as usize <= self.len());
 
-        let buffer = self.buffer.rotate_left(len.value() as u32);
+        let buffer = self.buffer.rotate_left(len.bits() as u32);
         ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
     }
 
     #[inline]
     fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
-        validate!(len.value() as usize <= self.len());
-        self.buffer = self.buffer.rotate_left(len.value() as u32);
-        self.len -= len.value();
+        validate!(len.bits() as usize <= self.len());
+        self.buffer = self.buffer.rotate_left(len.bits() as u32);
+        self.len -= len.bits();
         ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
     }
 
@@ -90,7 +90,7 @@ impl key::Write for Writer {
 
     #[inline]
     fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        let len = array.len().value();
+        let len = array.len().bits();
         validate!(self.len + len <= 64);
         self.buffer <<= len;
         self.buffer |= array.buffer().value();
@@ -168,9 +168,6 @@ impl_unsigned_int!(
 
 #[cfg(test)]
 mod tests {
-
-    use ribbit::u6;
-
     use crate::byte;
     use crate::key::fixed;
     use crate::key::Read as _;
@@ -185,7 +182,7 @@ mod tests {
         take_all(0x1234_5678_9ABC_DEF0u64, [0, 1, 0]);
     }
 
-    fn take_all<N, I: IntoIterator<Item = usize>>(initial: N, lens: I)
+    fn take_all<N, I: IntoIterator<Item = u8>>(initial: N, lens: I)
     where
         fixed::Fixed: From<N>,
     {
@@ -193,17 +190,16 @@ mod tests {
         let initial = iter.with_bytes(|bytes| bytes.to_vec());
 
         let mut index = 0;
-        for len in lens {
+        for len in lens
+            .into_iter()
+            .map(byte::Len::from_bytes)
+            .map(Option::unwrap)
+        {
             assert_eq!(iter.len() >> 3, initial.len() - index);
-            ribbit::Packed::<byte::Array>::with_bytes(
-                iter.take(ribbit::Packed::<crate::byte::Len>::new(u6::new(
-                    (len as u8) << 3,
-                ))),
-                |a| {
-                    assert_eq!(a, &initial[index..][..len]);
-                },
-            );
-            index += len;
+            ribbit::Packed::<byte::Array>::with_bytes(iter.take(len), |a| {
+                assert_eq!(a, &initial[index..][..len.bytes() as usize]);
+            });
+            index += len.bytes() as usize;
         }
 
         assert_eq!(iter.len() >> 3, initial.len() - index);

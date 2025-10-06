@@ -145,7 +145,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
-                byte::Match::Full(_) if self.key.len() > byte::Array::MAX_LEN.value() as usize => (
+                byte::Match::Full(_) if self.key.len() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
                     Edge::new_node::<Node3, _>(self.key.peek_all(), None),
                 ),
@@ -178,7 +178,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
         edge: &'a Atomic128<Edge>,
     ) {
         // 1 extra byte for node
-        self.index += len.value() as usize + 8;
+        self.index += len.bits() as usize + 8;
         self.history.push(Segment {
             key,
             len,
@@ -190,7 +190,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.index -= segment.len.value() as usize + 8;
+        self.index -= segment.len.bits() as usize + 8;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)

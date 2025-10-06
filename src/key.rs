@@ -29,7 +29,7 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
 
     #[inline]
     fn peek_all(&self) -> ribbit::Packed<byte::Array> {
-        self.peek(byte::Array::MAX_LEN.min(self.len()))
+        self.peek(byte::Len::MAX.min(self.len()))
     }
 
     fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
