@@ -6,7 +6,7 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub enum PostorderIter<'a, W, V>
+pub(crate) enum PostorderIter<'a, W: key::Write, V>
 where
     V: Selector<W>,
 {
@@ -17,7 +17,7 @@ where
     Node {
         key: W,
         #[allow(private_interfaces)]
-        frontier: Vec<(usize, RepeatIter<'a>)>,
+        frontier: Vec<(W::Len, RepeatIter<'a>)>,
     },
 }
 

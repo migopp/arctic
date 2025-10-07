@@ -10,7 +10,9 @@ pub trait Key {
         Self: 'k;
 
     #[allow(private_bounds)]
-    type Write: Write + for<'k> PartialOrd<Self::Read<'k>> + for<'k> From<Self::Read<'k>>;
+    type Write: Write<Len = usize>
+        + for<'k> PartialOrd<Self::Read<'k>>
+        + for<'k> From<Self::Read<'k>>;
 
     #[allow(private_bounds)]
     type Borrow<'k>: Copy
@@ -47,20 +49,22 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
 }
 
 pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
-    fn bits(&self) -> usize;
+    type Len: Copy;
+
+    fn bits(&self) -> Self::Len;
     fn extend(&mut self, array: byte::Array);
     fn push(&mut self, byte: u8);
-    fn truncate(&mut self, bits: usize);
+    fn truncate(&mut self, bits: Self::Len);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Ignore;
 
 impl Write for Ignore {
+    type Len = ();
+
     #[inline]
-    fn bits(&self) -> usize {
-        0
-    }
+    fn bits(&self) -> Self::Len {}
 
     #[inline]
     fn extend(&mut self, _array: byte::Array) {}
@@ -69,7 +73,7 @@ impl Write for Ignore {
     fn push(&mut self, _byte: u8) {}
 
     #[inline]
-    fn truncate(&mut self, _len: usize) {}
+    fn truncate(&mut self, (): Self::Len) {}
 }
 
 macro_rules! impl_unsigned_int {

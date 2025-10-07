@@ -182,6 +182,8 @@ unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
 pub struct Writer(pub(super) Vec<u8>);
 
 impl key::Write for Writer {
+    type Len = usize;
+
     #[inline]
     fn bits(&self) -> usize {
         self.0.len() << 3

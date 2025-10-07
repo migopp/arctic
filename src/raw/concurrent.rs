@@ -326,7 +326,7 @@ impl<'g> MapRef<'g> {
     ) -> RangeNonLinearizableIter<'g, 'l, R, W>
     where
         R: key::Read,
-        W: key::Write + PartialOrd<R> + From<R>,
+        W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
@@ -346,7 +346,7 @@ impl<'g> MapRef<'g> {
     pub(crate) fn range<R, W>(&mut self, min: R, max: R) -> std::vec::IntoIter<(W, u64)>
     where
         R: key::Read,
-        W: key::Write + PartialOrd<R> + From<R>,
+        W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
     {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
@@ -387,7 +387,7 @@ pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
 impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
 where
     R: key::Read,
-    W: key::Write + PartialOrd<R>,
+    W: key::Write<Len = usize> + PartialOrd<R>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {

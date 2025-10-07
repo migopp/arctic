@@ -22,7 +22,7 @@ pub(crate) enum RangeIter<'a, R, W> {
 impl<'a, R, W> RangeIter<'a, R, W>
 where
     R: key::Read,
-    W: key::Write + PartialOrd<R>,
+    W: key::Write<Len = usize> + PartialOrd<R>,
 {
     #[inline]
     pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {

@@ -6,9 +6,9 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub(crate) enum LeafIter<W, S> {
+pub(crate) enum LeafIter<W: key::Write, S> {
     Root { key: W, next: Option<u64> },
-    Node { key: W, frontier: Vec<(usize, S)> },
+    Node { key: W, frontier: Vec<(W::Len, S)> },
 }
 
 impl<'a, W, S> LeafIter<W, S>

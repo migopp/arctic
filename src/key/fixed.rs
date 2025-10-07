@@ -96,6 +96,8 @@ pub struct Writer {
 }
 
 impl key::Write for Writer {
+    type Len = usize;
+
     #[inline]
     fn bits(&self) -> usize {
         self.bits as usize
