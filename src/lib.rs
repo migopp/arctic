@@ -102,7 +102,7 @@ mod tests {
         let key = 1u64;
         map.insert(key, 2);
         assert_eq!(
-            map.range_non_linearizable(1u64, 1).collect::<Vec<_>>(),
+            map.range_non_linearizable(1u64, 1u64).collect::<Vec<_>>(),
             vec![(1, 2)]
         );
     }
@@ -132,7 +132,8 @@ mod tests {
         let map = insert_all((0u64..512).step_by(2));
         let mut map = map.pin();
         assert_eq!(
-            map.range_non_linearizable(256, 511).collect::<Vec<_>>(),
+            map.range_non_linearizable(256u64, 511u64)
+                .collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))

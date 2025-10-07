@@ -72,18 +72,18 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
     #[expect(private_interfaces)]
     pub fn prefix_non_linearizable<'l>(
         &'l mut self,
-        prefix: K::Read<'l>,
+        prefix: impl Into<K::Read<'l>>,
     ) -> PrefixNonLinearizable<'g, 'l, K, V, node::SortedIter<'l>> {
         PrefixNonLinearizable {
-            iter: self.raw.prefix_non_linearizable(prefix),
+            iter: self.raw.prefix_non_linearizable(prefix.into()),
             _value: PhantomData,
         }
     }
 
     pub fn range_non_linearizable<'l>(
         &'l mut self,
-        min: K::Borrow<'l>,
-        max: K::Borrow<'l>,
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
     ) -> RangeNonLinearizableIter<'g, 'l, K, V> {
         RangeNonLinearizableIter {
             iter: self.raw.range_non_linearizable(min.into(), max.into()),
@@ -93,8 +93,8 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
 
     pub fn range<'l>(
         &'l mut self,
-        min: K::Borrow<'l>,
-        max: K::Borrow<'l>,
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
     ) -> impl Iterator<Item = (K, V)> {
         self.raw
             .range(min.into(), max.into())
