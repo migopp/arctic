@@ -150,13 +150,13 @@ mod tests {
             assert_eq!(pin.get(1), Some(value));
         }
 
-        // drop(pin);
-        // assert_eq!(map.as_sequential().iter().count(), 1);
-        //
-        // map.as_sequential().iter().for_each(|(key, value)| {
-        //     assert_eq!(key, 1);
-        //     assert_eq!(value, 3);
-        // });
+        drop(pin);
+        assert_eq!(map.as_sequential().iter().count(), 1);
+
+        map.as_sequential().iter().for_each(|(key, value)| {
+            assert_eq!(key, 1);
+            assert_eq!(value, 3);
+        });
     }
 
     #[test]
@@ -224,25 +224,25 @@ mod tests {
 
         drop(pin);
 
-        // let mut iter = map.as_sequential().iter();
-        // let mut count = 0;
-        // while iter.lend().is_some() {
-        //     count += 1;
-        // }
-        // drop(iter);
-        //
-        // assert_eq!(count, keys.len());
+        let mut iter = map.as_sequential().iter();
+        let mut count = 0;
+        while iter.lend().is_some() {
+            count += 1;
+        }
+        drop(iter);
+
+        assert_eq!(count, keys.len());
 
         keys.sort_by(|(l, _), (r, _)| l.cmp(r));
 
         // Sequential iteration
-        // map.as_sequential()
-        //     .iter()
-        //     .zip(&keys)
-        //     .for_each(|((lk, lv), (rk, rv))| {
-        //         assert_eq!(lk, *rk);
-        //         assert_eq!(lv, *rv);
-        //     });
+        map.as_sequential()
+            .iter()
+            .zip(&keys)
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
 
         let mut pin = map.pin();
 

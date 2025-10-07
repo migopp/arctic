@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
 
+use crate::node;
 use crate::raw;
 use crate::Key;
 use crate::Value;
@@ -49,26 +50,24 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     #[expect(private_interfaces)]
-    pub fn iter(&self) -> Iter<K, V> {
-        todo!()
-        // Iter {
-        //     inner: self.raw.iter_leaves(RangeFull),
-        //     _key: PhantomData,
-        //     _value: PhantomData,
-        // }
+    pub fn iter(&self) -> Iter<K, V, node::SortedIter> {
+        Iter {
+            inner: self.raw.iter(),
+            _value: PhantomData,
+        }
     }
 }
 
-pub(crate) struct Iter<'a, 'k, K: Key + 'k, V> {
-    inner: raw::iter::RangeIter<'a, K::Read<'k>, K::Write>,
-    _key: PhantomData<K>,
+pub(crate) struct Iter<K: Key, V, S> {
+    inner: raw::iter::LeafIter<K::Write, S>,
     _value: PhantomData<V>,
 }
 
-impl<'a, 'k, K, V> Iterator for Iter<'a, 'k, K, V>
+impl<'a, K, V, S> Iterator for Iter<K, V, S>
 where
-    K: Key + 'k,
+    K: Key,
     V: Value,
+    S: raw::iter::leaf::Sort<'a>,
 {
     type Item = (K, V);
     fn next(&mut self) -> Option<Self::Item> {
@@ -78,13 +77,14 @@ where
     }
 }
 
-impl<'a, 'k, K, V> Iter<'a, 'k, K, V>
+impl<'a, K, V, S> Iter<K, V, S>
 where
-    K: Key + 'k,
+    K: Key,
     V: Value,
+    S: raw::iter::leaf::Sort<'a>,
 {
     #[allow(dead_code)]
-    pub fn lend<'i>(&'i mut self) -> Option<(K::Borrow<'i>, V)> {
+    pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.inner
             .lend()
             .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))

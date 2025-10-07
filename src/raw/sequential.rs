@@ -44,12 +44,10 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter_leaves<'a, R: key::Read, W: key::Write + PartialOrd<R>>(
+    pub(crate) fn iter<'a, W: key::Write, S: iter::leaf::Sort<'a>>(
         &'a self,
-        min: R,
-        max: R,
-    ) -> iter::RangeIter<'a, R, W> {
-        unsafe { iter::RangeIter::new(&self.root, W::default(), min, max) }
+    ) -> iter::LeafIter<W, S> {
+        unsafe { iter::LeafIter::new(&self.root, W::default()) }
     }
 
     pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::postorder::Selector<W>>(
