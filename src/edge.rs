@@ -1,6 +1,8 @@
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
+use ribbit::u56;
+use ribbit::u6;
 
 use crate::byte;
 use crate::node;
@@ -86,12 +88,12 @@ impl Edge {
         stat::increment(counter);
     }
 
-    pub(crate) fn new_leaf(key: ribbit::Packed<byte::Array>, leaf: u64) -> ribbit::Packed<Self> {
+    pub(crate) fn new_leaf(key: byte::Array, leaf: u64) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), leaf)
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: ribbit::Packed<byte::Array>, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
@@ -115,19 +117,33 @@ impl Edge {
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 64, debug, eq)]
+#[ribbit(size = 64, packed(rename = MetaPacked), debug, eq)]
 pub(crate) struct Meta {
-    #[ribbit(size = 62)]
-    pub(crate) key: byte::Array,
-    pub(crate) frozen: bool,
+    #[ribbit(with(skip))]
+    _placeholder_len: u6,
     pub(crate) leaf: bool,
+    pub(crate) frozen: bool,
+    #[ribbit(with(skip))]
+    _placeholder_array: u56,
 }
 
 impl Meta {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(byte::Array::EMPTY, false, false);
+        ribbit::Packed::<Self>::new(u6::new(0), false, false, u56::new(0));
 
     const LEAF: ribbit::Packed<Self> = Self::DEFAULT.with_leaf(true);
+}
+
+impl MetaPacked {
+    #[inline]
+    pub(crate) fn key(self) -> byte::Array {
+        byte::Array::new_masked(self.value)
+    }
+
+    #[inline]
+    pub(crate) fn with_key(self, key: byte::Array) -> Self {
+        unsafe { Self::new_unchecked(self.value & !byte::Array::MASK | key.value()) }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

@@ -35,27 +35,26 @@ impl key::Read for Reader {
     }
 
     #[inline]
-    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
+    fn peek(&self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.remaining_bits());
-
-        let buffer = self.buffer.rotate_left(len.bits() as u32);
-        ribbit::Packed::<byte::Array>::from_u64_truncate(buffer, len)
+        byte::Array::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
-    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
+    fn take(&mut self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.remaining_bits());
-        self.buffer = self.buffer.rotate_left(len.bits() as u32);
+        let array = self.peek(len);
+        self.buffer = self.buffer.unbounded_shl(len.bits() as u32);
         self.remaining_bits -= len.bits();
-        ribbit::Packed::<byte::Array>::from_u64_truncate(self.buffer, len)
+        array
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        let some = self.remaining_bits > 0;
-        self.buffer = self.buffer.rotate_left(8);
+        let byte = (self.remaining_bits > 0).then_some(self.buffer.rotate_left(8) as u8);
+        self.buffer <<= 8;
         self.remaining_bits = self.remaining_bits.saturating_sub(8);
-        some.then_some(self.buffer as u8)
+        byte
     }
 
     #[inline]
@@ -93,14 +92,10 @@ impl key::Write for Writer {
     }
 
     #[inline]
-    fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
-        let bits = array.len().bits();
-        validate!(self.bits + bits <= 64);
-        self.buffer |= array
-            .buffer()
-            .value()
-            .rotate_right((bits + self.bits) as u32);
-        self.bits += bits;
+    fn extend(&mut self, array: byte::Array) {
+        validate!(self.bits + array.len().bits() <= 64);
+        self.buffer |= (array.value() & !0xFF).unbounded_shr(self.bits as u32);
+        self.bits += array.len().bits();
     }
 
     #[inline]
@@ -212,7 +207,7 @@ mod tests {
             .map(Option::unwrap)
         {
             assert_eq!(iter.remaining_bytes(), initial.len() - index);
-            ribbit::Packed::<byte::Array>::with_bytes(iter.take(len), |a| {
+            byte::Array::with_bytes(iter.take(len), |a| {
                 assert_eq!(a, &initial[index..][..len.bytes() as usize]);
             });
             index += len.bytes() as usize;

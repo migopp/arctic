@@ -59,7 +59,7 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
-    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
+    fn peek(&self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.remaining_bits());
 
         match self {
@@ -69,7 +69,7 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
-    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
+    fn take(&mut self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.remaining_bits());
 
         match self {
@@ -144,14 +144,11 @@ impl key::Read for Reader<'_> {
 /// # SAFETY
 ///
 /// Caller must ensure `slice.len() >= 8`
-unsafe fn read_array(slice: &[u8], len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array> {
+unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
     validate!(slice.len() >= 8);
 
     let buffer = unsafe { slice.as_ptr().cast::<u64>().read_unaligned() };
-    ribbit::Packed::<byte::Array>::from_u64_truncate(
-        buffer.to_be().rotate_left(len.bits() as u32),
-        len,
-    )
+    byte::Array::from_u64_truncate(buffer.to_be(), len)
 }
 
 #[repr(transparent)]
@@ -165,7 +162,7 @@ impl key::Write for Writer {
     }
 
     #[inline]
-    fn extend(&mut self, array: ribbit::Packed<byte::Array>) {
+    fn extend(&mut self, array: byte::Array) {
         self.0.extend(array)
     }
 
@@ -265,7 +262,7 @@ mod tests {
             .map(Option::unwrap)
         {
             assert_eq!(iter.remaining_bytes(), initial.len() - index);
-            ribbit::Packed::<Array>::with_bytes(iter.take(len), |a| {
+            Array::with_bytes(iter.take(len), |a| {
                 assert_eq!(a, &initial[index..][..len.bytes() as usize]);
             });
             index += len.bytes() as usize;

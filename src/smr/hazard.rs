@@ -1,7 +1,7 @@
 use core::cell::RefCell;
+use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic64;
 use thread_local::ThreadLocal;
 
 use crate::byte;
@@ -16,7 +16,7 @@ const RETIRED_COUNT: usize = 16;
 struct Cache<T>(T);
 
 pub(crate) struct Global {
-    hazards: ThreadLocal<Cache<Atomic64<byte::Array>>>,
+    hazards: ThreadLocal<Cache<AtomicU64>>,
     edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge>>>>>,
 }
 
@@ -50,33 +50,27 @@ impl Drop for Global {
 }
 
 pub(crate) struct Local<'g> {
-    hazards: &'g ThreadLocal<Cache<Atomic64<byte::Array>>>,
-    hazard: &'g Atomic64<byte::Array>,
+    hazards: &'g ThreadLocal<Cache<AtomicU64>>,
+    hazard: &'g AtomicU64,
     edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge>>>,
 }
 
 impl<'g> Local<'g> {
     #[inline]
-    pub(crate) fn protect_read<'l>(
-        &'l self,
-        prefix: ribbit::Packed<byte::Array>,
-    ) -> ReadGuard<'g, 'l> {
+    pub(crate) fn protect_read<'l>(&'l self, prefix: byte::Array) -> ReadGuard<'g, 'l> {
         self.protect(prefix);
         ReadGuard(self)
     }
 
     #[inline]
-    pub(crate) fn protect_write<'l>(
-        &'l mut self,
-        prefix: ribbit::Packed<byte::Array>,
-    ) -> WriteGuard<'g, 'l> {
+    pub(crate) fn protect_write<'l>(&'l mut self, prefix: byte::Array) -> WriteGuard<'g, 'l> {
         self.protect(prefix);
         WriteGuard(self)
     }
 
     #[inline]
-    fn protect(&self, prefix: ribbit::Packed<byte::Array>) {
-        self.hazard.store_packed(prefix, Ordering::Relaxed);
+    fn protect(&self, prefix: byte::Array) {
+        self.hazard.store(prefix.value(), Ordering::Relaxed);
         membarrier::fast();
     }
 }
@@ -88,7 +82,7 @@ impl Drop for ReadGuard<'_, '_> {
     fn drop(&mut self) {
         self.0
             .hazard
-            .store_packed(byte::Array::EMPTY, Ordering::Relaxed);
+            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
     }
 }
 
@@ -99,7 +93,7 @@ impl Drop for WriteGuard<'_, '_> {
     fn drop(&mut self) {
         self.0
             .hazard
-            .store_packed(byte::Array::EMPTY, Ordering::Relaxed);
+            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
     }
 }
 
@@ -129,7 +123,8 @@ impl WriteGuard<'_, '_> {
             .0
             .hazards
             .iter()
-            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+            .map(|hazard| hazard.0.load(Ordering::Relaxed))
+            .map(|hazard| unsafe { byte::Array::new_unchecked(hazard) })
             .filter(|hazard| *hazard != byte::Array::EMPTY)
             .collect::<Vec<_>>();
 

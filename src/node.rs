@@ -25,7 +25,7 @@ pub(crate) trait Node {
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
 }
 
-pub(crate) trait Info: Node + Default {
+pub(crate) trait Info: Node + Default + core::fmt::Debug {
     const KIND: Kind;
     const GROW: usize;
     const REF: for<'a> fn(&'a Self) -> Ref<'a>;

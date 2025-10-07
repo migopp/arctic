@@ -1,54 +1,73 @@
 use core::fmt;
 use core::ops::BitOr;
-use core::ops::Shl as _;
+use core::ops::BitXor;
 
-use ribbit::u56;
 use ribbit::u6;
-use ribbit::Pack as _;
 
 use crate::key;
 
 /// Immutable fixed-size array of up to 7 bytes.
-#[derive(Copy, Clone, Default, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 62, packed(rename = ArrayPacked), eq)]
-pub(crate) struct Array {
-    #[ribbit(size = 56, get(vis = "pub(crate)"))]
-    buffer: u56,
-
-    #[ribbit(size = 6, get(vis = "pub(crate)"))]
-    len: Len,
-}
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Array(u64);
 
 impl Array {
-    pub(crate) const EMPTY: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u56::new(0), Len::ZERO);
-}
+    pub(crate) const EMPTY: Self = Array(0);
+    pub(crate) const MASK_LEN: u64 = 0b0011_1111;
+    pub(crate) const MASK_DATA: u64 = 0xFFFF_FFFF_FFFF_FF00;
+    pub(crate) const MASK: u64 = Self::MASK_LEN | Self::MASK_DATA;
 
-impl ArrayPacked {
     #[inline]
-    pub(crate) fn from_u64_truncate(value: u64, len: ribbit::Packed<Len>) -> Self {
-        Self::new(unsafe { u56::new_unchecked(value & len.mask()) }, len)
+    pub(crate) const fn from_u64_truncate(value: u64, len: Len) -> Self {
+        unsafe { Self::new_unchecked(value & len.mask() | len.bits() as u64) }
+    }
+
+    #[inline]
+    pub(crate) const fn new_masked(value: u64) -> Self {
+        unsafe { Self::new_unchecked(value & Self::MASK) }
+    }
+
+    #[inline]
+    pub(crate) const unsafe fn new_unchecked(value: u64) -> Self {
+        const fn invariant(value: u64) -> bool {
+            let bytes = value.to_be_bytes();
+            let mut i = (value & Array::MASK_LEN) as usize;
+            while i < 7 {
+                if bytes[i] != 0 {
+                    return false;
+                }
+                i += 1;
+            }
+            true
+        }
+
+        validate!(value & Self::MASK == value);
+        validate!(invariant(value));
+        Self(value)
+    }
+
+    #[inline]
+    pub(crate) const fn value(self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub(crate) const fn len(self) -> Len {
+        Len(unsafe { u6::new_unchecked(self.0 as u8) })
     }
 
     #[inline]
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     pub(crate) fn has_prefix(self, prefix: Self) -> bool {
-        match self.len().bits().checked_sub(prefix.len().bits()) {
-            None => false,
-            Some(0) => self == prefix,
-            Some(len) => {
-                //  7  6  5  4  3  2  1  0
-                //           s' s' s' s  s   self, len = 5
-                //                 p  p  p   prefix, len = 3
-                //                 s' s' s'
-                let diff = (self.value.value() >> len) ^ prefix.value.value();
-                diff & prefix.len().mask() == 0
-            }
+        if self.len().bits() < prefix.len().bits() {
+            return false;
         }
+
+        let len = self.len().min(prefix.len());
+        (self.0 ^ prefix.0) & len.mask() == 0
     }
 
     #[inline]
-    pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<ribbit::Packed<Len>> {
+    pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<Len> {
         let len = self.len().min_bits(key.remaining_bits());
         (key.take(len) == self).then_some(len)
     }
@@ -62,28 +81,23 @@ impl ArrayPacked {
             return Match::Full(len);
         }
 
-        // 7 6 5 4 3 2 1 0
-        //         s s x x  self, len = 32
-        //     s s m e e e  key, len = 48
-        //         s s m e  shift key for prefix
-        //
-        //             s s  start
-        //               m  middle
-        //           e e e  end
-        let diff = (key.buffer().value() >> (key.len().bits() - len.bits()))
-            ^ (self.buffer().value() >> (self.len().bits() - len.bits()));
+        let len_prefix = unsafe {
+            Len::from_bits_unchecked(
+                key.0
+                    .bitxor(self.0)
+                    .bitor(1u64.rotate_right(1) >> len.bits())
+                    .leading_zeros() as u8
+                    & !0b111u8,
+            )
+        };
 
-        let len_start = (diff.leading_zeros() & !0b111) as u8 - (64 - len.bits());
-        let len_end =
-            unsafe { Len::from_bits_unchecked(self.len().bits() - len_start - Len::ONE.bits()) };
-
+        let shift = len_prefix.bits() as u32 + 8;
         Match::Partial {
-            start: Self::from_u64_truncate(
-                self.value.value() >> (len_end.bits() + Len::ONE.bits()),
-                unsafe { Len::from_bits_unchecked(len_start) },
-            ),
-            middle: (self.value.value() >> len_end.bits()) as u8,
-            end: Self::from_u64_truncate(self.value.value(), len_end),
+            start: Self::from_u64_truncate(self.0, len_prefix),
+            middle: self.0.rotate_left(shift) as u8,
+            end: Self::from_u64_truncate(self.0 << shift, unsafe {
+                Len::from_bits_unchecked(self.len().bits() - len_prefix.bits() - 8)
+            }),
         }
     }
 
@@ -91,73 +105,64 @@ impl ArrayPacked {
         let parent_bits = self.len().bits();
         let child_bits = child.len().bits();
         let len = Len::from_bits(parent_bits + Len::ONE.bits() + child_bits)?;
+        let shift = parent_bits as u32 + 8;
         Some(Self::from_u64_truncate(
-            self.value
-                .value()
-                .shl(Len::ONE.bits() + child_bits)
-                .bitor((byte as u64) << child_bits)
-                .bitor(child.value.value()),
+            self.0
+                .bitor((byte as u64).rotate_right(shift))
+                .bitor(child.0 >> shift),
             len,
         ))
     }
 
     #[cfg(test)]
     pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, with: F) -> T {
-        let bytes = self.buffer().value().to_be_bytes();
-        let slice = &bytes[8 - self.len().bytes() as usize..];
+        let bytes = self.0.to_be_bytes();
+        let slice = &bytes[..self.len().bytes() as usize];
         with(slice)
     }
 }
 
 #[derive(Debug)]
 pub(crate) enum Match {
-    Full(ribbit::Packed<Len>),
+    Full(Len),
     Partial {
-        start: ribbit::Packed<Array>,
+        start: Array,
         middle: u8,
-        end: ribbit::Packed<Array>,
+        end: Array,
     },
 }
 
-impl IntoIterator for ArrayPacked {
+impl IntoIterator for Array {
     type Item = u8;
-    type IntoIter = core::iter::Skip<core::array::IntoIter<u8, 8>>;
+    type IntoIter = core::iter::Take<core::array::IntoIter<u8, 8>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.value
-            .value()
+        self.0
             .to_be_bytes()
             .into_iter()
-            .skip(8 - self.len().bytes() as usize)
+            .take(self.len().bytes() as usize)
     }
 }
 
 impl fmt::Debug for Array {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.pack().fmt(f)
-    }
-}
-
-impl fmt::Debug for ArrayPacked {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(*self).finish()
     }
 }
 
 /// Length in bits.
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 6, packed(rename = LenPacked), debug, eq, ord)]
+#[repr(transparent)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub(crate) struct Len(u6);
 
 impl Len {
-    const ZERO: ribbit::Packed<Self> = Self::from_bits(0).unwrap();
-    const ONE: ribbit::Packed<Self> = Self::from_bits(8).unwrap();
-    pub(crate) const MAX: ribbit::Packed<Self> = Self::from_bits(56).unwrap();
+    const ONE: Self = Self::from_bits(8).unwrap();
+    pub(crate) const MAX: Self = Self::from_bits(56).unwrap();
 
     #[inline]
-    pub(crate) const fn from_bits(bits: u8) -> Option<ribbit::Packed<Self>> {
+    pub(crate) const fn from_bits(bits: u8) -> Option<Self> {
         validate!(bits & 0b111 == 0);
         if bits <= 56 {
-            Some(ribbit::Packed::<Self>::new(u6::new(bits)))
+            Some(Self(u6::new(bits)))
         } else {
             None
         }
@@ -165,37 +170,40 @@ impl Len {
 
     #[inline]
     #[cfg(test)]
-    pub(crate) const fn from_bytes(bytes: u8) -> Option<ribbit::Packed<Self>> {
+    pub(crate) const fn from_bytes(bytes: u8) -> Option<Self> {
         Self::from_bits(bytes << 3)
     }
 
     #[inline]
-    pub(crate) const unsafe fn from_bits_unchecked(len: u8) -> ribbit::Packed<Self> {
+    pub(crate) const unsafe fn from_bits_unchecked(len: u8) -> Self {
         validate!(len & 0b111 == 0);
         validate!(len <= 56);
-        ribbit::Packed::<Self>::new_unchecked(u6::new_unchecked(len))
+        Self(u6::new_unchecked(len))
     }
-}
 
-impl LenPacked {
     #[inline]
     pub(crate) fn min_bits(self, bits: usize) -> Self {
         validate_eq!(bits & 0b111, 0);
-        unsafe { Len::from_bits_unchecked((self.value.value() as usize).min(bits) as u8) }
+        unsafe { Len::from_bits_unchecked((self.0.value() as usize).min(bits) as u8) }
     }
 
     #[inline]
-    pub(crate) fn bits(self) -> u8 {
-        self.value.value()
+    pub(crate) const fn bits(self) -> u8 {
+        self.0.value()
     }
 
     #[inline]
-    pub(crate) fn bytes(self) -> u8 {
-        self.value.value() >> 3
+    pub(crate) const fn bytes(self) -> u8 {
+        self.0.value() >> 3
     }
 
     #[inline]
-    fn mask(self) -> u64 {
-        (1u64 << self.value.value()) - 1
+    const fn mask(self) -> u64 {
+        !(u64::MAX >> self.bits())
+    }
+
+    #[inline]
+    fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
     }
 }

@@ -30,21 +30,21 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
         self.remaining_bits() >> 3
     }
 
-    fn peek(&self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
+    fn peek(&self, len: byte::Len) -> byte::Array;
 
     #[inline]
-    fn peek_all(&self) -> ribbit::Packed<byte::Array> {
+    fn peek_all(&self) -> byte::Array {
         self.peek(byte::Len::MAX.min_bits(self.remaining_bits()))
     }
 
-    fn take(&mut self, len: ribbit::Packed<byte::Len>) -> ribbit::Packed<byte::Array>;
+    fn take(&mut self, len: byte::Len) -> byte::Array;
     fn next(&mut self) -> Option<u8>;
     fn prefix(&self, other: &Self) -> Self;
 }
 
 pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
     fn bits(&self) -> usize;
-    fn extend(&mut self, array: ribbit::Packed<byte::Array>);
+    fn extend(&mut self, array: byte::Array);
     fn push(&mut self, byte: u8);
     fn truncate(&mut self, bits: usize);
 }
@@ -64,7 +64,7 @@ impl Write for Ignore {
     }
 
     #[inline]
-    fn extend(&mut self, _array: ribbit::Packed<byte::Array>) {}
+    fn extend(&mut self, _array: byte::Array) {}
 
     #[inline]
     fn push(&mut self, _byte: u8) {}

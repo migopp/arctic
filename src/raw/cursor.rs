@@ -165,13 +165,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    fn step(
-        &mut self,
-        key: R,
-        len: ribbit::Packed<byte::Len>,
-        node: node::Ref<'a>,
-        edge: &'a Atomic128<Edge>,
-    ) {
+    fn step(&mut self, key: R, len: byte::Len, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
         // 1 extra byte for node
         self.bit += len.bits() as usize + 8;
         self.history.push(Segment {
@@ -253,7 +247,7 @@ impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
 #[derive(Debug)]
 pub(crate) struct Segment<'a, R> {
     key: R,
-    len: ribbit::Packed<byte::Len>,
+    len: byte::Len,
     edge: &'a Atomic128<Edge>,
     node: node::Ref<'a>,
 }
