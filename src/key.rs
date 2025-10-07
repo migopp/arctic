@@ -58,7 +58,7 @@ pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Ignore;
+pub struct Ignore;
 
 impl Write for Ignore {
     type Len = ();

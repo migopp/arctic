@@ -2,7 +2,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
-use crate::key;
 use crate::node;
 use crate::raw;
 
@@ -20,12 +19,11 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut node_15 = Histogram::default();
     let mut node_256 = Histogram::default();
 
-    let mut entries = map
+    for (edge, depth_) in map
         .as_sequential()
         .as_raw()
-        .iter_postorder::<key::Ignore, raw::iter::postorder::SelectAll>();
-
-    while let Some((key::Ignore, (edge, depth_))) = entries.lend() {
+        .postorder::<raw::iter::postorder::SelectAll>()
+    {
         let meta = edge.meta();
         let data = edge.data();
 

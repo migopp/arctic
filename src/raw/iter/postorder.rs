@@ -2,65 +2,56 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub(crate) enum PostorderIter<'a, W: key::Write, V>
+pub(crate) enum PostorderIter<'a, S>
 where
-    V: Selector<W>,
+    S: Selector,
 {
-    Root {
-        key: W,
-        next: Option<V::Item>,
-    },
-    Node {
-        key: W,
-        #[allow(private_interfaces)]
-        frontier: Vec<(W::Len, RepeatIter<'a>)>,
-    },
+    Root(Option<S::Item>),
+    Node(#[allow(private_interfaces)] Vec<RepeatIter<'a>>),
 }
 
-impl<'a, W: key::Write, V: Selector<W>> PostorderIter<'a, W, V> {
+impl<'a, S: Selector> PostorderIter<'a, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
 
-        key.extend(edge.meta().key());
-
         if meta.leaf() {
-            let next = V::select(edge, &key, 0);
-            Self::Root { key, next }
+            let next = S::select(edge, 0);
+            Self::Root(next)
         } else if data == 0 {
-            Self::Root { key, next: None }
+            Self::Root(None)
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
-            Self::Node {
-                frontier: vec![(key.bits(), RepeatIter::new(node))],
-                key,
-            }
+            Self::Node(vec![RepeatIter::new(node)])
         }
     }
+}
+
+impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
+    type Item = S::Item;
 
     #[inline]
-    pub fn lend(&mut self) -> Option<(&W, V::Item)> {
-        let (key, frontier) = match self {
-            PostorderIter::Root { key, next } => {
+    fn next(&mut self) -> Option<S::Item> {
+        let frontier = match self {
+            PostorderIter::Root(next) => {
                 crate::cold();
                 let value = next.take()?;
-                return Some((key, value));
+                return Some(value);
             }
-            PostorderIter::Node { key, frontier } => (key, frontier),
+            PostorderIter::Node(frontier) => frontier,
         };
 
         'vertical: loop {
             let depth = frontier.len();
-            let (len, iter) = frontier.last_mut()?;
+            let iter = frontier.last_mut()?;
 
             loop {
-                let Some((first, byte, edge)) = iter.next() else {
+                let Some((first, _, edge)) = iter.next() else {
                     frontier.pop();
                     continue 'vertical;
                 };
@@ -73,52 +64,46 @@ impl<'a, W: key::Write, V: Selector<W>> PostorderIter<'a, W, V> {
                     continue;
                 }
 
-                if first {
-                    key.truncate(*len);
-                    key.push(byte);
-                    key.extend(meta.key());
-
-                    if !meta.leaf() {
-                        let node = unsafe { Edge::next_node_unchecked(data) };
-                        frontier.push((key.bits(), unsafe { RepeatIter::new(node) }));
-                        continue 'vertical;
-                    }
+                if first && !meta.leaf() {
+                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    frontier.push(unsafe { RepeatIter::new(node) });
+                    continue 'vertical;
                 }
 
                 // Second visit (or fallthrough)
                 iter.skip();
 
-                if let Some(item) = V::select(edge, key, depth) {
-                    return Some((key, item));
+                if let Some(item) = S::select(edge, depth) {
+                    return Some(item);
                 }
             }
         }
     }
 }
 
-pub(crate) trait Selector<W> {
+pub(crate) trait Selector {
     type Item;
-    fn select(edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Option<Self::Item>;
+    fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item>;
 }
 
 pub(crate) struct SelectNode;
 
-impl<W: key::Write> Selector<W> for SelectNode {
+impl Selector for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge>, _depth: usize) -> Option<Self::Item> {
         (!edge.meta().leaf() && edge.data() > 0).then_some(edge)
     }
 }
 
 pub(crate) struct SelectAll;
 
-impl<W: key::Write> Selector<W> for SelectAll {
+impl Selector for SelectAll {
     type Item = (ribbit::Packed<Edge>, usize);
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item> {
         (edge.meta().leaf() || edge.data() > 0).then_some((edge, depth))
     }
 }

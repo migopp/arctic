@@ -50,20 +50,18 @@ impl Map {
         unsafe { iter::LeafIter::new(&self.root, W::default()) }
     }
 
-    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::postorder::Selector<W>>(
+    pub(crate) fn postorder<'a, S: iter::postorder::Selector>(
         &'a self,
-    ) -> iter::PostorderIter<'a, W, V> {
-        unsafe { iter::PostorderIter::new(&self.root, W::default()) }
+    ) -> iter::PostorderIter<'a, S> {
+        unsafe { iter::PostorderIter::new(&self.root) }
     }
 }
 
 impl Drop for Map {
     fn drop(&mut self) {
-        let mut iter = self.iter_postorder::<key::Ignore, iter::postorder::SelectNode>();
-        while let Some((key::Ignore, edge)) = iter.lend() {
-            unsafe {
+        self.postorder::<iter::postorder::SelectNode>()
+            .for_each(|edge| unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
-            }
-        }
+            })
     }
 }
