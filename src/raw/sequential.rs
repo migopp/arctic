@@ -4,7 +4,6 @@ use core::marker::PhantomData;
 use ribbit::atomic::Atomic128;
 
 use crate::key;
-use crate::node;
 use crate::raw::iter;
 use crate::stat;
 use crate::Edge;
@@ -53,18 +52,16 @@ impl Map {
         unsafe { iter::LeafIter::new(&self.root, W::default(), min, max) }
     }
 
-    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>, S: iter::Sort<'a>>(
+    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>>(
         &'a self,
-        selector: V,
-    ) -> iter::PostorderIter<'a, W, V, S> {
-        unsafe { iter::PostorderIter::new(&self.root, W::default(), selector) }
+    ) -> iter::PostorderIter<'a, W, V> {
+        unsafe { iter::PostorderIter::new(&self.root, W::default()) }
     }
 }
 
 impl Drop for Map {
     fn drop(&mut self) {
-        let mut iter = self
-            .iter_postorder::<key::Ignore, iter::SelectNode, node::UnsortedIter>(iter::SelectNode);
+        let mut iter = self.iter_postorder::<key::Ignore, iter::SelectNode>();
         while let Some((key::Ignore, edge)) = iter.lend() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);

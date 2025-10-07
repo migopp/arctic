@@ -23,9 +23,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut entries = map
         .as_sequential()
         .as_raw()
-        .iter_postorder::<key::Ignore, raw::iter::SelectAll, node::UnsortedIter>(
-            raw::iter::SelectAll,
-        );
+        .iter_postorder::<key::Ignore, raw::iter::SelectAll>();
 
     while let Some((key::Ignore, (edge, depth_))) = entries.lend() {
         let meta = edge.meta();

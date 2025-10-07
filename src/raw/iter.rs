@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -134,9 +133,8 @@ where
     }
 }
 
-pub enum PostorderIter<'a, W, V, S>
+pub enum PostorderIter<'a, W, V>
 where
-    S: Sort<'a>,
     V: Selector<W>,
 {
     Root {
@@ -145,16 +143,14 @@ where
     },
     Node {
         key: W,
-        selector: V,
         #[allow(private_interfaces)]
-        frontier: Vec<(usize, RepeatIter<S>)>,
-        _sort: PhantomData<&'a ()>,
+        frontier: Vec<(usize, RepeatIter<'a>)>,
     },
 }
 
-impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> {
+impl<'a, W: key::Write, V: Selector<W>> PostorderIter<'a, W, V> {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, selector: V) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -162,35 +158,28 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
         key.extend(edge.meta().key());
 
         if meta.leaf() {
-            let next = selector.select(edge, &key, 0);
+            let next = V::select(edge, &key, 0);
             Self::Root { key, next }
         } else if data == 0 {
             Self::Root { key, next: None }
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
             Self::Node {
-                selector,
                 frontier: vec![(key.bits(), RepeatIter::new(node))],
                 key,
-                _sort: PhantomData,
             }
         }
     }
 
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, V::Item)> {
-        let (key, selector, frontier) = match self {
+        let (key, frontier) = match self {
             PostorderIter::Root { key, next } => {
                 crate::cold();
                 let value = next.take()?;
                 return Some((key, value));
             }
-            PostorderIter::Node {
-                key,
-                selector,
-                frontier,
-                _sort,
-            } => (key, selector, frontier),
+            PostorderIter::Node { key, frontier } => (key, frontier),
         };
 
         'vertical: loop {
@@ -218,7 +207,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
 
                     if !meta.leaf() {
                         let node = unsafe { Edge::next_node_unchecked(data) };
-                        frontier.push((key.bits(), RepeatIter::new(node)));
+                        frontier.push((key.bits(), unsafe { RepeatIter::new(node) }));
                         continue 'vertical;
                     }
                 }
@@ -226,7 +215,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
                 // Second visit (or fallthrough)
                 iter.skip();
 
-                if let Some(item) = selector.select(edge, key, depth) {
+                if let Some(item) = V::select(edge, key, depth) {
                     return Some((key, item));
                 }
             }
@@ -236,7 +225,7 @@ impl<'a, W: key::Write, V: Selector<W>, S: Sort<'a>> PostorderIter<'a, W, V, S> 
 
 pub(crate) trait Selector<W> {
     type Item;
-    fn select(&self, edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Option<Self::Item>;
+    fn select(edge: ribbit::Packed<Edge>, key: &W, depth: usize) -> Option<Self::Item>;
 }
 
 pub(crate) struct SelectNode;
@@ -245,7 +234,7 @@ impl<W: key::Write> Selector<W> for SelectNode {
     type Item = ribbit::Packed<Edge>;
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge>, _key: &W, _depth: usize) -> Option<Self::Item> {
         (!edge.meta().leaf() && edge.data() > 0).then_some(edge)
     }
 }
@@ -256,52 +245,31 @@ impl<W: key::Write> Selector<W> for SelectAll {
     type Item = (ribbit::Packed<Edge>, usize);
 
     #[inline]
-    fn select(&self, edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge>, _key: &W, depth: usize) -> Option<Self::Item> {
         (edge.meta().leaf() || edge.data() > 0).then_some((edge, depth))
     }
 }
 
-pub(crate) trait Sort<'a>: Iterator<Item = (u8, &'a Atomic128<Edge>)> {
-    fn new(node: node::Ref<'a>) -> Self;
-}
-
-impl<'a> Sort<'a> for node::SortedIter<'a> {
-    #[inline]
-    fn new(node: node::Ref) -> node::SortedIter {
-        unsafe { node.iter_sorted() }
-    }
-}
-
-impl<'a> Sort<'a> for node::UnsortedIter<'a> {
-    #[inline]
-    fn new(node: node::Ref) -> node::UnsortedIter {
-        unsafe { node.iter_unsorted() }
-    }
-}
-
-struct RepeatIter<N> {
+struct RepeatIter<'a> {
     first: bool,
     key: u8,
     edge: ribbit::Packed<Edge>,
-    iter: N,
+    iter: node::UnsortedIter<'a>,
 }
 
-impl<'a, N: Sort<'a>> RepeatIter<N> {
+impl<'a> RepeatIter<'a> {
     #[inline]
-    fn new(node: node::Ref<'a>) -> Self {
+    unsafe fn new(node: node::Ref<'a>) -> Self {
         Self {
             first: true,
             key: 0,
             edge: Edge::DEFAULT,
-            iter: N::new(node),
+            iter: node.iter_unsorted(),
         }
     }
 }
 
-impl<'a, S> RepeatIter<S>
-where
-    S: Sort<'a>,
-{
+impl<'a> RepeatIter<'a> {
     #[inline]
     fn next(&mut self) -> Option<(bool, u8, ribbit::Packed<Edge>)> {
         let first = self.first;
