@@ -13,7 +13,7 @@ pub struct Reader {
 
 impl Reader {
     #[inline]
-    pub(super) fn new(buffer: u64, bits: u8) -> Self {
+    pub fn new(buffer: u64, bits: u8) -> Self {
         validate!(bits <= 64);
         validate_eq!(bits & 0b111, 0);
         Self { buffer, bits }

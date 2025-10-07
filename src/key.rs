@@ -1,5 +1,5 @@
-pub(crate) mod dynamic;
-mod fixed;
+pub mod dynamic;
+pub mod fixed;
 
 use crate::byte;
 
