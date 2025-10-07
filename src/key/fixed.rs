@@ -171,7 +171,6 @@ macro_rules! impl_unsigned_int {
 impl PartialOrd<Reader> for Writer {
     #[inline]
     fn partial_cmp(&self, reader: &Reader) -> Option<core::cmp::Ordering> {
-        validate_eq!(self.bits, reader.bits);
         self.buffer.partial_cmp(&reader.buffer)
     }
 }
@@ -179,7 +178,6 @@ impl PartialOrd<Reader> for Writer {
 impl PartialEq<Reader> for Writer {
     #[inline]
     fn eq(&self, reader: &Reader) -> bool {
-        validate_eq!(self.bits, reader.bits);
         self.buffer == reader.buffer
     }
 }
