@@ -49,7 +49,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let data = edge.data();
 
             let save = self.key.clone();
-            let len = meta.key().match_prefix(&mut self.key)?;
+            let len = meta.key().match_exact(&mut self.key)?;
 
             // Fast path: traversal
             if !meta.leaf() && data != 0 {
@@ -83,7 +83,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
 
             // Continue traversal only if exact match
             if !meta.leaf() && data != 0 {
-                if let Some(len) = meta.key().match_prefix(&mut self.key) {
+                if let Some(len) = meta.key().match_exact(&mut self.key) {
                     let node = unsafe { Edge::next_node_unchecked(data) };
                     if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
                         self.step(save, len, node, next);

@@ -54,7 +54,7 @@ impl<'g> MapRef<'g> {
             let edge = root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
 
-            let _ = meta.key().match_prefix(&mut key)?;
+            let _ = meta.key().match_exact(&mut key)?;
             let data = edge.data();
 
             if meta.leaf() {

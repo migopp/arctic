@@ -48,7 +48,7 @@ impl ArrayPacked {
     }
 
     #[inline]
-    pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<ribbit::Packed<Len>> {
+    pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<ribbit::Packed<Len>> {
         let len = self.len().min_bits(key.remaining_bits());
         (key.take(len) == self).then_some(len)
     }
