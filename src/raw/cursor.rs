@@ -138,11 +138,15 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                 }
                 byte::Match::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3, _>(self.key.peek_all(), None),
+                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), None),
                 ),
                 byte::Match::Full(_) => (
                     Op::Edge(edge::Op::Insert),
-                    Edge::new_leaf(self.key.peek_all(), value),
+                    Edge::new_leaf(
+                        self.key
+                            .peek(unsafe { byte::Len::from_bits_unchecked(self.key.bits() as u8) }),
+                        value,
+                    ),
                 ),
                 byte::Match::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
