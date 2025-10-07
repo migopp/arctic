@@ -1,5 +1,3 @@
-use core::ops::Bound;
-use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use crate::byte;
@@ -321,26 +319,24 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<'l, B, K, R, W>(
+    pub(crate) fn range_non_linearizable<'l, K, R, W>(
         &'l mut self,
-        range: B,
-    ) -> RangeNonLinearizableIter<'g, 'l, B, K, W>
+        min: K,
+        max: K,
+    ) -> RangeNonLinearizableIter<'g, 'l, K, W>
     where
-        B: RangeBounds<K> + Clone,
-        K: Copy,
+        K: key::Borrow,
         R: key::Read + From<K>,
         W: key::Write + PartialOrd<K> + From<R>,
     {
-        let prefix = Self::prefix::<B, K, R>(range.clone());
+        let prefix = R::from(min).prefix(&R::from(max));
         let guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
         let mut stack = W::from(prefix);
         stack.truncate(index);
 
-        let iter = unsafe {
-            iter::LeafIter::<B, K, W, node::SortedIter>::new(cursor.root(), stack, range)
-        };
+        let iter = unsafe { iter::LeafIter::<K, W>::new(cursor.root(), stack, min, max) };
 
         RangeNonLinearizableIter {
             iter,
@@ -348,15 +344,14 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range<B, K, R, W>(&mut self, range: B) -> std::vec::IntoIter<(W, u64)>
+    pub(crate) fn range<K, R, W>(&mut self, min: K, max: K) -> std::vec::IntoIter<(W, u64)>
     where
-        B: RangeBounds<K> + Clone,
-        K: Copy,
+        K: key::Borrow,
         R: key::Read + From<K>,
         W: key::Write + PartialOrd<K> + From<R>,
     {
         // FIXME: deduplicate prefix traversal?
-        let prefix = Self::prefix::<B, K, R>(range.clone());
+        let prefix = R::from(min).prefix(&R::from(max));
         let _guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
         let index = cursor.traverse_prefix();
@@ -368,13 +363,8 @@ impl<'g> MapRef<'g> {
         loop {
             count += 1;
 
-            let mut iter = unsafe {
-                iter::LeafIter::<B, K, W, node::SortedIter>::new(
-                    cursor.root(),
-                    stack.clone(),
-                    range.clone(),
-                )
-            };
+            let mut iter =
+                unsafe { iter::LeafIter::<K, W>::new(cursor.root(), stack.clone(), min, max) };
 
             let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
                 .collect::<Vec<_>>();
@@ -388,34 +378,16 @@ impl<'g> MapRef<'g> {
             }
         }
     }
-
-    fn prefix<B: RangeBounds<K>, K, R>(range: B) -> R
-    where
-        K: Copy,
-        R: key::Read + From<K>,
-    {
-        match (range.start_bound(), range.end_bound()) {
-            (Bound::Unbounded, _) | (_, Bound::Unbounded) => R::default(),
-            (
-                Bound::Included(start) | Bound::Excluded(start),
-                Bound::Included(end) | Bound::Excluded(end),
-            ) => {
-                let start = R::from(*start);
-                let end = R::from(*end);
-                start.prefix(&end)
-            }
-        }
-    }
 }
 
-pub(crate) struct RangeNonLinearizableIter<'g, 'l, B, K, W> {
-    iter: iter::LeafIter<'g, B, K, W, node::SortedIter<'g>>,
+pub(crate) struct RangeNonLinearizableIter<'g, 'l, K, W> {
+    iter: iter::LeafIter<'g, K, W>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 
-impl<'g, 'l, B, K, W> RangeNonLinearizableIter<'g, 'l, B, K, W>
+impl<'g, 'l, K, W> RangeNonLinearizableIter<'g, 'l, K, W>
 where
-    B: RangeBounds<K>,
+    K: key::Borrow,
     W: key::Write + PartialOrd<K>,
 {
     #[inline]

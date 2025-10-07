@@ -62,6 +62,11 @@ pub(crate) enum Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
+    pub(crate) unsafe fn iter_range(&self, min: u8, max: u8) -> RangeIter<'a> {
+        RangeIter::new(min, max, self.iter_sorted())
+    }
+
+    #[inline]
     pub(crate) unsafe fn iter_sorted(&self) -> SortedIter<'a> {
         match self {
             Ref::Node3(node) => Or::L(node.iter_sorted()),
@@ -142,3 +147,43 @@ impl Kind {
 
 pub(crate) type SortedIter<'a> = Or<linear::SortedIter<'a>, node256::Iter<'a>>;
 pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
+
+pub(crate) struct RangeIter<'a> {
+    min: u8,
+    max: u8,
+    iter: SortedIter<'a>,
+}
+
+impl<'a> RangeIter<'a> {
+    pub(crate) fn new(min: u8, max: u8, iter: SortedIter<'a>) -> Self {
+        validate!(min != max);
+        let iter = match iter {
+            Or::L(iter) => Or::L(iter),
+            Or::R(iter) => Or::R(iter.range(min, max)),
+        };
+        Self { min, max, iter }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) enum Position {
+    First,
+    Middle,
+    Last,
+}
+
+impl<'a> Iterator for RangeIter<'a> {
+    type Item = (Position, u8, &'a Atomic128<Edge>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, edge) = self.iter.next()?;
+        let position = if key == self.min {
+            Position::First
+        } else if key == self.max {
+            Position::Last
+        } else {
+            Position::Middle
+        };
+        Some((position, key, edge))
+    }
+}

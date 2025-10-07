@@ -69,6 +69,14 @@ pub(crate) struct Iter<'a> {
     edges: core::slice::Iter<'a, Atomic128<Edge>>,
 }
 
+impl<'a> Iter<'a> {
+    pub(crate) fn range(mut self, min: u8, max: u8) -> Self {
+        self.key = min;
+        self.edges = self.edges.as_slice()[min as usize..=max as usize].iter();
+        self
+    }
+}
+
 impl<'a> Iterator for Iter<'a> {
     type Item = (u8, &'a Atomic128<Edge>);
 

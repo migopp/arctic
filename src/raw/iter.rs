@@ -1,5 +1,4 @@
 use core::marker::PhantomData;
-use core::ops::RangeBounds;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -8,53 +7,37 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub enum LeafIter<'a, R, K, W, S>
-where
-    S: Sort<'a>,
-{
+pub enum LeafIter<'a, K, W> {
     Root {
         key: W,
         next: Option<u64>,
     },
     Node {
         key: W,
-        range: R,
-        frontier: Vec<(usize, S)>,
+        min: K,
+        max: K,
+        frontier: Vec<(usize, bool, bool, node::RangeIter<'a>)>,
         _key: PhantomData<K>,
         _sort: PhantomData<&'a ()>,
     },
 }
 
-impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
-    LeafIter<'a, R, K, W, S>
+impl<'a, K, W> LeafIter<'a, K, W>
+where
+    K: key::Borrow,
+    W: key::Write + PartialOrd<K>,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, range: R) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, min: K, max: K) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
 
         key.extend(edge.meta().key());
 
-        match range.end_bound() {
-            core::ops::Bound::Included(end) if key > *end => {
-                return Self::Root { key, next: None };
-            }
-            core::ops::Bound::Excluded(end) if key >= *end => {
-                return Self::Root { key, next: None };
-            }
-            _ => (),
-        }
-
         if meta.leaf() {
-            match range.start_bound() {
-                core::ops::Bound::Included(start) if key < *start => {
-                    return Self::Root { key, next: None };
-                }
-                core::ops::Bound::Excluded(start) if key <= *start => {
-                    return Self::Root { key, next: None };
-                }
-                _ => (),
+            if key < min || key > max {
+                return Self::Root { key, next: None };
             }
 
             Self::Root {
@@ -65,9 +48,19 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
             Self::Root { key, next: None }
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
+
+            validate_eq!(key, min.slice(key.bits()));
+            validate_eq!(key, max.slice(key.bits()));
+
             Self::Node {
-                range,
-                frontier: vec![(key.bits(), S::new(node))],
+                min,
+                max,
+                frontier: vec![(
+                    key.bits(),
+                    true,
+                    true,
+                    node.iter_range(min.get(key.bits()), max.get(key.bits())),
+                )],
                 key,
                 _key: PhantomData,
                 _sort: PhantomData,
@@ -77,7 +70,7 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
 
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {
-        let (key, range, frontier) = match self {
+        let (key, min, max, frontier) = match self {
             LeafIter::Root { key, next } => {
                 crate::cold();
                 let value = next.take()?;
@@ -85,19 +78,19 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
             }
             LeafIter::Node {
                 key,
-                range,
+                min,
+                max,
                 frontier,
                 _sort,
                 ..
-            } => (key, range, frontier),
+            } => (key, min, max, frontier),
         };
 
         'vertical: loop {
-            let (len, iter) = frontier.last_mut()?;
-            let len = *len;
+            let (len, check_first, check_last, iter) = frontier.last_mut()?;
 
             loop {
-                let Some((byte, edge)) = iter.next() else {
+                let Some((position, byte, edge)) = iter.next() else {
                     frontier.pop();
                     continue 'vertical;
                 };
@@ -110,33 +103,36 @@ impl<'a, R: RangeBounds<K>, K, W: key::Write + PartialOrd<K>, S: Sort<'a>>
                     continue;
                 }
 
-                key.truncate(len);
+                key.truncate(*len);
                 key.push(byte);
                 key.extend(meta.key());
 
-                match range.end_bound() {
-                    core::ops::Bound::Included(end) if *key > *end => {
-                        frontier.clear();
-                        return None;
-                    }
-                    core::ops::Bound::Excluded(end) if *key >= *end => {
-                        frontier.clear();
-                        return None;
-                    }
-                    _ => (),
+                let check_first = *check_first && matches!(position, node::Position::First);
+                let check_last = *check_last && matches!(position, node::Position::Last);
+
+                if check_last && *key > *max {
+                    frontier.clear();
+                    return None;
                 }
 
                 if meta.leaf() {
-                    match range.start_bound() {
-                        core::ops::Bound::Included(start) if *key < *start => continue,
-                        core::ops::Bound::Excluded(start) if *key <= *start => continue,
-                        _ => (),
+                    if check_first && *key < *min {
+                        continue;
                     }
 
                     return Some((key, edge.data()));
                 } else {
+                    if check_first && *key < min.slice(key.bits()) {
+                        continue;
+                    }
+
+                    let min = if check_first { min.get(key.bits()) } else { 0 };
+                    let max = if check_last { max.get(key.bits()) } else { 255 };
+
                     let node = unsafe { Edge::next_node_unchecked(data) };
-                    frontier.push((key.bits(), S::new(node)));
+                    frontier.push((key.bits(), check_first, check_last, unsafe {
+                        node.iter_range(min, max)
+                    }));
                     continue 'vertical;
                 }
             }
