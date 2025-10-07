@@ -6,7 +6,7 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub enum LeafIter<'a, R, W> {
+pub enum RangeIter<'a, R, W> {
     Root {
         key: W,
         next: Option<u64>,
@@ -19,7 +19,7 @@ pub enum LeafIter<'a, R, W> {
     },
 }
 
-impl<'a, R, W> LeafIter<'a, R, W>
+impl<'a, R, W> RangeIter<'a, R, W>
 where
     R: key::Read,
     W: key::Write + PartialOrd<R>,
@@ -66,12 +66,12 @@ where
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {
         let (key, min, max, frontier) = match self {
-            LeafIter::Root { key, next } => {
+            RangeIter::Root { key, next } => {
                 crate::cold();
                 let value = next.take()?;
                 return Some((key, value));
             }
-            LeafIter::Node {
+            RangeIter::Node {
                 key,
                 min,
                 max,

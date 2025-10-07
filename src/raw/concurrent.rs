@@ -335,7 +335,7 @@ impl<'g> MapRef<'g> {
         let mut stack = W::from(prefix);
         stack.truncate(index);
 
-        let iter = unsafe { iter::LeafIter::<R, W>::new(cursor.root(), stack, min, max) };
+        let iter = unsafe { iter::RangeIter::<R, W>::new(cursor.root(), stack, min, max) };
 
         RangeNonLinearizableIter {
             iter,
@@ -362,7 +362,7 @@ impl<'g> MapRef<'g> {
             count += 1;
 
             let mut iter = unsafe {
-                iter::LeafIter::<R, W>::new(cursor.root(), stack.clone(), min.clone(), max.clone())
+                iter::RangeIter::<R, W>::new(cursor.root(), stack.clone(), min.clone(), max.clone())
             };
 
             let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
@@ -380,7 +380,7 @@ impl<'g> MapRef<'g> {
 }
 
 pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
-    iter: iter::LeafIter<'g, R, W>,
+    iter: iter::RangeIter<'g, R, W>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 

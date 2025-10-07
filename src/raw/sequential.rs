@@ -48,8 +48,8 @@ impl Map {
         &'a self,
         min: R,
         max: R,
-    ) -> iter::LeafIter<'a, R, W> {
-        unsafe { iter::LeafIter::new(&self.root, W::default(), min, max) }
+    ) -> iter::RangeIter<'a, R, W> {
+        unsafe { iter::RangeIter::new(&self.root, W::default(), min, max) }
     }
 
     pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>>(

@@ -72,10 +72,12 @@ impl key::Read for Reader {
         }
     }
 
+    #[inline]
     fn get(&self, bit: usize) -> u8 {
         self.buffer.rotate_left(8 + bit as u32) as u8
     }
 
+    #[inline]
     fn slice(&self, bit: usize) -> Self {
         Self {
             buffer: self.buffer & !u64::MAX.unbounded_shr(bit as u32),
