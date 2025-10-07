@@ -163,27 +163,29 @@ impl<'a> RangeIter<'a> {
         };
         Self { min, max, iter }
     }
-}
 
-#[derive(Copy, Clone)]
-pub(crate) enum Position {
-    First,
-    Middle,
-    Last,
+    pub(crate) fn min(&self) -> u8 {
+        self.min
+    }
+
+    pub(crate) fn max(&self) -> u8 {
+        self.max
+    }
 }
 
 impl<'a> Iterator for RangeIter<'a> {
-    type Item = (Position, u8, &'a Atomic128<Edge>);
+    type Item = (u8, &'a Atomic128<Edge>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key, edge) = self.iter.next()?;
-        let position = if key == self.min {
-            Position::First
-        } else if key == self.max {
-            Position::Last
-        } else {
-            Position::Middle
-        };
-        Some((position, key, edge))
+        match &mut self.iter {
+            Or::L(iter) => loop {
+                match iter.next()? {
+                    (key, _) if key < self.min => continue,
+                    (key, _) if key > self.max => return None,
+                    (key, edge) => return Some((key, edge)),
+                }
+            },
+            Or::R(iter) => iter.next(),
+        }
     }
 }

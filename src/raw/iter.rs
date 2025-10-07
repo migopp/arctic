@@ -90,7 +90,7 @@ where
             let (len, check_first, check_last, iter) = frontier.last_mut()?;
 
             loop {
-                let Some((position, byte, edge)) = iter.next() else {
+                let Some((byte, edge)) = iter.next() else {
                     frontier.pop();
                     continue 'vertical;
                 };
@@ -107,8 +107,8 @@ where
                 key.push(byte);
                 key.extend(meta.key());
 
-                let check_first = *check_first && matches!(position, node::Position::First);
-                let check_last = *check_last && matches!(position, node::Position::Last);
+                let check_first = *check_first && byte == node::RangeIter::min(iter);
+                let check_last = *check_last && byte == node::RangeIter::max(iter);
 
                 if check_last && *key > *max {
                     frontier.clear();
