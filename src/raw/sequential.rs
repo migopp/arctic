@@ -45,11 +45,11 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter_leaves<'a, K: key::Borrow, W: key::Write + PartialOrd<K>>(
+    pub(crate) fn iter_leaves<'a, R: key::Read, W: key::Write + PartialOrd<R>>(
         &'a self,
-        min: K,
-        max: K,
-    ) -> iter::LeafIter<'a, K, W> {
+        min: R,
+        max: R,
+    ) -> iter::LeafIter<'a, R, W> {
         unsafe { iter::LeafIter::new(&self.root, W::default(), min, max) }
     }
 

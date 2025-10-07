@@ -10,10 +10,10 @@ pub trait Key {
         Self: 'k;
 
     #[allow(private_bounds)]
-    type Write: Write + for<'k> PartialOrd<Self::Borrow<'k>> + for<'k> From<Self::Read<'k>>;
+    type Write: Write + for<'k> PartialOrd<Self::Read<'k>> + for<'k> From<Self::Read<'k>>;
 
     #[allow(private_bounds)]
-    type Borrow<'k>: Borrow
+    type Borrow<'k>: Copy
     where
         Self: 'k;
 
@@ -38,6 +38,10 @@ pub(crate) trait Read: Clone + core::fmt::Debug + Default {
     }
 
     fn take(&mut self, len: byte::Len) -> byte::Array;
+
+    fn get(&self, bit: usize) -> u8;
+    fn slice(&self, bit: usize) -> Self;
+
     fn next(&mut self) -> Option<u8>;
     fn prefix(&self, other: &Self) -> Self;
 }
@@ -47,11 +51,6 @@ pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
     fn extend(&mut self, array: byte::Array);
     fn push(&mut self, byte: u8);
     fn truncate(&mut self, bits: usize);
-}
-
-pub(crate) trait Borrow: Copy + core::fmt::Debug {
-    fn slice(self, bits: usize) -> Self;
-    fn get(self, bit: usize) -> u8;
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -96,18 +95,6 @@ macro_rules! impl_unsigned_int {
                     Self::from(write)
                 }
             }
-
-            impl Borrow for $ty {
-                #[inline]
-                fn get(self, bit: usize) -> u8 {
-                    self.rotate_left(8 + bit as u32) as u8
-                }
-
-                #[inline]
-                fn slice(self, bits: usize) -> Self {
-                    self & !(Self::MAX >> bits)
-                }
-            }
         )*
     };
 }
@@ -142,18 +129,6 @@ impl<const N: usize> Key for [u8; N] {
     }
 }
 
-impl<const N: usize> Borrow for &'_ [u8; N] {
-    #[inline]
-    fn get(self, bit: usize) -> u8 {
-        self.as_slice().get(bit >> 3).copied().unwrap()
-    }
-
-    #[inline]
-    fn slice(self, _bits: usize) -> Self {
-        todo!()
-    }
-}
-
 impl Key for Vec<u8> {
     type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
@@ -175,18 +150,6 @@ impl Key for Vec<u8> {
     }
 }
 
-impl Borrow for &'_ [u8] {
-    #[inline]
-    fn get(self, bit: usize) -> u8 {
-        self.get(bit >> 3).copied().unwrap()
-    }
-
-    #[inline]
-    fn slice(self, bits: usize) -> Self {
-        &self[..bits >> 3]
-    }
-}
-
 impl Key for String {
     type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
@@ -205,16 +168,5 @@ impl Key for String {
     #[inline]
     fn from_owned(writer: Self::Write) -> Self {
         String::from_utf8(writer.0).expect("key::Write should be valid UTF-8")
-    }
-}
-
-impl Borrow for &'_ str {
-    #[inline]
-    fn get(self, bit: usize) -> u8 {
-        self.as_bytes().get(bit >> 3).copied().unwrap()
-    }
-
-    fn slice(self, _bits: usize) -> Self {
-        todo!()
     }
 }

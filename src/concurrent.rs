@@ -74,7 +74,7 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         max: K::Borrow<'l>,
     ) -> RangeNonLinearizableIter<'g, 'l, K, V> {
         RangeNonLinearizableIter {
-            iter: self.raw.range_non_linearizable(min, max),
+            iter: self.raw.range_non_linearizable(min.into(), max.into()),
             _value: PhantomData,
         }
     }
@@ -85,13 +85,13 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         max: K::Borrow<'l>,
     ) -> impl Iterator<Item = (K, V)> {
         self.raw
-            .range(min, max)
+            .range(min.into(), max.into())
             .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
     }
 }
 
 pub struct RangeNonLinearizableIter<'g, 'l, K: Key + 'l, V> {
-    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Borrow<'l>, K::Write>,
+    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Read<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 

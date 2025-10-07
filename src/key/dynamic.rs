@@ -139,6 +139,32 @@ impl key::Read for Reader<'_> {
 
         Self::Small(left.prefix(right))
     }
+
+    #[inline]
+    fn get(&self, bit: usize) -> u8 {
+        match self {
+            Reader::Large(large) => large[bit >> 3],
+            Reader::Small(small) => small.get(bit),
+        }
+    }
+
+    #[inline]
+    fn slice(&self, bit: usize) -> Self {
+        match self {
+            Reader::Large(large) => Reader::from(&large[..bit >> 3]),
+            Reader::Small(small) => Reader::Small(small.slice(bit)),
+        }
+    }
+}
+
+impl Reader<'_> {
+    #[inline]
+    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
+        match self {
+            Reader::Large(large) => with(large),
+            Reader::Small(small) => small.with_bytes(with),
+        }
+    }
 }
 
 /// # SAFETY
@@ -186,17 +212,17 @@ impl<'a> From<Reader<'a>> for Writer {
     }
 }
 
-impl<T: AsRef<[u8]>> PartialEq<T> for Writer {
+impl PartialEq<Reader<'_>> for Writer {
     #[inline]
-    fn eq(&self, other: &T) -> bool {
-        self.0 == other.as_ref()
+    fn eq(&self, other: &Reader<'_>) -> bool {
+        other.with_bytes(|other| self.0 == other)
     }
 }
 
-impl<T: AsRef<[u8]>> PartialOrd<T> for Writer {
+impl PartialOrd<Reader<'_>> for Writer {
     #[inline]
-    fn partial_cmp(&self, other: &T) -> Option<cmp::Ordering> {
-        self.0.as_slice().partial_cmp(other.as_ref())
+    fn partial_cmp(&self, other: &Reader<'_>) -> Option<cmp::Ordering> {
+        other.with_bytes(|other| self.0.as_slice().partial_cmp(other))
     }
 }
 

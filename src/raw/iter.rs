@@ -7,28 +7,26 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub enum LeafIter<'a, K, W> {
+pub enum LeafIter<'a, R, W> {
     Root {
         key: W,
         next: Option<u64>,
     },
     Node {
         key: W,
-        min: K,
-        max: K,
+        min: R,
+        max: R,
         frontier: Vec<(usize, bool, bool, node::RangeIter<'a>)>,
-        _key: PhantomData<K>,
-        _sort: PhantomData<&'a ()>,
     },
 }
 
-impl<'a, K, W> LeafIter<'a, K, W>
+impl<'a, R, W> LeafIter<'a, R, W>
 where
-    K: key::Borrow,
-    W: key::Write + PartialOrd<K>,
+    R: key::Read,
+    W: key::Write + PartialOrd<R>,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, min: K, max: K) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -53,8 +51,6 @@ where
             validate_eq!(key, max.slice(key.bits()));
 
             Self::Node {
-                min,
-                max,
                 frontier: vec![(
                     key.bits(),
                     true,
@@ -62,8 +58,8 @@ where
                     node.iter_range(min.get(key.bits()), max.get(key.bits())),
                 )],
                 key,
-                _key: PhantomData,
-                _sort: PhantomData,
+                min,
+                max,
             }
         }
     }
@@ -81,8 +77,6 @@ where
                 min,
                 max,
                 frontier,
-                _sort,
-                ..
             } => (key, min, max, frontier),
         };
 

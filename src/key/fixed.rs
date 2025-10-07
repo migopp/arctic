@@ -71,6 +71,17 @@ impl key::Read for Reader {
             remaining_bits: prefix as u8,
         }
     }
+
+    fn get(&self, bit: usize) -> u8 {
+        self.buffer.rotate_left(8 + bit as u32) as u8
+    }
+
+    fn slice(&self, bit: usize) -> Self {
+        Self {
+            buffer: self.buffer & !u64::MAX.unbounded_shr(bit as u32),
+            remaining_bits: bit as u8,
+        }
+    }
 }
 
 impl fmt::Debug for Reader {
@@ -152,22 +163,24 @@ macro_rules! impl_unsigned_int {
                     writer.buffer.rotate_left($len << 3) as $from
                 }
             }
-
-            impl PartialOrd<$from> for Writer {
-                #[inline]
-                fn partial_cmp(&self, value: &$from) -> Option<core::cmp::Ordering> {
-                    <$from>::from(*self).partial_cmp(&value)
-                }
-            }
-
-            impl PartialEq<$from> for Writer {
-                #[inline]
-                fn eq(&self, value: &$from) -> bool {
-                    <$from>::from(*self) == *value
-                }
-            }
         )*
     };
+}
+
+impl PartialOrd<Reader> for Writer {
+    #[inline]
+    fn partial_cmp(&self, reader: &Reader) -> Option<core::cmp::Ordering> {
+        validate_eq!(self.bits, reader.remaining_bits);
+        self.buffer.partial_cmp(&reader.buffer)
+    }
+}
+
+impl PartialEq<Reader> for Writer {
+    #[inline]
+    fn eq(&self, reader: &Reader) -> bool {
+        validate_eq!(self.bits, reader.remaining_bits);
+        self.buffer == reader.buffer
+    }
 }
 
 impl_unsigned_int!(

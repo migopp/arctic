@@ -60,7 +60,7 @@ impl<K: Key, V: Value> Map<K, V> {
 }
 
 pub(crate) struct Iter<'a, 'k, K: Key + 'k, V> {
-    inner: raw::iter::LeafIter<'a, K::Borrow<'k>, K::Write>,
+    inner: raw::iter::LeafIter<'a, K::Read<'k>, K::Write>,
     _key: PhantomData<K>,
     _value: PhantomData<V>,
 }
