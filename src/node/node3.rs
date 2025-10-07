@@ -4,6 +4,7 @@ use ribbit::atomic::Atomic64;
 use ribbit::u24;
 use ribbit::u4;
 
+use crate::iter::Or;
 use crate::node;
 use crate::node::linear;
 
@@ -81,19 +82,45 @@ impl linear::Header for Atomic64<Header> {
     #[inline]
     fn keys_range(&self, min: u8, max: u8) -> linear::RangeKeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        linear::SortedKeyIter::range_3(header.value, header.len().value() as usize, min, max)
+        let mut len = header.len().value() as usize;
+        let keys = header.value.to_ne_bytes();
+
+        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
+            if index < len {
+                if (min..=max).contains(&keys[index]) {
+                    return (keys[index], index as u8);
+                } else {
+                    len -= 1;
+                }
+            }
+
+            (255, 3)
+        });
+
+        indexes.sort_unstable();
+        Or::L(indexes.into_iter().take(len))
     }
 
     #[inline]
     fn keys_sorted(&self) -> linear::SortedKeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        linear::SortedKeyIter::new_3(header.value, header.len().value() as usize)
+        let len = header.len().value() as usize;
+        let keys = header.value.to_ne_bytes();
+        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes[..len].sort_unstable();
+        Or::L(indexes.into_iter().take(len))
     }
 
     #[inline]
     fn keys_unsorted(&self) -> linear::UnsortedKeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        linear::UnsortedKeyIter::new_3(header.value, header.len().value() as usize)
+        Or::L(
+            header
+                .value
+                .to_ne_bytes()
+                .into_iter()
+                .take(header.len().value() as usize),
+        )
     }
 }
 

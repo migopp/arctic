@@ -12,8 +12,8 @@ pub(crate) use node3::Node3;
 use ribbit::atomic::Atomic128;
 
 use crate::edge;
+use crate::iter::Or;
 use crate::Edge;
-use crate::Or;
 
 pub(crate) trait Node {
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
