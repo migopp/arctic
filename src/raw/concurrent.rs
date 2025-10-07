@@ -319,6 +319,28 @@ impl<'g> MapRef<'g> {
         }
     }
 
+    pub(crate) fn prefix_non_linearizable<'l, R, W, S>(
+        &'l mut self,
+        prefix: R,
+    ) -> PrefixNonLinearizable<'g, 'l, W, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        S: iter::leaf::Sort<'g>,
+    {
+        let guard = self.smr.protect_read(prefix.peek_all());
+        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
+        let index = cursor.traverse_prefix();
+        let writer = W::from(prefix.slice(index));
+
+        let iter = unsafe { iter::LeafIter::new(cursor.root(), writer) };
+
+        PrefixNonLinearizable {
+            iter,
+            _guard: guard,
+        }
+    }
+
     pub(crate) fn range_non_linearizable<'l, R, W>(
         &'l mut self,
         min: R,
@@ -388,6 +410,22 @@ impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
 where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
+{
+    #[inline]
+    pub fn lend(&mut self) -> Option<(&W, u64)> {
+        self.iter.lend()
+    }
+}
+
+pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, S> {
+    iter: iter::LeafIter<W, S>,
+    _guard: smr::ReadGuard<'g, 'l>,
+}
+
+impl<'g, 'l, W, S> PrefixNonLinearizable<'g, 'l, W, S>
+where
+    W: key::Write,
+    S: iter::leaf::Sort<'g>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {
