@@ -52,7 +52,7 @@ impl Map {
         unsafe { iter::RangeIter::new(&self.root, W::default(), min, max) }
     }
 
-    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::Selector<W>>(
+    pub(crate) fn iter_postorder<'a, W: key::Write, V: iter::postorder::Selector<W>>(
         &'a self,
     ) -> iter::PostorderIter<'a, W, V> {
         unsafe { iter::PostorderIter::new(&self.root, W::default()) }
@@ -61,7 +61,7 @@ impl Map {
 
 impl Drop for Map {
     fn drop(&mut self) {
-        let mut iter = self.iter_postorder::<key::Ignore, iter::SelectNode>();
+        let mut iter = self.iter_postorder::<key::Ignore, iter::postorder::SelectNode>();
         while let Some((key::Ignore, edge)) = iter.lend() {
             unsafe {
                 Edge::deallocate(edge, stat::Counter::FreeDrop);
