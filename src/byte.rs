@@ -68,13 +68,13 @@ impl Array {
 
     #[inline]
     pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<Len> {
-        let len = self.len().min_bits(key.remaining_bits());
+        let len = self.len().min_bits(key.bits());
         (key.take(len) == self).then_some(len)
     }
 
     #[inline]
     pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> Match {
-        let len = self.len().min_bits(key.remaining_bits());
+        let len = self.len().min_bits(key.bits());
         let key = key.take(len);
 
         if key == self {

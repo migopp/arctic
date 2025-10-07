@@ -8,58 +8,55 @@ use crate::key::Read as _;
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Reader {
     buffer: u64,
-    remaining_bits: u8,
+    bits: u8,
 }
 
 impl Reader {
     #[inline]
-    pub(super) fn new(buffer: u64, remaining_bits: u8) -> Self {
-        validate!(remaining_bits <= 64);
-        validate_eq!(remaining_bits & 0b111, 0);
-        Self {
-            buffer,
-            remaining_bits,
-        }
+    pub(super) fn new(buffer: u64, bits: u8) -> Self {
+        validate!(bits <= 64);
+        validate_eq!(bits & 0b111, 0);
+        Self { buffer, bits }
     }
 
     #[inline]
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
-        with(&self.buffer.to_be_bytes()[..self.remaining_bytes()])
+        with(&self.buffer.to_be_bytes()[..self.bytes()])
     }
 }
 
 impl key::Read for Reader {
     #[inline]
-    fn remaining_bits(&self) -> usize {
-        self.remaining_bits as usize
+    fn bits(&self) -> usize {
+        self.bits as usize
     }
 
     #[inline]
     fn peek(&self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.remaining_bits());
+        validate!(len.bits() as usize <= self.bits());
         byte::Array::from_u64_truncate(self.buffer, len)
     }
 
     #[inline]
     fn take(&mut self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.remaining_bits());
+        validate!(len.bits() as usize <= self.bits());
         let array = self.peek(len);
         self.buffer = self.buffer.unbounded_shl(len.bits() as u32);
-        self.remaining_bits -= len.bits();
+        self.bits -= len.bits();
         array
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        let byte = (self.remaining_bits > 0).then_some(self.buffer.rotate_left(8) as u8);
+        let byte = (self.bits > 0).then_some(self.buffer.rotate_left(8) as u8);
         self.buffer <<= 8;
-        self.remaining_bits = self.remaining_bits.saturating_sub(8);
+        self.bits = self.bits.saturating_sub(8);
         byte
     }
 
     #[inline]
     fn prefix(&self, other: &Self) -> Self {
-        let max = self.remaining_bits.min(other.remaining_bits);
+        let max = self.bits.min(other.bits);
 
         let prefix = (self.buffer ^ other.buffer)
             .bitor(0x8000_0000_0000_0000u64.unbounded_shr(max as u32))
@@ -68,7 +65,7 @@ impl key::Read for Reader {
 
         Self {
             buffer: self.buffer,
-            remaining_bits: prefix as u8,
+            bits: prefix as u8,
         }
     }
 
@@ -81,7 +78,7 @@ impl key::Read for Reader {
     fn slice(&self, bit: usize) -> Self {
         Self {
             buffer: self.buffer & !u64::MAX.unbounded_shr(bit as u32),
-            remaining_bits: bit as u8,
+            bits: bit as u8,
         }
     }
 }
@@ -131,8 +128,8 @@ impl From<Reader> for Writer {
     #[inline]
     fn from(reader: Reader) -> Self {
         Self {
-            buffer: reader.buffer & !u64::MAX.unbounded_shr(reader.remaining_bits as u32),
-            bits: reader.remaining_bits,
+            buffer: reader.buffer & !u64::MAX.unbounded_shr(reader.bits as u32),
+            bits: reader.bits,
         }
     }
 }
@@ -151,10 +148,10 @@ macro_rules! impl_unsigned_int {
             impl From<$from> for Reader {
                 #[inline]
                 fn from(value: $from) -> Self {
-                    let remaining_bits = $len << 3;
+                    let bits = $len << 3;
                     Self {
-                        buffer: (value as u64) << (64 - remaining_bits),
-                        remaining_bits,
+                        buffer: (value as u64) << (64 - bits),
+                        bits,
                     }
                 }
             }
@@ -172,7 +169,7 @@ macro_rules! impl_unsigned_int {
 impl PartialOrd<Reader> for Writer {
     #[inline]
     fn partial_cmp(&self, reader: &Reader) -> Option<core::cmp::Ordering> {
-        validate_eq!(self.bits, reader.remaining_bits);
+        validate_eq!(self.bits, reader.bits);
         self.buffer.partial_cmp(&reader.buffer)
     }
 }
@@ -180,7 +177,7 @@ impl PartialOrd<Reader> for Writer {
 impl PartialEq<Reader> for Writer {
     #[inline]
     fn eq(&self, reader: &Reader) -> bool {
-        validate_eq!(self.bits, reader.remaining_bits);
+        validate_eq!(self.bits, reader.bits);
         self.buffer == reader.buffer
     }
 }
@@ -221,15 +218,15 @@ mod tests {
             .map(byte::Len::from_bytes)
             .map(Option::unwrap)
         {
-            assert_eq!(iter.remaining_bytes(), initial.len() - index);
+            assert_eq!(iter.bytes(), initial.len() - index);
             byte::Array::with_bytes(iter.take(len), |a| {
                 assert_eq!(a, &initial[index..][..len.bytes() as usize]);
             });
             index += len.bytes() as usize;
         }
 
-        assert_eq!(iter.remaining_bytes(), initial.len() - index);
-        if iter.remaining_bytes() > 0 {
+        assert_eq!(iter.bytes(), initial.len() - index);
+        if iter.bytes() > 0 {
             assert_eq!(iter.next(), Some(initial[index]));
         } else {
             assert_eq!(iter.next(), None);

@@ -51,16 +51,16 @@ impl Default for Reader<'_> {
 
 impl key::Read for Reader<'_> {
     #[inline]
-    fn remaining_bits(&self) -> usize {
+    fn bits(&self) -> usize {
         match self {
             Reader::Large(large) => large.len() << 3,
-            Reader::Small(small) => key::Read::remaining_bits(small),
+            Reader::Small(small) => key::Read::bits(small),
         }
     }
 
     #[inline]
     fn peek(&self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.remaining_bits());
+        validate!(len.bits() as usize <= self.bits());
 
         match self {
             Reader::Large(large) => unsafe { read_array(large, len) },
@@ -70,7 +70,7 @@ impl key::Read for Reader<'_> {
 
     #[inline]
     fn take(&mut self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.remaining_bits());
+        validate!(len.bits() as usize <= self.bits());
 
         match self {
             Reader::Large(large) => {
@@ -287,15 +287,15 @@ mod tests {
             .map(byte::Len::from_bytes)
             .map(Option::unwrap)
         {
-            assert_eq!(iter.remaining_bytes(), initial.len() - index);
+            assert_eq!(iter.bytes(), initial.len() - index);
             Array::with_bytes(iter.take(len), |a| {
                 assert_eq!(a, &initial[index..][..len.bytes() as usize]);
             });
             index += len.bytes() as usize;
         }
 
-        assert_eq!(iter.remaining_bytes(), initial.len() - index);
-        if iter.remaining_bits() > 0 {
+        assert_eq!(iter.bytes(), initial.len() - index);
+        if iter.bits() > 0 {
             assert_eq!(iter.next(), Some(initial[index]));
         } else {
             assert_eq!(iter.next(), None);

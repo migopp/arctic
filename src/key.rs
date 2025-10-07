@@ -23,18 +23,18 @@ pub trait Key {
 }
 
 pub(crate) trait Read: Clone + core::fmt::Debug + Default {
-    fn remaining_bits(&self) -> usize;
+    fn bits(&self) -> usize;
 
     #[inline]
-    fn remaining_bytes(&self) -> usize {
-        self.remaining_bits() >> 3
+    fn bytes(&self) -> usize {
+        self.bits() >> 3
     }
 
     fn peek(&self, len: byte::Len) -> byte::Array;
 
     #[inline]
     fn peek_all(&self) -> byte::Array {
-        self.peek(byte::Len::MAX.min_bits(self.remaining_bits()))
+        self.peek(byte::Len::MAX.min_bits(self.bits()))
     }
 
     fn take(&mut self, len: byte::Len) -> byte::Array;

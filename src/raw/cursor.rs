@@ -136,14 +136,10 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
-                byte::Match::Full(_)
-                    if self.key.remaining_bits() > byte::Len::MAX.bits() as usize =>
-                {
-                    (
-                        Op::Edge(edge::Op::Create),
-                        Edge::new_node::<Node3, _>(self.key.peek_all(), None),
-                    )
-                }
+                byte::Match::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
+                    Op::Edge(edge::Op::Create),
+                    Edge::new_node::<Node3, _>(self.key.peek_all(), None),
+                ),
                 byte::Match::Full(_) => (
                     Op::Edge(edge::Op::Insert),
                     Edge::new_leaf(self.key.peek_all(), value),
