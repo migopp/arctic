@@ -326,7 +326,7 @@ impl<'g> MapRef<'g> {
     where
         R: key::Read,
         W: key::Write + From<R>,
-        S: iter::leaf::Sort<'g>,
+        S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
         let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
@@ -417,15 +417,15 @@ where
     }
 }
 
-pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, S> {
-    iter: iter::LeafIter<W, S>,
+pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, S: crate::iter::Sort> {
+    iter: iter::LeafIter<'g, W, S>,
     _guard: smr::ReadGuard<'g, 'l>,
 }
 
 impl<'g, 'l, W, S> PrefixNonLinearizable<'g, 'l, W, S>
 where
     W: key::Write,
-    S: iter::leaf::Sort<'g>,
+    S: crate::iter::Sort,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(&W, u64)> {

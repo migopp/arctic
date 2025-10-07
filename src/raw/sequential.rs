@@ -44,9 +44,9 @@ impl Map {
         todo!()
     }
 
-    pub(crate) fn iter<'a, W: key::Write, S: iter::leaf::Sort<'a>>(
+    pub(crate) fn iter<'a, W: key::Write, S: crate::iter::Sort>(
         &'a self,
-    ) -> iter::LeafIter<W, S> {
+    ) -> iter::LeafIter<'a, W, S> {
         unsafe { iter::LeafIter::new(&self.root, W::default()) }
     }
 

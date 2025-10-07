@@ -17,6 +17,7 @@ macro_rules! validate_eq {
 mod byte;
 pub mod concurrent;
 mod edge;
+pub mod iter;
 pub mod key;
 mod node;
 mod raw;
@@ -152,12 +153,14 @@ mod tests {
         }
 
         drop(pin);
-        assert_eq!(map.as_sequential().iter().count(), 1);
+        assert_eq!(map.as_sequential().iter::<crate::iter::Sorted>().count(), 1);
 
-        map.as_sequential().iter().for_each(|(key, value)| {
-            assert_eq!(key, 1);
-            assert_eq!(value, 3);
-        });
+        map.as_sequential()
+            .iter::<crate::iter::Sorted>()
+            .for_each(|(key, value)| {
+                assert_eq!(key, 1);
+                assert_eq!(value, 3);
+            });
     }
 
     #[test]
@@ -225,7 +228,7 @@ mod tests {
 
         drop(pin);
 
-        let mut iter = map.as_sequential().iter();
+        let mut iter = map.as_sequential().iter::<crate::iter::Sorted>();
         let mut count = 0;
         while iter.lend().is_some() {
             count += 1;
@@ -238,7 +241,7 @@ mod tests {
 
         // Sequential iteration
         map.as_sequential()
-            .iter()
+            .iter::<crate::iter::Sorted>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

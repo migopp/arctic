@@ -3,18 +3,23 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::key;
-use crate::node;
 use crate::Edge;
 
-pub(crate) enum LeafIter<W: key::Write, S> {
-    Root { key: W, next: Option<u64> },
-    Node { key: W, frontier: Vec<(W::Len, S)> },
+pub(crate) enum LeafIter<'a, W: key::Write, S: crate::iter::Sort> {
+    Root {
+        key: W,
+        next: Option<u64>,
+    },
+    Node {
+        key: W,
+        frontier: Vec<(W::Len, S::Iter<'a>)>,
+    },
 }
 
-impl<'a, W, S> LeafIter<W, S>
+impl<'a, W, S> LeafIter<'a, W, S>
 where
     W: key::Write,
-    S: Sort<'a>,
+    S: crate::iter::Sort,
 {
     #[inline]
     pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W) -> Self {
@@ -81,21 +86,5 @@ where
                 }
             }
         }
-    }
-}
-
-pub(crate) trait Sort<'a>: Iterator<Item = (u8, &'a Atomic128<Edge>)> {
-    unsafe fn new(node: node::Ref<'a>) -> Self;
-}
-
-impl<'a> Sort<'a> for node::SortedIter<'a> {
-    unsafe fn new(node: node::Ref<'a>) -> Self {
-        node.iter_sorted()
-    }
-}
-
-impl<'a> Sort<'a> for node::UnsortedIter<'a> {
-    unsafe fn new(node: node::Ref<'a>) -> Self {
-        node.iter_unsorted()
     }
 }

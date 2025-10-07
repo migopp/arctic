@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
 
-use crate::node;
 use crate::raw;
 use crate::sequential;
 use crate::Key;
@@ -69,11 +68,10 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
             .map(V::from_u64)
     }
 
-    #[expect(private_interfaces)]
-    pub fn prefix_non_linearizable<'l>(
+    pub fn prefix_non_linearizable<'l, S: crate::iter::Sort>(
         &'l mut self,
         prefix: impl Into<K::Read<'l>>,
-    ) -> PrefixNonLinearizable<'g, 'l, K, V, node::SortedIter<'l>> {
+    ) -> PrefixNonLinearizable<'g, 'l, K, V, S> {
         PrefixNonLinearizable {
             iter: self.raw.prefix_non_linearizable(prefix.into()),
             _value: PhantomData,
@@ -102,15 +100,12 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
     }
 }
 
-pub struct PrefixNonLinearizable<'g, 'l, K: Key + 'l, V, S> {
+pub struct PrefixNonLinearizable<'g, 'l, K: Key + 'l, V, S: crate::iter::Sort> {
     iter: raw::concurrent::PrefixNonLinearizable<'g, 'l, K::Write, S>,
     _value: PhantomData<V>,
 }
 
-#[expect(private_bounds)]
-impl<'g, 'l, K: Key + 'l, V: Value, S: raw::iter::leaf::Sort<'g>>
-    PrefixNonLinearizable<'g, 'l, K, V, S>
-{
+impl<'g, 'l, K: Key + 'l, V: Value, S: crate::iter::Sort> PrefixNonLinearizable<'g, 'l, K, V, S> {
     #[inline]
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
@@ -123,7 +118,7 @@ impl<'g, 'l, K, V, S> Iterator for PrefixNonLinearizable<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
-    S: raw::iter::leaf::Sort<'g>,
+    S: crate::iter::Sort,
 {
     type Item = (K, V);
     #[inline]
