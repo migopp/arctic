@@ -51,7 +51,7 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
             let iter = frontier.last_mut()?;
 
             loop {
-                let Some((first, _, edge)) = iter.next() else {
+                let Some((first, edge)) = iter.next() else {
                     frontier.pop();
                     continue 'vertical;
                 };
@@ -110,7 +110,6 @@ impl Selector for SelectAll {
 
 struct RepeatIter<'a> {
     first: bool,
-    key: u8,
     edge: ribbit::Packed<Edge>,
     iter: node::UnsortedIter<'a>,
 }
@@ -120,7 +119,6 @@ impl<'a> RepeatIter<'a> {
     unsafe fn new(node: node::Ref<'a>) -> Self {
         Self {
             first: true,
-            key: 0,
             edge: Edge::DEFAULT,
             iter: node.iter_unsorted(),
         }
@@ -129,18 +127,17 @@ impl<'a> RepeatIter<'a> {
 
 impl<'a> RepeatIter<'a> {
     #[inline]
-    fn next(&mut self) -> Option<(bool, u8, ribbit::Packed<Edge>)> {
+    fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge>)> {
         let first = self.first;
         self.first ^= true;
 
         if first {
-            let (key, edge) = self.iter.next()?;
+            let (_, edge) = self.iter.next()?;
             let edge = edge.load_packed(Ordering::Acquire);
-            self.key = key;
             self.edge = edge;
         }
 
-        Some((first, self.key, self.edge))
+        Some((first, self.edge))
     }
 
     #[inline]
