@@ -202,12 +202,15 @@ impl SortedKeyIter {
     pub(crate) fn range_3(keys: u32, mut len: usize, min: u8, max: u8) -> Self {
         let keys = keys.to_ne_bytes();
         let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
-            if (min..=max).contains(&keys[index]) {
-                (keys[index], index as u8)
-            } else {
-                len -= 1;
-                (255, 3)
+            if index < len {
+                if (min..=max).contains(&keys[index]) {
+                    return (keys[index], index as u8);
+                } else {
+                    len -= 1;
+                }
             }
+
+            (255, 3)
         });
 
         indexes.sort_unstable();
