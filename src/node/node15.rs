@@ -79,6 +79,12 @@ impl linear::Header for Atomic128<Header> {
     }
 
     #[inline]
+    fn keys_range(&self, min: u8, max: u8) -> linear::RangeKeyIter {
+        let header = self.load_packed(Ordering::Relaxed);
+        linear::SortedKeyIter::range_15(header.value, header.len().value() as usize, min, max)
+    }
+
+    #[inline]
     fn keys_sorted(&self) -> linear::SortedKeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         linear::SortedKeyIter::new_15(header.value, header.len().value() as usize)

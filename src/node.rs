@@ -63,7 +63,15 @@ pub(crate) enum Ref<'a> {
 impl<'a> Ref<'a> {
     #[inline]
     pub(crate) unsafe fn iter_range(&self, min: u8, max: u8) -> RangeIter<'a> {
-        RangeIter::new(min, max, self.iter_sorted())
+        RangeIter::new(
+            min,
+            max,
+            match self {
+                Ref::Node3(node) => Or::L(node.iter_range(min, max)),
+                Ref::Node15(node) => Or::L(node.iter_range(min, max)),
+                Ref::Node256(node) => Or::R(node.iter_range(min, max)),
+            },
+        )
     }
 
     #[inline]
@@ -155,19 +163,17 @@ pub(crate) struct RangeIter<'a> {
 }
 
 impl<'a> RangeIter<'a> {
+    #[inline]
     pub(crate) fn new(min: u8, max: u8, iter: SortedIter<'a>) -> Self {
-        validate!(min != max);
-        let iter = match iter {
-            Or::L(iter) => Or::L(iter),
-            Or::R(iter) => Or::R(iter.range(min, max)),
-        };
         Self { min, max, iter }
     }
 
+    #[inline]
     pub(crate) fn min(&self) -> u8 {
         self.min
     }
 
+    #[inline]
     pub(crate) fn max(&self) -> u8 {
         self.max
     }
@@ -176,16 +182,8 @@ impl<'a> RangeIter<'a> {
 impl<'a> Iterator for RangeIter<'a> {
     type Item = (u8, &'a Atomic128<Edge>);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.iter {
-            Or::L(iter) => loop {
-                match iter.next()? {
-                    (key, _) if key < self.min => continue,
-                    (key, _) if key > self.max => return None,
-                    (key, edge) => return Some((key, edge)),
-                }
-            },
-            Or::R(iter) => iter.next(),
-        }
+        self.iter.next()
     }
 }

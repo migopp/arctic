@@ -1,3 +1,5 @@
+use core::arch::x86_64::_mm_extract_epi64;
+use core::arch::x86_64::_pext_u64;
 use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
@@ -108,6 +110,14 @@ where
 #[expect(private_bounds)]
 impl<const LEN: usize, H: Header> Linear<LEN, H> {
     #[inline]
+    pub(super) fn iter_range(&self, min: u8, max: u8) -> SortedIter {
+        SortedIter {
+            keys: self.header.keys_range(min, max),
+            edges: self.edges.as_slice(),
+        }
+    }
+
+    #[inline]
     pub(super) fn iter_sorted(&self) -> SortedIter {
         SortedIter {
             keys: self.header.keys_sorted(),
@@ -129,6 +139,7 @@ pub(super) trait Header {
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
+    fn keys_range(&self, min: u8, max: u8) -> RangeKeyIter;
     fn keys_sorted(&self) -> SortedKeyIter;
     fn keys_unsorted(&self) -> UnsortedKeyIter;
 }
@@ -163,6 +174,8 @@ impl<'a> Iterator for UnsortedIter<'a> {
     }
 }
 
+pub(crate) type RangeKeyIter = SortedKeyIter;
+
 pub(crate) enum SortedKeyIter {
     K3(core::iter::Take<core::array::IntoIter<(u8, u8), 3>>),
     K15(core::iter::Take<core::array::IntoIter<(u8, u8), 15>>),
@@ -179,6 +192,67 @@ impl SortedKeyIter {
 
     #[inline]
     pub(crate) fn new_15(keys: u128, len: usize) -> Self {
+        let keys = keys.to_ne_bytes();
+        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes[..len].sort_unstable();
+        Self::K15(indexes.into_iter().take(len))
+    }
+
+    #[inline]
+    pub(crate) fn range_3(keys: u32, mut len: usize, min: u8, max: u8) -> Self {
+        let keys = keys.to_ne_bytes();
+        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
+            if (min..=max).contains(&keys[index]) {
+                (keys[index], index as u8)
+            } else {
+                len -= 1;
+                (255, 3)
+            }
+        });
+
+        indexes.sort_unstable();
+        Self::K3(indexes.into_iter().take(len))
+    }
+
+    #[inline]
+    pub(crate) fn range_15(keys: u128, len: usize, min: u8, max: u8) -> Self {
+        // https://stackoverflow.com/a/28383095
+        // https://talkchess.com/viewtopic.php?t=78804
+        let (keys, len) = unsafe {
+            use core::arch::x86_64::_mm_and_si128;
+            use core::arch::x86_64::_mm_cmpeq_epi8;
+            use core::arch::x86_64::_mm_cvtsi128_si64x;
+            use core::arch::x86_64::_mm_max_epu8;
+            use core::arch::x86_64::_mm_min_epu8;
+            use core::arch::x86_64::_mm_set1_epi8;
+
+            let keys = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(keys);
+
+            let min = _mm_set1_epi8(min as i8);
+            let max = _mm_set1_epi8(max as i8);
+            let valid =
+                core::mem::transmute::<u128, core::arch::x86_64::__m128i>(1u128 << (len << 3));
+
+            let mask = _mm_and_si128(
+                _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys),
+                valid,
+            );
+            let len = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(mask).count_ones()
+                as usize;
+
+            let mask_low = _mm_cvtsi128_si64x(mask) as u64;
+            let keys_low = _mm_cvtsi128_si64x(keys) as u64;
+            let keys_low = _pext_u64(keys_low, mask_low);
+
+            let mask_high = _mm_extract_epi64::<1>(mask) as u64;
+            let keys_high = _mm_extract_epi64::<1>(keys) as u64;
+            let keys_high = _pext_u64(keys_high, mask_high);
+
+            let keys = ((keys_high as u128) << mask_low.count_ones()) | (keys_low as u128);
+            (keys, len)
+        };
+
+        // TODO: SIMD sorting network?
         let keys = keys.to_ne_bytes();
         let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len].sort_unstable();

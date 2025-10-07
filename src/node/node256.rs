@@ -43,6 +43,15 @@ impl Node for Node256 {
     }
 }
 
+impl Node256 {
+    pub(crate) fn iter_range(&self, min: u8, max: u8) -> Iter {
+        Iter {
+            key: min,
+            edges: self.0[min as usize..=max as usize].iter(),
+        }
+    }
+}
+
 impl<'a> IntoIterator for &'a Node256 {
     type Item = (u8, &'a Atomic128<Edge>);
     type IntoIter = Iter<'a>;
@@ -67,14 +76,6 @@ impl node::Info for Node256 {
 pub(crate) struct Iter<'a> {
     key: u8,
     edges: core::slice::Iter<'a, Atomic128<Edge>>,
-}
-
-impl<'a> Iter<'a> {
-    pub(crate) fn range(mut self, min: u8, max: u8) -> Self {
-        self.key = min;
-        self.edges = self.edges.as_slice()[min as usize..=max as usize].iter();
-        self
-    }
 }
 
 impl<'a> Iterator for Iter<'a> {
