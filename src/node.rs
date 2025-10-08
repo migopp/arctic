@@ -93,10 +93,14 @@ impl<'a> Ref<'a> {
         RangeIter::new(
             min,
             max,
-            match self {
-                Ref::Node3(node) => Or::L(node.iter_range(min, max)),
-                Ref::Node15(node) => Or::L(node.iter_range(min, max)),
-                Ref::Node256(node) => Or::R(node.iter_range(min, max)),
+            if min == 0 && max == 255 {
+                self.iter()
+            } else {
+                match self {
+                    Ref::Node3(node) => Or::L(node.iter_range(min, max)),
+                    Ref::Node15(node) => Or::L(node.iter_range(min, max)),
+                    Ref::Node256(node) => Or::R(node.iter_range(min, max)),
+                }
             },
         )
     }
