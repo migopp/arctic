@@ -25,7 +25,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     pub(crate) fn new(key: R, root: &'a Atomic128<Edge>) -> Self {
         Self {
             bit: 0,
-            key: key.clone(),
+            key,
             root,
             history: H::default(),
         }
@@ -48,7 +48,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let meta = edge.meta();
             let data = edge.data();
 
-            let save = self.key.clone();
+            let save = self.key;
             let len = meta.key().match_exact(&mut self.key)?;
 
             // Fast path: traversal
@@ -79,7 +79,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let data = edge.data();
-            let save = self.key.clone();
+            let save = self.key;
 
             // Continue traversal only if exact match
             if !meta.leaf() && data != 0 {
@@ -108,7 +108,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let old = self.root().load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
             let old_data = old.data();
-            let save = self.key.clone();
+            let save = self.key;
             let r#match = old_meta.key().match_split(&mut self.key);
 
             // Fast path: traverse

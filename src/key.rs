@@ -24,7 +24,7 @@ pub trait Key {
     fn from_owned(writer: Self::Write) -> Self;
 }
 
-pub(crate) trait Read: Clone + core::fmt::Debug + Default {
+pub(crate) trait Read: Copy + core::fmt::Debug + Default {
     fn bits(&self) -> usize;
 
     #[inline]

@@ -84,7 +84,7 @@ impl<'g> MapRef<'g> {
         R: key::Read,
         F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
     {
-        match self.compare_exchange_optimistic(key.clone(), &mut exchange) {
+        match self.compare_exchange_optimistic(key, &mut exchange) {
             Ok(old) => old,
             Err(()) => self.compare_exchange_pessimistic(key, exchange),
         }
@@ -121,7 +121,7 @@ impl<'g> MapRef<'g> {
         F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
     {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -150,7 +150,7 @@ impl<'g> MapRef<'g> {
 
     #[inline]
     pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
-        match self.insert_optimistic(key.clone(), value) {
+        match self.insert_optimistic(key, value) {
             Ok(old) => old,
             Err(()) => self.insert_pessimistic(key, value),
         }
@@ -175,7 +175,7 @@ impl<'g> MapRef<'g> {
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
         let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
@@ -300,7 +300,7 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let cursor = self.raw.traverse_prefix(prefix);
         let writer = W::from(prefix.slice(cursor.bit()));
         let iter = unsafe { iter::LeafIter::new(cursor.root(), writer) };
 
@@ -321,7 +321,7 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let cursor = self.raw.traverse_prefix(prefix);
         let writer = W::from(prefix.slice(cursor.bit()));
 
         let iter = unsafe { iter::RangeIter::<R, W>::new(cursor.root(), writer, min, max) };
@@ -340,7 +340,7 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let cursor = self.raw.traverse_prefix(prefix);
         let writer = W::from(prefix.slice(cursor.bit()));
 
         let mut prev: Option<Vec<(W, u64)>> = None;
@@ -348,14 +348,8 @@ impl<'g> MapRef<'g> {
         loop {
             count += 1;
 
-            let mut iter = unsafe {
-                iter::RangeIter::<R, W>::new(
-                    cursor.root(),
-                    writer.clone(),
-                    min.clone(),
-                    max.clone(),
-                )
-            };
+            let mut iter =
+                unsafe { iter::RangeIter::<R, W>::new(cursor.root(), writer.clone(), min, max) };
 
             let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
                 .collect::<Vec<_>>();
