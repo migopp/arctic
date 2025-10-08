@@ -70,85 +70,56 @@ impl<'g> MapRef<'g> {
 
     #[inline]
     pub(crate) fn update<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
-        match self.update_optimistic(key.clone(), value) {
-            Ok(old) => old,
-            Err(()) => self.update_pessimistic(key, value),
-        }
-    }
-
-    #[inline]
-    fn update_optimistic<R: key::Read>(&mut self, key: R, value: u64) -> Result<Option<u64>, ()> {
-        self.update_impl::<_, cursor::Optimistic<R>>(key, value)
-    }
-
-    #[cold]
-    fn update_pessimistic<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
-        self.update_impl::<_, cursor::Pessimistic<R>>(key, value)
-            .unwrap()
-    }
-
-    #[inline]
-    fn update_impl<R: key::Read, H: cursor::History<'g, R>>(
-        &mut self,
-        key: R,
-        value: u64,
-    ) -> Result<Option<u64>, H::PopError> {
-        let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
-
-        loop {
-            let old = match cursor.traverse_exact() {
-                None => return Ok(None),
-                Some(Ok(old)) => old,
-                Some(Err(())) => {
-                    Self::freeze(&mut guard, &mut cursor, &key)?;
-                    continue;
-                }
-            };
-
-            if cursor
-                .root()
-                .compare_exchange_packed(
-                    old,
-                    Edge::new_leaf(old.meta().key(), value),
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_ok()
-            {
-                return if old.meta().leaf() {
-                    Ok(Some(old.data()))
-                } else {
-                    validate_eq!(old.data(), 0);
-                    Ok(None)
-                };
-            }
-        }
+        self.compare_exchange(key, |old| Edge::new_leaf(old.meta().key(), value))
     }
 
     #[inline]
     pub(crate) fn remove<R: key::Read>(&mut self, key: R) -> Option<u64> {
-        match self.remove_optimistic(key.clone()) {
+        self.compare_exchange(key, |_| Edge::DEFAULT)
+    }
+
+    #[inline]
+    fn compare_exchange<R, F>(&mut self, key: R, mut exchange: F) -> Option<u64>
+    where
+        R: key::Read,
+        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+    {
+        match self.compare_exchange_optimistic(key.clone(), &mut exchange) {
             Ok(old) => old,
-            Err(()) => self.remove_pessimistic(key),
+            Err(()) => self.compare_exchange_pessimistic(key, exchange),
         }
     }
 
     #[inline]
-    fn remove_optimistic<R: key::Read>(&mut self, key: R) -> Result<Option<u64>, ()> {
-        self.remove_impl::<_, cursor::Optimistic<R>>(key)
+    fn compare_exchange_optimistic<R, F>(&mut self, key: R, exchange: F) -> Result<Option<u64>, ()>
+    where
+        R: key::Read,
+        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+    {
+        self.compare_exchange_impl::<_, cursor::Optimistic<R>, _>(key, exchange)
     }
 
     #[cold]
-    fn remove_pessimistic<R: key::Read>(&mut self, key: R) -> Option<u64> {
-        self.remove_impl::<_, cursor::Pessimistic<R>>(key).unwrap()
+    fn compare_exchange_pessimistic<R, F>(&mut self, key: R, exchange: F) -> Option<u64>
+    where
+        R: key::Read,
+        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+    {
+        self.compare_exchange_impl::<_, cursor::Pessimistic<R>, _>(key, exchange)
+            .unwrap()
     }
 
     #[inline]
-    fn remove_impl<R: key::Read, H: cursor::History<'g, R>>(
+    fn compare_exchange_impl<R, H, F>(
         &mut self,
         key: R,
-    ) -> Result<Option<u64>, H::PopError> {
+        mut exchange: F,
+    ) -> Result<Option<u64>, H::PopError>
+    where
+        R: key::Read,
+        H: cursor::History<'g, R>,
+        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+    {
         let mut guard = self.smr.protect_write(key.peek_all());
         let mut cursor = Cursor::<R, H>::new(key.clone(), self.raw.root());
 
@@ -164,7 +135,7 @@ impl<'g> MapRef<'g> {
 
             if cursor
                 .root()
-                .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange_packed(old, exchange(old), Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
                 return if old.meta().leaf() {
