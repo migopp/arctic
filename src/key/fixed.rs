@@ -191,45 +191,24 @@ impl_unsigned_int!(
 
 #[cfg(test)]
 mod tests {
-    use crate::byte;
-    use crate::key::fixed;
-    use crate::key::Read as _;
+    use crate::key::tests::take_all;
 
     #[test]
     fn smoke() {
-        take_all(0x1234_5678_9ABC_DEF0u64, [7, 1]);
+        take_all_u64(0x1234_5678_9ABC_DEF0u64, &[7, 1]);
     }
 
     #[test]
     fn take_0() {
-        take_all(0x1234_5678_9ABC_DEF0u64, [0, 1, 0]);
+        take_all_u64(0x1234_5678_9ABC_DEF0u64, &[0, 1, 0]);
     }
 
-    fn take_all<N, I: IntoIterator<Item = u8>>(initial: N, lens: I)
-    where
-        fixed::Reader: From<N>,
-    {
-        let mut iter = fixed::Reader::from(initial);
-        let initial = iter.with_bytes(|bytes| bytes.to_vec());
+    #[test]
+    fn take_1() {
+        take_all_u64(0x1234_5678_9ABC_DEF0u64, &[1, 1, 1, 1, 1, 1, 1, 1]);
+    }
 
-        let mut index = 0;
-        for len in lens
-            .into_iter()
-            .map(byte::Len::from_bytes)
-            .map(Option::unwrap)
-        {
-            assert_eq!(iter.bytes(), initial.len() - index);
-            byte::Array::with_bytes(iter.take(len), |a| {
-                assert_eq!(a, &initial[index..][..len.bytes() as usize]);
-            });
-            index += len.bytes() as usize;
-        }
-
-        assert_eq!(iter.bytes(), initial.len() - index);
-        if iter.bytes() > 0 {
-            assert_eq!(iter.next(), Some(initial[index]));
-        } else {
-            assert_eq!(iter.next(), None);
-        }
+    fn take_all_u64(key: u64, lens: &[u8]) {
+        take_all::<u64>(key.to_be_bytes().as_slice(), key, lens)
     }
 }

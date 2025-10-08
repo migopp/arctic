@@ -174,3 +174,38 @@ impl Key for String {
         String::from_utf8(writer.0).expect("key::Write should be valid UTF-8")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::byte;
+    use crate::key::Read as _;
+    use crate::Key;
+
+    pub(super) fn take_all<'k, K: Key + 'k>(
+        array: &[u8],
+        key: impl Into<K::Borrow<'k>>,
+        lens: &[u8],
+    ) {
+        let mut reader = K::Read::from(key.into());
+
+        let mut index = 0;
+
+        for len in lens
+            .iter()
+            .copied()
+            .map(byte::Len::from_bytes)
+            .map(Option::unwrap)
+        {
+            assert_eq!(reader.bytes(), array.len() - index);
+
+            byte::Array::with_bytes(reader.take(len), |actual| {
+                assert_eq!(actual, &array[index..][..len.bytes() as usize]);
+            });
+
+            index += len.bytes() as usize;
+        }
+
+        assert_eq!(reader.bytes(), array.len() - index);
+        assert_eq!(reader.next(), array.get(index).copied());
+    }
+}

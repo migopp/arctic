@@ -230,77 +230,54 @@ impl PartialOrd<Reader<'_>> for Writer {
 
 #[cfg(test)]
 mod tests {
-    use crate::byte;
-    use crate::byte::Array;
-    use crate::key::dynamic;
-    use crate::key::Read as _;
+    use crate::key::tests::take_all;
 
     #[test]
-    fn dynamic_smoke() {
-        take_all(b"0123456789", [1])
+    fn smoke() {
+        take_all_array(b"0123456789", &[1])
     }
 
     #[test]
-    fn dynamic_0() {
-        take_all(b"", [0])
+    fn take_0() {
+        take_all_array(b"", &[0])
     }
 
     #[test]
-    fn dynamic_1() {
-        take_all(b"0", [1])
+    fn take_1() {
+        take_all_array(b"0", &[1])
     }
 
     #[test]
-    fn dynamic_3() {
-        take_all(b"012", [1, 1, 1])
+    fn len_3() {
+        take_all_array(b"012", &[1, 1, 1])
     }
 
     #[test]
-    fn dynamic_5() {
-        take_all(b"01234", [1, 1, 1, 1, 1])
+    fn len_5() {
+        take_all_array(b"01234", &[1, 1, 1, 1, 1])
     }
 
     #[test]
-    fn dynamic_7() {
-        take_all(b"0123456", [1, 1, 1, 1, 1, 1, 1])
+    fn len_7() {
+        take_all_array(b"0123456", &[1, 1, 1, 1, 1, 1, 1])
     }
 
     #[test]
-    fn dynamic_switch_exact() {
-        take_all(b"0123456789", [2, 2])
+    fn switch_exact() {
+        take_all_array(b"0123456789", &[2, 2])
     }
 
     #[test]
-    fn dynamic_switch_inexact() {
-        take_all(b"0123456789", [4, 2])
+    fn switch_inexact() {
+        take_all_array(b"0123456789", &[4, 2])
     }
 
     #[test]
-    fn dynamic_long() {
-        take_all(b"abcdefghijklmnopqrstuvwxyz", [1, 2, 3, 4, 5, 4, 3, 2, 1])
+    fn long() {
+        take_all_array(b"abcdefghijklmnopqrstuvwxyz", &[1, 2, 3, 4, 5, 4, 3, 2, 1])
     }
 
-    fn take_all<I: IntoIterator<Item = u8>>(initial: &[u8], lens: I) {
-        let mut iter = dynamic::Reader::from(initial);
-
-        let mut index = 0;
-        for len in lens
-            .into_iter()
-            .map(byte::Len::from_bytes)
-            .map(Option::unwrap)
-        {
-            assert_eq!(iter.bytes(), initial.len() - index);
-            Array::with_bytes(iter.take(len), |a| {
-                assert_eq!(a, &initial[index..][..len.bytes() as usize]);
-            });
-            index += len.bytes() as usize;
-        }
-
-        assert_eq!(iter.bytes(), initial.len() - index);
-        if iter.bits() > 0 {
-            assert_eq!(iter.next(), Some(initial[index]));
-        } else {
-            assert_eq!(iter.next(), None);
-        }
+    fn take_all_array(key: &[u8], lens: &[u8]) {
+        take_all::<Vec<u8>>(key, key, lens)
     }
 }
