@@ -4,7 +4,9 @@ use core::marker::PhantomData;
 use ribbit::atomic::Atomic128;
 
 use crate::key;
+use crate::raw::cursor;
 use crate::raw::iter;
+use crate::raw::Cursor;
 use crate::stat;
 use crate::Edge;
 
@@ -54,6 +56,15 @@ impl Map {
         &'a self,
     ) -> iter::PostorderIter<'a, S> {
         unsafe { iter::PostorderIter::new(&self.root) }
+    }
+
+    pub(super) fn traverse_prefix<'a, R: key::Read>(
+        &'a self,
+        prefix: R,
+    ) -> Cursor<'a, R, cursor::Optimistic<R>> {
+        let mut cursor = Cursor::new(prefix, &self.root);
+        cursor.traverse_prefix();
+        cursor
     }
 }
 

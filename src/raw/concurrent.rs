@@ -329,10 +329,8 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
-        let index = cursor.traverse_prefix();
-        let writer = W::from(prefix.slice(index));
-
+        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let writer = W::from(prefix.slice(cursor.bit()));
         let iter = unsafe { iter::LeafIter::new(cursor.root(), writer) };
 
         PrefixNonLinearizable {
@@ -352,12 +350,10 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
-        let index = cursor.traverse_prefix();
-        let mut stack = W::from(prefix);
-        stack.truncate(index);
+        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let writer = W::from(prefix.slice(cursor.bit()));
 
-        let iter = unsafe { iter::RangeIter::<R, W>::new(cursor.root(), stack, min, max) };
+        let iter = unsafe { iter::RangeIter::<R, W>::new(cursor.root(), writer, min, max) };
 
         RangeNonLinearizableIter {
             iter,
@@ -373,10 +369,8 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let mut cursor = Cursor::<R, cursor::Optimistic<R>>::new(prefix.clone(), self.raw.root());
-        let index = cursor.traverse_prefix();
-        let mut stack = W::from(prefix);
-        stack.truncate(index);
+        let cursor = self.raw.traverse_prefix(prefix.clone());
+        let writer = W::from(prefix.slice(cursor.bit()));
 
         let mut prev: Option<Vec<(W, u64)>> = None;
         let mut count = 0;
@@ -384,7 +378,12 @@ impl<'g> MapRef<'g> {
             count += 1;
 
             let mut iter = unsafe {
-                iter::RangeIter::<R, W>::new(cursor.root(), stack.clone(), min.clone(), max.clone())
+                iter::RangeIter::<R, W>::new(
+                    cursor.root(),
+                    writer.clone(),
+                    min.clone(),
+                    max.clone(),
+                )
             };
 
             let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
