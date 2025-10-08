@@ -102,7 +102,7 @@ impl linear::Header for Atomic64<Header> {
     }
 
     #[inline]
-    fn keys_sorted(&self) -> linear::SortedKeyIter {
+    fn keys(&self) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         let len = header.len().value() as usize;
         let keys = header.value.to_ne_bytes();

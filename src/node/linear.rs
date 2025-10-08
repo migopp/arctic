@@ -109,23 +109,23 @@ where
 #[expect(private_bounds)]
 impl<const LEN: usize, H: Header> Linear<LEN, H> {
     #[inline]
-    pub(super) fn iter_range(&self, min: u8, max: u8) -> SortedIter {
-        SortedIter {
+    pub(crate) fn iter(&self) -> Iter {
+        Iter {
+            keys: self.header.keys(),
+            edges: self.edges.as_slice(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn iter_range(&self, min: u8, max: u8) -> RangeIter {
+        Iter {
             keys: self.header.keys_range(min, max),
             edges: self.edges.as_slice(),
         }
     }
 
     #[inline]
-    pub(super) fn iter_sorted(&self) -> SortedIter {
-        SortedIter {
-            keys: self.header.keys_sorted(),
-            edges: self.edges.as_slice(),
-        }
-    }
-
-    #[inline]
-    pub(super) fn iter_unsorted(&self) -> UnsortedIter {
+    pub(crate) fn iter_unsorted(&self) -> UnsortedIter {
         UnsortedIter {
             keys: self.header.keys_unsorted(),
             edges: self.edges.iter(),
@@ -138,21 +138,30 @@ pub(super) trait Header {
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
+    fn keys(&self) -> KeyIter;
     fn keys_range(&self, min: u8, max: u8) -> RangeKeyIter;
-    fn keys_sorted(&self) -> SortedKeyIter;
     fn keys_unsorted(&self) -> UnsortedKeyIter;
 }
 
-pub(crate) struct SortedIter<'a> {
-    keys: SortedKeyIter,
+pub(crate) struct Iter<'a> {
+    keys: KeyIter,
     edges: &'a [Atomic128<Edge>],
 }
 
-impl<'a> Iterator for SortedIter<'a> {
+impl<'a> Iterator for Iter<'a> {
     type Item = (u8, &'a Atomic128<Edge>);
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next()?;
+        let edge = unsafe { self.edges.get_unchecked(index as usize) };
+        Some((key, edge))
+    }
+}
+
+impl<'a> DoubleEndedIterator for Iter<'a> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let (key, index) = self.keys.next_back()?;
         let edge = unsafe { self.edges.get_unchecked(index as usize) };
         Some((key, edge))
     }
@@ -173,9 +182,9 @@ impl<'a> Iterator for UnsortedIter<'a> {
     }
 }
 
-pub(crate) type RangeKeyIter = SortedKeyIter;
+pub(crate) type RangeIter<'a> = Iter<'a>;
 
-pub(crate) type SortedKeyIter = Or<
+pub(crate) type KeyIter = Or<
     core::iter::Take<core::array::IntoIter<(u8, u8), 3>>,
     core::iter::Take<core::array::IntoIter<(u8, u8), 15>>,
 >;
@@ -184,3 +193,5 @@ pub(crate) type UnsortedKeyIter = Or<
     core::iter::Take<core::array::IntoIter<u8, 4>>,
     core::iter::Take<core::array::IntoIter<u8, 16>>,
 >;
+
+pub(crate) type RangeKeyIter = KeyIter;

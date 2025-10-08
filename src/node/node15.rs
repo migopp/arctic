@@ -130,7 +130,7 @@ impl linear::Header for Atomic128<Header> {
     }
 
     #[inline]
-    fn keys_sorted(&self) -> linear::SortedKeyIter {
+    fn keys(&self) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         let keys = header.value.to_ne_bytes();
         let len = header.len().value() as usize;

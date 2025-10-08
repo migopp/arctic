@@ -50,6 +50,13 @@ impl Node256 {
             edges: self.0[min as usize..=max as usize].iter(),
         }
     }
+
+    pub(crate) fn iter_rev(&self) -> RevIter {
+        RevIter {
+            key: 255u8,
+            edges: self.0.iter().rev(),
+        }
+    }
 }
 
 impl<'a> IntoIterator for &'a Node256 {
@@ -86,6 +93,23 @@ impl<'a> Iterator for Iter<'a> {
         let edge = self.edges.next()?;
         let key = self.key;
         self.key = self.key.wrapping_add(1);
+        Some((key, edge))
+    }
+}
+
+pub(crate) struct RevIter<'a> {
+    key: u8,
+    edges: core::iter::Rev<core::slice::Iter<'a, Atomic128<Edge>>>,
+}
+
+impl<'a> Iterator for RevIter<'a> {
+    type Item = (u8, &'a Atomic128<Edge>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let edge = self.edges.next()?;
+        let key = self.key;
+        self.key = self.key.wrapping_sub(1);
         Some((key, edge))
     }
 }

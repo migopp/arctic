@@ -62,24 +62,20 @@ pub(crate) enum Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) unsafe fn iter_range(&self, min: u8, max: u8) -> RangeIter<'a> {
-        RangeIter::new(
-            min,
-            max,
-            match self {
-                Ref::Node3(node) => Or::L(node.iter_range(min, max)),
-                Ref::Node15(node) => Or::L(node.iter_range(min, max)),
-                Ref::Node256(node) => Or::R(node.iter_range(min, max)),
-            },
-        )
+    pub(crate) unsafe fn iter(&self) -> Iter<'a> {
+        match self {
+            Ref::Node3(node) => Or::L(node.iter()),
+            Ref::Node15(node) => Or::L(node.iter()),
+            Ref::Node256(node) => Or::R(node.into_iter()),
+        }
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_sorted(&self) -> SortedIter<'a> {
+    pub(crate) unsafe fn iter_rev(&self) -> RevIter<'a> {
         match self {
-            Ref::Node3(node) => Or::L(node.iter_sorted()),
-            Ref::Node15(node) => Or::L(node.iter_sorted()),
-            Ref::Node256(node) => Or::R(node.into_iter()),
+            Ref::Node3(node) => Or::L(node.iter().rev()),
+            Ref::Node15(node) => Or::L(node.iter().rev()),
+            Ref::Node256(node) => Or::R(node.iter_rev()),
         }
     }
 
@@ -90,6 +86,19 @@ impl<'a> Ref<'a> {
             Ref::Node15(node) => Or::L(node.iter_unsorted()),
             Ref::Node256(node) => Or::R(node.into_iter()),
         }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn iter_range(&self, min: u8, max: u8) -> RangeIter<'a> {
+        RangeIter::new(
+            min,
+            max,
+            match self {
+                Ref::Node3(node) => Or::L(node.iter_range(min, max)),
+                Ref::Node15(node) => Or::L(node.iter_range(min, max)),
+                Ref::Node256(node) => Or::R(node.iter_range(min, max)),
+            },
+        )
     }
 }
 
@@ -121,6 +130,7 @@ impl<'a> Ref<'a> {
         }
     }
 
+    #[inline]
     pub(crate) fn as_data(&self) -> u64 {
         match *self {
             Ref::Node3(node) => node as *const _ as u64 | Kind::NODE_3,
@@ -153,18 +163,19 @@ impl Kind {
     pub(crate) const NODE_256: u64 = Self::Node256 as u64;
 }
 
-pub(crate) type SortedIter<'a> = Or<linear::SortedIter<'a>, node256::Iter<'a>>;
+pub(crate) type RevIter<'a> = Or<core::iter::Rev<linear::Iter<'a>>, node256::RevIter<'a>>;
+pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;
 pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
 
 pub(crate) struct RangeIter<'a> {
     min: u8,
     max: u8,
-    iter: SortedIter<'a>,
+    iter: Iter<'a>,
 }
 
 impl<'a> RangeIter<'a> {
     #[inline]
-    pub(crate) fn new(min: u8, max: u8, iter: SortedIter<'a>) -> Self {
+    pub(crate) fn new(min: u8, max: u8, iter: Iter<'a>) -> Self {
         Self { min, max, iter }
     }
 
