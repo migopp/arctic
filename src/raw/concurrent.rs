@@ -265,7 +265,7 @@ impl<'g> MapRef<'g> {
             | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
             Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
             | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                Edge::deallocate(edge, stat::Counter::FreeConflict)
+                Edge::deallocate_unchecked(edge, stat::Counter::FreeConflict)
             },
         }
     }

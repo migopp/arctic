@@ -64,14 +64,15 @@ impl Edge {
         }
     }
 
+    /// # SAFETY
+    ///
+    /// Caller must ensure `edge` is a node that has no references.
     #[inline]
-    pub(crate) unsafe fn deallocate(edge: ribbit::Packed<Edge>, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate_unchecked(edge: ribbit::Packed<Edge>, counter: stat::Counter) {
         let meta = edge.meta();
         let data = edge.data();
 
-        if meta.leaf() || data == 0 {
-            return;
-        }
+        validate!(!meta.leaf() && data != 0);
 
         let tag = data & Self::MASK_TAG;
         let ptr = data & Self::MASK_PTR;

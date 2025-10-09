@@ -45,7 +45,7 @@ impl Drop for Global {
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe { Edge::deallocate(*edge, stat::Counter::FreeDrop) })
+            .for_each(|edge| unsafe { Edge::deallocate_unchecked(*edge, stat::Counter::FreeDrop) })
     }
 }
 
@@ -137,7 +137,7 @@ impl WriteGuard<'_, '_> {
                 return true;
             }
 
-            unsafe { Edge::deallocate(*edge, stat::Counter::FreeRetire) };
+            unsafe { Edge::deallocate_unchecked(*edge, stat::Counter::FreeRetire) };
             false
         })
     }
