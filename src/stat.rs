@@ -27,10 +27,6 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
         let meta = edge.meta();
         let data = edge.data();
 
-        if !meta.leaf() && data == 0 {
-            continue;
-        }
-
         compression.record(meta.key().len().bits() as u64);
 
         if meta.leaf() {
