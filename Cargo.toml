@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["opt-node3-get", "opt-node15-get", "opt-membarrier", "smr-hazard"]
-stat = ["dep:serde", "dep:serde_bytes", "dep:hdrhistogram"]
+stat = ["dep:serde", "dep:base64", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
 opt-membarrier = ["dep:libc"]
@@ -13,11 +13,11 @@ smr-hazard = []
 validate = []
 
 [dependencies]
+base64 = { version = "0.22.1", optional = true }
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false, features = ["serialization"] }
 libc = { version = "0.2.176", optional = true }
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
-serde_bytes = { version = "0.11.19", optional = true }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
 [dev-dependencies]

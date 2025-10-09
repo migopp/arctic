@@ -287,10 +287,19 @@ impl serde::Serialize for Histogram {
         use serde::ser::Error as _;
 
         let mut buffer = Vec::new();
-        V2DeflateSerializer::new()
-            .serialize(&self.inner, &mut buffer)
-            .map_err(S::Error::custom)?;
-        serde_bytes::serialize(&buffer, serializer)
+
+        {
+            let mut encoder = base64::write::EncoderWriter::new(
+                &mut buffer,
+                &base64::engine::general_purpose::STANDARD,
+            );
+
+            V2DeflateSerializer::new()
+                .serialize(&self.inner, &mut encoder)
+                .map_err(S::Error::custom)?;
+        }
+
+        serializer.serialize_str(str::from_utf8(&buffer).map_err(S::Error::custom)?)
     }
 }
 
@@ -303,10 +312,15 @@ impl<'de> serde::Deserialize<'de> for Histogram {
         use hdrhistogram::serialization::Deserializer;
         use serde::de::Error as _;
 
-        let mut bytes: &[u8] = serde_bytes::deserialize(deserializer)?;
+        let mut string = <&'de str>::deserialize(deserializer).map(std::io::Cursor::new)?;
+        let mut decoder = base64::read::DecoderReader::new(
+            &mut string,
+            &base64::engine::general_purpose::STANDARD,
+        );
+
         Ok(Histogram {
             inner: Deserializer::new()
-                .deserialize(&mut bytes)
+                .deserialize(&mut decoder)
                 .map_err(D::Error::custom)?,
         })
     }
