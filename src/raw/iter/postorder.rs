@@ -64,14 +64,17 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
                     continue;
                 }
 
-                if first && !meta.leaf() {
-                    let node = unsafe { Edge::next_node_unchecked(data) };
-                    frontier.push(unsafe { RepeatIter::new(node) });
-                    continue 'vertical;
+                if first {
+                    // Fall through for leaf
+                    if meta.leaf() {
+                        iter.skip();
+                    } else {
+                        // Visit children before node
+                        let node = unsafe { Edge::next_node_unchecked(data) };
+                        frontier.push(unsafe { RepeatIter::new(node) });
+                        continue 'vertical;
+                    }
                 }
-
-                // Second visit (or fallthrough)
-                iter.skip();
 
                 if let Some(item) = S::select(edge, depth) {
                     return Some(item);
