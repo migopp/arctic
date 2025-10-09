@@ -300,9 +300,9 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(cursor.bit()));
-        let iter = unsafe { iter::LeafIter::new(cursor.root(), writer) };
+        let (root, bit) = self.raw.traverse_prefix(prefix);
+        let writer = W::from(prefix.slice(bit));
+        let iter = unsafe { iter::LeafIter::new(root, writer) };
 
         PrefixNonLinearizable {
             iter,
@@ -321,10 +321,10 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(cursor.bit()));
+        let (root, bit) = self.raw.traverse_prefix(prefix);
+        let writer = W::from(prefix.slice(bit));
 
-        let iter = unsafe { iter::RangeIter::<R, W>::new(cursor.root(), writer, min, max) };
+        let iter = unsafe { iter::RangeIter::<R, W>::new(root, writer, min, max) };
 
         RangeNonLinearizableIter {
             iter,
@@ -340,16 +340,15 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let cursor = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(cursor.bit()));
+        let (root, bit) = self.raw.traverse_prefix(prefix);
+        let writer = W::from(prefix.slice(bit));
 
         let mut prev: Option<Vec<(W, u64)>> = None;
         let mut count = 0;
         loop {
             count += 1;
 
-            let mut iter =
-                unsafe { iter::RangeIter::<R, W>::new(cursor.root(), writer.clone(), min, max) };
+            let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
 
             let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
                 .collect::<Vec<_>>();

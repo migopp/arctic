@@ -1,5 +1,6 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
@@ -49,7 +50,8 @@ impl Map {
     pub(crate) fn iter<'a, W: key::Write, S: crate::iter::Sort>(
         &'a self,
     ) -> iter::LeafIter<'a, W, S> {
-        unsafe { iter::LeafIter::new(&self.root, W::default()) }
+        let root = self.root.load_packed(Ordering::Relaxed);
+        unsafe { iter::LeafIter::new(root, W::default()) }
     }
 
     pub(crate) fn postorder<'a, S: iter::postorder::Selector>(
@@ -58,13 +60,9 @@ impl Map {
         unsafe { iter::PostorderIter::new(&self.root) }
     }
 
-    pub(super) fn traverse_prefix<'a, R: key::Read>(
-        &'a self,
-        prefix: R,
-    ) -> Cursor<'a, R, cursor::Optimistic<R>> {
-        let mut cursor = Cursor::new(prefix, &self.root);
-        cursor.traverse_prefix();
-        cursor
+    pub(super) fn traverse_prefix<R: key::Read>(&self, prefix: R) -> (ribbit::Packed<Edge>, usize) {
+        let mut cursor = Cursor::<_, cursor::Optimistic<_>>::new(prefix, &self.root);
+        cursor.traverse_prefix()
     }
 }
 

@@ -1,7 +1,5 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
-
 use crate::key;
 use crate::node;
 use crate::Edge;
@@ -25,12 +23,11 @@ where
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {
-        let edge = root.load_packed(Ordering::Acquire);
-        let meta = edge.meta();
-        let data = edge.data();
+    pub(crate) unsafe fn new(root: ribbit::Packed<Edge>, mut key: W, min: R, max: R) -> Self {
+        let meta = root.meta();
+        let data = root.data();
 
-        key.extend(edge.meta().key());
+        key.extend(root.meta().key());
 
         if meta.leaf() {
             if key < min || key > max {
@@ -39,7 +36,7 @@ where
 
             Self::Root {
                 key,
-                next: Some(edge.data()),
+                next: Some(root.data()),
             }
         } else if data == 0 {
             Self::Root { key, next: None }

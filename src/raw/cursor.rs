@@ -74,7 +74,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    pub(crate) fn traverse_prefix(&mut self) -> usize {
+    pub(crate) fn traverse_prefix(&mut self) -> (ribbit::Packed<Edge>, usize) {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -92,8 +92,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                 }
             }
 
-            self.key = save;
-            return self.bit;
+            return (edge, self.bit);
         }
     }
 
