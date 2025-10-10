@@ -382,7 +382,8 @@ impl<'g> MapRef<'g> {
             match meta.key().match_prefix(&mut reader)? {
                 byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
                     let node = unsafe { Edge::next_node_unchecked(data) };
-                    let next = reader.next().and_then(|byte| node.get(byte))?;
+                    let Some(byte) = reader.next() else { break };
+                    let next = node.get(byte)?;
 
                     edge = next.load_packed(Ordering::Acquire);
                     bits += len.bits() + 8;
