@@ -57,9 +57,22 @@ impl Array {
 
     #[inline]
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
-    pub(crate) fn has_overlap(self, prefix: Self) -> bool {
-        let len = self.len().min(prefix.len());
-        (self.0 ^ prefix.0) & len.mask() == 0
+    pub(crate) fn is_overlapping(self, other: Self) -> bool {
+        let len = self.len().min(other.len());
+        self.equal_up_to(other, len)
+    }
+
+    #[inline]
+    pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<MatchPrefix> {
+        let len = self.len().min_bits(key.bits());
+        let key = key.take(len);
+        if self == key {
+            Some(MatchPrefix::Full(len))
+        } else if self.equal_up_to(key, len) {
+            Some(MatchPrefix::Partial)
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -69,12 +82,12 @@ impl Array {
     }
 
     #[inline]
-    pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> Match {
+    pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> MatchSplit {
         let len = self.len().min_bits(key.bits());
         let key = key.take(len);
 
         if key == self {
-            return Match::Full(len);
+            return MatchSplit::Full(len);
         }
 
         let len_prefix = unsafe {
@@ -88,7 +101,7 @@ impl Array {
         };
 
         let shift = len_prefix.bits() as u32 + 8;
-        Match::Partial {
+        MatchSplit::Partial {
             start: Self::from_u64_truncate(self.0, len_prefix),
             middle: self.0.rotate_left(shift) as u8,
             end: Self::from_u64_truncate(self.0 << shift, unsafe {
@@ -110,6 +123,13 @@ impl Array {
         ))
     }
 
+    #[inline]
+    fn equal_up_to(self, other: Self, len: Len) -> bool {
+        validate!(self.len() >= len);
+        validate!(other.len() >= len);
+        (self.0 ^ other.0) & len.mask() == 0
+    }
+
     #[cfg(test)]
     pub(crate) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, with: F) -> T {
         let bytes = self.0.to_be_bytes();
@@ -119,7 +139,13 @@ impl Array {
 }
 
 #[derive(Debug)]
-pub(crate) enum Match {
+pub(crate) enum MatchPrefix {
+    Full(Len),
+    Partial,
+}
+
+#[derive(Debug)]
+pub(crate) enum MatchSplit {
     Full(Len),
     Partial {
         start: Array,
@@ -147,7 +173,7 @@ impl fmt::Debug for Array {
 
 /// Length in bits.
 #[repr(transparent)]
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Len(u6);
 
 impl Len {

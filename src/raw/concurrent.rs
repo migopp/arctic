@@ -300,9 +300,10 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
-        let (root, bit) = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(bit));
-        let iter = unsafe { iter::LeafIter::new(root, writer) };
+        let iter = match self.traverse_prefix::<R, W>(prefix) {
+            Some((writer, root)) => unsafe { iter::LeafIter::new(root, writer) },
+            None => iter::LeafIter::empty(),
+        };
 
         PrefixNonLinearizable {
             iter,
@@ -321,10 +322,10 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
-        let (root, bit) = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(bit));
-
-        let iter = unsafe { iter::RangeIter::<R, W>::new(root, writer, min, max) };
+        let iter = match self.traverse_prefix::<R, W>(prefix) {
+            Some((writer, root)) => unsafe { iter::RangeIter::<R, W>::new(root, writer, min, max) },
+            None => iter::RangeIter::<R, W>::empty(),
+        };
 
         RangeNonLinearizableIter {
             iter,
@@ -340,8 +341,9 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let (root, bit) = self.raw.traverse_prefix(prefix);
-        let writer = W::from(prefix.slice(bit));
+        let Some((writer, root)) = self.traverse_prefix::<R, W>(prefix) else {
+            return Vec::new().into_iter();
+        };
 
         let mut prev: Option<Vec<(W, u64)>> = None;
         let mut count = 0;
@@ -361,6 +363,35 @@ impl<'g> MapRef<'g> {
                 None | Some(_) => prev = Some(next),
             }
         }
+    }
+
+    #[inline]
+    fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, ribbit::Packed<Edge>)>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+    {
+        let mut reader = prefix;
+        let mut bits = 0;
+        let mut edge = self.raw.root().load_packed(Ordering::Acquire);
+
+        loop {
+            let meta = edge.meta();
+            let data = edge.data();
+
+            match meta.key().match_prefix(&mut reader)? {
+                byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
+                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    let next = reader.next().and_then(|byte| node.get(byte))?;
+
+                    edge = next.load_packed(Ordering::Acquire);
+                    bits += len.bits() + 8;
+                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => break,
+            }
+        }
+
+        Some((W::from(prefix.slice(bits as usize)), edge))
     }
 }
 

@@ -73,29 +73,6 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
         }
     }
 
-    #[inline]
-    pub(crate) fn traverse_prefix(&mut self) -> (ribbit::Packed<Edge>, usize) {
-        loop {
-            let edge = self.root().load_packed(Ordering::Relaxed);
-            let meta = edge.meta();
-            let data = edge.data();
-            let save = self.key;
-
-            // Continue traversal only if exact match
-            if !meta.leaf() && data != 0 {
-                if let Some(len) = meta.key().match_exact(&mut self.key) {
-                    let node = unsafe { Edge::next_node_unchecked(data) };
-                    if let Some(next) = self.key.next().and_then(|byte| node.get(byte)) {
-                        self.step(save, len, node, next);
-                        continue;
-                    }
-                }
-            }
-
-            return (edge, self.bit);
-        }
-    }
-
     /// Return CAS operands to either insert the leaf or structurally update
     /// the tree on the way to inserting the leaf.
     #[inline]
@@ -111,7 +88,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             let r#match = old_meta.key().match_split(&mut self.key);
 
             // Fast path: traverse
-            if let byte::Match::Full(len) = r#match {
+            if let byte::MatchSplit::Full(len) = r#match {
                 if !old_meta.leaf() && old_data > 0 {
                     let byte = self.key.next().unwrap();
                     let node = unsafe { Edge::next_node_unchecked(old_data) };
@@ -130,16 +107,16 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
             self.key = save;
 
             let (op, new) = match r#match {
-                byte::Match::Full(_) if !old_meta.leaf() && old_data > 0 => {
+                byte::MatchSplit::Full(_) if !old_meta.leaf() && old_data > 0 => {
                     let node = unsafe { Edge::next_node_unchecked(old_data) };
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
-                byte::Match::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
+                byte::MatchSplit::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
                     Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), None),
                 ),
-                byte::Match::Full(_) => (
+                byte::MatchSplit::Full(_) => (
                     Op::Edge(edge::Op::Insert),
                     Edge::new_leaf(
                         self.key
@@ -147,7 +124,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                         value,
                     ),
                 ),
-                byte::Match::Partial { start, middle, end } => (
+                byte::MatchSplit::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,

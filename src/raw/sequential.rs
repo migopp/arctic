@@ -5,9 +5,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::key;
-use crate::raw::cursor;
 use crate::raw::iter;
-use crate::raw::Cursor;
 use crate::stat;
 use crate::Edge;
 
@@ -58,11 +56,6 @@ impl Map {
         &'a self,
     ) -> iter::PostorderIter<'a, S> {
         unsafe { iter::PostorderIter::new(&self.root) }
-    }
-
-    pub(super) fn traverse_prefix<R: key::Read>(&self, prefix: R) -> (ribbit::Packed<Edge>, usize) {
-        let mut cursor = Cursor::<_, cursor::Optimistic<_>>::new(prefix, &self.root);
-        cursor.traverse_prefix()
     }
 }
 

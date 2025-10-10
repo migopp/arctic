@@ -20,6 +20,14 @@ where
     S: crate::iter::Sort,
 {
     #[inline]
+    pub(crate) fn empty() -> Self {
+        Self::Root {
+            key: W::default(),
+            next: None,
+        }
+    }
+
+    #[inline]
     pub(crate) unsafe fn new(root: ribbit::Packed<Edge>, mut key: W) -> Self {
         let meta = root.meta();
         let data = root.data();
