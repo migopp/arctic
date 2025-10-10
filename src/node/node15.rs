@@ -123,7 +123,7 @@ impl linear::Header for Atomic128<Header> {
         };
 
         // TODO: SIMD sorting network?
-        let keys = keys.to_ne_bytes();
+        let keys = keys.to_le_bytes();
         let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len].sort_unstable();
         Or::R(indexes.into_iter().take(len))
@@ -132,7 +132,7 @@ impl linear::Header for Atomic128<Header> {
     #[inline]
     fn keys(&self) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        let keys = header.value.to_ne_bytes();
+        let keys = header.value.to_le_bytes();
         let len = header.len().value() as usize;
         let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len].sort_unstable();
@@ -145,7 +145,7 @@ impl linear::Header for Atomic128<Header> {
         Or::R(
             header
                 .value
-                .to_ne_bytes()
+                .to_le_bytes()
                 .into_iter()
                 .take(header.len().value() as usize),
         )

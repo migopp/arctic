@@ -153,6 +153,7 @@ impl<'a> Iterator for Iter<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next()?;
+        validate!((index as usize) < self.edges.len());
         let edge = unsafe { self.edges.get_unchecked(index as usize) };
         Some((key, edge))
     }
@@ -162,6 +163,7 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next_back()?;
+        validate!((index as usize) < self.edges.len());
         let edge = unsafe { self.edges.get_unchecked(index as usize) };
         Some((key, edge))
     }
