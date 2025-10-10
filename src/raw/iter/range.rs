@@ -51,15 +51,18 @@ where
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
 
-            validate_eq!(key, min.slice(key.bits()));
-            validate_eq!(key, max.slice(key.bits()));
+            let check_first = key == min.slice(key.bits());
+            let check_last = key == max.slice(key.bits());
+
+            let first = if check_first { min.get(key.bits()) } else { 0 };
+            let last = if check_last { max.get(key.bits()) } else { 255 };
 
             Self::Node {
                 frontier: vec![(
                     key.bits(),
-                    true,
-                    true,
-                    node.iter_range(min.get(key.bits()), max.get(key.bits())),
+                    check_first,
+                    check_last,
+                    node.iter_range(first, last),
                 )],
                 key,
                 min,

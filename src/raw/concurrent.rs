@@ -300,7 +300,7 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let guard = self.smr.protect_read(prefix.peek_all());
-        let iter = match self.traverse_prefix::<R, W>(prefix) {
+        let iter = match unsafe { self.traverse_prefix::<R, W>(prefix) } {
             Some((writer, root)) => unsafe { iter::LeafIter::new(root, writer) },
             None => iter::LeafIter::empty(),
         };
@@ -322,7 +322,7 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let guard = self.smr.protect_read(prefix.peek_all());
-        let iter = match self.traverse_prefix::<R, W>(prefix) {
+        let iter = match unsafe { self.traverse_prefix::<R, W>(prefix) } {
             Some((writer, root)) => unsafe { iter::RangeIter::<R, W>::new(root, writer, min, max) },
             None => iter::RangeIter::<R, W>::empty(),
         };
@@ -341,7 +341,7 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let Some((writer, root)) = self.traverse_prefix::<R, W>(prefix) else {
+        let Some((writer, root)) = (unsafe { self.traverse_prefix::<R, W>(prefix) }) else {
             return Vec::new().into_iter();
         };
 
@@ -366,7 +366,7 @@ impl<'g> MapRef<'g> {
     }
 
     #[inline]
-    fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, ribbit::Packed<Edge>)>
+    unsafe fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, ribbit::Packed<Edge>)>
     where
         R: key::Read,
         W: key::Write + From<R>,
