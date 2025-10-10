@@ -17,18 +17,12 @@ pub(crate) struct Local<'g>(PhantomData<&'g Global>);
 
 impl<'g> Local<'g> {
     #[inline]
-    pub(crate) fn protect_read<'l>(
-        &'l self,
-        _prefix: ribbit::Packed<byte::Array>,
-    ) -> ReadGuard<'g, 'l> {
+    pub(crate) fn protect_read<'l>(&'l self, _prefix: byte::Array) -> ReadGuard<'g, 'l> {
         ReadGuard(PhantomData)
     }
 
     #[inline]
-    pub(crate) fn protect_write<'l>(
-        &'l mut self,
-        _prefix: ribbit::Packed<byte::Array>,
-    ) -> WriteGuard<'g, 'l> {
+    pub(crate) fn protect_write<'l>(&'l mut self, _prefix: byte::Array) -> WriteGuard<'g, 'l> {
         WriteGuard(PhantomData)
     }
 }
