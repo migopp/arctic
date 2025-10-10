@@ -1,3 +1,4 @@
+use core::cmp;
 use core::sync::atomic::Ordering;
 
 use crate::key;
@@ -13,7 +14,7 @@ pub(crate) enum RangeIter<'a, R, W> {
         key: W,
         min: R,
         max: R,
-        frontier: Vec<(usize, bool, bool, node::RangeIter<'a>)>,
+        frontier: Vec<(usize, node::RangeIter<'a>)>,
     },
 }
 
@@ -51,19 +52,17 @@ where
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
 
-            let check_first = key == min.slice(key.bits());
-            let check_last = key == max.slice(key.bits());
+            validate!(key >= min.slice(key.bits()));
+            validate!(key <= max.slice(key.bits()));
 
-            let first = if check_first { min.get(key.bits()) } else { 0 };
-            let last = if check_last { max.get(key.bits()) } else { 255 };
+            let first = (key == min.slice(key.bits())).then(|| min.get(key.bits()));
+            let last = (key == max.slice(key.bits())).then(|| max.get(key.bits()));
+
+            let mut frontier = Vec::with_capacity(7);
+            frontier.push((key.bits(), node.iter_range(first, last)));
 
             Self::Node {
-                frontier: vec![(
-                    key.bits(),
-                    check_first,
-                    check_last,
-                    node.iter_range(first, last),
-                )],
+                frontier,
                 key,
                 min,
                 max,
@@ -88,7 +87,7 @@ where
         };
 
         'vertical: loop {
-            let (len, check_first, check_last, iter) = frontier.last_mut()?;
+            let (len, iter) = frontier.last_mut()?;
 
             loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -108,32 +107,57 @@ where
                 key.push(byte);
                 key.extend(meta.key());
 
-                let check_first = *check_first && byte == node::RangeIter::min(iter);
-                let check_last = *check_last && byte == node::RangeIter::max(iter);
+                let check_first = Some(byte) == node::RangeIter::min(iter);
+                let check_last = Some(byte) == node::RangeIter::max(iter);
 
-                if check_last && *key > *max {
-                    frontier.clear();
-                    return None;
+                if !check_first && !check_last {
+                    if meta.leaf() {
+                        return Some((key, edge.data()));
+                    } else {
+                        let node = unsafe { Edge::next_node_unchecked(data) };
+                        frontier.push((key.bits(), unsafe { node.iter_range(None, None) }));
+                        continue 'vertical;
+                    }
                 }
+
+                crate::cold();
 
                 if meta.leaf() {
                     if check_first && *key < *min {
                         continue;
                     }
 
-                    return Some((key, edge.data()));
-                } else {
-                    if check_first && *key < min.slice(key.bits()) {
-                        continue;
+                    if check_last && *key > *max {
+                        frontier.clear();
+                        return None;
                     }
 
-                    let min = if check_first { min.get(key.bits()) } else { 0 };
-                    let max = if check_last { max.get(key.bits()) } else { 255 };
+                    return Some((key, edge.data()));
+                } else {
+                    let min = if check_first {
+                        match (*key).partial_cmp(&min.slice(key.bits())) {
+                            None => unreachable!(),
+                            Some(cmp::Ordering::Less) => continue,
+                            Some(cmp::Ordering::Equal) => Some(min.get(key.bits())),
+                            Some(cmp::Ordering::Greater) => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    let max = if check_last {
+                        match (*key).partial_cmp(&max.slice(key.bits())) {
+                            None => unreachable!(),
+                            Some(cmp::Ordering::Less) => None,
+                            Some(cmp::Ordering::Equal) => Some(max.get(key.bits())),
+                            Some(cmp::Ordering::Greater) => continue,
+                        }
+                    } else {
+                        None
+                    };
 
                     let node = unsafe { Edge::next_node_unchecked(data) };
-                    frontier.push((key.bits(), check_first, check_last, unsafe {
-                        node.iter_range(min, max)
-                    }));
+                    frontier.push((key.bits(), unsafe { node.iter_range(min, max) }));
                     continue 'vertical;
                 }
             }

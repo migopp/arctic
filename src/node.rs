@@ -89,13 +89,15 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_range(&self, min: u8, max: u8) -> RangeIter<'a> {
+    pub(crate) unsafe fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> RangeIter<'a> {
         RangeIter::new(
             min,
             max,
-            if min == 0 && max == 255 {
+            if min.is_none() && max.is_none() {
                 self.iter()
             } else {
+                let min = min.unwrap_or(0);
+                let max = max.unwrap_or(255);
                 match self {
                     Ref::Node3(node) => Or::L(node.iter_range(min, max)),
                     Ref::Node15(node) => Or::L(node.iter_range(min, max)),
@@ -172,24 +174,24 @@ pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;
 pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
 
 pub(crate) struct RangeIter<'a> {
-    min: u8,
-    max: u8,
+    min: Option<u8>,
+    max: Option<u8>,
     iter: Iter<'a>,
 }
 
 impl<'a> RangeIter<'a> {
     #[inline]
-    pub(crate) fn new(min: u8, max: u8, iter: Iter<'a>) -> Self {
+    pub(crate) fn new(min: Option<u8>, max: Option<u8>, iter: Iter<'a>) -> Self {
         Self { min, max, iter }
     }
 
     #[inline]
-    pub(crate) fn min(&self) -> u8 {
+    pub(crate) fn min(&self) -> Option<u8> {
         self.min
     }
 
     #[inline]
-    pub(crate) fn max(&self) -> u8 {
+    pub(crate) fn max(&self) -> Option<u8> {
         self.max
     }
 }
