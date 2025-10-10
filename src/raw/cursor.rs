@@ -128,10 +128,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,
-                        Some((
-                            middle,
-                            old.with_meta(old.meta().with_key(end).with_frozen(false)),
-                        )),
+                        Some((middle, old.with_meta(old.meta().with_key(end)))),
                     ),
                 ),
             };

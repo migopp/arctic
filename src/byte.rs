@@ -100,12 +100,12 @@ impl Array {
             )
         };
 
-        let shift = len_prefix.bits() as u32 + 8;
+        let len_middle = len_prefix.bits() + 8;
         MatchSplit::Partial {
             start: Self::from_u64_truncate(self.0, len_prefix),
-            middle: self.0.rotate_left(shift) as u8,
-            end: Self::from_u64_truncate(self.0 << shift, unsafe {
-                Len::from_bits_unchecked(self.len().bits() - len_prefix.bits() - 8)
+            middle: self.0.rotate_left(len_middle as u32) as u8,
+            end: Self::from_u64_truncate(self.0 << len_middle, unsafe {
+                Len::from_bits_unchecked(self.len().bits() - len_middle)
             }),
         }
     }
