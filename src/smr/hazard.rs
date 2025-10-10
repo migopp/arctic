@@ -131,7 +131,7 @@ impl WriteGuard<'_, '_> {
         self.0.edges.retain(|edge| {
             if hazards
                 .iter()
-                .any(|hazard| hazard.has_prefix(edge.meta().key()))
+                .any(|hazard| hazard.has_overlap(edge.meta().key()))
             {
                 stat::increment(stat::Counter::HazardMatch);
                 return true;

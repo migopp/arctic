@@ -57,11 +57,7 @@ impl Array {
 
     #[inline]
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
-    pub(crate) fn has_prefix(self, prefix: Self) -> bool {
-        if self.len().bits() < prefix.len().bits() {
-            return false;
-        }
-
+    pub(crate) fn has_overlap(self, prefix: Self) -> bool {
         let len = self.len().min(prefix.len());
         (self.0 ^ prefix.0) & len.mask() == 0
     }
