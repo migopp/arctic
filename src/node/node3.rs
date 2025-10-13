@@ -80,7 +80,7 @@ impl linear::Header for Atomic64<Header> {
     }
 
     #[inline]
-    fn keys_range(&self, min: u8, max: u8) -> linear::RangeKeyIter {
+    fn keys_range(&self, min: u8, max: u8) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         let len = header.len().value() as usize;
         let keys = header.value.to_le_bytes();
@@ -96,17 +96,17 @@ impl linear::Header for Atomic64<Header> {
         });
 
         indexes.sort_unstable();
-        Or::L(indexes.into_iter().take(valid))
+        linear::KeyIter::new_3(linear::RawKeyIter::new(indexes, valid))
     }
 
     #[inline]
     fn keys(&self) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value() as usize;
+        let len = header.len().value();
         let keys = header.value.to_le_bytes();
         let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
-        indexes[..len].sort_unstable();
-        Or::L(indexes.into_iter().take(len))
+        indexes[..len as usize].sort_unstable();
+        linear::KeyIter::new_3(linear::RawKeyIter::new(indexes, len))
     }
 
     #[inline]

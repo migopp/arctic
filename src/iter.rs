@@ -25,11 +25,11 @@ impl SortPrivate for Sorted {
 }
 
 impl SortPrivate for core::iter::Rev<Sorted> {
-    type Iter<'a> = node::RevIter<'a>;
+    type Iter<'a> = core::iter::Rev<node::Iter<'a>>;
 
     #[inline]
     unsafe fn new<'a>(node: node::Ref<'a>) -> Self::Iter<'a> {
-        node.iter_rev()
+        node.iter().rev()
     }
 }
 

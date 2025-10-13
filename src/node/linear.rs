@@ -1,4 +1,7 @@
 use core::fmt::Debug;
+use core::marker::PhantomData;
+use core::num::NonZeroUsize;
+use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -110,18 +113,12 @@ where
 impl<const LEN: usize, H: Header> Linear<LEN, H> {
     #[inline]
     pub(crate) fn iter(&self) -> Iter {
-        Iter {
-            keys: self.header.keys(),
-            edges: self.edges.as_slice(),
-        }
+        Iter::new(self.header.keys(), &self.edges)
     }
 
     #[inline]
     pub(crate) fn iter_range(&self, min: u8, max: u8) -> RangeIter {
-        Iter {
-            keys: self.header.keys_range(min, max),
-            edges: self.edges.as_slice(),
-        }
+        Iter::new(self.header.keys_range(min, max), &self.edges)
     }
 
     #[inline]
@@ -139,13 +136,25 @@ pub(super) trait Header {
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
     fn keys(&self) -> KeyIter;
-    fn keys_range(&self, min: u8, max: u8) -> RangeKeyIter;
+    fn keys_range(&self, min: u8, max: u8) -> KeyIter;
     fn keys_unsorted(&self) -> UnsortedKeyIter;
 }
 
 pub(crate) struct Iter<'a> {
     keys: KeyIter,
-    edges: &'a [Atomic128<Edge>],
+    edges: NonNull<Atomic128<Edge>>,
+    _slice: PhantomData<&'a [Atomic128<Edge>]>,
+}
+
+impl<'a> Iter<'a> {
+    #[inline]
+    fn new(keys: KeyIter, edges: &[Atomic128<Edge>]) -> Self {
+        Self {
+            keys,
+            edges: NonNull::from(edges).cast(),
+            _slice: PhantomData,
+        }
+    }
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -153,9 +162,13 @@ impl<'a> Iterator for Iter<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next()?;
-        validate!((index as usize) < self.edges.len());
-        let edge = unsafe { self.edges.get_unchecked(index as usize) };
+        let edge = unsafe { self.edges.add(index as usize).as_ref() };
         Some((key, edge))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.keys.size_hint()
     }
 }
 
@@ -163,9 +176,17 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next_back()?;
-        validate!((index as usize) < self.edges.len());
-        let edge = unsafe { self.edges.get_unchecked(index as usize) };
+        let edge = unsafe { self.edges.add(index as usize).as_ref() };
         Some((key, edge))
+    }
+}
+
+impl<'a> ExactSizeIterator for Iter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
     }
 }
 
@@ -186,14 +207,194 @@ impl<'a> Iterator for UnsortedIter<'a> {
 
 pub(crate) type RangeIter<'a> = Iter<'a>;
 
-pub(crate) type KeyIter = Or<
-    core::iter::Take<core::array::IntoIter<(u8, u8), 3>>,
-    core::iter::Take<core::array::IntoIter<(u8, u8), 15>>,
->;
-
 pub(crate) type UnsortedKeyIter = Or<
     core::iter::Take<core::array::IntoIter<u8, 4>>,
     core::iter::Take<core::array::IntoIter<u8, 16>>,
 >;
 
-pub(crate) type RangeKeyIter = KeyIter;
+pub(crate) union KeyIter {
+    node_3: RawKeyIter<3>,
+    node_15: NonNull<RawKeyIter<15>>,
+    raw: usize,
+}
+
+const _: [(); size_of::<usize>()] = [(); size_of::<RawKeyIter<3>>()];
+const _: [(); size_of::<usize>()] = [(); size_of::<NonNull<RawKeyIter<15>>>()];
+
+impl KeyIter {
+    const MASK_TAG: usize = 0b100
+        << if cfg!(target_endian = "little") {
+            56
+        } else {
+            0
+        };
+    const MASK_PTR: usize = !Self::MASK_TAG;
+
+    #[inline]
+    pub(super) fn new_3(iter: RawKeyIter<3>) -> Self {
+        Self { node_3: iter }
+    }
+
+    #[inline]
+    pub(super) fn new_15(iter: RawKeyIter<15>) -> Self {
+        Self {
+            node_15: NonNull::from(Box::leak(Box::new(iter))).map_addr(|addr| unsafe {
+                validate_eq!(addr.get() & Self::MASK_TAG, 0);
+                NonZeroUsize::new_unchecked(addr.get() | Self::MASK_TAG)
+            }),
+        }
+    }
+
+    #[inline]
+    fn is_node_3(&self) -> bool {
+        unsafe { self.raw & Self::MASK_TAG == 0 }
+    }
+
+    #[inline]
+    fn with<N3, N15, T>(&self, node_3: N3, node_15: N15) -> T
+    where
+        N3: FnOnce(&RawKeyIter<3>) -> T,
+        N15: FnOnce(&RawKeyIter<15>) -> T,
+    {
+        if self.is_node_3() {
+            node_3(unsafe { &self.node_3 })
+        } else {
+            crate::cold();
+            node_15(unsafe {
+                self.node_15
+                    .map_addr(|addr| NonZeroUsize::new_unchecked(addr.get() & Self::MASK_PTR))
+                    .as_ref()
+            })
+        }
+    }
+
+    #[inline]
+    fn with_mut<N3, N15, T>(&mut self, node_3: N3, node_15: N15) -> T
+    where
+        N3: FnOnce(&mut RawKeyIter<3>) -> T,
+        N15: FnOnce(&mut RawKeyIter<15>) -> T,
+    {
+        if self.is_node_3() {
+            node_3(unsafe { &mut self.node_3 })
+        } else {
+            crate::cold();
+            node_15(unsafe {
+                self.node_15
+                    .map_addr(|addr| NonZeroUsize::new_unchecked(addr.get() & Self::MASK_PTR))
+                    .as_mut()
+            })
+        }
+    }
+}
+
+impl Drop for KeyIter {
+    #[inline]
+    fn drop(&mut self) {
+        if self.is_node_3() {
+            return;
+        }
+
+        crate::cold();
+        unsafe {
+            drop(Box::from_raw(
+                self.node_15
+                    .map_addr(|addr| NonZeroUsize::new_unchecked(addr.get() & Self::MASK_PTR))
+                    .as_ptr(),
+            ))
+        }
+    }
+}
+
+const _: [(); 8] = [(); size_of::<KeyIter>()];
+
+impl Iterator for KeyIter {
+    type Item = (u8, u8);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.with_mut(|node_3| node_3.next(), |node_15| node_15.next())
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.with(|node_3| node_3.size_hint(), |node_15| node_15.size_hint())
+    }
+}
+
+impl DoubleEndedIterator for KeyIter {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.with_mut(|node_3| node_3.next_back(), |node_15| node_15.next_back())
+    }
+}
+
+impl ExactSizeIterator for KeyIter {
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub(super) struct RawKeyIter<const N: usize> {
+    tail: u8,
+    head: u8,
+    inner: [(u8, u8); N],
+}
+
+const _: [(); 0] = [(); core::mem::offset_of!(RawKeyIter::<3>, tail)];
+
+impl<const N: usize> RawKeyIter<N> {
+    #[inline]
+    pub(super) fn new(inner: [(u8, u8); N], len: u8) -> Self {
+        Self {
+            inner,
+            head: 0,
+            tail: len,
+        }
+    }
+}
+
+impl<const N: usize> Iterator for RawKeyIter<N> {
+    type Item = (u8, u8);
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.head == self.tail {
+            return None;
+        }
+
+        let next = self.inner.get(self.head as usize).copied()?;
+        self.head += 1;
+        Some(next)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = (self.tail - self.head) as usize;
+        (len, Some(len))
+    }
+}
+
+impl<const N: usize> DoubleEndedIterator for RawKeyIter<N> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.head == self.tail {
+            return None;
+        }
+
+        self.tail -= 1;
+        self.inner.get(self.tail as usize).copied()
+    }
+}
+
+impl<const N: usize> ExactSizeIterator for RawKeyIter<N> {
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
+    }
+}

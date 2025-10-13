@@ -1,3 +1,6 @@
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+
 use ribbit::atomic::Atomic128;
 
 use crate::edge;
@@ -45,17 +48,7 @@ impl Node for Node256 {
 
 impl Node256 {
     pub(crate) fn iter_range(&self, min: u8, max: u8) -> Iter {
-        Iter {
-            key: min,
-            edges: self.0[min as usize..=max as usize].iter(),
-        }
-    }
-
-    pub(crate) fn iter_rev(&self) -> RevIter {
-        RevIter {
-            key: 255u8,
-            edges: self.0.iter().rev(),
-        }
+        Iter::new(min, max, &self.0)
     }
 }
 
@@ -65,10 +58,7 @@ impl<'a> IntoIterator for &'a Node256 {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        Iter {
-            key: 0,
-            edges: self.0.iter(),
-        }
+        Iter::new(0, 255, &self.0)
     }
 }
 
@@ -80,9 +70,24 @@ impl node::Info for Node256 {
     type Shrink = Node15;
 }
 
+#[derive(Copy, Clone)]
 pub(crate) struct Iter<'a> {
-    key: u8,
-    edges: core::slice::Iter<'a, Atomic128<Edge>>,
+    head: u16,
+    tail: u16,
+    edges: NonNull<Atomic128<Edge>>,
+    _slice: PhantomData<&'a [Atomic128<Edge>]>,
+}
+
+impl<'a> Iter<'a> {
+    #[inline]
+    fn new(min: u8, max: u8, edges: &'a [Atomic128<Edge>]) -> Self {
+        Self {
+            head: min as u16,
+            tail: max as u16 + 1,
+            edges: NonNull::from(edges).cast(),
+            _slice: PhantomData,
+        }
+    }
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -90,26 +95,42 @@ impl<'a> Iterator for Iter<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let edge = self.edges.next()?;
-        let key = self.key;
-        self.key = self.key.wrapping_add(1);
-        Some((key, edge))
+        if self.head == self.tail {
+            return None;
+        }
+
+        let next = (self.head as u8, unsafe {
+            self.edges.add(self.head as usize).as_ref()
+        });
+        self.head += 1;
+        Some(next)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = (self.tail - self.head) as usize;
+        (len, Some(len))
     }
 }
 
-pub(crate) struct RevIter<'a> {
-    key: u8,
-    edges: core::iter::Rev<core::slice::Iter<'a, Atomic128<Edge>>>,
+impl<'a> ExactSizeIterator for Iter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
+    }
 }
 
-impl<'a> Iterator for RevIter<'a> {
-    type Item = (u8, &'a Atomic128<Edge>);
-
+impl<'a> DoubleEndedIterator for Iter<'a> {
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let edge = self.edges.next()?;
-        let key = self.key;
-        self.key = self.key.wrapping_sub(1);
-        Some((key, edge))
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.head == self.tail {
+            return None;
+        }
+
+        self.tail -= 1;
+        let next = unsafe { self.edges.add(self.tail as usize).as_ref() };
+        Some((self.tail as u8, next))
     }
 }

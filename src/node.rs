@@ -71,15 +71,6 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_rev(&self) -> RevIter<'a> {
-        match self {
-            Ref::Node3(node) => Or::L(node.iter().rev()),
-            Ref::Node15(node) => Or::L(node.iter().rev()),
-            Ref::Node256(node) => Or::R(node.iter_rev()),
-        }
-    }
-
-    #[inline]
     pub(crate) unsafe fn iter_unsorted(&self) -> UnsortedIter<'a> {
         match self {
             Ref::Node3(node) => Or::L(node.iter_unsorted()),
@@ -169,14 +160,13 @@ impl Kind {
     pub(crate) const NODE_256: u64 = Self::Node256 as u64;
 }
 
-pub(crate) type RevIter<'a> = Or<core::iter::Rev<linear::Iter<'a>>, node256::RevIter<'a>>;
 pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;
 pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
 
 pub(crate) struct RangeIter<'a> {
+    iter: Iter<'a>,
     min: Option<u8>,
     max: Option<u8>,
-    iter: Iter<'a>,
 }
 
 impl<'a> RangeIter<'a> {

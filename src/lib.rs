@@ -220,6 +220,9 @@ mod tests {
         // Sequential iteration
         map.as_sequential()
             .iter::<crate::iter::Sorted>()
+            .inspect(|a| {
+                dbg!(a);
+            })
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
