@@ -1,6 +1,5 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
-use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
@@ -48,8 +47,7 @@ impl Map {
     pub(crate) fn iter<'a, W: key::Write, S: crate::iter::Sort>(
         &'a self,
     ) -> iter::LeafIter<'a, W, S> {
-        let root = self.root.load_packed(Ordering::Relaxed);
-        unsafe { iter::LeafIter::new(root, W::default()) }
+        unsafe { iter::LeafIter::new(&self.root, W::default()) }
     }
 
     pub(crate) fn postorder<'a, S: iter::postorder::Selector>(

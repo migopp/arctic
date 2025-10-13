@@ -1,5 +1,7 @@
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+
 use crate::key;
 use crate::Edge;
 
@@ -28,16 +30,17 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn new(root: ribbit::Packed<Edge>, mut key: W) -> Self {
-        let meta = root.meta();
-        let data = root.data();
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, mut key: W) -> Self {
+        let edge = root.load_packed(Ordering::Acquire);
+        let meta = edge.meta();
+        let data = edge.data();
 
-        key.extend(root.meta().key());
+        key.extend(edge.meta().key());
 
         if meta.leaf() {
             Self::Root {
                 key,
-                next: Some(root.data()),
+                next: Some(data),
             }
         } else if data == 0 {
             Self::Root { key, next: None }

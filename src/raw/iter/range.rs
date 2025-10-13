@@ -1,6 +1,8 @@
 use core::cmp;
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+
 use crate::key;
 use crate::node;
 use crate::Edge;
@@ -25,12 +27,11 @@ where
         })
     }
 
-    #[inline]
-    pub(crate) unsafe fn new(root: ribbit::Packed<Edge>, mut key: W, min: R, max: R) -> Self {
-        let meta = root.meta();
-        let data = root.data();
-
-        key.extend(root.meta().key());
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {
+        let edge = root.load_packed(Ordering::Acquire);
+        let meta = edge.meta();
+        let data = edge.data();
+        key.extend(edge.meta().key());
 
         if meta.leaf() {
             if key < min || key > max {
@@ -39,7 +40,7 @@ where
 
             Self::Root(RootIter {
                 key,
-                next: Some(root.data()),
+                next: Some(data),
             })
         } else if data == 0 {
             Self::Root(RootIter { key, next: None })
@@ -87,9 +88,9 @@ impl<W> RootIter<W> {
 }
 
 pub(crate) struct NodeIter<'a, R, W> {
-    writer: W,
     min: R,
     max: R,
+    writer: W,
     stack: Vec<(usize, node::RangeIter<'a>)>,
 }
 

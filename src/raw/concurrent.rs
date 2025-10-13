@@ -1,6 +1,8 @@
 use core::cmp;
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+
 use crate::byte;
 use crate::edge;
 use crate::key;
@@ -441,16 +443,17 @@ impl<'g> MapRef<'g> {
     }
 
     #[inline]
-    unsafe fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, ribbit::Packed<Edge>)>
+    unsafe fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, &'g Atomic128<Edge>)>
     where
         R: key::Read,
         W: key::Write + From<R>,
     {
         let mut reader = prefix;
         let mut bits = 0;
-        let mut edge = self.raw.root().load_packed(Ordering::Acquire);
+        let mut root = self.raw.root();
 
         loop {
+            let edge = root.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let data = edge.data();
 
@@ -458,16 +461,15 @@ impl<'g> MapRef<'g> {
                 byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
                     let node = unsafe { Edge::next_node_unchecked(data) };
                     let Some(byte) = reader.next() else { break };
-                    let next = node.get(byte)?;
 
-                    edge = next.load_packed(Ordering::Acquire);
+                    root = node.get(byte)?;
                     bits += len.bits() + 8;
                 }
                 byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => break,
             }
         }
 
-        Some((W::from(prefix.slice(bits as usize)), edge))
+        Some((W::from(prefix.slice(bits as usize)), root))
     }
 }
 
