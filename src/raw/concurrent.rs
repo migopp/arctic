@@ -1,4 +1,3 @@
-use core::cmp;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -6,6 +5,7 @@ use ribbit::atomic::Atomic128;
 use crate::byte;
 use crate::edge;
 use crate::key;
+use crate::key::Read as _;
 use crate::node;
 use crate::raw::cursor;
 use crate::raw::iter;
@@ -15,6 +15,7 @@ use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
+use crate::Key;
 
 #[derive(Default)]
 pub(crate) struct Map {
@@ -336,106 +337,89 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range<R, W>(&mut self, min: R, max: R) -> std::vec::IntoIter<(W, u64)>
-    where
-        R: key::Read,
-        W: key::Write<Len = usize> + PartialOrd<R> + Ord + From<R>,
-    {
+    pub(crate) fn range<'l, K: Key>(
+        &'l mut self,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+    ) -> std::vec::IntoIter<(K, u64)> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
         let _guard = self.smr.protect_read(prefix.peek_all());
-        let Some((writer, root)) = (unsafe { self.traverse_prefix::<R, W>(prefix) }) else {
+        let Some((writer, root)) =
+            (unsafe { self.traverse_prefix::<K::Read<'l>, K::Write>(prefix) })
+        else {
             return Vec::new().into_iter();
         };
 
-        let mut buffer =
-            match unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) } {
-                iter::RangeIter::Node(mut iter) => iter.collect(),
-                iter::RangeIter::Root(mut iter) => {
-                    crate::cold();
-                    return iter
-                        .lend()
-                        .map(|(key, value)| (key.clone(), value))
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                        .into_iter();
-                }
-            };
+        let mut buffer = match unsafe { iter::RangeIter::new(root, writer.clone(), min, max) } {
+            iter::RangeIter::Node(mut iter) => iter.collect::<K>(),
+            iter::RangeIter::Root(mut iter) => {
+                crate::cold();
+                return iter.collect().into_iter();
+            }
+        };
 
-        'outer: for retry in 0.. {
-            let mut iter =
-                match unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) } {
-                    iter::RangeIter::Node(iter) => iter,
-                    iter::RangeIter::Root(_) => todo!("FIXME: handle node to root transition"),
-                };
+        for retry in 0.. {
+            let mut iter = match unsafe { iter::RangeIter::new(root, writer.clone(), min, max) } {
+                iter::RangeIter::Node(iter) => iter,
+                iter::RangeIter::Root(_) => todo!("FIXME: handle node to root transition"),
+            };
 
             let mut dirty = false;
             let mut i = 0;
 
-            'inner: loop {
-                let (old, new) = match (buffer.get_mut(i), iter.lend()) {
+            iter.for_each(|new_writer, new_value| {
+                let index = i;
+                i += 1;
+
+                let new_borrow = K::Borrow::from(new_writer);
+
+                let old = match buffer
+                    .get_mut(index)
+                    .map(|(key, value)| (key.borrow(), value))
+                {
                     // Fast path: no change
-                    (Some((old_key, old_value)), Some((new_key, new_value)))
-                        if old_key == new_key && *old_value == new_value =>
+                    Some((old_borrow, old_value))
+                        if old_borrow == new_borrow && *old_value == new_value =>
                     {
-                        i += 1;
-                        continue 'inner;
+                        return;
                     }
-                    (None, None) if !dirty => {
-                        stat::record(stat::Record::RangeConflict, retry as u64);
-                        return buffer.into_iter();
-                    }
-                    (old, new) => (old, new),
+                    old => old,
                 };
 
                 crate::cold();
 
-                match (old, new) {
-                    (Some((old_key, old_value)), Some((new_key, new_value))) => {
-                        dirty = true;
+                dirty = true;
 
-                        match (*new_key).cmp(old_key) {
-                            cmp::Ordering::Equal => {
-                                *old_value = new_value;
-                                i += 1;
-                            }
-
-                            cmp::Ordering::Less => {
-                                buffer.insert(i, (new_key.clone(), new_value));
-                                i += 1;
-                            }
-
-                            cmp::Ordering::Greater => {
-                                let high = buffer[i + 1..]
-                                    .iter()
-                                    .position(|(old_key, _)| old_key >= new_key)
-                                    .map(|offset| i + 1 + offset)
-                                    .unwrap_or(buffer.len());
-                                buffer.drain(i..high);
-                                continue 'inner;
-                            }
-                        };
+                match old {
+                    Some((old_borrow, old_value)) if old_borrow == new_borrow => {
+                        *old_value = new_value;
                     }
-
-                    (None, None) => {
-                        continue 'outer;
+                    Some((old_borrow, _)) if old_borrow > new_borrow => {
+                        let high = buffer[i..]
+                            .iter()
+                            .map(|(key, value)| (key.borrow(), value))
+                            .position(|(old_borrow, _)| old_borrow >= new_borrow)
+                            .map(|offset| i + offset)
+                            .unwrap_or(buffer.len());
+                        buffer.drain(index..high);
+                        i = index;
                     }
-
-                    (None, Some((new_key, new_value))) => {
-                        buffer.push((new_key.clone(), new_value));
-                        while let Some((key, value)) = iter.lend() {
-                            buffer.push((key.clone(), value));
-                        }
-                        continue 'outer;
+                    None | Some(_) => {
+                        let new_key = K::from(new_writer.clone());
+                        buffer.insert(index, (new_key, new_value));
                     }
+                };
+            });
 
-                    (Some(_), None) => {
-                        crate::cold();
-                        buffer.drain(i..);
-                        continue 'outer;
-                    }
-                }
+            if i == buffer.len() && !dirty {
+                stat::record(stat::Record::RangeConflict, retry);
+                return buffer.into_iter();
             }
+
+            crate::cold();
+            validate!(buffer.len() <= i);
+            buffer.truncate(i);
         }
 
         unsafe { core::hint::unreachable_unchecked() }

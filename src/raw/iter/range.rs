@@ -58,7 +58,7 @@ where
 
             Self::Node(NodeIter {
                 stack,
-                writer: key,
+                key,
                 min,
                 max,
             })
@@ -79,7 +79,15 @@ pub(crate) struct RootIter<W> {
     next: Option<u64>,
 }
 
-impl<W> RootIter<W> {
+impl<W: Clone> RootIter<W> {
+    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
+        self.next
+            .take()
+            .map(|value| (K::from(self.key.clone()), value))
+            .into_iter()
+            .collect()
+    }
+
     #[inline]
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         let value = self.next.take()?;
@@ -90,7 +98,7 @@ impl<W> RootIter<W> {
 pub(crate) struct NodeIter<'a, R, W> {
     min: R,
     max: R,
-    writer: W,
+    key: W,
     stack: Vec<(usize, node::RangeIter<'a>)>,
 }
 
@@ -99,16 +107,102 @@ where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
-    #[cold]
-    pub(crate) fn collect(&mut self) -> Vec<(W, u64)> {
+    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
         let mut buffer = Vec::new();
-        while let Some((key, value)) = self.lend() {
-            buffer.push((key.clone(), value));
-        }
+        self.for_each(|key, value| {
+            buffer.push((K::from(key.clone()), value));
+        });
         buffer
     }
 
-    #[inline(always)]
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, mut apply: F) {
+        'vertical: loop {
+            let Some((len, iter)) = self.stack.last_mut() else {
+                return;
+            };
+
+            'horizontal: loop {
+                let Some((byte, edge)) = iter.next() else {
+                    self.stack.pop();
+                    continue 'vertical;
+                };
+
+                let edge = edge.load_packed(Ordering::Acquire);
+                let meta = edge.meta();
+                let data = edge.data();
+
+                if !meta.leaf() && data == 0 {
+                    continue 'horizontal;
+                }
+
+                self.key.truncate(*len);
+                self.key.push(byte);
+
+                unsafe {
+                    // SAFETY: we just pushed `byte` onto `key`
+                    self.key.extend_nonempty_unchecked(meta.key());
+                }
+
+                let check_first = Some(byte) == node::RangeIter::min(iter);
+                let check_last = Some(byte) == node::RangeIter::max(iter);
+
+                if !check_first && !check_last {
+                    if meta.leaf() {
+                        apply(&self.key, edge.data());
+                        continue 'horizontal;
+                    } else {
+                        let node = unsafe { Edge::next_node_unchecked(data) };
+                        self.stack
+                            .push((self.key.bits(), unsafe { node.iter_range(None, None) }));
+                        continue 'vertical;
+                    }
+                }
+
+                crate::cold();
+
+                if meta.leaf() {
+                    if check_first && self.key < self.min {
+                        continue 'horizontal;
+                    }
+
+                    if check_last && self.key > self.max {
+                        return;
+                    }
+
+                    apply(&self.key, edge.data());
+                    continue 'horizontal;
+                } else {
+                    let min = if check_first {
+                        match self.key.partial_cmp(&self.min.slice(self.key.bits())) {
+                            None => unreachable!(),
+                            Some(cmp::Ordering::Less) => continue 'horizontal,
+                            Some(cmp::Ordering::Equal) => Some(self.min.get(self.key.bits())),
+                            Some(cmp::Ordering::Greater) => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    let max = if check_last {
+                        match self.key.partial_cmp(&self.max.slice(self.key.bits())) {
+                            None => unreachable!(),
+                            Some(cmp::Ordering::Less) => None,
+                            Some(cmp::Ordering::Equal) => Some(self.max.get(self.key.bits())),
+                            Some(cmp::Ordering::Greater) => return,
+                        }
+                    } else {
+                        None
+                    };
+
+                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    self.stack
+                        .push((self.key.bits(), unsafe { node.iter_range(min, max) }));
+                    continue 'vertical;
+                }
+            }
+        }
+    }
+
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         'vertical: loop {
             let (len, iter) = self.stack.last_mut()?;
@@ -127,12 +221,12 @@ where
                     continue;
                 }
 
-                self.writer.truncate(*len);
-                self.writer.push(byte);
+                self.key.truncate(*len);
+                self.key.push(byte);
 
                 unsafe {
                     // SAFETY: we just pushed `byte` onto `key`
-                    self.writer.extend_nonempty_unchecked(meta.key());
+                    self.key.extend_nonempty_unchecked(meta.key());
                 }
 
                 let check_first = Some(byte) == node::RangeIter::min(iter);
@@ -140,11 +234,11 @@ where
 
                 if !check_first && !check_last {
                     if meta.leaf() {
-                        return Some((&self.writer, edge.data()));
+                        return Some((&self.key, edge.data()));
                     } else {
                         let node = unsafe { Edge::next_node_unchecked(data) };
                         self.stack
-                            .push((self.writer.bits(), unsafe { node.iter_range(None, None) }));
+                            .push((self.key.bits(), unsafe { node.iter_range(None, None) }));
                         continue 'vertical;
                     }
                 }
@@ -152,22 +246,22 @@ where
                 crate::cold();
 
                 if meta.leaf() {
-                    if check_first && self.writer < self.min {
+                    if check_first && self.key < self.min {
                         continue;
                     }
 
-                    if check_last && self.writer > self.max {
+                    if check_last && self.key > self.max {
                         self.stack.clear();
                         return None;
                     }
 
-                    return Some((&self.writer, edge.data()));
+                    return Some((&self.key, edge.data()));
                 } else {
                     let min = if check_first {
-                        match self.writer.partial_cmp(&self.min.slice(self.writer.bits())) {
+                        match self.key.partial_cmp(&self.min.slice(self.key.bits())) {
                             None => unreachable!(),
                             Some(cmp::Ordering::Less) => continue,
-                            Some(cmp::Ordering::Equal) => Some(self.min.get(self.writer.bits())),
+                            Some(cmp::Ordering::Equal) => Some(self.min.get(self.key.bits())),
                             Some(cmp::Ordering::Greater) => None,
                         }
                     } else {
@@ -175,10 +269,10 @@ where
                     };
 
                     let max = if check_last {
-                        match self.writer.partial_cmp(&self.max.slice(self.writer.bits())) {
+                        match self.key.partial_cmp(&self.max.slice(self.key.bits())) {
                             None => unreachable!(),
                             Some(cmp::Ordering::Less) => None,
-                            Some(cmp::Ordering::Equal) => Some(self.max.get(self.writer.bits())),
+                            Some(cmp::Ordering::Equal) => Some(self.max.get(self.key.bits())),
                             Some(cmp::Ordering::Greater) => continue,
                         }
                     } else {
@@ -187,7 +281,7 @@ where
 
                     let node = unsafe { Edge::next_node_unchecked(data) };
                     self.stack
-                        .push((self.writer.bits(), unsafe { node.iter_range(min, max) }));
+                        .push((self.key.bits(), unsafe { node.iter_range(min, max) }));
                     continue 'vertical;
                 }
             }

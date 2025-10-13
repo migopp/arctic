@@ -5,7 +5,10 @@ use crate::byte;
 
 pub trait Key: From<Self::Write> {
     #[allow(private_bounds)]
-    type Borrow<'k>: Copy + From<&'k Self::Write>
+    type Borrow<'k>: Copy
+        + From<&'k Self::Write>
+        + for<'a> PartialEq<Self::Borrow<'a>>
+        + for<'a> PartialOrd<Self::Borrow<'a>>
     where
         Self: 'k;
 
