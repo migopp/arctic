@@ -357,52 +357,55 @@ impl<'g> MapRef<'g> {
             let mut i = 0;
 
             'inner: loop {
-                match (buffer.get_mut(i), iter.lend()) {
-                    (Some((old_key, old_value)), Some((new_key, new_value))) => {
-                        match (*new_key).cmp(old_key) {
-                            // Fast path: no change
-                            cmp::Ordering::Equal if *old_value == new_value => (),
+                let (old, new) = match (buffer.get_mut(i), iter.lend()) {
+                    // Fast path: no change
+                    (Some((old_key, old_value)), Some((new_key, new_value)))
+                        if old_key == new_key && *old_value == new_value =>
+                    {
+                        i += 1;
+                        continue 'inner;
+                    }
+                    (None, None) if !dirty => {
+                        stat::record(stat::Record::RangeConflict, retry as u64);
+                        return buffer.into_iter();
+                    }
+                    (old, new) => (old, new),
+                };
 
+                crate::cold();
+
+                match (old, new) {
+                    (Some((old_key, old_value)), Some((new_key, new_value))) => {
+                        dirty = true;
+
+                        match (*new_key).cmp(old_key) {
                             cmp::Ordering::Equal => {
-                                crate::cold();
                                 *old_value = new_value;
-                                dirty = true
+                                i += 1;
                             }
 
                             cmp::Ordering::Less => {
-                                crate::cold();
                                 buffer.insert(i, (new_key.clone(), new_value));
-                                dirty = true
+                                i += 1;
                             }
 
                             cmp::Ordering::Greater => {
-                                crate::cold();
                                 let high = buffer[i + 1..]
                                     .iter()
                                     .position(|(old_key, _)| old_key >= new_key)
                                     .map(|offset| i + 1 + offset)
                                     .unwrap_or(buffer.len());
                                 buffer.drain(i..high);
-                                dirty = true;
-                                // Skip incrementing `i`
                                 continue 'inner;
                             }
                         };
-
-                        i += 1;
-                    }
-                    (None, None) if !dirty => {
-                        stat::record(stat::Record::RangeConflict, retry as u64);
-                        return buffer.into_iter();
                     }
 
                     (None, None) => {
-                        crate::cold();
                         continue 'outer;
                     }
 
                     (None, Some((new_key, new_value))) => {
-                        crate::cold();
                         buffer.push((new_key.clone(), new_value));
                         while let Some((key, value)) = iter.lend() {
                             buffer.push((key.clone(), value));
