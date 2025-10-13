@@ -96,7 +96,7 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
     ) -> impl Iterator<Item = (K, V)> {
         self.raw
             .range(min.into(), max.into())
-            .map(|(key, value)| (K::from_owned(key), V::from_u64(value)))
+            .map(|(key, value)| (K::from(key), V::from_u64(value)))
     }
 }
 
@@ -110,7 +110,7 @@ impl<'g, 'l, K: Key + 'l, V: Value, S: crate::iter::Sort> PrefixNonLinearizable<
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
     }
 }
 
@@ -125,7 +125,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::from_owned(key.clone()), V::from_u64(value)))
+            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
     }
 }
 
@@ -139,7 +139,7 @@ impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
     }
 }
 
@@ -153,6 +153,6 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::from_owned(key.clone()), V::from_u64(value)))
+            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
     }
 }

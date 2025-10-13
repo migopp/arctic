@@ -3,7 +3,12 @@ pub mod fixed;
 
 use crate::byte;
 
-pub trait Key {
+pub trait Key: From<Self::Write> {
+    #[allow(private_bounds)]
+    type Borrow<'k>: Copy + From<&'k Self::Write>
+    where
+        Self: 'k;
+
     #[allow(private_bounds)]
     type Read<'k>: Read + From<Self::Borrow<'k>>
     where
@@ -12,16 +17,10 @@ pub trait Key {
     #[allow(private_bounds)]
     type Write: Write<Len = usize>
         + for<'k> PartialOrd<Self::Read<'k>>
-        + for<'k> From<Self::Read<'k>>;
-
-    #[allow(private_bounds)]
-    type Borrow<'k>: Copy
-    where
-        Self: 'k;
+        + for<'k> From<Self::Read<'k>>
+        + Ord;
 
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
-    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
-    fn from_owned(writer: Self::Write) -> Self;
 }
 
 pub(crate) trait Read: Copy + core::fmt::Debug + Default {
@@ -88,15 +87,12 @@ macro_rules! impl_unsigned_int {
                 fn borrow(&self) -> Self {
                     *self
                 }
+            }
 
+            impl<'k> From<&'k fixed::Writer> for $ty {
                 #[inline]
-                fn from_borrowed(write: &Self::Write) -> Self {
-                    Self::from(*write)
-                }
-
-                #[inline]
-                fn from_owned(write: Self::Write) -> Self {
-                    Self::from(write)
+                fn from(writer: &'k fixed::Writer) -> Self {
+                    Self::from(*writer)
                 }
             }
         )*
@@ -114,18 +110,18 @@ impl<const N: usize> Key for [u8; N] {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
     }
+}
 
+impl<'w, const N: usize> From<&'w dynamic::Writer> for &'w [u8; N] {
     #[inline]
-    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-        writer
-            .0
-            .as_slice()
-            .try_into()
-            .expect("key::Write should have same length as key::Key")
+    fn from(writer: &'w dynamic::Writer) -> Self {
+        writer.0.as_slice().try_into().unwrap()
     }
+}
 
+impl<const N: usize> From<dynamic::Writer> for [u8; N] {
     #[inline]
-    fn from_owned(writer: Self::Write) -> Self {
+    fn from(writer: dynamic::Writer) -> Self {
         writer
             .0
             .try_into()
@@ -142,14 +138,18 @@ impl Key for Vec<u8> {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
     }
+}
 
+impl<'w> From<&'w dynamic::Writer> for &'w [u8] {
     #[inline]
-    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+    fn from(writer: &'w dynamic::Writer) -> Self {
         writer.0.as_slice()
     }
+}
 
+impl From<dynamic::Writer> for Vec<u8> {
     #[inline]
-    fn from_owned(writer: Self::Write) -> Self {
+    fn from(writer: dynamic::Writer) -> Self {
         writer.0
     }
 }
@@ -163,14 +163,18 @@ impl Key for String {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
     }
+}
 
+impl<'w> From<&'w dynamic::Writer> for &'w str {
     #[inline]
-    fn from_borrowed<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+    fn from(writer: &'w dynamic::Writer) -> Self {
         str::from_utf8(writer.0.as_slice()).expect("key::Write should be valid UTF-8")
     }
+}
 
+impl From<dynamic::Writer> for String {
     #[inline]
-    fn from_owned(writer: Self::Write) -> Self {
+    fn from(writer: dynamic::Writer) -> Self {
         String::from_utf8(writer.0).expect("key::Write should be valid UTF-8")
     }
 }

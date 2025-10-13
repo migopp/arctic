@@ -182,6 +182,20 @@ impl PartialEq<Reader> for Writer {
     }
 }
 
+impl Ord for Writer {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        validate_eq!(self.bits, other.bits);
+        self.buffer.cmp(&other.buffer)
+    }
+}
+
+impl PartialOrd for Writer {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl_unsigned_int!(
     u8: 1,
     u16: 2,

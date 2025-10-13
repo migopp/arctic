@@ -1,3 +1,4 @@
+use core::cmp;
 use core::sync::atomic::Ordering;
 
 use crate::byte;
@@ -336,7 +337,7 @@ impl<'g> MapRef<'g> {
     pub(crate) fn range<R, W>(&mut self, min: R, max: R) -> std::vec::IntoIter<(W, u64)>
     where
         R: key::Read,
-        W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
+        W: key::Write<Len = usize> + PartialOrd<R> + Ord + From<R>,
     {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
@@ -345,24 +346,80 @@ impl<'g> MapRef<'g> {
             return Vec::new().into_iter();
         };
 
-        let mut prev: Option<Vec<(W, u64)>> = None;
-        let mut count = 0;
-        loop {
-            count += 1;
-
-            let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
-
-            let next = core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
+        let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
+        let mut buffer: Vec<(W, u64)> =
+            core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
                 .collect::<Vec<_>>();
 
-            match prev {
-                Some(prev) if prev == next => {
-                    stat::record(stat::Record::RangeConflict, count);
-                    return next.into_iter();
+        'outer: for retry in 0.. {
+            let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
+            let mut dirty = false;
+            let mut i = 0;
+
+            'inner: loop {
+                match (buffer.get_mut(i), iter.lend()) {
+                    (Some((old_key, old_value)), Some((new_key, new_value))) => {
+                        match (*new_key).cmp(old_key) {
+                            // Fast path: no change
+                            cmp::Ordering::Equal if *old_value == new_value => (),
+
+                            cmp::Ordering::Equal => {
+                                crate::cold();
+                                *old_value = new_value;
+                                dirty = true
+                            }
+
+                            cmp::Ordering::Less => {
+                                crate::cold();
+                                buffer.insert(i, (new_key.clone(), new_value));
+                                dirty = true
+                            }
+
+                            cmp::Ordering::Greater => {
+                                crate::cold();
+                                let high = buffer[i + 1..]
+                                    .iter()
+                                    .position(|(old_key, _)| old_key >= new_key)
+                                    .map(|offset| i + 1 + offset)
+                                    .unwrap_or(buffer.len());
+                                buffer.drain(i..high);
+                                dirty = true;
+                                // Skip incrementing `i`
+                                continue 'inner;
+                            }
+                        };
+
+                        i += 1;
+                    }
+                    (None, None) if !dirty => {
+                        stat::record(stat::Record::RangeConflict, retry as u64);
+                        return buffer.into_iter();
+                    }
+
+                    (None, None) => {
+                        crate::cold();
+                        continue 'outer;
+                    }
+
+                    (None, Some((new_key, new_value))) => {
+                        crate::cold();
+                        buffer.push((new_key.clone(), new_value));
+                        while let Some((key, value)) = iter.lend() {
+                            buffer.push((key.clone(), value));
+                        }
+                        continue 'outer;
+                    }
+
+                    (Some(_), None) => {
+                        crate::cold();
+                        buffer.drain(i..);
+                        continue 'outer;
+                    }
                 }
-                None | Some(_) => prev = Some(next),
             }
         }
+
+        unsafe { core::hint::unreachable_unchecked() }
     }
 
     #[inline]

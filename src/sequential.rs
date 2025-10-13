@@ -72,7 +72,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .lend()
-            .map(|(key, value)| (K::from_owned(key.clone()), V::from_u64(value)))
+            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
     }
 }
 
@@ -86,6 +86,6 @@ where
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.inner
             .lend()
-            .map(|(key, value)| (K::from_borrowed(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
     }
 }

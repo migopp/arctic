@@ -178,7 +178,7 @@ unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer(pub(super) Vec<u8>);
 
 impl key::Write for Writer {
