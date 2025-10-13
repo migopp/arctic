@@ -107,7 +107,11 @@ where
 
                 key.truncate(*len);
                 key.push(byte);
-                key.extend(meta.key());
+
+                unsafe {
+                    // SAFETY: we just pushed `byte` onto `key`
+                    key.extend_nonempty_unchecked(meta.key());
+                }
 
                 let check_first = Some(byte) == node::RangeIter::min(iter);
                 let check_last = Some(byte) == node::RangeIter::max(iter);

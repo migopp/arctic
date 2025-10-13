@@ -52,6 +52,14 @@ pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
 
     fn bits(&self) -> Self::Len;
     fn extend(&mut self, array: byte::Array);
+
+    /// # SAFETY
+    ///
+    /// Caller must guarantee `self.bits() > 0`.
+    unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
+        self.extend(array)
+    }
+
     fn push(&mut self, byte: u8);
     fn truncate(&mut self, bits: Self::Len);
 }

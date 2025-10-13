@@ -106,8 +106,20 @@ impl key::Write for Writer {
     #[inline]
     fn extend(&mut self, array: byte::Array) {
         validate!(self.bits + array.len().bits() <= 64);
-        self.buffer |= (array.value() & !0xFF).unbounded_shr(self.bits as u32);
-        self.bits += array.len().bits();
+        if array.len().bits() > 0 {
+            self.buffer |= (array.value() & !0xFF) >> self.bits;
+            self.bits += array.len().bits();
+        }
+    }
+
+    #[inline]
+    unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
+        validate!(self.bits + array.len().bits() <= 64);
+        validate!(self.bits >= 8);
+        if array.len().bits() > 0 {
+            self.buffer |= array.value() >> self.bits;
+            self.bits += array.len().bits();
+        }
     }
 
     #[inline]
@@ -120,8 +132,8 @@ impl key::Write for Writer {
     #[inline]
     fn truncate(&mut self, bits: usize) {
         validate!(self.bits as usize >= bits);
-        validate!(bits <= 64);
-        self.buffer &= !u64::MAX.unbounded_shr(bits as u32);
+        validate!(bits < 64);
+        self.buffer &= !(u64::MAX >> bits);
         self.bits = bits as u8;
     }
 }
