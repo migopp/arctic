@@ -162,11 +162,17 @@ impl node::Info for Node15 {
 }
 
 #[inline]
-#[cfg(feature = "opt-node15-get")]
 fn get(array: u128, key: u8) -> u8 {
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    compile_error!("opt-node15-get requires target_arch=x86_64 and target_feature=sse2");
+    if cfg!(feature = "opt-node15-get") {
+        get_simd(array, key)
+    } else {
+        get_naive(array, key)
+    }
+}
 
+#[inline]
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+fn get_simd(array: u128, key: u8) -> u8 {
     use core::arch::x86_64::_mm_cmpeq_epi8;
     use core::arch::x86_64::_mm_movemask_epi8;
     use core::arch::x86_64::_mm_set1_epi8;
@@ -182,10 +188,51 @@ fn get(array: u128, key: u8) -> u8 {
 }
 
 #[inline]
-#[cfg(not(feature = "opt-node15-get"))]
-fn get(array: u128, key: u8) -> u8 {
-    linear::UnsortedKeyIter::new_15(array, 15)
+fn get_naive(array: u128, key: u8) -> u8 {
+    array
+        .to_le_bytes()
+        .into_iter()
         .position(|byte| byte == key)
         .map(|index| index as u8)
         .unwrap_or(u8::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn zero() {
+        test_get(0x00_00_00_00, 0, 0)
+    }
+
+    #[test]
+    fn zero_high() {
+        test_get(0x00_00_12_34, 0, 2)
+    }
+
+    #[test]
+    fn nonzero_middle() {
+        test_get(0x00_11_12_13, 0x12, 1)
+    }
+
+    #[test]
+    fn duplicate() {
+        test_get(0x00_11_11_12, 0x11, 1)
+    }
+
+    #[test]
+    fn lsb() {
+        test_get(u128::MAX, 0xFF, 0)
+    }
+
+    #[test]
+    fn msb() {
+        test_get(0x0F << 120, 0x0F, 15)
+    }
+
+    fn test_get(array: u128, key: u8, expected: u8) {
+        assert_eq!(super::get_naive(array, key), expected);
+
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        assert_eq!(super::get_simd(array, key), expected);
+    }
 }

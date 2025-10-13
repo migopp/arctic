@@ -131,11 +131,19 @@ impl node::Info for Node3 {
     type Shrink = Node3;
 }
 
+#[inline]
+fn get(array: u32, key: u8) -> u8 {
+    if cfg!(feature = "opt-node3-get") {
+        get_swar(array, key)
+    } else {
+        get_naive(array, key)
+    }
+}
+
 /// https://richardstartin.github.io/posts/finding-bytes
 /// https://orlp.net/blog/extracting-depositing-bits/
 #[inline]
-#[cfg(feature = "opt-node3-get")]
-fn get(array: u32, key: u8) -> u8 {
+fn get_swar(array: u32, key: u8) -> u8 {
     const LOWER: u32 = 0x00_7F_7F_7F;
 
     // LLVM is smart enough to turn this into an `imul`
@@ -156,9 +164,10 @@ fn get(array: u32, key: u8) -> u8 {
 }
 
 #[inline]
-#[cfg(not(feature = "opt-node3-get"))]
-fn get(array: u32, key: u8) -> u8 {
-    linear::UnsortedKeyIter::new_3(array, 3)
+fn get_naive(array: u32, key: u8) -> u8 {
+    array
+        .to_le_bytes()
+        .into_iter()
         .position(|byte| byte == key)
         .map(|index| index as u8)
         .unwrap_or(u8::MAX)
@@ -182,11 +191,12 @@ mod tests {
     }
 
     #[test]
-    fn first() {
+    fn duplicate() {
         test_get(0x00_11_11_12, 0x11, 1)
     }
 
     fn test_get(array: u32, key: u8, expected: u8) {
-        assert_eq!(super::get(array, key), expected);
+        assert_eq!(super::get_naive(array, key), expected);
+        assert_eq!(super::get_swar(array, key), expected);
     }
 }
