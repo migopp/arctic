@@ -47,7 +47,8 @@ impl Node for Node256 {
 }
 
 impl Node256 {
-    pub(crate) fn iter_range(&self, min: u8, max: u8) -> Iter {
+    #[inline]
+    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> Iter {
         Iter::new(min, max, &self.0)
     }
 }
@@ -58,7 +59,7 @@ impl<'a> IntoIterator for &'a Node256 {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        Iter::new(0, 255, &self.0)
+        Iter::new(None, None, &self.0)
     }
 }
 
@@ -74,19 +75,33 @@ impl node::Info for Node256 {
 pub(crate) struct Iter<'a> {
     head: u16,
     tail: u16,
+    min: Option<u8>,
+    max: Option<u8>,
     edges: NonNull<Atomic128<Edge>>,
     _slice: PhantomData<&'a [Atomic128<Edge>]>,
 }
 
 impl<'a> Iter<'a> {
     #[inline]
-    fn new(min: u8, max: u8, edges: &'a [Atomic128<Edge>]) -> Self {
+    fn new(min: Option<u8>, max: Option<u8>, edges: &'a [Atomic128<Edge>]) -> Self {
         Self {
-            head: min as u16,
-            tail: max as u16 + 1,
+            head: min.unwrap_or(0) as u16,
+            tail: max.unwrap_or(255) as u16 + 1,
+            min,
+            max,
             edges: NonNull::from(edges).cast(),
             _slice: PhantomData,
         }
+    }
+
+    #[inline]
+    pub(crate) fn min(&self) -> Option<u8> {
+        self.min
+    }
+
+    #[inline]
+    pub(crate) fn max(&self) -> Option<u8> {
+        self.max
     }
 }
 

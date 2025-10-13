@@ -117,7 +117,7 @@ impl<const LEN: usize, H: Header> Linear<LEN, H> {
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: u8, max: u8) -> RangeIter {
+    pub(crate) fn iter_range(&self, min: u8, max: u8) -> Iter {
         Iter::new(self.header.keys_range(min, max), &self.edges)
     }
 
@@ -204,8 +204,6 @@ impl<'a> Iterator for UnsortedIter<'a> {
         Some((key, edge))
     }
 }
-
-pub(crate) type RangeIter<'a> = Iter<'a>;
 
 pub(crate) type UnsortedKeyIter = Or<
     core::iter::Take<core::array::IntoIter<u8, 4>>,

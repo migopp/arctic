@@ -81,21 +81,31 @@ impl<'a> Ref<'a> {
 
     #[inline]
     pub(crate) unsafe fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> RangeIter<'a> {
-        RangeIter::new(
-            min,
-            max,
-            if min.is_none() && max.is_none() {
-                self.iter()
-            } else {
-                let min = min.unwrap_or(0);
-                let max = max.unwrap_or(255);
-                match self {
-                    Ref::Node3(node) => Or::L(node.iter_range(min, max)),
-                    Ref::Node15(node) => Or::L(node.iter_range(min, max)),
-                    Ref::Node256(node) => Or::R(node.iter_range(min, max)),
-                }
+        match self {
+            Ref::Node3(node) if min.is_none() && max.is_none() => RangeIter::Linear {
+                iter: node.iter(),
+                min,
+                max,
             },
-        )
+            Ref::Node3(node) => RangeIter::Linear {
+                iter: node.iter_range(min.unwrap_or(0), max.unwrap_or(255)),
+                min,
+                max,
+            },
+
+            Ref::Node15(node) if min.is_none() && max.is_none() => RangeIter::Linear {
+                iter: node.iter(),
+                min,
+                max,
+            },
+            Ref::Node15(node) => RangeIter::Linear {
+                iter: node.iter_range(min.unwrap_or(0), max.unwrap_or(255)),
+                min,
+                max,
+            },
+
+            Ref::Node256(node) => RangeIter::Node256(node.iter_range(min, max)),
+        }
     }
 }
 
@@ -163,26 +173,30 @@ impl Kind {
 pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;
 pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
 
-pub(crate) struct RangeIter<'a> {
-    iter: Iter<'a>,
-    min: Option<u8>,
-    max: Option<u8>,
+pub(crate) enum RangeIter<'a> {
+    Linear {
+        iter: linear::Iter<'a>,
+        min: Option<u8>,
+        max: Option<u8>,
+    },
+    Node256(node256::Iter<'a>),
 }
 
 impl<'a> RangeIter<'a> {
     #[inline]
-    pub(crate) fn new(min: Option<u8>, max: Option<u8>, iter: Iter<'a>) -> Self {
-        Self { min, max, iter }
-    }
-
-    #[inline]
     pub(crate) fn min(&self) -> Option<u8> {
-        self.min
+        match self {
+            RangeIter::Linear { min, .. } => *min,
+            RangeIter::Node256(iter) => iter.min(),
+        }
     }
 
     #[inline]
     pub(crate) fn max(&self) -> Option<u8> {
-        self.max
+        match self {
+            RangeIter::Linear { max, .. } => *max,
+            RangeIter::Node256(iter) => iter.max(),
+        }
     }
 }
 
@@ -191,6 +205,28 @@ impl<'a> Iterator for RangeIter<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
+        match self {
+            RangeIter::Linear { iter, .. } => iter.next(),
+            RangeIter::Node256(iter) => iter.next(),
+        }
+    }
+}
+
+impl DoubleEndedIterator for RangeIter<'_> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Linear { iter, .. } => iter.next_back(),
+            Self::Node256(iter) => iter.next_back(),
+        }
+    }
+}
+
+impl ExactSizeIterator for RangeIter<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
     }
 }

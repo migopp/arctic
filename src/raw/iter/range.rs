@@ -18,6 +18,8 @@ pub(crate) enum RangeIter<'a, R, W> {
     },
 }
 
+const _: [(); 32] = [(); size_of::<(usize, node::RangeIter<'static>)>()];
+
 impl<'a, R, W> RangeIter<'a, R, W>
 where
     R: key::Read,
