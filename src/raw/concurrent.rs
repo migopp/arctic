@@ -334,6 +334,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
+    #[inline]
     pub(crate) fn range<R, W>(&mut self, min: R, max: R) -> std::vec::IntoIter<(W, u64)>
     where
         R: key::Read,
@@ -346,13 +347,27 @@ impl<'g> MapRef<'g> {
             return Vec::new().into_iter();
         };
 
-        let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
-        let mut buffer: Vec<(W, u64)> =
-            core::iter::from_fn(|| iter.lend().map(|(key, value)| (key.clone(), value)))
-                .collect::<Vec<_>>();
+        let mut buffer =
+            match unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) } {
+                iter::RangeIter::Node(mut iter) => iter.collect(),
+                iter::RangeIter::Root(mut iter) => {
+                    crate::cold();
+                    return iter
+                        .lend()
+                        .map(|(key, value)| (key.clone(), value))
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .into_iter();
+                }
+            };
 
         'outer: for retry in 0.. {
-            let mut iter = unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) };
+            let mut iter =
+                match unsafe { iter::RangeIter::<R, W>::new(root, writer.clone(), min, max) } {
+                    iter::RangeIter::Node(iter) => iter,
+                    iter::RangeIter::Root(_) => todo!("FIXME: handle node to root transition"),
+                };
+
             let mut dirty = false;
             let mut i = 0;
 
