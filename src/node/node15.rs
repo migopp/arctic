@@ -98,27 +98,28 @@ impl linear::Header for Atomic128<Header> {
             let keys = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(header.value);
             let len = header.len().value() as usize;
 
+            let within_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
+                (1u128 << (len << 3)) - 1,
+            );
+
             let min = _mm_set1_epi8(min as i8);
             let max = _mm_set1_epi8(max as i8);
-            let valid =
-                core::mem::transmute::<u128, core::arch::x86_64::__m128i>(1u128 << (len << 3));
+            let within_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
 
-            let mask = _mm_and_si128(
-                _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys),
-                valid,
-            );
-            let len = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(mask).count_ones()
-                as usize;
+            let valid = _mm_and_si128(within_len, within_range);
+            let len = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(valid).count_ones()
+                as usize
+                >> 3;
 
-            let mask_low = _mm_cvtsi128_si64x(mask) as u64;
+            let valid_low = _mm_cvtsi128_si64x(valid) as u64;
             let keys_low = _mm_cvtsi128_si64x(keys) as u64;
-            let keys_low = _pext_u64(keys_low, mask_low);
+            let keys_low = _pext_u64(keys_low, valid_low);
 
-            let mask_high = _mm_extract_epi64::<1>(mask) as u64;
+            let valid_high = _mm_extract_epi64::<1>(valid) as u64;
             let keys_high = _mm_extract_epi64::<1>(keys) as u64;
-            let keys_high = _pext_u64(keys_high, mask_high);
+            let keys_high = _pext_u64(keys_high, valid_high);
 
-            let keys = ((keys_high as u128) << mask_low.count_ones()) | (keys_low as u128);
+            let keys = ((keys_high as u128) << valid_low.count_ones()) | (keys_low as u128);
             (keys, len)
         };
 
