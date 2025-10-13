@@ -99,6 +99,7 @@ where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
+    #[cold]
     pub(crate) fn collect(&mut self) -> Vec<(W, u64)> {
         let mut buffer = Vec::new();
         while let Some((key, value)) = self.lend() {
@@ -107,7 +108,7 @@ where
         buffer
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         'vertical: loop {
             let (len, iter) = self.stack.last_mut()?;

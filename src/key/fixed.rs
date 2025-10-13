@@ -54,7 +54,6 @@ impl key::Read for Reader {
         byte
     }
 
-    #[inline]
     fn prefix(&self, other: &Self) -> Self {
         let max = self.bits.min(other.bits);
 

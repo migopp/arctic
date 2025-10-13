@@ -336,7 +336,6 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    #[inline]
     pub(crate) fn range<R, W>(&mut self, min: R, max: R) -> std::vec::IntoIter<(W, u64)>
     where
         R: key::Read,
@@ -442,7 +441,7 @@ impl<'g> MapRef<'g> {
         unsafe { core::hint::unreachable_unchecked() }
     }
 
-    #[inline]
+    #[cold]
     unsafe fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, &'g Atomic128<Edge>)>
     where
         R: key::Read,
