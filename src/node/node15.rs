@@ -42,14 +42,14 @@ impl linear::Header for Atomic128<Header> {
         old.len().value() as usize
     }
 
-    #[inline]
+    #[cold]
     fn get(&self, key: u8) -> Option<u8> {
         let header = self.load_packed(Ordering::Relaxed);
         let index = get(header.value, key);
         (index < header.len().value()).then_some(index)
     }
 
-    #[inline]
+    #[cold]
     fn get_or_reserve(&self, key: u8) -> Option<u8> {
         let mut old = self.load_packed(Ordering::Acquire);
 
@@ -79,7 +79,7 @@ impl linear::Header for Atomic128<Header> {
         }
     }
 
-    #[inline]
+    #[cold]
     fn keys_range(&self, min: u8, max: u8) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
 
@@ -130,7 +130,7 @@ impl linear::Header for Atomic128<Header> {
         linear::KeyIter::new_15(linear::RawKeyIter::new(indexes, len))
     }
 
-    #[inline]
+    #[cold]
     fn keys(&self) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         let keys = header.value.to_le_bytes();
@@ -140,7 +140,7 @@ impl linear::Header for Atomic128<Header> {
         linear::KeyIter::new_15(linear::RawKeyIter::new(indexes, len))
     }
 
-    #[inline]
+    #[cold]
     fn keys_unsorted(&self) -> linear::UnsortedKeyIter {
         let header = self.load_packed(Ordering::Relaxed);
         Or::R(
