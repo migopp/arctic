@@ -11,4 +11,4 @@ pub(crate) use hazard::{Global, Guard, Local};
 mod no_op;
 
 #[cfg(not(feature = "smr-hazard"))]
-pub(crate) use no_op::{Global, Local, ReadGuard, WriteGuard};
+pub(crate) use no_op::{Global, Guard, Local};
