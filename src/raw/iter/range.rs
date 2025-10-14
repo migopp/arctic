@@ -8,7 +8,7 @@ use crate::node;
 use crate::Edge;
 
 pub(crate) enum RangeIter<'a, R, W> {
-    Root(RootIter<W>),
+    Root { key: W, next: Option<u64> },
     Node(NodeIter<'a, R, W>),
 }
 
@@ -21,10 +21,10 @@ where
 {
     #[inline]
     pub(crate) fn empty() -> Self {
-        Self::Root(RootIter {
+        Self::Root {
             key: W::default(),
             next: None,
-        })
+        }
     }
 
     pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {
@@ -35,15 +35,15 @@ where
 
         if meta.leaf() {
             if key < min || key > max {
-                return Self::Root(RootIter { key, next: None });
+                return Self::Root { key, next: None };
             }
 
-            Self::Root(RootIter {
+            Self::Root {
                 key,
                 next: Some(data),
-            })
+            }
         } else if data == 0 {
-            Self::Root(RootIter { key, next: None })
+            Self::Root { key, next: None }
         } else {
             let node = unsafe { Edge::next_node_unchecked(data) };
 
@@ -66,32 +66,42 @@ where
     }
 
     #[inline]
-    pub fn lend(&mut self) -> Option<(&W, u64)> {
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, mut apply: F) {
         match self {
-            RangeIter::Root(iter) => iter.lend(),
-            RangeIter::Node(iter) => iter.lend(),
+            RangeIter::Root { key, next } => {
+                crate::cold();
+                if let Some(value) = next.take() {
+                    apply(key, value);
+                }
+            }
+            RangeIter::Node(iter) => iter.for_each(apply),
         }
-    }
-}
-
-pub(crate) struct RootIter<W> {
-    key: W,
-    next: Option<u64>,
-}
-
-impl<W: Clone> RootIter<W> {
-    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
-        self.next
-            .take()
-            .map(|value| (K::from(self.key.clone()), value))
-            .into_iter()
-            .collect()
     }
 
     #[inline]
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
-        let value = self.next.take()?;
-        Some((&self.key, value))
+        match self {
+            RangeIter::Root { key, next } => {
+                crate::cold();
+                let value = next.take()?;
+                Some((key, value))
+            }
+            RangeIter::Node(iter) => iter.lend(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
+        match self {
+            RangeIter::Root { key, next } => {
+                crate::cold();
+                match next.take() {
+                    None => Vec::new(),
+                    Some(value) => vec![(K::from(key.clone()), value)],
+                }
+            }
+            RangeIter::Node(iter) => iter.collect(),
+        }
     }
 }
 
@@ -107,7 +117,8 @@ where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
-    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
+    #[inline]
+    fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
         let mut buffer = Vec::new();
         self.for_each(|key, value| {
             buffer.push((K::from(key.clone()), value));
@@ -115,11 +126,13 @@ where
         buffer
     }
 
-    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
+    #[inline]
+    fn lend(&mut self) -> Option<(&W, u64)> {
         self.walk::<true, _>(|_, _| ())
     }
 
-    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+    #[inline]
+    fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 

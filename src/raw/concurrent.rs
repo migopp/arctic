@@ -351,20 +351,11 @@ impl<'g> MapRef<'g> {
             return Vec::new().into_iter();
         };
 
-        let mut buffer = match unsafe { iter::RangeIter::new(root, writer.clone(), min, max) } {
-            iter::RangeIter::Node(mut iter) => iter.collect::<K>(),
-            iter::RangeIter::Root(mut iter) => {
-                crate::cold();
-                return iter.collect().into_iter();
-            }
-        };
+        let mut buffer =
+            unsafe { iter::RangeIter::new(root, writer.clone(), min, max) }.collect::<K>();
 
         for retry in 0.. {
-            let mut iter = match unsafe { iter::RangeIter::new(root, writer.clone(), min, max) } {
-                iter::RangeIter::Node(iter) => iter,
-                iter::RangeIter::Root(_) => todo!("FIXME: handle node to root transition"),
-            };
-
+            let mut iter = unsafe { iter::RangeIter::new(root, writer.clone(), min, max) };
             let mut dirty = false;
             let mut len = 0;
 
