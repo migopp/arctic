@@ -57,27 +57,16 @@ pub(crate) struct Local<'g> {
 
 impl<'g> Local<'g> {
     #[inline]
-    pub(crate) fn protect_read<'l>(&'l self, prefix: byte::Array) -> ReadGuard<'g, 'l> {
-        self.protect(prefix);
-        ReadGuard(self)
-    }
-
-    #[inline]
-    pub(crate) fn protect_write<'l>(&'l mut self, prefix: byte::Array) -> WriteGuard<'g, 'l> {
-        self.protect(prefix);
-        WriteGuard(self)
-    }
-
-    #[inline]
-    fn protect(&self, prefix: byte::Array) {
+    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> Guard<'g, 'l> {
         self.hazard.store(prefix.value(), Ordering::Relaxed);
         membarrier::fast();
+        Guard(self)
     }
 }
 
-pub(crate) struct ReadGuard<'g, 'l>(&'l Local<'g>);
+pub(crate) struct Guard<'g, 'l>(&'l mut Local<'g>);
 
-impl Drop for ReadGuard<'_, '_> {
+impl Drop for Guard<'_, '_> {
     #[inline]
     fn drop(&mut self) {
         self.0
@@ -86,18 +75,7 @@ impl Drop for ReadGuard<'_, '_> {
     }
 }
 
-pub(crate) struct WriteGuard<'g, 'l>(&'l mut Local<'g>);
-
-impl Drop for WriteGuard<'_, '_> {
-    #[inline]
-    fn drop(&mut self) {
-        self.0
-            .hazard
-            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
-    }
-}
-
-impl WriteGuard<'_, '_> {
+impl Guard<'_, '_> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
         if edge.meta().leaf() || edge.data() == 0 {
             return;

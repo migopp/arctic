@@ -48,7 +48,7 @@ pub struct MapRef<'g, K, V> {
 }
 
 impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
-    pub fn get<'k>(&self, key: K::Borrow<'k>) -> Option<V> {
+    pub fn get<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
         self.raw.get(K::Read::from(key)).map(V::from_u64)
     }
 

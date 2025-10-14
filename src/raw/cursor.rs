@@ -10,20 +10,23 @@ use crate::key;
 use crate::node;
 use crate::node::Node3;
 use crate::raw::Op;
+use crate::smr;
 use crate::Edge;
 
 /// Stateful traversal over tree.
-pub(crate) struct Cursor<'a, R, H> {
+pub(crate) struct Cursor<'g, 'l, R, H> {
+    guard: smr::Guard<'g, 'l>,
     bit: usize,
     key: R,
-    root: &'a Atomic128<Edge>,
+    root: &'g Atomic128<Edge>,
     history: H,
 }
 
-impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
+impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     #[inline]
-    pub(crate) fn new(key: R, root: &'a Atomic128<Edge>) -> Self {
+    pub(crate) fn new(smr: &'l mut smr::Local<'g>, root: &'g Atomic128<Edge>, key: R) -> Self {
         Self {
+            guard: smr.protect(key.peek_all()),
             bit: 0,
             key,
             root,
@@ -32,13 +35,23 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    pub(crate) fn root(&self) -> &'a Atomic128<Edge> {
+    pub(crate) fn root(&self) -> &'g Atomic128<Edge> {
         self.root
     }
 
     #[inline]
     pub(crate) fn bit(&self) -> usize {
         self.bit
+    }
+
+    #[inline]
+    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
+        unsafe { self.guard.retire(edge) }
+    }
+
+    #[inline]
+    pub(crate) fn into_guard(self) -> smr::Guard<'g, 'l> {
+        self.guard
     }
 
     #[inline]
@@ -138,7 +151,7 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[inline]
-    fn step(&mut self, key: R, len: byte::Len, node: node::Ref<'a>, edge: &'a Atomic128<Edge>) {
+    fn step(&mut self, key: R, len: byte::Len, node: node::Ref<'g>, edge: &'g Atomic128<Edge>) {
         // 1 extra byte for node
         self.bit += len.bits() as usize + 8;
         self.history.push(Segment {
@@ -150,12 +163,34 @@ impl<'a, R: key::Read, H: History<'a, R>> Cursor<'a, R, H> {
     }
 
     #[cold]
-    pub(crate) fn pop(&mut self) -> Result<node::Ref<'a>, H::PopError> {
+    pub(crate) fn pop(&mut self) -> Result<node::Ref<'g>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.bit -= segment.len.bits() as usize + 8;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)
+    }
+}
+
+impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
+        loop {
+            let edge = self.root.load_packed(Ordering::Acquire);
+            let meta = edge.meta();
+            let data = edge.data();
+
+            match meta.key().match_prefix(&mut self.key)? {
+                byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
+                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    let Some(byte) = self.key.next() else {
+                        return Some(edge);
+                    };
+                    self.root = node.get(byte)?;
+                    self.bit += len.bits() as usize + 8;
+                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => return Some(edge),
+            }
+        }
     }
 }
 

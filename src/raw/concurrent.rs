@@ -1,7 +1,5 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
-
 use crate::byte;
 use crate::edge;
 use crate::key;
@@ -47,8 +45,8 @@ pub(crate) struct MapRef<'g> {
 
 impl<'g> MapRef<'g> {
     #[inline]
-    pub(crate) fn get<R: key::Read>(&self, key: R) -> Option<u64> {
-        let _guard = self.smr.protect_read(key.peek_all());
+    pub(crate) fn get<R: key::Read>(&mut self, key: R) -> Option<u64> {
+        let _guard = self.smr.protect(key.peek_all());
 
         let mut root = self.raw.root();
         let mut key = key;
@@ -124,15 +122,14 @@ impl<'g> MapRef<'g> {
         H: cursor::History<'g, R>,
         F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
     {
-        let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(&mut self.smr, self.raw.root(), key);
 
         loop {
             let old = match cursor.traverse_exact() {
                 None => return Ok(None),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
-                    Self::freeze(&mut guard, &mut cursor, &key)?;
+                    Self::freeze(&mut cursor, &key)?;
                     continue;
                 }
             };
@@ -178,14 +175,13 @@ impl<'g> MapRef<'g> {
         key: R,
         value: u64,
     ) -> Result<Option<u64>, H::PopError> {
-        let mut guard = self.smr.protect_write(key.peek_all());
-        let mut cursor = Cursor::<R, H>::new(key, self.raw.root());
+        let mut cursor = Cursor::<R, H>::new(&mut self.smr, self.raw.root(), key);
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    Self::freeze(&mut guard, &mut cursor, &key)?;
+                    Self::freeze(&mut cursor, &key)?;
                     continue;
                 }
             };
@@ -209,7 +205,7 @@ impl<'g> MapRef<'g> {
                 }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut guard, &cursor, op, &key, old) };
+                    unsafe { Self::retire(&mut cursor, op, &key, old) };
                 }
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
@@ -221,8 +217,7 @@ impl<'g> MapRef<'g> {
 
     #[cold]
     fn freeze<R: key::Read, H: cursor::History<'g, R>>(
-        guard: &mut smr::WriteGuard,
-        cursor: &mut Cursor<'g, R, H>,
+        cursor: &mut Cursor<'g, '_, R, H>,
         key: &R,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
@@ -251,7 +246,7 @@ impl<'g> MapRef<'g> {
             ) {
                 Ok(_) => unsafe {
                     stat::increment(op);
-                    Self::retire(guard, cursor, Op::Node(op), key, edge);
+                    Self::retire(cursor, Op::Node(op), key, edge);
                     return Ok(());
                 },
                 Err(conflict) => unsafe {
@@ -276,8 +271,7 @@ impl<'g> MapRef<'g> {
 
     #[cold]
     unsafe fn retire<R: key::Read, H: cursor::History<'g, R>>(
-        guard: &mut smr::WriteGuard,
-        cursor: &Cursor<'g, R, H>,
+        cursor: &mut Cursor<'g, '_, R, H>,
         op: Op,
         key: &R,
         edge: ribbit::Packed<Edge>,
@@ -290,7 +284,7 @@ impl<'g> MapRef<'g> {
         let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bit()));
 
         unsafe {
-            guard.retire(edge.with_meta(edge.meta().with_key(prefix)));
+            cursor.retire(edge.with_meta(edge.meta().with_key(prefix)));
         }
     }
 
@@ -303,15 +297,19 @@ impl<'g> MapRef<'g> {
         W: key::Write + From<R>,
         S: crate::iter::Sort,
     {
-        let guard = self.smr.protect_read(prefix.peek_all());
-        let iter = match unsafe { self.traverse_prefix::<R, W>(prefix) } {
-            Some((writer, root)) => unsafe { iter::LeafIter::new(root, writer) },
+        let mut cursor =
+            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix.clone());
+
+        let iter = match cursor.traverse_prefix() {
+            Some(_) => unsafe {
+                iter::LeafIter::new(cursor.root(), W::from(prefix.slice(cursor.bit())))
+            },
             None => iter::LeafIter::empty(),
         };
 
         PrefixNonLinearizable {
             iter,
-            _guard: guard,
+            _guard: cursor.into_guard(),
         }
     }
 
@@ -325,15 +323,25 @@ impl<'g> MapRef<'g> {
         W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
     {
         let prefix = min.prefix(&max);
-        let guard = self.smr.protect_read(prefix.peek_all());
-        let iter = match unsafe { self.traverse_prefix::<R, W>(prefix) } {
-            Some((writer, root)) => unsafe { iter::RangeIter::<R, W>::new(root, writer, min, max) },
+
+        let mut cursor =
+            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix.clone());
+
+        let iter = match cursor.traverse_prefix() {
+            Some(_) => unsafe {
+                iter::RangeIter::<R, W>::new(
+                    cursor.root(),
+                    W::from(prefix.slice(cursor.bit())),
+                    min,
+                    max,
+                )
+            },
             None => iter::RangeIter::<R, W>::empty(),
         };
 
         RangeNonLinearizableIter {
             iter,
-            _guard: guard,
+            _guard: cursor.into_guard(),
         }
     }
 
@@ -344,18 +352,36 @@ impl<'g> MapRef<'g> {
     ) -> std::vec::IntoIter<(K, u64)> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
-        let _guard = self.smr.protect_read(prefix.peek_all());
-        let Some((writer, root)) =
-            (unsafe { self.traverse_prefix::<K::Read<'l>, K::Write>(prefix) })
-        else {
+
+        let mut cursor = Cursor::<K::Read<'l>, cursor::Optimistic<_>>::new(
+            &mut self.smr,
+            self.raw.root(),
+            prefix.clone(),
+        );
+
+        let Some(_) = cursor.traverse_prefix() else {
             return Vec::new().into_iter();
         };
 
-        let mut buffer =
-            unsafe { iter::RangeIter::new(root, writer.clone(), min, max) }.collect::<K>();
+        let mut buffer = unsafe {
+            iter::RangeIter::new(
+                cursor.root(),
+                K::Write::from(prefix.slice(cursor.bit())),
+                min,
+                max,
+            )
+        }
+        .collect::<K>();
 
         for retry in 0.. {
-            let mut iter = unsafe { iter::RangeIter::new(root, writer.clone(), min, max) };
+            let mut iter = unsafe {
+                iter::RangeIter::new(
+                    cursor.root(),
+                    K::Write::from(prefix.slice(cursor.bit())),
+                    min,
+                    max,
+                )
+            };
             let mut dirty = false;
             let mut len = 0;
 
@@ -415,41 +441,11 @@ impl<'g> MapRef<'g> {
 
         unsafe { core::hint::unreachable_unchecked() }
     }
-
-    #[cold]
-    unsafe fn traverse_prefix<R, W>(&self, prefix: R) -> Option<(W, &'g Atomic128<Edge>)>
-    where
-        R: key::Read,
-        W: key::Write + From<R>,
-    {
-        let mut reader = prefix;
-        let mut bits = 0;
-        let mut root = self.raw.root();
-
-        loop {
-            let edge = root.load_packed(Ordering::Acquire);
-            let meta = edge.meta();
-            let data = edge.data();
-
-            match meta.key().match_prefix(&mut reader)? {
-                byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
-                    let node = unsafe { Edge::next_node_unchecked(data) };
-                    let Some(byte) = reader.next() else { break };
-
-                    root = node.get(byte)?;
-                    bits += len.bits() + 8;
-                }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => break,
-            }
-        }
-
-        Some((W::from(prefix.slice(bits as usize)), root))
-    }
 }
 
 pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
     iter: iter::RangeIter<'g, R, W>,
-    _guard: smr::ReadGuard<'g, 'l>,
+    _guard: smr::Guard<'g, 'l>,
 }
 
 impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
@@ -465,7 +461,7 @@ where
 
 pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, S: crate::iter::Sort> {
     iter: iter::LeafIter<'g, W, S>,
-    _guard: smr::ReadGuard<'g, 'l>,
+    _guard: smr::Guard<'g, 'l>,
 }
 
 impl<'g, 'l, W, S> PrefixNonLinearizable<'g, 'l, W, S>
