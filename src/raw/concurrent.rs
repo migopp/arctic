@@ -46,28 +46,7 @@ pub(crate) struct MapRef<'g> {
 impl<'g> MapRef<'g> {
     #[inline]
     pub(crate) fn get<R: key::Read>(&mut self, key: R) -> Option<u64> {
-        let _guard = self.smr.protect(key.peek_all());
-
-        let mut root = self.raw.root();
-        let mut key = key;
-        loop {
-            let edge = root.load_packed(Ordering::Relaxed);
-            let meta = edge.meta();
-
-            let _ = meta.key().match_exact(&mut key)?;
-            let data = edge.data();
-
-            if meta.leaf() {
-                return Some(edge.data());
-            } else if data == 0 {
-                return None;
-            } else {
-                let byte = key.next()?;
-                let data = edge.data();
-                let node = unsafe { Edge::next_node_unchecked(data) };
-                root = node.get(byte)?;
-            }
-        }
+        Cursor::new(&mut self.smr, self.raw.root(), key).traverse_value()
     }
 
     #[inline]

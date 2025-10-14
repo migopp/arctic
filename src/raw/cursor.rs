@@ -69,7 +69,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                 let byte = self.key.next()?;
                 let node = unsafe { Edge::next_node_unchecked(data) };
                 let next = node.get(byte)?;
-                self.step(save, len, node, next);
+                self.push(save, len, node, next);
                 continue;
             }
 
@@ -106,7 +106,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                     let byte = self.key.next().unwrap();
                     let node = unsafe { Edge::next_node_unchecked(old_data) };
                     if let Some(next) = node.get_or_reserve(byte) {
-                        self.step(save, len, node, next);
+                        self.push(save, len, node, next);
                         continue;
                     }
                 }
@@ -151,9 +151,9 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[inline]
-    fn step(&mut self, key: R, len: byte::Len, node: node::Ref<'g>, edge: &'g Atomic128<Edge>) {
+    fn push(&mut self, key: R, len: byte::Len, node: node::Ref<'g>, edge: &'g Atomic128<Edge>) {
         // 1 extra byte for node
-        self.bit += len.bits() as usize + 8;
+        self.bit += 8 + len.bits() as usize;
         self.history.push(Segment {
             key,
             len,
@@ -189,6 +189,28 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
                     self.bit += len.bits() as usize + 8;
                 }
                 byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => return Some(edge),
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn traverse_value(mut self) -> Option<u64> {
+        loop {
+            let edge = self.root.load_packed(Ordering::Relaxed);
+            let meta = edge.meta();
+
+            let _ = meta.key().match_exact(&mut self.key)?;
+            let data = edge.data();
+
+            if meta.leaf() {
+                return Some(edge.data());
+            } else if data == 0 {
+                return None;
+            } else {
+                let byte = self.key.next()?;
+                let data = edge.data();
+                let node = unsafe { Edge::next_node_unchecked(data) };
+                self.root = node.get(byte)?;
             }
         }
     }
