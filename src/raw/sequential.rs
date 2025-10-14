@@ -61,7 +61,7 @@ impl Drop for Map {
     fn drop(&mut self) {
         self.postorder::<iter::postorder::SelectNode>()
             .for_each(|edge| unsafe {
-                Edge::deallocate_unchecked(edge, stat::Counter::FreeDrop);
+                edge.data().deallocate_unchecked(stat::Counter::FreeDrop);
             })
     }
 }

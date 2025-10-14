@@ -25,7 +25,7 @@ pub(crate) trait Node {
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
 }
 
-pub(crate) trait Info: Node + Default + core::fmt::Debug {
+pub(crate) trait Info: Node + Default + core::fmt::Debug + 'static {
     const KIND: Kind;
     const GROW: usize;
     const REF: for<'a> fn(&'a Self) -> Ref<'a>;
@@ -140,9 +140,9 @@ impl<'a> Ref<'a> {
     #[inline]
     pub(crate) fn as_data(&self) -> u64 {
         match *self {
-            Ref::Node3(node) => node as *const _ as u64 | Kind::NODE_3,
-            Ref::Node15(node) => node as *const _ as u64 | Kind::NODE_15,
-            Ref::Node256(node) => node as *const _ as u64 | Kind::NODE_256,
+            Ref::Node3(node) => node as *const _ as u64 | Kind::Node3 as u64,
+            Ref::Node15(node) => node as *const _ as u64 | Kind::Node15 as u64,
+            Ref::Node256(node) => node as *const _ as u64 | Kind::Node256 as u64,
         }
     }
 }
@@ -157,17 +157,27 @@ impl Debug for Ref<'_> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 2, eq, debug)]
 pub(crate) enum Kind {
-    Node3,
-    Node15,
-    Node256,
+    #[ribbit(size = 0)]
+    Node3 = 0,
+    #[ribbit(size = 0)]
+    Node15 = 1,
+    #[ribbit(size = 0)]
+    Node256 = 2,
+}
+
+impl Default for Kind {
+    fn default() -> Self {
+        Self::Node3
+    }
 }
 
 impl Kind {
-    pub(crate) const NODE_3: u64 = Self::Node3 as u64;
-    pub(crate) const NODE_15: u64 = Self::Node15 as u64;
-    pub(crate) const NODE_256: u64 = Self::Node256 as u64;
+    pub(crate) const NODE_3: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node3();
+    pub(crate) const NODE_15: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node15();
+    pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }
 
 pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;

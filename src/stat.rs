@@ -32,7 +32,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
         if meta.leaf() {
             depth.record(depth_ as u64);
         } else {
-            let node = unsafe { edge::Edge::next_node_unchecked(data) };
+            let node = unsafe { data.into_node_unchecked() };
             let histogram = match node {
                 node::Ref::Node3(_) => &mut node_3,
                 node::Ref::Node15(_) => &mut node_15,
@@ -42,7 +42,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             let children = unsafe { node.iter_unsorted() }
                 .filter(|(_, edge)| {
                     let edge = edge.load_packed(Ordering::Relaxed);
-                    edge.meta().leaf() || edge.data() > 0
+                    edge.meta().leaf() || !edge.data().is_null()
                 })
                 .count();
 

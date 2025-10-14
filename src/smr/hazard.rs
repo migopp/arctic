@@ -45,7 +45,7 @@ impl Drop for Global {
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe { Edge::deallocate_unchecked(*edge, stat::Counter::FreeDrop) })
+            .for_each(|edge| unsafe { edge.data().deallocate_unchecked(stat::Counter::FreeDrop) })
     }
 }
 
@@ -77,7 +77,7 @@ impl Drop for Guard<'_, '_> {
 
 impl Guard<'_, '_> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
-        if edge.meta().leaf() || edge.data() == 0 {
+        if edge.meta().leaf() || edge.data().is_null() {
             return;
         }
 
@@ -115,7 +115,7 @@ impl Guard<'_, '_> {
                 return true;
             }
 
-            unsafe { Edge::deallocate_unchecked(*edge, stat::Counter::FreeRetire) };
+            unsafe { edge.data().deallocate_unchecked(stat::Counter::FreeRetire) };
             false
         })
     }

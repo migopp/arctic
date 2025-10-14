@@ -120,9 +120,9 @@ impl<'g> MapRef<'g> {
                 .is_ok()
             {
                 return if old.meta().leaf() {
-                    Ok(Some(old.data()))
+                    Ok(Some(old.data().into_leaf()))
                 } else {
-                    validate_eq!(old.data(), 0);
+                    validate!(old.data().is_null());
                     Ok(None)
                 };
             }
@@ -177,9 +177,9 @@ impl<'g> MapRef<'g> {
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
                     if old.meta().leaf() {
-                        return Ok(Some(old.data()));
+                        return Ok(Some(old.data().into_leaf()));
                     } else {
-                        validate_eq!(old.data(), 0);
+                        validate!(old.data().is_null());
                         return Ok(None);
                     }
                 }
@@ -212,7 +212,7 @@ impl<'g> MapRef<'g> {
             let data = edge.data();
 
             // Already helped by another thread
-            if meta.leaf() || node.as_data() != data {
+            if meta.leaf() || node.as_data() != data.into_leaf() {
                 return Ok(());
             }
 
@@ -244,7 +244,11 @@ impl<'g> MapRef<'g> {
             | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
             Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
             | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                Edge::deallocate_unchecked(edge, stat::Counter::FreeConflict)
+                validate!(!edge.meta().leaf());
+                validate!(!edge.data().is_null());
+
+                edge.data()
+                    .deallocate_unchecked(stat::Counter::FreeConflict)
             },
         }
     }

@@ -40,12 +40,12 @@ where
         if meta.leaf() {
             Self::Root {
                 key,
-                next: Some(data),
+                next: Some(data.into_leaf()),
             }
-        } else if data == 0 {
+        } else if data.is_null() {
             Self::Root { key, next: None }
         } else {
-            let node = unsafe { Edge::next_node_unchecked(data) };
+            let node = unsafe { data.into_node_unchecked() };
             Self::Node {
                 frontier: vec![(key.bits(), S::new(node))],
                 key,
@@ -77,7 +77,7 @@ where
                 let meta = edge.meta();
                 let data = edge.data();
 
-                if !meta.leaf() && data == 0 {
+                if !meta.leaf() && data.is_null() {
                     continue;
                 }
 
@@ -86,9 +86,9 @@ where
                 key.extend(meta.key());
 
                 if meta.leaf() {
-                    return Some((key, edge.data()));
+                    return Some((key, data.into_leaf()));
                 } else {
-                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    let node = unsafe { data.into_node_unchecked() };
                     frontier.push((key.bits(), unsafe { S::new(node) }));
                     continue 'vertical;
                 }

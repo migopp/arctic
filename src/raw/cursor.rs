@@ -65,9 +65,9 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let len = meta.key().match_exact(&mut self.key)?;
 
             // Fast path: traversal
-            if !meta.leaf() && data != 0 {
+            if !meta.leaf() && !data.is_null() {
                 let byte = self.key.next()?;
-                let node = unsafe { Edge::next_node_unchecked(data) };
+                let node = unsafe { data.into_node_unchecked() };
                 let next = node.get(byte)?;
                 self.push(save, len, node, next);
                 continue;
@@ -80,7 +80,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             } else if meta.leaf() {
                 Some(Ok(edge))
             } else {
-                validate_eq!(data, 0);
+                validate!(data.is_null());
                 None
             };
         }
@@ -102,9 +102,9 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
 
             // Fast path: traverse
             if let byte::MatchSplit::Full(len) = r#match {
-                if !old_meta.leaf() && old_data > 0 {
+                if !old_meta.leaf() && !old_data.is_null() {
                     let byte = self.key.next().unwrap();
-                    let node = unsafe { Edge::next_node_unchecked(old_data) };
+                    let node = unsafe { old_data.into_node_unchecked() };
                     if let Some(next) = node.get_or_reserve(byte) {
                         self.push(save, len, node, next);
                         continue;
@@ -120,8 +120,8 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             self.key = save;
 
             let (op, new) = match r#match {
-                byte::MatchSplit::Full(_) if !old_meta.leaf() && old_data > 0 => {
-                    let node = unsafe { Edge::next_node_unchecked(old_data) };
+                byte::MatchSplit::Full(_) if !old_meta.leaf() && !old_data.is_null() => {
+                    let node = unsafe { old_data.into_node_unchecked() };
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
@@ -180,8 +180,8 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
             let data = edge.data();
 
             match meta.key().match_prefix(&mut self.key)? {
-                byte::MatchPrefix::Full(len) if !meta.leaf() && data != 0 => {
-                    let node = unsafe { Edge::next_node_unchecked(data) };
+                byte::MatchPrefix::Full(len) if !meta.leaf() && !data.is_null() => {
+                    let node = unsafe { data.into_node_unchecked() };
                     let Some(byte) = self.key.next() else {
                         return Some(edge);
                     };
@@ -203,13 +203,13 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(edge.data());
-            } else if data == 0 {
+                return Some(data.into_leaf());
+            } else if data.is_null() {
                 return None;
             } else {
                 let byte = self.key.next()?;
                 let data = edge.data();
-                let node = unsafe { Edge::next_node_unchecked(data) };
+                let node = unsafe { data.into_node_unchecked() };
                 self.root = node.get(byte)?;
             }
         }

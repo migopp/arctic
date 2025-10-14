@@ -23,10 +23,10 @@ impl<'a, S: Selector> PostorderIter<'a, S> {
         if meta.leaf() {
             let next = S::select(edge, 0);
             Self::Root(next)
-        } else if data == 0 {
+        } else if data.is_null() {
             Self::Root(None)
         } else {
-            let node = unsafe { Edge::next_node_unchecked(data) };
+            let node = unsafe { data.into_node_unchecked() };
             Self::Node(vec![RepeatIter::new(node)])
         }
     }
@@ -59,7 +59,7 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
                 let meta = edge.meta();
                 let data = edge.data();
 
-                if !meta.leaf() && data == 0 {
+                if !meta.leaf() && data.is_null() {
                     iter.skip();
                     continue;
                 }
@@ -70,7 +70,7 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
                         iter.skip();
                     } else {
                         // Visit children before node
-                        let node = unsafe { Edge::next_node_unchecked(data) };
+                        let node = unsafe { data.into_node_unchecked() };
                         frontier.push(unsafe { RepeatIter::new(node) });
                         continue 'vertical;
                     }
@@ -96,7 +96,7 @@ impl Selector for SelectNode {
 
     #[inline]
     fn select(edge: ribbit::Packed<Edge>, _depth: usize) -> Option<Self::Item> {
-        (!edge.meta().leaf() && edge.data() > 0).then_some(edge)
+        (!edge.meta().leaf() && !edge.data().is_null()).then_some(edge)
     }
 }
 
@@ -107,7 +107,7 @@ impl Selector for SelectAll {
 
     #[inline]
     fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item> {
-        (edge.meta().leaf() || edge.data() > 0).then_some((edge, depth))
+        (edge.meta().leaf() || !edge.data().is_null()).then_some((edge, depth))
     }
 }
 

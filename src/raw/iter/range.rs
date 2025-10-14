@@ -40,12 +40,12 @@ where
 
             Self::Root {
                 key,
-                next: Some(data),
+                next: Some(data.into_leaf()),
             }
-        } else if data == 0 {
+        } else if data.is_null() {
             Self::Root { key, next: None }
         } else {
-            let node = unsafe { Edge::next_node_unchecked(data) };
+            let node = unsafe { data.into_node_unchecked() };
 
             validate!(key >= min.slice(key.bits()));
             validate!(key <= max.slice(key.bits()));
@@ -128,7 +128,7 @@ where
                 let meta = edge.meta();
                 let data = edge.data();
 
-                if !meta.leaf() && data == 0 {
+                if !meta.leaf() && data.is_null() {
                     continue 'horizontal;
                 }
 
@@ -146,13 +146,13 @@ where
                 if !check_first && !check_last {
                     if meta.leaf() {
                         if YIELD {
-                            return Some((&self.key, edge.data()));
+                            return Some((&self.key, data.into_leaf()));
                         } else {
-                            apply(&self.key, edge.data());
+                            apply(&self.key, data.into_leaf());
                             continue 'horizontal;
                         }
                     } else {
-                        let node = unsafe { Edge::next_node_unchecked(data) };
+                        let node = unsafe { data.into_node_unchecked() };
                         self.stack
                             .push((self.key.bits(), unsafe { node.iter_range(None, None) }));
                         continue 'vertical;
@@ -172,9 +172,9 @@ where
                     }
 
                     if YIELD {
-                        return Some((&self.key, edge.data()));
+                        return Some((&self.key, data.into_leaf()));
                     } else {
-                        apply(&self.key, edge.data());
+                        apply(&self.key, data.into_leaf());
                     }
                 } else {
                     let min = if check_first {
@@ -202,7 +202,7 @@ where
                         None
                     };
 
-                    let node = unsafe { Edge::next_node_unchecked(data) };
+                    let node = unsafe { data.into_node_unchecked() };
                     self.stack
                         .push((self.key.bits(), unsafe { node.iter_range(min, max) }));
                     continue 'vertical;

@@ -3,6 +3,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 use ribbit::u56;
 use ribbit::u6;
+use ribbit::u62;
 
 use crate::byte;
 use crate::node;
@@ -16,15 +17,13 @@ use crate::stat;
 pub(crate) struct Edge {
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
-    #[ribbit(offset = 64)]
-    pub(crate) data: u64,
+    #[ribbit(size = 64)]
+    pub(crate) data: Data,
 }
 
 impl Edge {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
-
-    const MASK_TAG: u64 = 0b11;
-    const MASK_PTR: u64 = !Self::MASK_TAG;
+    pub(crate) const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(Meta::DEFAULT, Data::DEFAULT);
 
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
@@ -43,54 +42,8 @@ impl Edge {
     }
 
     #[inline]
-    pub(crate) unsafe fn next_node_unchecked<'a>(data: u64) -> node::Ref<'a> {
-        #[inline]
-        unsafe fn next<'a, N: node::Info + 'a>(ptr: u64) -> node::Ref<'a> {
-            let node = unsafe { (ptr as *mut N).as_ref() };
-            validate!(node.is_some());
-            N::REF(unsafe { node.unwrap_unchecked() })
-        }
-
-        let tag = data & Self::MASK_TAG;
-        let ptr = data & Self::MASK_PTR;
-
-        if tag == node::Kind::NODE_3 {
-            unsafe { next::<Node3>(ptr) }
-        } else if tag == node::Kind::NODE_15 {
-            unsafe { next::<Node15>(ptr) }
-        } else {
-            validate_eq!(tag, node::Kind::NODE_256);
-            unsafe { next::<Node256>(ptr) }
-        }
-    }
-
-    /// # SAFETY
-    ///
-    /// Caller must ensure `edge` is a node that has no references.
-    #[inline]
-    pub(crate) unsafe fn deallocate_unchecked(edge: ribbit::Packed<Edge>, counter: stat::Counter) {
-        let meta = edge.meta();
-        let data = edge.data();
-
-        validate!(!meta.leaf() && data != 0);
-
-        let tag = data & Self::MASK_TAG;
-        let ptr = data & Self::MASK_PTR;
-
-        if tag == node::Kind::NODE_3 {
-            drop(Box::from_raw(ptr as *mut Node3))
-        } else if tag == node::Kind::NODE_15 {
-            drop(Box::from_raw(ptr as *mut Node15))
-        } else {
-            validate_eq!(tag, node::Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256))
-        }
-
-        stat::increment(counter);
-    }
-
     pub(crate) fn new_leaf(key: byte::Array, leaf: u64) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), leaf)
+        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), Data::from_leaf(leaf))
     }
 
     #[cold]
@@ -107,13 +60,7 @@ impl Edge {
                 .set_packed(edge);
         }
 
-        let ptr = Box::leak(node) as *mut N as u64;
-        let tag = N::KIND as u64;
-
-        validate!(ptr > 0);
-        validate_eq!(ptr & Self::MASK_TAG, 0);
-
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), ptr | tag)
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
     }
 }
 
@@ -161,4 +108,96 @@ pub(crate) enum Op {
     /// Leaf removal
     #[expect(dead_code)]
     Remove,
+}
+
+#[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
+#[ribbit(size = 64, packed(rename = DataPacked), debug)]
+pub struct Data {
+    #[ribbit(size = 2)]
+    kind: node::Kind,
+
+    #[ribbit(with(skip))]
+    _placeholder_data: u62,
+}
+
+impl Data {
+    const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(node::Kind::NODE_3, u62::new(0));
+
+    #[inline]
+    fn from_leaf(value: u64) -> ribbit::Packed<Self> {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(value) }
+    }
+
+    #[inline]
+    fn from_node<N: node::Info>(node: Box<N>) -> ribbit::Packed<Self> {
+        let ptr = Box::leak(node) as *mut N as u64;
+        let kind = N::KIND as u64;
+
+        validate!(ptr > 0);
+        validate_eq!(ptr & ribbit::Packed::<Self>::MASK_KIND, 0);
+
+        unsafe { ribbit::Packed::<Self>::new_unchecked(ptr | kind) }
+    }
+}
+
+impl DataPacked {
+    const MASK_KIND: u64 = 0b11;
+    const MASK_PTR: u64 = !Self::MASK_KIND;
+
+    #[inline]
+    pub(crate) fn is_null(self) -> bool {
+        self.value == 0
+    }
+
+    #[inline]
+    pub(crate) fn into_leaf(self) -> u64 {
+        self.value
+    }
+
+    #[inline]
+    pub(crate) unsafe fn into_node_unchecked<'a>(self) -> node::Ref<'a> {
+        #[inline]
+        unsafe fn convert<'a, N: node::Info>(ptr: u64) -> node::Ref<'a> {
+            let node = unsafe { (ptr as *const N).as_ref() };
+            validate!(node.is_some());
+            N::REF(unsafe { node.unwrap_unchecked() })
+        }
+
+        validate!(!self.is_null());
+
+        let ptr = self.value & Self::MASK_PTR;
+        let kind = self.kind();
+
+        if kind == node::Kind::NODE_3 {
+            unsafe { convert::<Node3>(ptr) }
+        } else if kind == node::Kind::NODE_15 {
+            unsafe { convert::<Node15>(ptr) }
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            unsafe { convert::<Node256>(ptr) }
+        }
+    }
+
+    /// # SAFETY
+    ///
+    /// Caller must ensure there are no references to this node.
+    #[inline]
+    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
+        validate!(!self.is_null());
+
+        let ptr = self.value & Self::MASK_PTR;
+        let kind = self.kind();
+
+        if kind == node::Kind::NODE_3 {
+            drop(Box::from_raw(ptr as *mut Node3))
+        } else if kind == node::Kind::NODE_15 {
+            drop(Box::from_raw(ptr as *mut Node15))
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            drop(Box::from_raw(ptr as *mut Node256))
+        }
+
+        stat::increment(counter);
+    }
 }
