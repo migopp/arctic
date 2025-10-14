@@ -56,7 +56,7 @@ fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
         for thread_id in 0..thread_count {
             scope.spawn(move || {
                 let keys = generate(thread_count, thread_id, key_count / 2..key_count, shuffle);
-                let map = map.pin();
+                let mut map = map.pin();
 
                 barrier.wait();
 

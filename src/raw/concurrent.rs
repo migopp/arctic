@@ -277,7 +277,7 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let mut cursor =
-            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix.clone());
+            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix);
 
         let iter = match cursor.traverse_prefix() {
             Some(_) => unsafe {
@@ -304,7 +304,7 @@ impl<'g> MapRef<'g> {
         let prefix = min.prefix(&max);
 
         let mut cursor =
-            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix.clone());
+            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix);
 
         let iter = match cursor.traverse_prefix() {
             Some(_) => unsafe {
@@ -335,7 +335,7 @@ impl<'g> MapRef<'g> {
         let mut cursor = Cursor::<K::Read<'l>, cursor::Optimistic<_>>::new(
             &mut self.smr,
             self.raw.root(),
-            prefix.clone(),
+            prefix,
         );
 
         let Some(_) = cursor.traverse_prefix() else {
