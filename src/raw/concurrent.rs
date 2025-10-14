@@ -366,11 +366,11 @@ impl<'g> MapRef<'g> {
             };
 
             let mut dirty = false;
-            let mut i = 0;
+            let mut len = 0;
 
             iter.for_each(|new_writer, new_value| {
-                let index = i;
-                i += 1;
+                let index = len;
+                len += 1;
 
                 let new_borrow = K::Borrow::from(new_writer);
 
@@ -395,15 +395,15 @@ impl<'g> MapRef<'g> {
                     Some((old_borrow, old_value)) if old_borrow == new_borrow => {
                         *old_value = new_value;
                     }
-                    Some((old_borrow, _)) if old_borrow > new_borrow => {
-                        let high = buffer[i..]
+                    Some((old_borrow, _)) if old_borrow < new_borrow => {
+                        let high = buffer[len..]
                             .iter()
                             .map(|(key, value)| (key.borrow(), value))
                             .position(|(old_borrow, _)| old_borrow >= new_borrow)
-                            .map(|offset| i + offset)
+                            .map(|offset| len + offset)
                             .unwrap_or(buffer.len());
                         buffer.drain(index..high);
-                        i = index;
+                        len = index;
                     }
                     None | Some(_) => {
                         let new_key = K::from(new_writer.clone());
@@ -412,14 +412,14 @@ impl<'g> MapRef<'g> {
                 };
             });
 
-            if i == buffer.len() && !dirty {
+            if len == buffer.len() && !dirty {
                 stat::record(stat::Record::RangeConflict, retry);
                 return buffer.into_iter();
             }
 
             crate::cold();
-            validate!(buffer.len() <= i);
-            buffer.truncate(i);
+            validate!(buffer.len() <= len);
+            buffer.truncate(len);
         }
 
         unsafe { core::hint::unreachable_unchecked() }
