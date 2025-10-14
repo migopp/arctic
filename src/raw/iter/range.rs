@@ -89,20 +89,6 @@ where
             RangeIter::Node(iter) => iter.lend(),
         }
     }
-
-    #[inline]
-    pub(crate) fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
-        match self {
-            RangeIter::Root { key, next } => {
-                crate::cold();
-                match next.take() {
-                    None => Vec::new(),
-                    Some(value) => vec![(K::from(key.clone()), value)],
-                }
-            }
-            RangeIter::Node(iter) => iter.collect(),
-        }
-    }
 }
 
 pub(crate) struct NodeIter<'a, R, W> {
@@ -117,15 +103,6 @@ where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
-    #[inline]
-    fn collect<K: From<W>>(&mut self) -> Vec<(K, u64)> {
-        let mut buffer = Vec::new();
-        self.for_each(|key, value| {
-            buffer.push((K::from(key.clone()), value));
-        });
-        buffer
-    }
-
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
         self.walk::<true, _>(|_, _| ())

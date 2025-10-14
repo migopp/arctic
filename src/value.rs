@@ -1,4 +1,4 @@
-pub trait Value {
+pub trait Value: Eq {
     fn from_u64(value: u64) -> Self;
     fn into_u64(self) -> u64;
 }

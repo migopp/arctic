@@ -93,10 +93,9 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> impl Iterator<Item = (K, V)> {
-        self.raw
-            .range::<K>(min.into(), max.into())
-            .map(|(key, value)| (key, V::from_u64(value)))
+        buffer: &mut Vec<(K, V)>,
+    ) {
+        self.raw.range::<K, V>(min.into(), max.into(), buffer)
     }
 }
 

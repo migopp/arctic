@@ -242,7 +242,10 @@ mod tests {
             });
 
         // Concurrent iteration, linearizable
-        pin.range(first.borrow(), last.borrow())
+        let mut buffer = Vec::new();
+        pin.range(first.borrow(), last.borrow(), &mut buffer);
+        buffer
+            .into_iter()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

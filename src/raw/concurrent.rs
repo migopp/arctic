@@ -14,6 +14,7 @@ use crate::smr;
 use crate::stat;
 use crate::Edge;
 use crate::Key;
+use crate::Value;
 
 #[derive(Default)]
 pub(crate) struct Map {
@@ -324,11 +325,12 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range<'l, K: Key>(
+    pub(crate) fn range<'l, K: Key, V: Value>(
         &'l mut self,
         min: K::Read<'l>,
         max: K::Read<'l>,
-    ) -> std::vec::IntoIter<(K, u64)> {
+        output: &mut Vec<(K, V)>,
+    ) {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
 
@@ -339,10 +341,11 @@ impl<'g> MapRef<'g> {
         );
 
         let Some(_) = cursor.traverse_prefix() else {
-            return Vec::new().into_iter();
+            return;
         };
 
-        let mut buffer = unsafe {
+        let len = output.len();
+        unsafe {
             iter::RangeIter::new(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bit())),
@@ -350,7 +353,7 @@ impl<'g> MapRef<'g> {
                 max,
             )
         }
-        .collect::<K>();
+        .for_each(|key, value| output.push((K::from(key.clone()), V::from_u64(value))));
 
         for retry in 0.. {
             let mut iter = unsafe {
@@ -362,15 +365,16 @@ impl<'g> MapRef<'g> {
                 )
             };
             let mut dirty = false;
-            let mut len = 0;
+            let mut len = len;
 
             iter.for_each(|new_writer, new_value| {
                 let index = len;
                 len += 1;
 
                 let new_borrow = K::Borrow::from(new_writer);
+                let new_value = V::from_u64(new_value);
 
-                let old = match buffer
+                let old = match output
                     .get_mut(index)
                     .map(|(key, value)| (key.borrow(), value))
                 {
@@ -392,30 +396,30 @@ impl<'g> MapRef<'g> {
                         *old_value = new_value;
                     }
                     Some((old_borrow, _)) if old_borrow < new_borrow => {
-                        let high = buffer[len..]
+                        let high = output[len..]
                             .iter()
                             .map(|(key, value)| (key.borrow(), value))
                             .position(|(old_borrow, _)| old_borrow >= new_borrow)
                             .map(|offset| len + offset)
-                            .unwrap_or(buffer.len());
-                        buffer.drain(index..high);
+                            .unwrap_or(output.len());
+                        output.drain(index..high);
                         len = index;
                     }
                     None | Some(_) => {
                         let new_key = K::from(new_writer.clone());
-                        buffer.insert(index, (new_key, new_value));
+                        output.insert(index, (new_key, new_value));
                     }
                 };
             });
 
-            if len == buffer.len() && !dirty {
+            if len == output.len() && !dirty {
                 stat::record(stat::Record::RangeConflict, retry);
-                return buffer.into_iter();
+                return;
             }
 
             crate::cold();
-            validate!(buffer.len() <= len);
-            buffer.truncate(len);
+            validate!(output.len() <= len);
+            output.truncate(len);
         }
 
         unsafe { core::hint::unreachable_unchecked() }
