@@ -388,7 +388,7 @@ impl<'g> MapRef<'g> {
                 max,
             )
         }
-        .for_each(|key, value| output.push((K::from(key.clone()), V::from_u64(value))));
+        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
 
         for retry in 0.. {
             let mut iter = unsafe {
@@ -441,7 +441,7 @@ impl<'g> MapRef<'g> {
                         len = index;
                     }
                     None | Some(_) => {
-                        let new_key = K::from(new_writer.clone());
+                        let new_key = K::from(K::Borrow::from(new_writer));
                         output.insert(index, (new_key, new_value));
                     }
                 };

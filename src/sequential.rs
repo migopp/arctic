@@ -69,10 +69,9 @@ where
     S: crate::iter::Sort,
 {
     type Item = (K, V);
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .lend()
-            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
+        self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
 
@@ -82,7 +81,7 @@ where
     V: Value,
     S: crate::iter::Sort,
 {
-    #[allow(dead_code)]
+    #[inline]
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.inner
             .lend()

@@ -3,7 +3,7 @@ pub mod fixed;
 
 use crate::byte;
 
-pub trait Key: From<Self::Write> + 'static {
+pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     #[allow(private_bounds)]
     type Borrow<'k>: Copy
         + From<&'k Self::Write>
@@ -46,7 +46,7 @@ pub(crate) trait Read: Copy + core::fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Write: Clone + core::fmt::Debug + Default + Eq {
+pub(crate) trait Write: core::fmt::Debug + Default {
     type Len: Copy;
 
     fn bits(&self) -> Self::Len;
@@ -107,34 +107,6 @@ macro_rules! impl_unsigned_int {
 }
 
 impl_unsigned_int!(u8, u16, u32, u64);
-
-impl<const N: usize> Key for [u8; N] {
-    type Read<'a> = dynamic::Reader<'a>;
-    type Write = dynamic::Writer;
-    type Borrow<'a> = &'a [u8; N];
-
-    #[inline]
-    fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
-        self
-    }
-}
-
-impl<'w, const N: usize> From<&'w dynamic::Writer> for &'w [u8; N] {
-    #[inline]
-    fn from(writer: &'w dynamic::Writer) -> Self {
-        writer.0.as_slice().try_into().unwrap()
-    }
-}
-
-impl<const N: usize> From<dynamic::Writer> for [u8; N] {
-    #[inline]
-    fn from(writer: dynamic::Writer) -> Self {
-        writer
-            .0
-            .try_into()
-            .expect("key::Write should have same length as key::Key")
-    }
-}
 
 impl Key for Vec<u8> {
     type Read<'a> = dynamic::Reader<'a>;

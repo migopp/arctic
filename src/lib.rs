@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let map = Map::<[u8; 4], _>::default();
+        let map = Map::<Vec<u8>, _>::default();
         let mut map = map.pin();
         map.insert(b"abcd", 1);
         assert_eq!(map.get(b"abcd"), Some(1));
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn smoke_u64_key() {
-        let map = Map::<[u8; 8], _>::default();
+        let map = Map::<Vec<u8>, _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
         let mut map = map.pin();
         map.insert(&key, 1);

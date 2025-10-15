@@ -138,9 +138,7 @@ where
     type Item = (K, V);
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .lend()
-            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
+        self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
 
@@ -172,8 +170,6 @@ where
     type Item = (K, V);
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .lend()
-            .map(|(key, value)| (K::from(key.clone()), V::from_u64(value)))
+        self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
