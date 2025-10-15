@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 use ribbit::atomic::Atomic128;
 
 use crate::edge;
@@ -8,7 +10,6 @@ use crate::node::Op;
 use crate::Node;
 
 #[repr(C, align(4096))]
-#[derive(Debug)]
 pub(crate) struct Node256([Atomic128<Edge>; 256]);
 
 const _: () = assert!(core::mem::size_of::<Node256>() == 4096);
@@ -57,6 +58,14 @@ impl Node256 {
     #[inline]
     pub(crate) fn keys_range(&self, min: Option<u8>, max: Option<u8>) -> KeyIter {
         KeyIter::new(min, max)
+    }
+}
+
+impl Debug for Node256 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Node256")
+            .field("edges", &edge::DebugSlice(&self.0))
+            .finish()
     }
 }
 

@@ -294,7 +294,6 @@ impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
 /// - Number of bytes matched along edge
 /// - Edge to match next
 /// - Node underneath edge
-#[derive(Debug)]
 pub(crate) struct Segment<'a, R> {
     key: R,
     len: byte::Len,

@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -12,8 +13,8 @@ use crate::node::Node256;
 use crate::node::Node3;
 use crate::stat;
 
-#[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
-#[ribbit(size = 128, packed(rename = EdgePacked), debug)]
+#[derive(Copy, Clone, Default, ribbit::Pack)]
+#[ribbit(size = 128, packed(rename = EdgePacked))]
 pub(crate) struct Edge {
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
@@ -82,8 +83,24 @@ impl EdgePacked {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = MetaPacked), debug, eq)]
+impl Debug for EdgePacked {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut debug = f.debug_struct("Edge");
+
+        debug.field("meta", &self.meta());
+
+        if self.meta().leaf() {
+            debug.field("leaf", &self.data().value);
+        } else {
+            debug.field("node", &self.data());
+        }
+
+        debug.finish()
+    }
+}
+
+#[derive(Copy, Clone, Default, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 64, packed(rename = MetaPacked), eq)]
 pub(crate) struct Meta {
     #[ribbit(with(skip))]
     _placeholder_len: u6,
@@ -112,6 +129,16 @@ impl MetaPacked {
     }
 }
 
+impl Debug for MetaPacked {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Meta")
+            .field("leaf", &self.leaf())
+            .field("frozen", &self.frozen())
+            .field("key", &self.key())
+            .finish()
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
     /// Node creation
@@ -128,9 +155,9 @@ pub(crate) enum Op {
     Remove,
 }
 
-#[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = DataPacked), debug)]
-pub struct Data {
+#[derive(Copy, Clone, Default, ribbit::Pack)]
+#[ribbit(size = 64, packed(rename = DataPacked))]
+pub(crate) struct Data {
     #[ribbit(size = 2)]
     kind: node::Kind,
 
@@ -220,5 +247,29 @@ impl DataPacked {
         }
 
         stat::increment(counter);
+    }
+}
+
+impl Debug for DataPacked {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Data")
+            .field("kind", &self.kind())
+            .field("scan", &self.scan())
+            .field("ptr", &(self.value & Self::MASK_PTR))
+            .finish()
+    }
+}
+
+pub(crate) struct DebugSlice<'a>(pub(crate) &'a [Atomic128<Edge>]);
+
+impl Debug for DebugSlice<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_list()
+            .entries(
+                self.0
+                    .iter()
+                    .map(|edge| edge.load_packed(Ordering::Relaxed)),
+            )
+            .finish()
     }
 }

@@ -13,7 +13,6 @@ use crate::node::Op;
 use crate::Node;
 
 #[repr(C, align(64))]
-#[derive(Debug)]
 pub(crate) struct Linear<const LEN: usize, H> {
     pub(super) header: H,
     pub(super) edges: [Atomic128<Edge>; LEN],
@@ -128,6 +127,25 @@ impl<const LEN: usize, H: Header> Linear<LEN, H> {
     #[inline]
     pub(crate) fn keys_unsorted(&self) -> UnsortedKeyIter {
         self.header.keys_unsorted()
+    }
+}
+
+impl<const LEN: usize, H: Debug> Debug for Linear<LEN, H> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let name = const {
+            if LEN == 3 {
+                "Node3"
+            } else if LEN == 15 {
+                "Node15"
+            } else {
+                unreachable!()
+            }
+        };
+
+        f.debug_struct(name)
+            .field("header", &self.header)
+            .field("edges", &edge::DebugSlice(&self.edges))
+            .finish()
     }
 }
 
