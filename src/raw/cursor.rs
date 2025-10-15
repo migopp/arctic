@@ -57,7 +57,12 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge>, ()>> {
         loop {
-            let edge = self.root().load_packed(Ordering::Relaxed);
+            let mut edge = self.root().load_packed(Ordering::Relaxed);
+
+            if edge.is_scan() {
+                edge = self.block();
+            }
+
             let meta = edge.meta();
 
             let save = self.key;
@@ -93,7 +98,12 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
         value: u64,
     ) -> Result<(Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>), ()> {
         loop {
-            let old = self.root().load_packed(Ordering::Relaxed);
+            let mut old = self.root().load_packed(Ordering::Relaxed);
+
+            if old.is_scan() {
+                old = self.block();
+            }
+
             let old_meta = old.meta();
             let old_data = old.data();
             let save = self.key;
@@ -146,6 +156,17 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             };
 
             return Ok((op, old, new));
+        }
+    }
+
+    #[cold]
+    fn block(&self) -> ribbit::Packed<Edge> {
+        loop {
+            core::hint::spin_loop();
+            let edge = self.root().load_packed(Ordering::Acquire);
+            if !edge.is_scan() {
+                return edge;
+            }
         }
     }
 

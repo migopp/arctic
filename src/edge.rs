@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 use ribbit::u56;
 use ribbit::u6;
-use ribbit::u62;
+use ribbit::u61;
 
 use crate::byte;
 use crate::node;
@@ -75,6 +75,11 @@ impl EdgePacked {
     pub(crate) fn is_null(self) -> bool {
         !self.meta().leaf() && self.data().is_null()
     }
+
+    #[inline]
+    pub(crate) fn is_scan(self) -> bool {
+        !self.meta().leaf() && self.data().scan()
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ribbit::Pack)]
@@ -129,13 +134,16 @@ pub struct Data {
     #[ribbit(size = 2)]
     kind: node::Kind,
 
+    #[ribbit(get(vis = "pub(crate)"))]
+    scan: bool,
+
     #[ribbit(with(skip))]
-    _placeholder_data: u62,
+    _placeholder_data: u61,
 }
 
 impl Data {
     const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(node::Kind::NODE_3, u62::new(0));
+        ribbit::Packed::<Self>::new(node::Kind::NODE_3, false, u61::new(0));
 
     #[inline]
     fn from_leaf(value: u64) -> ribbit::Packed<Self> {
@@ -148,15 +156,15 @@ impl Data {
         let kind = N::KIND as u64;
 
         validate!(ptr > 0);
-        validate_eq!(ptr & ribbit::Packed::<Self>::MASK_KIND, 0);
+        validate_eq!(ptr & ribbit::Packed::<Self>::MASK_TAG, 0);
 
         unsafe { ribbit::Packed::<Self>::new_unchecked(ptr | kind) }
     }
 }
 
 impl DataPacked {
-    const MASK_KIND: u64 = 0b11;
-    const MASK_PTR: u64 = !Self::MASK_KIND;
+    const MASK_TAG: u64 = 0b111;
+    const MASK_PTR: u64 = !Self::MASK_TAG;
 
     #[inline]
     pub(crate) fn is_null(self) -> bool {
