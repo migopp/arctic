@@ -488,6 +488,10 @@ impl<'g, 'l, R, W> Drop for RangeIter<'g, 'l, R, W> {
         if let Some(root) = self.root {
             let mut edge = root.load_packed(Ordering::Relaxed);
 
+            if !edge.is_node() {
+                return;
+            }
+
             validate!(edge.data().scan());
 
             loop {
