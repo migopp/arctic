@@ -305,7 +305,7 @@ impl<'g> MapRef<'g> {
         &'l mut self,
         min: R,
         max: R,
-    ) -> RangeNonLinearizableIter<'g, 'l, R, W>
+    ) -> RangeIter<'g, 'l, R, W>
     where
         R: key::Read,
         W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
@@ -327,7 +327,7 @@ impl<'g> MapRef<'g> {
             None => iter::RangeIter::<R, W>::empty(),
         };
 
-        RangeNonLinearizableIter {
+        RangeIter {
             iter,
             _guard: cursor.into_guard(),
         }
@@ -434,12 +434,12 @@ impl<'g> MapRef<'g> {
     }
 }
 
-pub(crate) struct RangeNonLinearizableIter<'g, 'l, R, W> {
+pub(crate) struct RangeIter<'g, 'l, R, W> {
     iter: iter::RangeIter<'g, R, W>,
     _guard: smr::Guard<'g, 'l>,
 }
 
-impl<'g, 'l, R, W> RangeNonLinearizableIter<'g, 'l, R, W>
+impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
 where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,

@@ -3,19 +3,15 @@ pub mod fixed;
 
 use crate::byte;
 
-pub trait Key: From<Self::Write> {
+pub trait Key: From<Self::Write> + 'static {
     #[allow(private_bounds)]
     type Borrow<'k>: Copy
         + From<&'k Self::Write>
         + for<'a> PartialEq<Self::Borrow<'a>>
-        + for<'a> PartialOrd<Self::Borrow<'a>>
-    where
-        Self: 'k;
+        + for<'a> PartialOrd<Self::Borrow<'a>>;
 
     #[allow(private_bounds)]
-    type Read<'k>: Read + From<Self::Borrow<'k>>
-    where
-        Self: 'k;
+    type Read<'k>: Read + From<Self::Borrow<'k>>;
 
     #[allow(private_bounds)]
     type Write: Write<Len = usize>
@@ -196,11 +192,7 @@ mod tests {
     use crate::key::Read as _;
     use crate::Key;
 
-    pub(super) fn take_all<'k, K: Key + 'k>(
-        array: &[u8],
-        key: impl Into<K::Borrow<'k>>,
-        lens: &[u8],
-    ) {
+    pub(super) fn take_all<'k, K: Key>(array: &[u8], key: impl Into<K::Borrow<'k>>, lens: &[u8]) {
         let mut reader = K::Read::from(key.into());
 
         let mut index = 0;

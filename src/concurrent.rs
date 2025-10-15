@@ -82,8 +82,8 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> RangeNonLinearizableIter<'g, 'l, K, V> {
-        RangeNonLinearizableIter {
+    ) -> RangeIter<'g, 'l, K, V> {
+        RangeIter {
             iter: self.raw.range_non_linearizable(min.into(), max.into()),
             _value: PhantomData,
         }
@@ -99,12 +99,12 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
     }
 }
 
-pub struct PrefixNonLinearizable<'g, 'l, K: Key + 'l, V, S: crate::iter::Sort> {
+pub struct PrefixNonLinearizable<'g, 'l, K: Key, V, S: crate::iter::Sort> {
     iter: raw::concurrent::PrefixNonLinearizable<'g, 'l, K::Write, S>,
     _value: PhantomData<V>,
 }
 
-impl<'g, 'l, K: Key + 'l, V: Value, S: crate::iter::Sort> PrefixNonLinearizable<'g, 'l, K, V, S> {
+impl<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> PrefixNonLinearizable<'g, 'l, K, V, S> {
     #[inline]
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
@@ -128,12 +128,12 @@ where
     }
 }
 
-pub struct RangeNonLinearizableIter<'g, 'l, K: Key + 'l, V> {
-    iter: raw::concurrent::RangeNonLinearizableIter<'g, 'l, K::Read<'l>, K::Write>,
+pub struct RangeIter<'g, 'l, K: Key, V> {
+    iter: raw::concurrent::RangeIter<'g, 'l, K::Read<'l>, K::Write>,
     _value: PhantomData<V>,
 }
 
-impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
+impl<'g, 'l, K: Key, V: Value> RangeIter<'g, 'l, K, V> {
     #[inline]
     pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
         self.iter
@@ -148,7 +148,7 @@ impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
     }
 }
 
-impl<'g, 'l, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, K, V>
+impl<'g, 'l, K, V> Iterator for RangeIter<'g, 'l, K, V>
 where
     K: Key,
     V: Value,
