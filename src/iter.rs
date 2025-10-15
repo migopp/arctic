@@ -16,20 +16,20 @@ pub(crate) trait SortPrivate {
 }
 
 impl SortPrivate for Sorted {
-    type Iter<'a> = node::Iter<'a>;
+    type Iter<'a> = node::SortedIter<'a>;
 
     #[inline]
     unsafe fn new<'a>(node: node::Ref<'a>) -> Self::Iter<'a> {
-        node.iter()
+        node.iter_sorted()
     }
 }
 
 impl SortPrivate for core::iter::Rev<Sorted> {
-    type Iter<'a> = core::iter::Rev<node::Iter<'a>>;
+    type Iter<'a> = core::iter::Rev<node::SortedIter<'a>>;
 
     #[inline]
     unsafe fn new<'a>(node: node::Ref<'a>) -> Self::Iter<'a> {
-        node.iter().rev()
+        node.iter_sorted().rev()
     }
 }
 

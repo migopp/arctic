@@ -12,8 +12,6 @@ pub(crate) enum RangeIter<'a, R, W> {
     Node(NodeIter<'a, R, W>),
 }
 
-const _: [(); 32] = [(); size_of::<(usize, node::RangeIter<'static>)>()];
-
 impl<'a, R, W> RangeIter<'a, R, W>
 where
     R: key::Read,
@@ -54,7 +52,7 @@ where
             let last = (key == max.slice(key.bits())).then(|| max.get(key.bits()));
 
             let mut stack = Vec::with_capacity(7);
-            stack.push((key.bits(), node.iter_range(first, last)));
+            stack.push((key.bits(), first, last, node.iter_range(first, last)));
 
             Self::Node(NodeIter {
                 stack,
@@ -95,8 +93,10 @@ pub(crate) struct NodeIter<'a, R, W> {
     min: R,
     max: R,
     key: W,
-    stack: Vec<(usize, node::RangeIter<'a>)>,
+    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'a>)>,
 }
+
+const _: [(); 32] = [(); size_of::<(usize, Option<u8>, Option<u8>, node::SortedIter<'static>)>()];
 
 impl<'a, R, W> NodeIter<'a, R, W>
 where
@@ -116,7 +116,7 @@ where
     #[inline]
     fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         'vertical: loop {
-            let (len, iter) = self.stack.last_mut()?;
+            let (len, min, max, iter) = self.stack.last_mut()?;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -140,8 +140,8 @@ where
                     self.key.extend_nonempty_unchecked(meta.key());
                 }
 
-                let check_first = Some(byte) == node::RangeIter::min(iter);
-                let check_last = Some(byte) == node::RangeIter::max(iter);
+                let check_first = Some(byte) == *min;
+                let check_last = Some(byte) == *max;
 
                 if !check_first && !check_last {
                     if meta.leaf() {
@@ -153,8 +153,9 @@ where
                         }
                     } else {
                         let node = unsafe { data.into_node_unchecked() };
-                        self.stack
-                            .push((self.key.bits(), unsafe { node.iter_range(None, None) }));
+                        self.stack.push((self.key.bits(), None, None, unsafe {
+                            node.iter_range(None, None)
+                        }));
                         continue 'vertical;
                     }
                 }
@@ -203,8 +204,9 @@ where
                     };
 
                     let node = unsafe { data.into_node_unchecked() };
-                    self.stack
-                        .push((self.key.bits(), unsafe { node.iter_range(min, max) }));
+                    self.stack.push((self.key.bits(), min, max, unsafe {
+                        node.iter_range(min, max)
+                    }));
                     continue 'vertical;
                 }
             }

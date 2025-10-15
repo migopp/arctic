@@ -1,5 +1,7 @@
 use core::fmt::Debug;
+use core::mem::ManuallyDrop;
 
+mod iter;
 mod linear;
 mod node15;
 mod node256;
@@ -16,6 +18,8 @@ use crate::iter::Or;
 use crate::Edge;
 
 pub(crate) trait Node {
+    fn edges(&self) -> &[Atomic128<Edge>];
+
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
 
     fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>>;
@@ -62,50 +66,52 @@ pub(crate) enum Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) unsafe fn iter(&self) -> Iter<'a> {
-        match self {
-            Ref::Node3(node) => Or::L(node.iter()),
-            Ref::Node15(node) => Or::L(node.iter()),
-            Ref::Node256(node) => Or::R(node.into_iter()),
-        }
+    pub(crate) unsafe fn iter_sorted(&self) -> SortedIter<'a> {
+        let (keys, edges) = match self {
+            Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
+            Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
+            Ref::Node256(node) => (
+                SortedKeyIter::from_node_256(node.keys_sorted()),
+                node.edges(),
+            ),
+        };
+
+        SortedIter::new(keys, edges)
     }
 
     #[inline]
     pub(crate) unsafe fn iter_unsorted(&self) -> UnsortedIter<'a> {
-        match self {
-            Ref::Node3(node) => Or::L(node.iter_unsorted()),
-            Ref::Node15(node) => Or::L(node.iter_unsorted()),
-            Ref::Node256(node) => Or::R(node.into_iter()),
-        }
+        let (keys, edges) = match self {
+            Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
+            Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
+            Ref::Node256(node) => (Or::R(node.keys_sorted()), node.edges()),
+        };
+
+        UnsortedIter::new(keys, edges)
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> RangeIter<'a> {
-        match self {
-            Ref::Node3(node) if min.is_none() && max.is_none() => RangeIter::Linear {
-                iter: node.iter(),
-                min,
-                max,
-            },
-            Ref::Node3(node) => RangeIter::Linear {
-                iter: node.iter_range(min.unwrap_or(0), max.unwrap_or(255)),
-                min,
-                max,
-            },
-
-            Ref::Node15(node) if min.is_none() && max.is_none() => RangeIter::Linear {
-                iter: node.iter(),
-                min,
-                max,
-            },
-            Ref::Node15(node) => RangeIter::Linear {
-                iter: node.iter_range(min.unwrap_or(0), max.unwrap_or(255)),
-                min,
-                max,
-            },
-
-            Ref::Node256(node) => RangeIter::Node256(node.iter_range(min, max)),
+    pub(crate) unsafe fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a> {
+        if min.is_none() && max.is_none() {
+            return self.iter_sorted();
         }
+
+        let (keys, edges) = match self {
+            Ref::Node3(node) => (
+                SortedKeyIter::from_linear(node.keys_range(min.unwrap_or(0), max.unwrap_or(255))),
+                node.edges(),
+            ),
+            Ref::Node15(node) => (
+                SortedKeyIter::from_linear(node.keys_range(min.unwrap_or(0), max.unwrap_or(255))),
+                node.edges(),
+            ),
+            Ref::Node256(node) => (
+                SortedKeyIter::from_node_256(node.keys_range(min, max)),
+                node.edges(),
+            ),
+        };
+
+        SortedIter::new(keys, edges)
     }
 }
 
@@ -180,59 +186,78 @@ impl Kind {
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }
 
-pub(crate) type Iter<'a> = Or<linear::Iter<'a>, node256::Iter<'a>>;
-pub(crate) type UnsortedIter<'a> = Or<linear::UnsortedIter<'a>, node256::Iter<'a>>;
+pub(crate) type SortedIter<'a> = iter::SortedIter<'a, SortedKeyIter>;
 
-pub(crate) enum RangeIter<'a> {
-    Linear {
-        iter: linear::Iter<'a>,
-        min: Option<u8>,
-        max: Option<u8>,
-    },
-    Node256(node256::Iter<'a>),
+pub(crate) type UnsortedIter<'a> = iter::UnsortedIter<'a, UnsortedKeyIter>;
+
+pub(crate) type UnsortedKeyIter = Or<linear::UnsortedKeyIter, node256::KeyIter>;
+
+pub(crate) union SortedKeyIter {
+    linear: ManuallyDrop<linear::SortedKeyIter>,
+    node_256: node256::KeyIter,
+    raw: usize,
 }
 
-impl<'a> RangeIter<'a> {
+impl SortedKeyIter {
+    const MASK_TAG: usize = 1usize.rotate_right(1);
+
     #[inline]
-    pub(crate) fn min(&self) -> Option<u8> {
-        match self {
-            RangeIter::Linear { min, .. } => *min,
-            RangeIter::Node256(iter) => iter.min(),
-        }
+    fn from_linear(iter: linear::SortedKeyIter) -> Self {
+        let iter = Self {
+            linear: ManuallyDrop::new(iter),
+        };
+        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, 0);
+        iter
     }
 
     #[inline]
-    pub(crate) fn max(&self) -> Option<u8> {
-        match self {
-            RangeIter::Linear { max, .. } => *max,
-            RangeIter::Node256(iter) => iter.max(),
-        }
+    fn from_node_256(iter: node256::KeyIter) -> Self {
+        let iter = Self { node_256: iter };
+        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, Self::MASK_TAG);
+        iter
+    }
+
+    fn is_node_256(&self) -> bool {
+        (unsafe { self.raw } & Self::MASK_TAG) > 0
     }
 }
 
-impl<'a> Iterator for RangeIter<'a> {
-    type Item = (u8, &'a Atomic128<Edge>);
+impl Iterator for SortedKeyIter {
+    type Item = (u8, u8);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            RangeIter::Linear { iter, .. } => iter.next(),
-            RangeIter::Node256(iter) => iter.next(),
+        if self.is_node_256() {
+            unsafe { &mut self.node_256 }.next().map(|key| (key, key))
+        } else {
+            unsafe { &mut self.linear }.next()
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.is_node_256() {
+            unsafe { &self.node_256 }.size_hint()
+        } else {
+            unsafe { &self.linear }.size_hint()
         }
     }
 }
 
-impl DoubleEndedIterator for RangeIter<'_> {
+impl DoubleEndedIterator for SortedKeyIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Linear { iter, .. } => iter.next_back(),
-            Self::Node256(iter) => iter.next_back(),
+        if self.is_node_256() {
+            unsafe { &mut self.node_256 }
+                .next_back()
+                .map(|key| (key, key))
+        } else {
+            unsafe { &mut self.linear }.next_back()
         }
     }
 }
 
-impl ExactSizeIterator for RangeIter<'_> {
+impl ExactSizeIterator for SortedKeyIter {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();

@@ -1,0 +1,122 @@
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+
+use ribbit::atomic::Atomic128;
+
+use crate::Edge;
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub(crate) struct SortedIter<'a, K>(Iter<'a, K>);
+
+impl<'a, K> SortedIter<'a, K> {
+    pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge>]) -> Self {
+        Self(Iter::new(keys, edges))
+    }
+}
+
+impl<'a, K> Iterator for SortedIter<'a, K>
+where
+    K: Iterator<Item = (u8, u8)>,
+{
+    type Item = (u8, &'a Atomic128<Edge>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, index) = self.0.keys.next()?;
+        let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
+        Some((key, edge))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.keys.size_hint()
+    }
+}
+
+impl<'a, K> DoubleEndedIterator for SortedIter<'a, K>
+where
+    K: DoubleEndedIterator<Item = (u8, u8)>,
+{
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let (key, index) = self.0.keys.next_back()?;
+        let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
+        Some((key, edge))
+    }
+}
+
+impl<'a, K> ExactSizeIterator for SortedIter<'a, K>
+where
+    K: ExactSizeIterator<Item = (u8, u8)>,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub(crate) struct UnsortedIter<'a, K>(Iter<'a, K>);
+
+impl<'a, K> UnsortedIter<'a, K> {
+    pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge>]) -> Self {
+        Self(Iter::new(keys, edges))
+    }
+}
+
+impl<'a, K> Iterator for UnsortedIter<'a, K>
+where
+    K: Iterator<Item = u8>,
+{
+    type Item = (u8, &'a Atomic128<Edge>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let key = self.0.keys.next()?;
+        let edge = unsafe {
+            let edge = self.0.edges.as_ref();
+            self.0.edges = self.0.edges.add(1);
+            edge
+        };
+        Some((key, edge))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.keys.size_hint()
+    }
+}
+
+impl<'a, K> ExactSizeIterator for UnsortedIter<'a, K>
+where
+    K: ExactSizeIterator<Item = u8>,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        validate_eq!(upper, Some(lower));
+        lower
+    }
+}
+
+#[derive(Copy, Clone)]
+struct Iter<'a, K> {
+    keys: K,
+    edges: NonNull<Atomic128<Edge>>,
+    _slice: PhantomData<&'a [Atomic128<Edge>]>,
+}
+
+impl<'a, K> Iter<'a, K> {
+    #[inline]
+    unsafe fn new(keys: K, edges: &[Atomic128<Edge>]) -> Self {
+        Self {
+            keys,
+            edges: NonNull::from(edges).cast(),
+            _slice: PhantomData,
+        }
+    }
+}

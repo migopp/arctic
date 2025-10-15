@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::marker::PhantomData;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
@@ -34,6 +33,11 @@ where
     H: Header,
     Self: node::Info,
 {
+    #[inline]
+    fn edges(&self) -> &[Atomic128<Edge>] {
+        &self.edges
+    }
+
     #[inline]
     fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
         let index = self.header.get(key)?;
@@ -112,21 +116,18 @@ where
 #[expect(private_bounds)]
 impl<const LEN: usize, H: Header> Linear<LEN, H> {
     #[inline]
-    pub(crate) fn iter(&self) -> Iter {
-        Iter::new(self.header.keys(), &self.edges)
+    pub(crate) fn keys_sorted(&self) -> SortedKeyIter {
+        self.header.keys_sorted()
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: u8, max: u8) -> Iter {
-        Iter::new(self.header.keys_range(min, max), &self.edges)
+    pub(crate) fn keys_range(&self, min: u8, max: u8) -> SortedKeyIter {
+        self.header.keys_range(min, max)
     }
 
     #[inline]
-    pub(crate) fn iter_unsorted(&self) -> UnsortedIter {
-        UnsortedIter {
-            keys: self.header.keys_unsorted(),
-            edges: self.edges.iter(),
-        }
+    pub(crate) fn keys_unsorted(&self) -> UnsortedKeyIter {
+        self.header.keys_unsorted()
     }
 }
 
@@ -135,74 +136,9 @@ pub(super) trait Header {
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
-    fn keys(&self) -> KeyIter;
-    fn keys_range(&self, min: u8, max: u8) -> KeyIter;
+    fn keys_sorted(&self) -> SortedKeyIter;
+    fn keys_range(&self, min: u8, max: u8) -> SortedKeyIter;
     fn keys_unsorted(&self) -> UnsortedKeyIter;
-}
-
-pub(crate) struct Iter<'a> {
-    keys: KeyIter,
-    edges: NonNull<Atomic128<Edge>>,
-    _slice: PhantomData<&'a [Atomic128<Edge>]>,
-}
-
-impl<'a> Iter<'a> {
-    #[inline]
-    fn new(keys: KeyIter, edges: &[Atomic128<Edge>]) -> Self {
-        Self {
-            keys,
-            edges: NonNull::from(edges).cast(),
-            _slice: PhantomData,
-        }
-    }
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = (u8, &'a Atomic128<Edge>);
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.keys.next()?;
-        let edge = unsafe { self.edges.add(index as usize).as_ref() };
-        Some((key, edge))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.keys.size_hint()
-    }
-}
-
-impl<'a> DoubleEndedIterator for Iter<'a> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.keys.next_back()?;
-        let edge = unsafe { self.edges.add(index as usize).as_ref() };
-        Some((key, edge))
-    }
-}
-
-impl<'a> ExactSizeIterator for Iter<'a> {
-    #[inline]
-    fn len(&self) -> usize {
-        let (lower, upper) = self.size_hint();
-        validate_eq!(upper, Some(lower));
-        lower
-    }
-}
-
-pub(crate) struct UnsortedIter<'a> {
-    keys: UnsortedKeyIter,
-    edges: core::slice::Iter<'a, Atomic128<Edge>>,
-}
-
-impl<'a> Iterator for UnsortedIter<'a> {
-    type Item = (u8, &'a Atomic128<Edge>);
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let key = self.keys.next()?;
-        let edge = unsafe { self.edges.next().unwrap_unchecked() };
-        Some((key, edge))
-    }
 }
 
 pub(crate) type UnsortedKeyIter = Or<
@@ -210,7 +146,7 @@ pub(crate) type UnsortedKeyIter = Or<
     core::iter::Take<core::array::IntoIter<u8, 16>>,
 >;
 
-pub(crate) union KeyIter {
+pub(crate) union SortedKeyIter {
     node_3: RawKeyIter<3>,
     node_15: NonNull<RawKeyIter<15>>,
     raw: usize,
@@ -219,7 +155,7 @@ pub(crate) union KeyIter {
 const _: [(); size_of::<usize>()] = [(); size_of::<RawKeyIter<3>>()];
 const _: [(); size_of::<usize>()] = [(); size_of::<NonNull<RawKeyIter<15>>>()];
 
-impl KeyIter {
+impl SortedKeyIter {
     const MASK_TAG: usize = 0b100
         << if cfg!(target_endian = "little") {
             56
@@ -285,7 +221,7 @@ impl KeyIter {
     }
 }
 
-impl Drop for KeyIter {
+impl Drop for SortedKeyIter {
     #[inline]
     fn drop(&mut self) {
         if self.is_node_3() {
@@ -303,9 +239,9 @@ impl Drop for KeyIter {
     }
 }
 
-const _: [(); 8] = [(); size_of::<KeyIter>()];
+const _: [(); 8] = [(); size_of::<SortedKeyIter>()];
 
-impl Iterator for KeyIter {
+impl Iterator for SortedKeyIter {
     type Item = (u8, u8);
 
     #[inline]
@@ -319,14 +255,14 @@ impl Iterator for KeyIter {
     }
 }
 
-impl DoubleEndedIterator for KeyIter {
+impl DoubleEndedIterator for SortedKeyIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         self.with_mut(|node_3| node_3.next_back(), |node_15| node_15.next_back())
     }
 }
 
-impl ExactSizeIterator for KeyIter {
+impl ExactSizeIterator for SortedKeyIter {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();
@@ -338,12 +274,12 @@ impl ExactSizeIterator for KeyIter {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub(super) struct RawKeyIter<const N: usize> {
-    tail: u8,
     head: u8,
     inner: [(u8, u8); N],
+    tail: u8,
 }
 
-const _: [(); 0] = [(); core::mem::offset_of!(RawKeyIter::<3>, tail)];
+const _: [(); 0] = [(); core::mem::offset_of!(RawKeyIter::<3>, head)];
 
 impl<const N: usize> RawKeyIter<N> {
     #[inline]
