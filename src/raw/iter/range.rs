@@ -96,8 +96,6 @@ pub(crate) struct NodeIter<'a, R, W> {
     stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'a>)>,
 }
 
-const _: [(); 32] = [(); size_of::<(usize, Option<u8>, Option<u8>, node::SortedIter<'static>)>()];
-
 impl<'a, R, W> NodeIter<'a, R, W>
 where
     R: key::Read,
@@ -153,9 +151,8 @@ where
                         }
                     } else {
                         let node = unsafe { data.into_node_unchecked() };
-                        self.stack.push((self.key.bits(), None, None, unsafe {
-                            node.iter_range(None, None)
-                        }));
+                        self.stack
+                            .push((self.key.bits(), None, None, node.iter_range(None, None)));
                         continue 'vertical;
                     }
                 }
@@ -204,9 +201,8 @@ where
                     };
 
                     let node = unsafe { data.into_node_unchecked() };
-                    self.stack.push((self.key.bits(), min, max, unsafe {
-                        node.iter_range(min, max)
-                    }));
+                    self.stack
+                        .push((self.key.bits(), min, max, node.iter_range(min, max)));
                     continue 'vertical;
                 }
             }

@@ -39,7 +39,8 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                 node::Ref::Node256(_) => &mut node_256,
             };
 
-            let children = unsafe { node.iter_unsorted() }
+            let children = node
+                .iter_unsorted()
                 .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
                 .count();
 

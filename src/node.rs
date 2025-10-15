@@ -66,7 +66,7 @@ pub(crate) enum Ref<'a> {
 
 impl<'a> Ref<'a> {
     #[inline]
-    pub(crate) unsafe fn iter_sorted(&self) -> SortedIter<'a> {
+    pub(crate) fn iter_sorted(&self) -> SortedIter<'a> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
             Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
@@ -76,22 +76,22 @@ impl<'a> Ref<'a> {
             ),
         };
 
-        SortedIter::new(keys, edges)
+        unsafe { SortedIter::new(keys, edges) }
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_unsorted(&self) -> UnsortedIter<'a> {
+    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'a> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node256(node) => (Or::R(node.keys_sorted()), node.edges()),
         };
 
-        UnsortedIter::new(keys, edges)
+        unsafe { UnsortedIter::new(keys, edges) }
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a> {
+    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a> {
         if min.is_none() && max.is_none() {
             return self.iter_sorted();
         }
@@ -111,7 +111,7 @@ impl<'a> Ref<'a> {
             ),
         };
 
-        SortedIter::new(keys, edges)
+        unsafe { SortedIter::new(keys, edges) }
     }
 }
 

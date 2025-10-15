@@ -10,6 +10,9 @@ use crate::Edge;
 pub(crate) struct SortedIter<'a, K>(Iter<'a, K>);
 
 impl<'a, K> SortedIter<'a, K> {
+    /// # SAFETY
+    ///
+    /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
     pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge>]) -> Self {
         Self(Iter::new(keys, edges))
     }
@@ -24,6 +27,15 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (key, index) = self.0.keys.next()?;
+
+        #[cfg(feature = "validate")]
+        validate!(
+            (index as u16) < self.0.len,
+            "index is {} but len is {}",
+            index,
+            self.0.len,
+        );
+
         let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
@@ -41,6 +53,15 @@ where
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         let (key, index) = self.0.keys.next_back()?;
+
+        #[cfg(feature = "validate")]
+        validate!(
+            (index as u16) < self.0.len,
+            "index is {} but len is {}",
+            index,
+            self.0.len,
+        );
+
         let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
@@ -63,6 +84,9 @@ where
 pub(crate) struct UnsortedIter<'a, K>(Iter<'a, K>);
 
 impl<'a, K> UnsortedIter<'a, K> {
+    /// # SAFETY
+    ///
+    /// Caller must guarantee `keys` produces at most `edges.len()` keys.
     pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge>]) -> Self {
         Self(Iter::new(keys, edges))
     }
@@ -77,6 +101,13 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let key = self.0.keys.next()?;
+
+        #[cfg(feature = "validate")]
+        {
+            validate!(self.0.len > 0);
+            self.0.len -= 1;
+        }
+
         let edge = unsafe {
             let edge = self.0.edges.as_ref();
             self.0.edges = self.0.edges.add(1);
@@ -107,6 +138,10 @@ where
 struct Iter<'a, K> {
     keys: K,
     edges: NonNull<Atomic128<Edge>>,
+
+    #[cfg(feature = "validate")]
+    len: u16,
+
     _slice: PhantomData<&'a [Atomic128<Edge>]>,
 }
 
@@ -116,6 +151,10 @@ impl<'a, K> Iter<'a, K> {
         Self {
             keys,
             edges: NonNull::from(edges).cast(),
+
+            #[cfg(feature = "validate")]
+            len: edges.len() as u16,
+
             _slice: PhantomData,
         }
     }
