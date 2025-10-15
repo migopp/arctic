@@ -56,13 +56,13 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
                     continue 'vertical;
                 };
 
-                let meta = edge.meta();
-                let data = edge.data();
-
-                if !meta.leaf() && data.is_null() {
+                if edge.is_null() {
                     iter.skip();
                     continue;
                 }
+
+                let meta = edge.meta();
+                let data = edge.data();
 
                 if first {
                     // Fall through for leaf
@@ -96,7 +96,7 @@ impl Selector for SelectNode {
 
     #[inline]
     fn select(edge: ribbit::Packed<Edge>, _depth: usize) -> Option<Self::Item> {
-        (!edge.meta().leaf() && !edge.data().is_null()).then_some(edge)
+        edge.is_node().then_some(edge)
     }
 }
 
@@ -107,7 +107,7 @@ impl Selector for SelectAll {
 
     #[inline]
     fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item> {
-        (edge.meta().leaf() || !edge.data().is_null()).then_some((edge, depth))
+        (!edge.is_null()).then_some((edge, depth))
     }
 }
 

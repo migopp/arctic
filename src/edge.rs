@@ -13,7 +13,7 @@ use crate::node::Node3;
 use crate::stat;
 
 #[derive(Copy, Clone, Default, Debug, ribbit::Pack)]
-#[ribbit(size = 128, debug)]
+#[ribbit(size = 128, packed(rename = EdgePacked), debug)]
 pub(crate) struct Edge {
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
@@ -24,22 +24,6 @@ pub(crate) struct Edge {
 impl Edge {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(Meta::DEFAULT, Data::DEFAULT);
-
-    pub(crate) fn freeze(edge: &Atomic128<Self>) {
-        let mut old = edge.load_packed(Ordering::Relaxed);
-
-        while !old.meta().frozen() {
-            match edge.compare_exchange_packed(
-                old,
-                old.with_meta(old.meta().with_frozen(true)),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(conflict) => old = conflict,
-            }
-        }
-    }
 
     #[inline]
     pub(crate) fn new_leaf(key: byte::Array, leaf: u64) -> ribbit::Packed<Self> {
@@ -61,6 +45,35 @@ impl Edge {
         }
 
         ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
+    }
+
+    #[inline]
+    pub(crate) fn freeze(edge: &Atomic128<Self>) {
+        let mut old = edge.load_packed(Ordering::Relaxed);
+
+        while !old.meta().frozen() {
+            match edge.compare_exchange_packed(
+                old,
+                old.with_meta(old.meta().with_frozen(true)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) => old = conflict,
+            }
+        }
+    }
+}
+
+impl EdgePacked {
+    #[inline]
+    pub(crate) fn is_node(self) -> bool {
+        !self.meta().leaf() && !self.data().is_null()
+    }
+
+    #[inline]
+    pub(crate) fn is_null(self) -> bool {
+        !self.meta().leaf() && self.data().is_null()
     }
 }
 

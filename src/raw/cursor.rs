@@ -59,15 +59,14 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
         loop {
             let edge = self.root().load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let data = edge.data();
 
             let save = self.key;
             let len = meta.key().match_exact(&mut self.key)?;
 
             // Fast path: traversal
-            if !meta.leaf() && !data.is_null() {
+            if edge.is_node() {
                 let byte = self.key.next()?;
-                let node = unsafe { data.into_node_unchecked() };
+                let node = unsafe { edge.data().into_node_unchecked() };
                 let next = node.get(byte)?;
                 self.push(save, len, node, next);
                 continue;
@@ -80,7 +79,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             } else if meta.leaf() {
                 Some(Ok(edge))
             } else {
-                validate!(data.is_null());
+                validate!(edge.data().is_null());
                 None
             };
         }
@@ -102,7 +101,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
 
             // Fast path: traverse
             if let byte::MatchSplit::Full(len) = r#match {
-                if !old_meta.leaf() && !old_data.is_null() {
+                if old.is_node() {
                     let byte = self.key.next().unwrap();
                     let node = unsafe { old_data.into_node_unchecked() };
                     if let Some(next) = node.get_or_reserve(byte) {
@@ -120,7 +119,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             self.key = save;
 
             let (op, new) = match r#match {
-                byte::MatchSplit::Full(_) if !old_meta.leaf() && !old_data.is_null() => {
+                byte::MatchSplit::Full(_) if old.is_node() => {
                     let node = unsafe { old_data.into_node_unchecked() };
                     let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
@@ -180,7 +179,7 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
             let data = edge.data();
 
             match meta.key().match_prefix(&mut self.key)? {
-                byte::MatchPrefix::Full(len) if !meta.leaf() && !data.is_null() => {
+                byte::MatchPrefix::Full(len) if edge.is_node() => {
                     let node = unsafe { data.into_node_unchecked() };
                     let Some(byte) = self.key.next() else {
                         return Some(edge);

@@ -66,7 +66,7 @@ where
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
         )
-        .filter(|(_, edge)| edge.meta().leaf() || !edge.data().is_null())
+        .filter(|(_, edge)| !edge.is_null())
         .map(|(key, edge)| {
             validate!(
                 edge.meta().frozen(),

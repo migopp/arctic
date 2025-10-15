@@ -77,9 +77,7 @@ impl Drop for Guard<'_, '_> {
 
 impl Guard<'_, '_> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
-        if edge.meta().leaf() || edge.data().is_null() {
-            return;
-        }
+        validate!(edge.is_node());
 
         stat::increment(stat::Counter::Retire);
 

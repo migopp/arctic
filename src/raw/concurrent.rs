@@ -122,7 +122,7 @@ impl<'g> MapRef<'g> {
                 return if old.meta().leaf() {
                     Ok(Some(old.data().into_leaf()))
                 } else {
-                    validate!(old.data().is_null());
+                    validate!(old.is_null());
                     Ok(None)
                 };
             }
@@ -179,7 +179,7 @@ impl<'g> MapRef<'g> {
                     if old.meta().leaf() {
                         return Ok(Some(old.data().into_leaf()));
                     } else {
-                        validate!(old.data().is_null());
+                        validate!(old.is_null());
                         return Ok(None);
                     }
                 }
@@ -244,8 +244,7 @@ impl<'g> MapRef<'g> {
             | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
             Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
             | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                validate!(!edge.meta().leaf());
-                validate!(!edge.data().is_null());
+                validate!(edge.is_node());
 
                 edge.data()
                     .deallocate_unchecked(stat::Counter::FreeConflict)
@@ -264,6 +263,8 @@ impl<'g> MapRef<'g> {
             Op::Edge(_) => return,
             Op::Node(_) => (),
         }
+
+        validate!(edge.is_node());
 
         let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bit()));
 

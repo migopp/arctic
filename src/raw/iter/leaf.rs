@@ -74,12 +74,12 @@ where
                 };
 
                 let edge = edge.load_packed(Ordering::Acquire);
-                let meta = edge.meta();
-                let data = edge.data();
-
-                if !meta.leaf() && data.is_null() {
+                if edge.is_null() {
                     continue;
                 }
+
+                let meta = edge.meta();
+                let data = edge.data();
 
                 key.truncate(*len);
                 key.push(byte);

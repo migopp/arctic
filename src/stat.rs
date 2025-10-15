@@ -40,10 +40,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             };
 
             let children = unsafe { node.iter_unsorted() }
-                .filter(|(_, edge)| {
-                    let edge = edge.load_packed(Ordering::Relaxed);
-                    edge.meta().leaf() || !edge.data().is_null()
-                })
+                .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
                 .count();
 
             histogram.record(children as u64);
