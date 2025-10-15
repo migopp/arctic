@@ -150,14 +150,8 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,
-                        old_data.scan(),
-                        Some((
-                            middle,
-                            ribbit::Packed::<Edge>::new(
-                                old_meta.with_key(end),
-                                old_data.with_scan(false),
-                            ),
-                        )),
+                        false,
+                        Some((middle, old.with_meta(old_meta.with_key(end)))),
                     ),
                 ),
             };

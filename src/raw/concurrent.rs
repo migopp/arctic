@@ -1,5 +1,7 @@
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+
 use crate::byte;
 use crate::edge;
 use crate::key;
@@ -301,7 +303,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_non_linearizable<'l, R, W>(
+    pub(crate) fn range_pessimistic<'l, const LINEARIZABLE: bool, R, W>(
         &'l mut self,
         min: R,
         max: R,
@@ -311,12 +313,47 @@ impl<'g> MapRef<'g> {
         W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
     {
         let prefix = min.prefix(&max);
-
         let mut cursor =
             Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix);
 
-        let iter = match cursor.traverse_prefix() {
-            Some(_) => unsafe {
+        if cursor.traverse_prefix().is_none() {
+            return RangeIter {
+                iter: iter::RangeIter::<R, W>::empty(),
+                root: None,
+                _guard: cursor.into_guard(),
+            };
+        }
+
+        if LINEARIZABLE {
+            let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+            loop {
+                if !edge.is_node() {
+                    break;
+                }
+
+                if edge.data().scan() {
+                    core::hint::spin_loop();
+                    edge = cursor.root().load_packed(Ordering::Relaxed);
+                    continue;
+                }
+
+                match cursor.root().compare_exchange_packed(
+                    edge,
+                    edge.with_data(edge.data().with_scan(true)),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(conflict) => {
+                        core::hint::spin_loop();
+                        edge = conflict;
+                    }
+                }
+            }
+        }
+
+        RangeIter {
+            iter: unsafe {
                 iter::RangeIter::<R, W>::new(
                     cursor.root(),
                     W::from(prefix.slice(cursor.bit())),
@@ -324,16 +361,12 @@ impl<'g> MapRef<'g> {
                     max,
                 )
             },
-            None => iter::RangeIter::<R, W>::empty(),
-        };
-
-        RangeIter {
-            iter,
+            root: LINEARIZABLE.then_some(cursor.root()),
             _guard: cursor.into_guard(),
         }
     }
 
-    pub(crate) fn range<'l, K: Key, V: Value>(
+    pub(crate) fn range_optimistic<'l, K: Key, V: Value>(
         &'l mut self,
         min: K::Read<'l>,
         max: K::Read<'l>,
@@ -436,6 +469,7 @@ impl<'g> MapRef<'g> {
 
 pub(crate) struct RangeIter<'g, 'l, R, W> {
     iter: iter::RangeIter<'g, R, W>,
+    root: Option<&'g Atomic128<Edge>>,
     _guard: smr::Guard<'g, 'l>,
 }
 
@@ -452,6 +486,31 @@ where
     #[inline]
     pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
         self.iter.for_each(apply)
+    }
+}
+
+impl<'g, 'l, R, W> Drop for RangeIter<'g, 'l, R, W> {
+    fn drop(&mut self) {
+        if let Some(root) = self.root {
+            let mut edge = root.load_packed(Ordering::Relaxed);
+
+            validate!(edge.data().scan());
+
+            loop {
+                match root.compare_exchange_packed(
+                    edge,
+                    edge.with_data(edge.data().with_scan(false)),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(conflict) => {
+                        core::hint::spin_loop();
+                        edge = conflict;
+                    }
+                }
+            }
+        }
     }
 }
 
