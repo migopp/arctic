@@ -61,7 +61,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
 
             if edge.is_scan() {
                 stat::increment(stat::Counter::ScanUpdate);
-                edge = self.block();
+                edge = self.wait_for_scan();
             }
 
             let meta = edge.meta();
@@ -103,7 +103,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
 
             if old.is_scan() {
                 stat::increment(stat::Counter::ScanInsert);
-                old = self.block();
+                old = self.wait_for_scan();
             }
 
             let old_meta = old.meta();
@@ -163,7 +163,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[cold]
-    fn block(&self) -> ribbit::Packed<Edge> {
+    pub(crate) fn wait_for_scan(&self) -> ribbit::Packed<Edge> {
         loop {
             core::hint::spin_loop();
             let edge = self.root().load_packed(Ordering::Acquire);

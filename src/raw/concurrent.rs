@@ -326,16 +326,13 @@ impl<'g> MapRef<'g> {
 
         if LINEARIZABLE {
             let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-            loop {
-                if !edge.is_node() {
-                    break;
+            while edge.is_node() {
+                if edge.data().scan() {
+                    stat::increment(stat::Counter::ScanScan);
+                    edge = cursor.wait_for_scan();
                 }
 
-                if edge.data().scan() {
-                    core::hint::spin_loop();
-                    edge = cursor.root().load_packed(Ordering::Relaxed);
-                    continue;
-                }
+                validate!(!edge.meta().leaf());
 
                 match cursor.root().compare_exchange_packed(
                     edge,

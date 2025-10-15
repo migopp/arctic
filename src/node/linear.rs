@@ -100,6 +100,7 @@ where
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
+                // FIXME: how to handle scan?
                 if let Some(compress) = meta.key().compress(*key, edge.meta().key()) {
                     return (Op::Compress, edge.with_meta(edge.meta().with_key(compress)));
                 }

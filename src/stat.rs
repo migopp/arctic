@@ -117,6 +117,7 @@ pub(crate) enum Counter {
 
     ScanInsert,
     ScanUpdate,
+    ScanScan,
 }
 
 #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
@@ -162,6 +163,7 @@ pub struct Thread {
     range_retry: Histogram,
     scan_insert: u64,
     scan_update: u64,
+    scan_scan: u64,
 }
 
 #[cfg(not(feature = "stat"))]
@@ -223,6 +225,7 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::HazardMatch => &mut thread.hazard_match,
                 Counter::ScanInsert => &mut thread.scan_insert,
                 Counter::ScanUpdate => &mut thread.scan_update,
+                Counter::ScanScan => &mut thread.scan_scan,
             } += 1;
         })
     }
