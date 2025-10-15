@@ -10,6 +10,7 @@ use crate::node;
 use crate::node::Node3;
 use crate::raw::Op;
 use crate::smr;
+use crate::stat;
 use crate::Edge;
 
 /// Stateful traversal over tree.
@@ -59,6 +60,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut edge = self.root().load_packed(Ordering::Relaxed);
 
             if edge.is_scan() {
+                stat::increment(stat::Counter::ScanUpdate);
                 edge = self.block();
             }
 
@@ -100,6 +102,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut old = self.root().load_packed(Ordering::Relaxed);
 
             if old.is_scan() {
+                stat::increment(stat::Counter::ScanInsert);
                 old = self.block();
             }
 

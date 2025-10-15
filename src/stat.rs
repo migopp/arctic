@@ -114,6 +114,9 @@ pub(crate) enum Counter {
     FreeDrop,
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     HazardMatch,
+
+    ScanInsert,
+    ScanUpdate,
 }
 
 #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
@@ -157,6 +160,8 @@ pub struct Thread {
     free_drop: u64,
     hazard_match: u64,
     range_retry: Histogram,
+    scan_insert: u64,
+    scan_update: u64,
 }
 
 #[cfg(not(feature = "stat"))]
@@ -216,6 +221,8 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::FreeRetire => &mut thread.free_retire,
                 Counter::FreeDrop => &mut thread.free_drop,
                 Counter::HazardMatch => &mut thread.hazard_match,
+                Counter::ScanInsert => &mut thread.scan_insert,
+                Counter::ScanUpdate => &mut thread.scan_update,
             } += 1;
         })
     }
