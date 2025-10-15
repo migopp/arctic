@@ -140,6 +140,12 @@ impl<'g, 'l, K: Key + 'l, V: Value> RangeNonLinearizableIter<'g, 'l, K, V> {
             .lend()
             .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
     }
+
+    #[inline]
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V)>(mut self, mut apply: F) {
+        self.iter
+            .for_each(|key, value| apply(K::Borrow::from(key), V::from_u64(value)))
+    }
 }
 
 impl<'g, 'l, K, V> Iterator for RangeNonLinearizableIter<'g, 'l, K, V>

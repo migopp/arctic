@@ -445,8 +445,13 @@ where
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(&W, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         self.iter.lend()
+    }
+
+    #[inline]
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+        self.iter.for_each(apply)
     }
 }
 
