@@ -211,16 +211,19 @@ impl<'g> MapRef<'g> {
             let meta = edge.meta();
             let data = edge.data();
 
+            // Should be impossible to freeze leaf
+            validate!(!meta.leaf());
+
             // Already helped by another thread
-            if meta.leaf() || node.as_data() != data.into_leaf() {
+            if !data.is_ref(node) {
                 return Ok(());
             }
 
-            let (op, new) = node.replace(meta);
+            let (op, new) = node.replace(edge);
 
             match cursor.root().compare_exchange_packed(
                 edge,
-                new,
+                new.with_data(new.data().with_scan(data.scan())),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {

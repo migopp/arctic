@@ -131,12 +131,12 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let (op, new) = match r#match {
                 byte::MatchSplit::Full(_) if old.is_node() => {
                     let node = unsafe { old_data.into_node_unchecked() };
-                    let (op, new) = node.replace(old_meta);
+                    let (op, new) = node.replace(old);
                     (Op::Node(op), new)
                 }
                 byte::MatchSplit::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), None),
+                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), false, None),
                 ),
                 byte::MatchSplit::Full(_) => (
                     Op::Edge(edge::Op::Insert),
@@ -150,7 +150,14 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,
-                        Some((middle, old.with_meta(old.meta().with_key(end)))),
+                        old_data.scan(),
+                        Some((
+                            middle,
+                            ribbit::Packed::<Edge>::new(
+                                old_meta.with_key(end),
+                                old_data.with_scan(false),
+                            ),
+                        )),
                     ),
                 ),
             };

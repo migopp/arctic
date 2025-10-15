@@ -32,7 +32,7 @@ impl Edge {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: byte::Array, scan: bool, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
@@ -45,7 +45,7 @@ impl Edge {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node, scan))
     }
 
     #[inline]
@@ -161,8 +161,7 @@ pub(crate) struct Data {
     #[ribbit(size = 2)]
     kind: node::Kind,
 
-    #[ribbit(get(vis = "pub(crate)"))]
-    scan: bool,
+    pub(crate) scan: bool,
 
     #[ribbit(with(skip))]
     _placeholder_data: u61,
@@ -178,14 +177,14 @@ impl Data {
     }
 
     #[inline]
-    fn from_node<N: node::Info>(node: Box<N>) -> ribbit::Packed<Self> {
+    fn from_node<N: node::Info>(node: Box<N>, scan: bool) -> ribbit::Packed<Self> {
         let ptr = Box::leak(node) as *mut N as u64;
         let kind = N::KIND as u64;
 
         validate!(ptr > 0);
         validate_eq!(ptr & ribbit::Packed::<Self>::MASK_TAG, 0);
 
-        unsafe { ribbit::Packed::<Self>::new_unchecked(ptr | kind) }
+        unsafe { ribbit::Packed::<Self>::new_unchecked(kind | ((scan as u64) << 2) | ptr) }
     }
 }
 
@@ -201,6 +200,21 @@ impl DataPacked {
     #[inline]
     pub(crate) fn into_leaf(self) -> u64 {
         self.value
+    }
+
+    #[inline]
+    pub(crate) fn is_ref(self, node: node::Ref<'_>) -> bool {
+        if self.is_null() {
+            return false;
+        }
+
+        let ptr = match node {
+            node::Ref::Node3(node) => node as *const _ as u64,
+            node::Ref::Node15(node) => node as *const _ as u64,
+            node::Ref::Node256(node) => node as *const _ as u64,
+        };
+
+        self.value & Self::MASK_PTR == ptr
     }
 
     #[inline]

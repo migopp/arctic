@@ -55,7 +55,7 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
+    fn replace(&self, parent: ribbit::Packed<Edge>) -> (Op, ribbit::Packed<Edge>) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
 
@@ -84,19 +84,23 @@ where
             len += 1;
         });
 
+        let meta = parent.meta();
+        let scan = parent.data().scan();
+
         match &edges[..len] {
             _ if len == <Self as node::Info>::GROW => {
                 return (
                     node::Op::Grow,
                     Edge::new_node::<<Self as node::Info>::Grow, _>(
-                        parent.key(),
+                        meta.key(),
+                        scan,
                         edges.into_iter().take(len),
                     ),
                 )
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
-                if let Some(compress) = parent.key().compress(*key, edge.meta().key()) {
+                if let Some(compress) = meta.key().compress(*key, edge.meta().key()) {
                     return (Op::Compress, edge.with_meta(edge.meta().with_key(compress)));
                 }
             }
@@ -107,7 +111,7 @@ where
         // Catch-all:
         (
             node::Op::Replace,
-            Edge::new_node::<Self, _>(parent.key(), edges.into_iter().take(len)),
+            Edge::new_node::<Self, _>(meta.key(), scan, edges.into_iter().take(len)),
         )
     }
 }

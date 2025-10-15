@@ -44,7 +44,7 @@ impl Node for Node256 {
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
+    fn replace(&self, _parent: ribbit::Packed<Edge>) -> (Op, ribbit::Packed<Edge>) {
         todo!()
     }
 }
