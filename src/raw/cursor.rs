@@ -1,5 +1,4 @@
 use core::convert::Infallible;
-use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -193,7 +192,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 }
 
-impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
+impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic> {
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
         loop {
             let edge = self.root.load_packed(Ordering::Acquire);
@@ -237,22 +236,17 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic<R>> {
     }
 }
 
-pub(crate) trait History<'a, K>: Default {
+pub(crate) trait History<'a, R>: Default {
     type PopError;
 
-    fn push(&mut self, segment: Segment<'a, K>);
-    fn pop(&mut self) -> Result<Option<Segment<'a, K>>, Self::PopError>;
+    fn push(&mut self, segment: Segment<'a, R>);
+    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError>;
 }
 
-pub(crate) struct Optimistic<K>(PhantomData<K>);
+#[derive(Default)]
+pub(crate) struct Optimistic;
 
-impl<R> Default for Optimistic<R> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<'a, R> History<'a, R> for Optimistic<R> {
+impl<'a, R> History<'a, R> for Optimistic {
     type PopError = ();
 
     #[inline]

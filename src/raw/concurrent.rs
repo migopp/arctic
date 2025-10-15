@@ -80,7 +80,7 @@ impl<'g> MapRef<'g> {
         R: key::Read,
         F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
     {
-        self.compare_exchange_impl::<_, cursor::Optimistic<R>, _>(key, exchange)
+        self.compare_exchange_impl::<_, cursor::Optimistic, _>(key, exchange)
     }
 
     #[cold]
@@ -141,7 +141,7 @@ impl<'g> MapRef<'g> {
 
     #[inline]
     fn insert_optimistic<R: key::Read>(&mut self, key: R, value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<_, cursor::Optimistic<R>>(key, value)
+        self.insert_impl::<_, cursor::Optimistic>(key, value)
     }
 
     #[cold]
@@ -288,7 +288,7 @@ impl<'g> MapRef<'g> {
         S: crate::iter::Sort,
     {
         let mut cursor =
-            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         let iter = match cursor.traverse_prefix() {
             Some(_) => unsafe {
@@ -314,7 +314,7 @@ impl<'g> MapRef<'g> {
     {
         let prefix = min.prefix(&max);
         let mut cursor =
-            Cursor::<R, cursor::Optimistic<_>>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         if cursor.traverse_prefix().is_none() {
             return RangeIter {
@@ -375,11 +375,8 @@ impl<'g> MapRef<'g> {
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
 
-        let mut cursor = Cursor::<K::Read<'l>, cursor::Optimistic<_>>::new(
-            &mut self.smr,
-            self.raw.root(),
-            prefix,
-        );
+        let mut cursor =
+            Cursor::<K::Read<'l>, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         let Some(_) = cursor.traverse_prefix() else {
             return;
