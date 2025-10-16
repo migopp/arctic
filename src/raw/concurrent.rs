@@ -342,11 +342,17 @@ impl<'g> MapRef<'g> {
     ) {
         let prefix = min.prefix(&max);
 
-        let mut cursor = match self.lock::<_, cursor::Optimistic>(prefix) {
-            None => return,
-            Some(Ok(cursor)) => cursor,
-            Some(Err(())) => todo!(),
-        };
+        let mut cursor =
+            Cursor::<_, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+
+        if cursor.traverse_prefix().is_none() {
+            return;
+        }
+
+        match Self::lock::<_, cursor::Optimistic>(&mut cursor, prefix) {
+            Ok(()) => (),
+            Err(()) => todo!(),
+        }
 
         unsafe {
             iter::RangeIter::<K::Read<'l>, K::Write>::new(
@@ -365,25 +371,22 @@ impl<'g> MapRef<'g> {
     }
 
     fn lock<'l, R: key::Read, H: cursor::History<'g, R>>(
-        &'l mut self,
+        cursor: &mut Cursor<'g, 'l, R, H>,
         prefix: R,
-    ) -> Option<Result<Cursor<'g, 'l, R, H>, H::PopError>> {
-        let mut cursor = Cursor::<_, H>::new(&mut self.smr, self.raw.root(), prefix);
-        let mut edge = cursor.traverse_prefix()?;
-
-        // No need to lock leaf
-        if edge.meta().leaf() {
-            return Some(Ok(cursor));
-        }
+    ) -> Result<(), H::PopError> {
+        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 
         loop {
+            // No need to lock leaf
+            if edge.meta().leaf() {
+                return Ok(());
+            }
+
             if edge.meta().frozen() || edge.data().scan() {
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
-                    Ok(safe) => edge = safe,
-                    Err(()) => {
-                        if let Err(error) = Self::freeze(&mut cursor, &prefix) {
-                            return Some(Err(error));
-                        }
+                    Ok(safe) if !edge.meta().frozen() => edge = safe,
+                    Ok(_) | Err(()) => {
+                        Self::freeze(cursor, &prefix)?;
                     }
                 }
             }
@@ -394,7 +397,7 @@ impl<'g> MapRef<'g> {
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return Some(Ok(cursor)),
+                Ok(_) => return Ok(()),
                 Err(conflict) => {
                     core::hint::spin_loop();
                     edge = conflict;
