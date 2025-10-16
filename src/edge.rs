@@ -32,7 +32,7 @@ impl Edge {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: byte::Array, scan: bool, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
     where
         N: node::Info,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
@@ -45,7 +45,7 @@ impl Edge {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node, scan))
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
     }
 
     #[inline]
@@ -177,14 +177,14 @@ impl Data {
     }
 
     #[inline]
-    fn from_node<N: node::Info>(node: Box<N>, scan: bool) -> ribbit::Packed<Self> {
+    fn from_node<N: node::Info>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = Box::leak(node) as *mut N as u64;
         let kind = N::KIND as u64;
 
         validate!(ptr > 0);
         validate_eq!(ptr & ribbit::Packed::<Self>::MASK_TAG, 0);
 
-        unsafe { ribbit::Packed::<Self>::new_unchecked(kind | ((scan as u64) << 2) | ptr) }
+        unsafe { ribbit::Packed::<Self>::new_unchecked(kind | ptr) }
     }
 }
 

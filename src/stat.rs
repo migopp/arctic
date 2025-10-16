@@ -164,6 +164,7 @@ pub struct Thread {
     scan_insert: u64,
     scan_update: u64,
     scan_scan: u64,
+    scan_freeze: u64,
 }
 
 #[cfg(not(feature = "stat"))]

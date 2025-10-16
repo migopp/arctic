@@ -210,6 +210,7 @@ impl<'g> MapRef<'g> {
                 node = cursor.pop()?;
                 edge = cursor.root().load_packed(Ordering::Acquire);
             }
+
             let meta = edge.meta();
             let data = edge.data();
 
@@ -221,7 +222,7 @@ impl<'g> MapRef<'g> {
                 return Ok(());
             }
 
-            let (op, new) = node.replace(edge);
+            let (op, new) = node.replace(meta);
 
             match cursor.root().compare_exchange_packed(
                 edge,
@@ -328,8 +329,7 @@ impl<'g> MapRef<'g> {
             let mut edge = cursor.root().load_packed(Ordering::Relaxed);
             while edge.is_node() {
                 if edge.data().scan() {
-                    stat::increment(stat::Counter::ScanScan);
-                    edge = cursor.wait_for_scan();
+                    edge = cursor.wait_for_scan(stat::Counter::ScanScan);
                 }
 
                 validate!(!edge.meta().leaf());

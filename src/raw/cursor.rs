@@ -60,8 +60,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut edge = self.root().load_packed(Ordering::Relaxed);
 
             if edge.is_scan() {
-                stat::increment(stat::Counter::ScanUpdate);
-                edge = self.wait_for_scan();
+                edge = self.wait_for_scan(stat::Counter::ScanUpdate);
             }
 
             let meta = edge.meta();
@@ -102,8 +101,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut old = self.root().load_packed(Ordering::Relaxed);
 
             if old.is_scan() {
-                stat::increment(stat::Counter::ScanInsert);
-                old = self.wait_for_scan();
+                old = self.wait_for_scan(stat::Counter::ScanInsert);
             }
 
             let old_meta = old.meta();
@@ -133,12 +131,12 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let (op, new) = match r#match {
                 byte::MatchSplit::Full(_) if old.is_node() => {
                     let node = unsafe { old_data.into_node_unchecked() };
-                    let (op, new) = node.replace(old);
+                    let (op, new) = node.replace(old_meta);
                     (Op::Node(op), new)
                 }
                 byte::MatchSplit::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), false, None),
+                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), None),
                 ),
                 byte::MatchSplit::Full(_) => (
                     Op::Edge(edge::Op::Insert),
@@ -152,7 +150,6 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3, _>(
                         start,
-                        false,
                         Some((middle, old.with_meta(old_meta.with_key(end)))),
                     ),
                 ),
@@ -163,7 +160,9 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[cold]
-    pub(crate) fn wait_for_scan(&self) -> ribbit::Packed<Edge> {
+    pub(crate) fn wait_for_scan(&self, counter: stat::Counter) -> ribbit::Packed<Edge> {
+        stat::increment(counter);
+
         loop {
             core::hint::spin_loop();
             let edge = self.root().load_packed(Ordering::Acquire);

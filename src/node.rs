@@ -13,6 +13,7 @@ pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 use ribbit::atomic::Atomic128;
 
+use crate::edge;
 use crate::iter::Or;
 use crate::Edge;
 
@@ -25,7 +26,7 @@ pub(crate) trait Node {
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
 
-    fn replace(&self, parent: ribbit::Packed<Edge>) -> (Op, ribbit::Packed<Edge>);
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
 }
 
 pub(crate) trait Info: Node + Default + core::fmt::Debug + 'static {
@@ -134,7 +135,7 @@ impl<'a> Ref<'a> {
     }
 
     #[cold]
-    pub(crate) fn replace(&self, parent: ribbit::Packed<Edge>) -> (Op, ribbit::Packed<Edge>) {
+    pub(crate) fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
         match self {
             Ref::Node3(node) => node.replace(parent),
             Ref::Node15(node) => node.replace(parent),
