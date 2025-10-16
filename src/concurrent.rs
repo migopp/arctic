@@ -105,10 +105,11 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
+        retry: usize,
         output: &mut Vec<(K, V)>,
     ) {
         self.raw
-            .range_optimistic::<K, V>(min.into(), max.into(), output)
+            .range_optimistic::<K, V>(min.into(), max.into(), retry, output)
     }
 }
 

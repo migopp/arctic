@@ -243,7 +243,7 @@ mod tests {
 
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
-        pin.range_optimistic(first.borrow(), last.borrow(), &mut buffer);
+        pin.range_optimistic(first.borrow(), last.borrow(), usize::MAX, &mut buffer);
         buffer
             .into_iter()
             .zip(&keys)

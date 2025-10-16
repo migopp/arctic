@@ -446,6 +446,7 @@ impl<'g> MapRef<'g> {
         &'l mut self,
         min: K::Read<'l>,
         max: K::Read<'l>,
+        retry: usize,
         output: &mut Vec<(K, V)>,
     ) {
         // FIXME: deduplicate prefix traversal?
@@ -469,7 +470,7 @@ impl<'g> MapRef<'g> {
         }
         .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
 
-        for retry in 0.. {
+        for retry in 0..retry {
             let mut iter = unsafe {
                 iter::RangeIter::new(
                     cursor.root(),
@@ -527,7 +528,7 @@ impl<'g> MapRef<'g> {
             });
 
             if len == output.len() && !dirty {
-                stat::record(stat::Record::RangeConflict, retry);
+                stat::record(stat::Record::RangeConflict, retry as u64);
                 return;
             }
 
@@ -536,7 +537,25 @@ impl<'g> MapRef<'g> {
             output.truncate(len);
         }
 
-        unsafe { core::hint::unreachable_unchecked() }
+        match Self::lock::<_, cursor::Optimistic>(&mut cursor, prefix) {
+            Ok(()) => (),
+            Err(()) => todo!(),
+        }
+
+        unsafe {
+            iter::RangeIter::<K::Read<'l>, K::Write>::new(
+                cursor.root(),
+                K::Write::from(prefix.slice(cursor.bit())),
+                min,
+                max,
+            )
+        }
+        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
+
+        match Self::unlock(&mut cursor, &prefix) {
+            Ok(()) => (),
+            Err(_) => todo!(),
+        }
     }
 }
 
