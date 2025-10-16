@@ -540,7 +540,7 @@ impl<'g> MapRef<'g> {
         }
         .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
 
-        for retry in 0..retry {
+        for retry in 0..=retry {
             let mut iter = unsafe {
                 iter::RangeIter::new(
                     cursor.root(),
