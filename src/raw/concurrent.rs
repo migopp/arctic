@@ -377,6 +377,8 @@ impl<'g> MapRef<'g> {
         max: K::Read<'l>,
         output: &mut Vec<(K, V)>,
     ) {
+        stat::increment(stat::Counter::LockFrozen);
+
         let mut cursor = cursor.upgrade(root, prefix);
 
         let Some(_) = cursor.traverse_prefix() else {
@@ -462,6 +464,8 @@ impl<'g> MapRef<'g> {
         cursor: Cursor<'g, 'l, R, H>,
         prefix: R,
     ) {
+        stat::increment(stat::Counter::UnlockFrozen);
+
         let mut cursor = cursor.upgrade(root, prefix);
 
         let Some(_) = cursor.traverse_prefix() else {

@@ -118,6 +118,9 @@ pub(crate) enum Counter {
     ScanInsert,
     ScanUpdate,
     ScanScan,
+
+    LockFrozen,
+    UnlockFrozen,
 }
 
 #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
@@ -165,6 +168,8 @@ pub struct Thread {
     scan_update: u64,
     scan_scan: u64,
     scan_freeze: u64,
+    lock_frozen: u64,
+    unlock_frozen: u64,
 }
 
 #[cfg(not(feature = "stat"))]
@@ -227,6 +232,9 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::ScanInsert => &mut thread.scan_insert,
                 Counter::ScanUpdate => &mut thread.scan_update,
                 Counter::ScanScan => &mut thread.scan_scan,
+
+                Counter::LockFrozen => &mut thread.lock_frozen,
+                Counter::UnlockFrozen => &mut thread.unlock_frozen,
             } += 1;
         })
     }
