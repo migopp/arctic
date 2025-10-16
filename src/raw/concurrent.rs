@@ -1,7 +1,5 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
-
 use crate::byte;
 use crate::edge;
 use crate::key;
@@ -318,36 +316,44 @@ impl<'g> MapRef<'g> {
             Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         if cursor.traverse_prefix().is_none() {
+            // FIXME: do not need to hold SMR guard if iterator is empty
             return RangeIter {
                 iter: iter::RangeIter::<R, W>::empty(),
-                root: None,
-                _guard: cursor.into_guard(),
+                cursor,
+                lock: None,
             };
         }
 
-        if LINEARIZABLE {
+        let lock = if LINEARIZABLE {
             let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-            while edge.is_node() {
-                if edge.data().scan() {
-                    edge = cursor.wait_for_scan(stat::Counter::ScanScan);
-                }
 
-                validate!(!edge.meta().leaf());
+            if edge.meta().leaf() {
+                None
+            } else {
+                loop {
+                    if edge.data().scan() {
+                        edge = cursor.wait_for_scan(stat::Counter::ScanScan);
+                    }
 
-                match cursor.root().compare_exchange_packed(
-                    edge,
-                    edge.with_data(edge.data().with_scan(true)),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(conflict) => {
-                        core::hint::spin_loop();
-                        edge = conflict;
+                    validate!(!edge.meta().leaf());
+
+                    match cursor.root().compare_exchange_packed(
+                        edge,
+                        edge.with_data(edge.data().with_scan(true)),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break Some(edge),
+                        Err(conflict) => {
+                            core::hint::spin_loop();
+                            edge = conflict;
+                        }
                     }
                 }
             }
-        }
+        } else {
+            None
+        };
 
         RangeIter {
             iter: unsafe {
@@ -358,8 +364,8 @@ impl<'g> MapRef<'g> {
                     max,
                 )
             },
-            root: LINEARIZABLE.then_some(cursor.root()),
-            _guard: cursor.into_guard(),
+            cursor,
+            lock,
         }
     }
 
@@ -461,10 +467,10 @@ impl<'g> MapRef<'g> {
     }
 }
 
-pub(crate) struct RangeIter<'g, 'l, R, W> {
+pub(crate) struct RangeIter<'g, 'l, R: key::Read, W> {
     iter: iter::RangeIter<'g, R, W>,
-    root: Option<&'g Atomic128<Edge>>,
-    _guard: smr::Guard<'g, 'l>,
+    cursor: Cursor<'g, 'l, R, cursor::Optimistic>,
+    lock: Option<ribbit::Packed<Edge>>,
 }
 
 impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
@@ -483,29 +489,37 @@ where
     }
 }
 
-impl<'g, 'l, R, W> Drop for RangeIter<'g, 'l, R, W> {
+impl<'g, 'l, R, W> Drop for RangeIter<'g, 'l, R, W>
+where
+    R: key::Read,
+{
     fn drop(&mut self) {
-        if let Some(root) = self.root {
-            let mut edge = root.load_packed(Ordering::Relaxed);
+        let Some(old) = self.lock else {
+            return;
+        };
 
-            if !edge.is_node() {
-                return;
-            }
+        let mut old = old.with_data(old.data().with_scan(true));
 
-            validate!(edge.data().scan());
+        loop {
+            validate!(!old.meta().leaf());
+            validate!(old.data().scan());
 
-            loop {
-                match root.compare_exchange_packed(
-                    edge,
-                    edge.with_data(edge.data().with_scan(false)),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(conflict) => {
-                        core::hint::spin_loop();
-                        edge = conflict;
-                    }
+            match self.cursor.root().compare_exchange_packed(
+                old,
+                old.with_data(old.data().with_scan(false)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) if conflict.meta().frozen() => {
+                    // Must re-traverse to edge
+                    todo!()
+                }
+                // Another thread replaced the node underneath this edge
+                Err(conflict) => {
+                    validate!(!old.meta().frozen());
+                    validate!(!conflict.meta().frozen());
+                    old = conflict;
                 }
             }
         }
