@@ -60,7 +60,10 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut edge = self.root().load_packed(Ordering::Relaxed);
 
             if edge.is_scan() {
-                edge = self.wait_for_scan(stat::Counter::ScanUpdate);
+                match self.wait_for_scan(stat::Counter::ScanUpdate) {
+                    Ok(safe) => edge = safe,
+                    Err(()) => return Some(Err(())),
+                }
             }
 
             let meta = edge.meta();
@@ -101,7 +104,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
             let mut old = self.root().load_packed(Ordering::Relaxed);
 
             if old.is_scan() {
-                old = self.wait_for_scan(stat::Counter::ScanInsert);
+                old = self.wait_for_scan(stat::Counter::ScanInsert)?;
             }
 
             let old_meta = old.meta();
@@ -159,15 +162,47 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
         }
     }
 
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
+        loop {
+            let edge = self.root.load_packed(Ordering::Acquire);
+            let meta = edge.meta();
+            let data = edge.data();
+            let save = self.key;
+
+            match meta.key().match_prefix(&mut self.key)? {
+                byte::MatchPrefix::Full(len) if edge.is_node() => {
+                    let node = unsafe { data.into_node_unchecked() };
+                    let Some(byte) = self.key.next() else {
+                        return Some(edge);
+                    };
+                    let next = node.get(byte)?;
+                    self.push(save, len, node, next);
+                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial if edge.is_null() => {
+                    return None
+                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => {
+                    self.key = save;
+                    return Some(edge);
+                }
+            }
+        }
+    }
+
     #[cold]
-    pub(crate) fn wait_for_scan(&self, counter: stat::Counter) -> ribbit::Packed<Edge> {
+    pub(crate) fn wait_for_scan(&self, counter: stat::Counter) -> Result<ribbit::Packed<Edge>, ()> {
         stat::increment(counter);
 
         loop {
             core::hint::spin_loop();
             let edge = self.root().load_packed(Ordering::Acquire);
+
             if !edge.is_scan() {
-                return edge;
+                return Ok(edge);
+            }
+
+            if edge.meta().frozen() {
+                return Err(());
             }
         }
     }
@@ -195,26 +230,6 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
 }
 
 impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic> {
-    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
-        loop {
-            let edge = self.root.load_packed(Ordering::Acquire);
-            let meta = edge.meta();
-            let data = edge.data();
-
-            match meta.key().match_prefix(&mut self.key)? {
-                byte::MatchPrefix::Full(len) if edge.is_node() => {
-                    let node = unsafe { data.into_node_unchecked() };
-                    let Some(byte) = self.key.next() else {
-                        return Some(edge);
-                    };
-                    self.root = node.get(byte)?;
-                    self.bit += len.bits() as usize + 8;
-                }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => return Some(edge),
-            }
-        }
-    }
-
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<u64> {
         loop {

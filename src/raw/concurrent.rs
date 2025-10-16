@@ -302,7 +302,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_pessimistic<'l, const LINEARIZABLE: bool, R, W>(
+    pub(crate) fn range_non_linearizable<'l, R, W>(
         &'l mut self,
         min: R,
         max: R,
@@ -315,48 +315,10 @@ impl<'g> MapRef<'g> {
         let mut cursor =
             Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
-        if cursor.traverse_prefix().is_none() {
+        let iter = match cursor.traverse_prefix() {
             // FIXME: do not need to hold SMR guard if iterator is empty
-            return RangeIter {
-                iter: iter::RangeIter::<R, W>::empty(),
-                cursor,
-                lock: None,
-            };
-        }
-
-        let lock = if LINEARIZABLE {
-            let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-
-            if edge.meta().leaf() {
-                None
-            } else {
-                loop {
-                    if edge.data().scan() {
-                        edge = cursor.wait_for_scan(stat::Counter::ScanScan);
-                    }
-
-                    validate!(!edge.meta().leaf());
-
-                    match cursor.root().compare_exchange_packed(
-                        edge,
-                        edge.with_data(edge.data().with_scan(true)),
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break Some(edge),
-                        Err(conflict) => {
-                            core::hint::spin_loop();
-                            edge = conflict;
-                        }
-                    }
-                }
-            }
-        } else {
-            None
-        };
-
-        RangeIter {
-            iter: unsafe {
+            None => iter::RangeIter::<R, W>::empty(),
+            Some(_) => unsafe {
                 iter::RangeIter::<R, W>::new(
                     cursor.root(),
                     W::from(prefix.slice(cursor.bit())),
@@ -364,8 +326,116 @@ impl<'g> MapRef<'g> {
                     max,
                 )
             },
-            cursor,
-            lock,
+        };
+
+        RangeIter {
+            iter,
+            _guard: cursor.into_guard(),
+        }
+    }
+
+    pub(crate) fn range_pessimistic<'l, K: Key, V: Value>(
+        &'l mut self,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+        output: &mut Vec<(K, V)>,
+    ) {
+        let prefix = min.prefix(&max);
+
+        let mut cursor = match self.lock::<_, cursor::Optimistic>(prefix) {
+            None => return,
+            Some(Ok(cursor)) => cursor,
+            Some(Err(())) => todo!(),
+        };
+
+        unsafe {
+            iter::RangeIter::<K::Read<'l>, K::Write>::new(
+                cursor.root(),
+                K::Write::from(prefix.slice(cursor.bit())),
+                min,
+                max,
+            )
+        }
+        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
+
+        match Self::unlock(&mut cursor, &prefix) {
+            Ok(()) => (),
+            Err(_) => todo!(),
+        }
+    }
+
+    fn lock<'l, R: key::Read, H: cursor::History<'g, R>>(
+        &'l mut self,
+        prefix: R,
+    ) -> Option<Result<Cursor<'g, 'l, R, H>, H::PopError>> {
+        let mut cursor = Cursor::<_, H>::new(&mut self.smr, self.raw.root(), prefix);
+        let mut edge = cursor.traverse_prefix()?;
+
+        // No need to lock leaf
+        if edge.meta().leaf() {
+            return Some(Ok(cursor));
+        }
+
+        loop {
+            if edge.meta().frozen() || edge.data().scan() {
+                match cursor.wait_for_scan(stat::Counter::ScanScan) {
+                    Ok(safe) => edge = safe,
+                    Err(()) => {
+                        if let Err(error) = Self::freeze(&mut cursor, &prefix) {
+                            return Some(Err(error));
+                        }
+                    }
+                }
+            }
+
+            match cursor.root().compare_exchange_packed(
+                edge,
+                edge.with_data(edge.data().with_scan(true)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Ok(cursor)),
+                Err(conflict) => {
+                    core::hint::spin_loop();
+                    edge = conflict;
+                }
+            }
+        }
+    }
+
+    fn unlock<'l, R: key::Read, H: cursor::History<'g, R>>(
+        cursor: &mut Cursor<'g, 'l, R, H>,
+        prefix: &R,
+    ) -> Result<(), H::PopError> {
+        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+
+        if edge.meta().leaf() {
+            return Ok(());
+        }
+
+        loop {
+            validate!(edge.data().scan());
+
+            if edge.meta().frozen() {
+                Self::freeze(cursor, prefix)?;
+                edge = cursor
+                    .traverse_prefix()
+                    .expect("Scan bit must be reachable");
+                continue;
+            }
+
+            match cursor.root().compare_exchange_packed(
+                edge,
+                edge.with_data(edge.data().with_scan(false)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(conflict) => {
+                    core::hint::spin_loop();
+                    edge = conflict;
+                }
+            }
         }
     }
 
@@ -469,8 +539,7 @@ impl<'g> MapRef<'g> {
 
 pub(crate) struct RangeIter<'g, 'l, R: key::Read, W> {
     iter: iter::RangeIter<'g, R, W>,
-    cursor: Cursor<'g, 'l, R, cursor::Optimistic>,
-    lock: Option<ribbit::Packed<Edge>>,
+    _guard: smr::Guard<'g, 'l>,
 }
 
 impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
@@ -486,43 +555,6 @@ where
     #[inline]
     pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
         self.iter.for_each(apply)
-    }
-}
-
-impl<'g, 'l, R, W> Drop for RangeIter<'g, 'l, R, W>
-where
-    R: key::Read,
-{
-    fn drop(&mut self) {
-        let Some(old) = self.lock else {
-            return;
-        };
-
-        let mut old = old.with_data(old.data().with_scan(true));
-
-        loop {
-            validate!(!old.meta().leaf());
-            validate!(old.data().scan());
-
-            match self.cursor.root().compare_exchange_packed(
-                old,
-                old.with_data(old.data().with_scan(false)),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(conflict) if conflict.meta().frozen() => {
-                    // Must re-traverse to edge
-                    todo!()
-                }
-                // Another thread replaced the node underneath this edge
-                Err(conflict) => {
-                    validate!(!old.meta().frozen());
-                    validate!(!conflict.meta().frozen());
-                    old = conflict;
-                }
-            }
-        }
     }
 }
 

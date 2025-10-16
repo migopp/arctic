@@ -86,7 +86,7 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         RangeIter {
             iter: self
                 .raw
-                .range_pessimistic::<false, _, _>(min.into(), max.into()),
+                .range_non_linearizable::<_, _>(min.into(), max.into()),
             _value: PhantomData,
         }
     }
@@ -95,13 +95,10 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> RangeIter<'g, 'l, K, V> {
-        RangeIter {
-            iter: self
-                .raw
-                .range_pessimistic::<true, _, _>(min.into(), max.into()),
-            _value: PhantomData,
-        }
+        output: &mut Vec<(K, V)>,
+    ) {
+        self.raw
+            .range_pessimistic::<_, _>(min.into(), max.into(), output);
     }
 
     pub fn range_optimistic<'l>(
