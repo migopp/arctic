@@ -1,5 +1,7 @@
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+
 use crate::byte;
 use crate::edge;
 use crate::key;
@@ -109,7 +111,7 @@ impl<'g> MapRef<'g> {
                 None => return Ok(None),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
-                    Self::freeze(&mut cursor, &key)?;
+                    Self::freeze(&mut cursor, key)?;
                     continue;
                 }
             };
@@ -161,7 +163,7 @@ impl<'g> MapRef<'g> {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    Self::freeze(&mut cursor, &key)?;
+                    Self::freeze(&mut cursor, key)?;
                     continue;
                 }
             };
@@ -185,7 +187,7 @@ impl<'g> MapRef<'g> {
                 }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut cursor, op, &key, old) };
+                    unsafe { Self::retire(&mut cursor, op, key, old) };
                 }
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
@@ -198,7 +200,7 @@ impl<'g> MapRef<'g> {
     #[cold]
     fn freeze<R: key::Read, H: cursor::History<'g, R>>(
         cursor: &mut Cursor<'g, '_, R, H>,
-        key: &R,
+        key: R,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
         let mut edge = cursor.root().load_packed(Ordering::Acquire);
@@ -260,7 +262,7 @@ impl<'g> MapRef<'g> {
     unsafe fn retire<R: key::Read, H: cursor::History<'g, R>>(
         cursor: &mut Cursor<'g, '_, R, H>,
         op: Op,
-        key: &R,
+        key: R,
         edge: ribbit::Packed<Edge>,
     ) {
         match op {
@@ -349,9 +351,55 @@ impl<'g> MapRef<'g> {
             return;
         }
 
-        match Self::lock::<_, cursor::Optimistic>(&mut cursor, prefix) {
+        Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
+    }
+
+    fn pessimistic<'l, K: Key, V: Value>(
+        root: &'g Atomic128<Edge>,
+        cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
+        prefix: K::Read<'l>,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+        output: &mut Vec<(K, V)>,
+    ) {
+        match Self::pessimistic_impl(root, cursor, prefix, min, max, output) {
             Ok(()) => (),
-            Err(()) => todo!(),
+            Err(cursor) => Self::pessimistic_pessimistic(root, cursor, prefix, min, max, output),
+        }
+    }
+
+    #[cold]
+    fn pessimistic_pessimistic<'l, K: Key, V: Value>(
+        root: &'g Atomic128<Edge>,
+        cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
+        prefix: K::Read<'l>,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+        output: &mut Vec<(K, V)>,
+    ) {
+        let mut cursor = cursor.upgrade(root, prefix);
+
+        let Some(_) = cursor.traverse_prefix() else {
+            return;
+        };
+
+        match Self::pessimistic_impl(root, cursor, prefix, min, max, output) {
+            Ok(()) => (),
+            Err(_) => unreachable!(),
+        }
+    }
+
+    fn pessimistic_impl<'l, K: Key, V: Value, H: cursor::History<'g, K::Read<'l>>>(
+        root: &'g Atomic128<Edge>,
+        mut cursor: Cursor<'g, 'l, K::Read<'l>, H>,
+        prefix: K::Read<'l>,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+        output: &mut Vec<(K, V)>,
+    ) -> Result<(), Cursor<'g, 'l, K::Read<'l>, H>> {
+        match Self::lock(&mut cursor, prefix) {
+            Ok(()) => (),
+            Err(_) => return Err(cursor),
         }
 
         unsafe {
@@ -364,10 +412,12 @@ impl<'g> MapRef<'g> {
         }
         .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
 
-        match Self::unlock(&mut cursor, &prefix) {
+        match Self::unlock(&mut cursor, prefix) {
             Ok(()) => (),
-            Err(_) => todo!(),
+            Err(_) => Self::unlock_pessimistic(root, cursor, prefix),
         }
+
+        Ok(())
     }
 
     fn lock<'l, R: key::Read, H: cursor::History<'g, R>>(
@@ -386,7 +436,7 @@ impl<'g> MapRef<'g> {
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
                     Ok(safe) if !edge.meta().frozen() => edge = safe,
                     Ok(_) | Err(()) => {
-                        Self::freeze(cursor, &prefix)?;
+                        Self::freeze(cursor, prefix)?;
                     }
                 }
             }
@@ -406,9 +456,25 @@ impl<'g> MapRef<'g> {
         }
     }
 
+    #[cold]
+    fn unlock_pessimistic<'l, R: key::Read, H: cursor::History<'g, R>>(
+        root: &'g Atomic128<Edge>,
+        cursor: Cursor<'g, 'l, R, H>,
+        prefix: R,
+    ) {
+        let mut cursor = cursor.upgrade(root, prefix);
+
+        let Some(_) = cursor.traverse_prefix() else {
+            unreachable!("Scan lock must exist");
+        };
+
+        Self::unlock(&mut cursor, prefix).unwrap()
+    }
+
+    #[inline]
     fn unlock<'l, R: key::Read, H: cursor::History<'g, R>>(
         cursor: &mut Cursor<'g, 'l, R, H>,
-        prefix: &R,
+        prefix: R,
     ) -> Result<(), H::PopError> {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 
@@ -537,25 +603,7 @@ impl<'g> MapRef<'g> {
             output.truncate(len);
         }
 
-        match Self::lock::<_, cursor::Optimistic>(&mut cursor, prefix) {
-            Ok(()) => (),
-            Err(()) => todo!(),
-        }
-
-        unsafe {
-            iter::RangeIter::<K::Read<'l>, K::Write>::new(
-                cursor.root(),
-                K::Write::from(prefix.slice(cursor.bit())),
-                min,
-                max,
-            )
-        }
-        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
-
-        match Self::unlock(&mut cursor, &prefix) {
-            Ok(()) => (),
-            Err(_) => todo!(),
-        }
+        Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
     }
 }
 

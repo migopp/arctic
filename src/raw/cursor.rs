@@ -35,6 +35,21 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[inline]
+    pub(crate) fn upgrade(
+        self,
+        root: &'g Atomic128<Edge>,
+        key: R,
+    ) -> Cursor<'g, 'l, R, Pessimistic<'g, R>> {
+        Cursor {
+            guard: self.guard,
+            bit: 0,
+            key,
+            root,
+            history: Pessimistic::default(),
+        }
+    }
+
+    #[inline]
     pub(crate) fn root(&self) -> &'g Atomic128<Edge> {
         self.root
     }
