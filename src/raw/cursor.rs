@@ -13,12 +13,21 @@ use crate::smr;
 use crate::stat;
 use crate::Edge;
 
-/// Stateful traversal over tree.
+/// Tree traversal state.
 pub(crate) struct Cursor<'g, 'l, R, H> {
+    /// SMR guard protecting allocations that overlap with `key`
     guard: smr::Guard<'g, 'l>,
+
+    /// Total number of bits read from `key`
     bit: usize,
+
+    /// Current key reader
     key: R,
+
+    /// Edge this cursor currently points to
     root: &'g Atomic128<Edge>,
+
+    /// Path history of this cursor (sequence of path segments to `root`)
     history: H,
 }
 
@@ -316,14 +325,17 @@ impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
     }
 }
 
-/// Path segment consists of:
-/// - Current key before matching on edge
-/// - Number of bytes matched along edge
-/// - Edge to match next
-/// - Node underneath edge
+/// A path along the tree is composed of 0 or more path segments.
 pub(crate) struct Segment<'a, R> {
-    key: R,
-    len: byte::Len,
+    /// Edge to match
     edge: &'a Atomic128<Edge>,
+
+    /// Key before matching on `edge`
+    key: R,
+
+    /// Number of bytes matched along `edge`
+    len: byte::Len,
+
+    /// Node underneath `edge`
     node: node::Ref<'a>,
 }
