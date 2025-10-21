@@ -10,46 +10,46 @@ use crate::node::Op;
 use crate::Node;
 
 #[repr(C, align(4096))]
-pub(crate) struct Node256([Atomic128<Edge>; 256]);
+pub(crate) struct Node256<V>([Atomic128<Edge<V>>; 256]);
 
-const _: () = assert!(core::mem::size_of::<Node256>() == 4096);
-const _: () = assert!(core::mem::align_of::<Node256>() == 4096);
+const _: () = assert!(core::mem::size_of::<Node256<()>>() == 4096);
+const _: () = assert!(core::mem::align_of::<Node256<()>>() == 4096);
 
-impl Default for Node256 {
+impl<V> Default for Node256<V> {
     fn default() -> Self {
-        Self(core::array::from_fn(|_| Atomic128::default()))
+        Self(core::array::from_fn(|_| Atomic128::new(Edge::default())))
     }
 }
 
-impl Node for Node256 {
+impl<V> Node<V> for Node256<V> {
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge>] {
+    fn edges(&self) -> &[Atomic128<Edge<V>>] {
         &self.0
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked(key as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
         self.get(key)
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
+    fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
         todo!()
     }
 }
 
-impl Node256 {
+impl<V> Node256<V> {
     #[inline]
     pub(crate) fn keys_sorted(&self) -> KeyIter {
         KeyIter::new(None, None)
@@ -61,7 +61,7 @@ impl Node256 {
     }
 }
 
-impl Debug for Node256 {
+impl<V> Debug for Node256<V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node256")
             .field("edges", &edge::DebugSlice(&self.0))
@@ -69,12 +69,12 @@ impl Debug for Node256 {
     }
 }
 
-impl node::Info for Node256 {
+impl<V> node::Info<V> for Node256<V> {
     const KIND: node::Kind = node::Kind::Node256;
     const GROW: usize = 256;
-    const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node256(node);
-    type Grow = Node256;
-    type Shrink = Node15;
+    const REF: for<'a> fn(&'a Self) -> node::Ref<'a, V> = |node| node::Ref::Node256(node);
+    type Grow = Node256<V>;
+    type Shrink = Node15<V>;
 }
 
 #[repr(C)]

@@ -10,10 +10,10 @@ use crate::node::linear;
 use crate::node::Node256;
 use crate::node::Node3;
 
-pub(crate) type Node15 = super::Linear<15, Atomic128<Header>>;
+pub(crate) type Node15<V> = super::Linear<15, Atomic128<Header>, V>;
 
-const _: () = assert!(core::mem::size_of::<Node15>() == 256);
-const _: () = assert!(core::mem::align_of::<Node15>() == 64);
+const _: () = assert!(core::mem::size_of::<Node15<()>>() == 256);
+const _: () = assert!(core::mem::align_of::<Node15<()>>() == 64);
 
 #[derive(Copy, Clone, Debug, Default, ribbit::Pack)]
 #[ribbit(size = 128)]
@@ -153,13 +153,13 @@ impl linear::Header for Atomic128<Header> {
     }
 }
 
-impl node::Info for Node15 {
+impl<V> node::Info<V> for Node15<V> {
     const KIND: node::Kind = node::Kind::Node15;
     const GROW: usize = 15;
-    const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node15(node);
+    const REF: for<'a> fn(&'a Self) -> node::Ref<'a, V> = |node| node::Ref::Node15(node);
 
-    type Grow = Node256;
-    type Shrink = Node3;
+    type Grow = Node256<V>;
+    type Shrink = Node3<V>;
 }
 
 #[inline]

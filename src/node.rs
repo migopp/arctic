@@ -17,25 +17,25 @@ use crate::edge;
 use crate::iter::Or;
 use crate::Edge;
 
-pub(crate) trait Node {
-    fn edges(&self) -> &[Atomic128<Edge>];
+pub(crate) trait Node<V> {
+    fn edges(&self) -> &[Atomic128<Edge<V>>];
 
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge>>;
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>>;
 
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>>;
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<V>>>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>>;
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>);
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>);
 }
 
-pub(crate) trait Info: Node + Default + core::fmt::Debug + 'static {
+pub(crate) trait Info<V>: Node<V> + Default + core::fmt::Debug {
     const KIND: Kind;
     const GROW: usize;
-    const REF: for<'a> fn(&'a Self) -> Ref<'a>;
+    const REF: for<'a> fn(&'a Self) -> Ref<'a, V>;
 
-    type Grow: Info;
-    type Shrink: Info;
+    type Grow: Info<V>;
+    type Shrink: Info<V>;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -57,16 +57,22 @@ pub(crate) enum Op {
     Compress,
 }
 
-#[derive(Copy, Clone)]
-pub(crate) enum Ref<'a> {
-    Node3(&'a Node3),
-    Node15(&'a Node15),
-    Node256(&'a Node256),
+pub(crate) enum Ref<'a, V> {
+    Node3(&'a Node3<V>),
+    Node15(&'a Node15<V>),
+    Node256(&'a Node256<V>),
 }
 
-impl<'a> Ref<'a> {
+impl<'a, V> Copy for Ref<'a, V> {}
+impl<'a, V> Clone for Ref<'a, V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, V> Ref<'a, V> {
     #[inline]
-    pub(crate) fn iter_sorted(&self) -> SortedIter<'a> {
+    pub(crate) fn iter_sorted(&self) -> SortedIter<'a, V> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
             Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
@@ -80,7 +86,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'a> {
+    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'a, V> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
@@ -91,7 +97,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a> {
+    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a, V> {
         if min.is_none() && max.is_none() {
             return self.iter_sorted();
         }
@@ -115,9 +121,9 @@ impl<'a> Ref<'a> {
     }
 }
 
-impl<'a> Ref<'a> {
+impl<'a, V> Ref<'a, V> {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'a Atomic128<Edge<V>>> {
         match self {
             Ref::Node3(node) => node.get(key),
             Ref::Node15(node) => node.get(key),
@@ -126,7 +132,7 @@ impl<'a> Ref<'a> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'a Atomic128<Edge>> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'a Atomic128<Edge<V>>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
@@ -135,7 +141,10 @@ impl<'a> Ref<'a> {
     }
 
     #[cold]
-    pub(crate) fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
+    pub(crate) fn replace(
+        &self,
+        parent: ribbit::Packed<edge::Meta>,
+    ) -> (Op, ribbit::Packed<Edge<V>>) {
         match self {
             Ref::Node3(node) => node.replace(parent),
             Ref::Node15(node) => node.replace(parent),
@@ -144,7 +153,7 @@ impl<'a> Ref<'a> {
     }
 }
 
-impl Debug for Ref<'_> {
+impl<V> Debug for Ref<'_, V> {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Ref::Node3(node) => node.fmt(fmt),
@@ -177,9 +186,9 @@ impl Kind {
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }
 
-pub(crate) type SortedIter<'a> = iter::SortedIter<'a, SortedKeyIter>;
+pub(crate) type SortedIter<'a, V> = iter::SortedIter<'a, SortedKeyIter, V>;
 
-pub(crate) type UnsortedIter<'a> = iter::UnsortedIter<'a, UnsortedKeyIter>;
+pub(crate) type UnsortedIter<'a, V> = iter::UnsortedIter<'a, UnsortedKeyIter, V>;
 
 pub(crate) type UnsortedKeyIter = Or<linear::UnsortedKeyIter, node256::KeyIter>;
 

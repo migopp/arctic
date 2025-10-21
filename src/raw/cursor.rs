@@ -12,11 +12,12 @@ use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
+use crate::Value;
 
 /// Tree traversal state.
-pub(crate) struct Cursor<'g, 'l, R, H> {
+pub(crate) struct Cursor<'g, 'l, R, V, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: smr::Guard<'g, 'l>,
+    guard: smr::Guard<'g, 'l, V>,
 
     /// Total number of bits read from `key`
     bit: usize,
@@ -25,15 +26,24 @@ pub(crate) struct Cursor<'g, 'l, R, H> {
     key: R,
 
     /// Edge this cursor currently points to
-    root: &'g Atomic128<Edge>,
+    root: &'g Atomic128<Edge<V>>,
 
     /// Path history of this cursor (sequence of path segments to `root`)
     history: H,
 }
 
-impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
+impl<'g, 'l, R, V, H> Cursor<'g, 'l, R, V, H>
+where
+    R: key::Read,
+    V: Value,
+    H: History<'g, R, V>,
+{
     #[inline]
-    pub(crate) fn new(smr: &'l mut smr::Local<'g>, root: &'g Atomic128<Edge>, key: R) -> Self {
+    pub(crate) fn new(
+        smr: &'l mut smr::Local<'g, V>,
+        root: &'g Atomic128<Edge<V>>,
+        key: R,
+    ) -> Self {
         Self {
             guard: smr.protect(key.peek_all()),
             bit: 0,
@@ -46,9 +56,9 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     #[inline]
     pub(crate) fn upgrade(
         self,
-        root: &'g Atomic128<Edge>,
+        root: &'g Atomic128<Edge<V>>,
         key: R,
-    ) -> Cursor<'g, 'l, R, Pessimistic<'g, R>> {
+    ) -> Cursor<'g, 'l, R, V, Pessimistic<'g, R, V>> {
         Cursor {
             guard: self.guard,
             bit: 0,
@@ -59,7 +69,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[inline]
-    pub(crate) fn root(&self) -> &'g Atomic128<Edge> {
+    pub(crate) fn root(&self) -> &'g Atomic128<Edge<V>> {
         self.root
     }
 
@@ -69,17 +79,17 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[inline]
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
+    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         unsafe { self.guard.retire(edge) }
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::Guard<'g, 'l> {
+    pub(crate) fn into_guard(self) -> smr::Guard<'g, 'l, V> {
         self.guard
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge>, ()>> {
+    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<V>>, ()>> {
         loop {
             let mut edge = self.root().load_packed(Ordering::Relaxed);
 
@@ -122,8 +132,8 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
-        value: u64,
-    ) -> Result<(Op, ribbit::Packed<Edge>, ribbit::Packed<Edge>), ()> {
+        leaf: ribbit::Packed<Edge<V>>,
+    ) -> Result<(Op, ribbit::Packed<Edge<V>>, ribbit::Packed<Edge<V>>), ()> {
         loop {
             let mut old = self.root().load_packed(Ordering::Relaxed);
 
@@ -163,19 +173,19 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
                 }
                 byte::MatchSplit::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
                     Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3, _>(self.key.peek(byte::Len::MAX), None),
+                    Edge::new_node::<Node3<V>, _>(self.key.peek(byte::Len::MAX), None),
                 ),
-                byte::MatchSplit::Full(_) => (
-                    Op::Edge(edge::Op::Insert),
-                    Edge::new_leaf(
-                        self.key
-                            .peek(unsafe { byte::Len::from_bits_unchecked(self.key.bits() as u8) }),
-                        value,
-                    ),
-                ),
+                byte::MatchSplit::Full(_) => {
+                    (
+                        Op::Edge(edge::Op::Insert),
+                        leaf.with_meta(edge::Meta::LEAF.with_key(self.key.peek(unsafe {
+                            byte::Len::from_bits_unchecked(self.key.bits() as u8)
+                        }))),
+                    )
+                }
                 byte::MatchSplit::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
-                    Edge::new_node::<Node3, _>(
+                    Edge::new_node::<Node3<V>, _>(
                         start,
                         Some((middle, old.with_meta(old_meta.with_key(end)))),
                     ),
@@ -186,7 +196,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
         }
     }
 
-    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge>> {
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
         loop {
             let edge = self.root.load_packed(Ordering::Acquire);
             let meta = edge.meta();
@@ -214,7 +224,10 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[cold]
-    pub(crate) fn wait_for_scan(&self, counter: stat::Counter) -> Result<ribbit::Packed<Edge>, ()> {
+    pub(crate) fn wait_for_scan(
+        &self,
+        counter: stat::Counter,
+    ) -> Result<ribbit::Packed<Edge<V>>, ()> {
         stat::increment(counter);
 
         loop {
@@ -232,7 +245,13 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[inline]
-    fn push(&mut self, key: R, len: byte::Len, node: node::Ref<'g>, edge: &'g Atomic128<Edge>) {
+    fn push(
+        &mut self,
+        key: R,
+        len: byte::Len,
+        node: node::Ref<'g, V>,
+        edge: &'g Atomic128<Edge<V>>,
+    ) {
         // 1 extra byte for node
         self.bit += 8 + len.bits() as usize;
         self.history.push(Segment {
@@ -244,7 +263,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 
     #[cold]
-    pub(crate) fn pop(&mut self) -> Result<node::Ref<'g>, H::PopError> {
+    pub(crate) fn pop(&mut self) -> Result<node::Ref<'g, V>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.bit -= segment.len.bits() as usize + 8;
         self.key = segment.key;
@@ -253,7 +272,7 @@ impl<'g, 'l, R: key::Read, H: History<'g, R>> Cursor<'g, 'l, R, H> {
     }
 }
 
-impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic> {
+impl<'g, 'l, R: key::Read, V> Cursor<'g, 'l, R, V, Optimistic> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<u64> {
         loop {
@@ -277,33 +296,33 @@ impl<'g, 'l, R: key::Read> Cursor<'g, 'l, R, Optimistic> {
     }
 }
 
-pub(crate) trait History<'a, R>: Default {
+pub(crate) trait History<'a, R, V>: Default {
     type PopError;
 
-    fn push(&mut self, segment: Segment<'a, R>);
-    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError>;
+    fn push(&mut self, segment: Segment<'a, R, V>);
+    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError>;
 }
 
 #[derive(Default)]
 pub(crate) struct Optimistic;
 
-impl<'a, R> History<'a, R> for Optimistic {
+impl<'a, R, V> History<'a, R, V> for Optimistic {
     type PopError = ();
 
     #[inline]
-    fn push(&mut self, _segment: Segment<'a, R>) {}
+    fn push(&mut self, _segment: Segment<'a, R, V>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError> {
         Err(())
     }
 }
 
-pub(crate) struct Pessimistic<'a, R> {
-    path: Vec<Segment<'a, R>>,
+pub(crate) struct Pessimistic<'a, R, V> {
+    path: Vec<Segment<'a, R, V>>,
 }
 
-impl<R> Default for Pessimistic<'_, R> {
+impl<R, V> Default for Pessimistic<'_, R, V> {
     fn default() -> Self {
         Self {
             path: Vec::default(),
@@ -311,24 +330,24 @@ impl<R> Default for Pessimistic<'_, R> {
     }
 }
 
-impl<'a, R> History<'a, R> for Pessimistic<'a, R> {
+impl<'a, R, V> History<'a, R, V> for Pessimistic<'a, R, V> {
     type PopError = Infallible;
 
     #[inline]
-    fn push(&mut self, segment: Segment<'a, R>) {
+    fn push(&mut self, segment: Segment<'a, R, V>) {
         self.path.push(segment);
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, R>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError> {
         Ok(self.path.pop())
     }
 }
 
 /// A path along the tree is composed of 0 or more path segments.
-pub(crate) struct Segment<'a, R> {
+pub(crate) struct Segment<'a, R, V> {
     /// Edge to match
-    edge: &'a Atomic128<Edge>,
+    edge: &'a Atomic128<Edge<V>>,
 
     /// Key before matching on `edge`
     key: R,
@@ -337,5 +356,5 @@ pub(crate) struct Segment<'a, R> {
     len: byte::Len,
 
     /// Node underneath `edge`
-    node: node::Ref<'a>,
+    node: node::Ref<'a, V>,
 }

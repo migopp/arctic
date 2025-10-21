@@ -15,13 +15,13 @@ const RETIRED_COUNT: usize = 16;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub(crate) struct Global {
+pub(crate) struct Global<V> {
     hazards: ThreadLocal<Cache<AtomicU64>>,
-    edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge>>>>>,
+    edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge<V>>>>>>,
 }
 
-impl Global {
-    pub(crate) fn pin(&self) -> Local {
+impl<V> Global<V> {
+    pub(crate) fn pin(&self) -> Local<V> {
         Local {
             hazards: &self.hazards,
             hazard: &self.hazards.get_or_default().0,
@@ -30,7 +30,7 @@ impl Global {
     }
 }
 
-impl Default for Global {
+impl<V> Default for Global<V> {
     fn default() -> Self {
         Self {
             hazards: ThreadLocal::with_capacity(128),
@@ -39,7 +39,7 @@ impl Default for Global {
     }
 }
 
-impl Drop for Global {
+impl<V> Drop for Global<V> {
     fn drop(&mut self) {
         self.edges
             .iter_mut()
@@ -49,15 +49,15 @@ impl Drop for Global {
     }
 }
 
-pub(crate) struct Local<'g> {
+pub(crate) struct Local<'g, V: 'g> {
     hazards: &'g ThreadLocal<Cache<AtomicU64>>,
     hazard: &'g AtomicU64,
-    edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge>>>,
+    edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge<V>>>>,
 }
 
-impl<'g> Local<'g> {
+impl<'g, V> Local<'g, V> {
     #[inline]
-    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> Guard<'g, 'l> {
+    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> Guard<'g, 'l, V> {
         self.hazard
             .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
@@ -68,9 +68,9 @@ impl<'g> Local<'g> {
 const MASK_VALID: u64 = 0b0100_0000;
 const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
-pub(crate) struct Guard<'g, 'l>(&'l mut Local<'g>);
+pub(crate) struct Guard<'g, 'l, V: 'g>(&'l mut Local<'g, V>);
 
-impl Drop for Guard<'_, '_> {
+impl<V> Drop for Guard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
         self.0
@@ -79,8 +79,8 @@ impl Drop for Guard<'_, '_> {
     }
 }
 
-impl Guard<'_, '_> {
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
+impl<V> Guard<'_, '_, V> {
+    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         validate!(edge.is_node());
 
         stat::increment(stat::Counter::Retire);

@@ -10,7 +10,7 @@ use crate::Edge;
 
 #[repr(transparent)]
 pub(crate) struct Map<V> {
-    root: Atomic128<Edge>,
+    root: Atomic128<Edge<V>>,
     _not_sync: PhantomData<Cell<()>>,
     _value: PhantomData<V>,
 }
@@ -26,7 +26,7 @@ impl<V> Default for Map<V> {
 }
 
 impl<V> Map<V> {
-    pub(crate) fn root(&self) -> &Atomic128<Edge> {
+    pub(crate) fn root(&self) -> &Atomic128<Edge<V>> {
         &self.root
     }
 
@@ -56,13 +56,13 @@ impl<V> Map<V> {
 
     pub(crate) fn iter<'a, W: key::Write, S: crate::iter::Sort>(
         &'a self,
-    ) -> iter::LeafIter<'a, W, S> {
+    ) -> iter::LeafIter<'a, W, V, S> {
         unsafe { iter::LeafIter::new(&self.root, W::default()) }
     }
 
-    pub(crate) fn postorder<'a, S: iter::postorder::Selector>(
+    pub(crate) fn postorder<'a, S: iter::postorder::Selector<V>>(
         &'a self,
-    ) -> iter::PostorderIter<'a, S> {
+    ) -> iter::PostorderIter<'a, V, S> {
         unsafe { iter::PostorderIter::new(&self.root) }
     }
 }

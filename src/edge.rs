@@ -1,10 +1,12 @@
 use core::fmt::Debug;
+use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 use ribbit::u56;
 use ribbit::u6;
 use ribbit::u61;
+use ribbit::Unpack as _;
 
 use crate::byte;
 use crate::node;
@@ -12,41 +14,35 @@ use crate::node::Node15;
 use crate::node::Node256;
 use crate::node::Node3;
 use crate::stat;
+use crate::Value;
 
-#[derive(Copy, Clone, Default, ribbit::Pack)]
+#[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
-pub(crate) struct Edge {
+pub(crate) struct Edge<L> {
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
     #[ribbit(size = 64)]
-    pub(crate) data: Data,
+    pub(crate) data: Data<L>,
 }
 
-impl Edge {
+impl<L> Copy for Edge<L> {}
+impl<L> Clone for Edge<L> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<L> Default for Edge<L> {
+    fn default() -> Self {
+        Self {
+            meta: Meta::default(),
+            data: Data::default(),
+        }
+    }
+}
+
+impl<L> Edge<L> {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(Meta::DEFAULT, Data::DEFAULT);
-
-    #[inline]
-    pub(crate) fn new_leaf(key: byte::Array, leaf: u64) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), Data::from_leaf(leaf))
-    }
-
-    #[cold]
-    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
-    where
-        N: node::Info,
-        I: IntoIterator<Item = (u8, ribbit::Packed<Edge>)>,
-    {
-        let mut node = Box::new(N::default());
-
-        for (key, edge) in edges {
-            node.reserve(key)
-                .expect("Node can fit all edges")
-                .set_packed(edge);
-        }
-
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
-    }
 
     #[inline]
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
@@ -64,9 +60,33 @@ impl Edge {
             }
         }
     }
+
+    #[cold]
+    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
+    where
+        N: node::Info<L>,
+        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<L>>)>,
+    {
+        let mut node = Box::new(N::default());
+
+        for (key, edge) in edges {
+            node.reserve(key)
+                .expect("Node can fit all edges")
+                .set_packed(edge);
+        }
+
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Data::from_node(node))
+    }
 }
 
-impl EdgePacked {
+impl<L: Value> Edge<L> {
+    #[inline]
+    pub(crate) fn new_leaf(key: byte::Array, leaf: L) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), Data::from_leaf(leaf))
+    }
+}
+
+impl<L> EdgePacked<L> {
     #[inline]
     pub(crate) fn is_node(self) -> bool {
         !self.meta().leaf() && !self.data().is_null()
@@ -83,7 +103,7 @@ impl EdgePacked {
     }
 }
 
-impl Debug for EdgePacked {
+impl<L> Debug for EdgePacked<L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug = f.debug_struct("Edge");
 
@@ -114,7 +134,7 @@ impl Meta {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(u6::new(0), false, false, u56::new(0));
 
-    const LEAF: ribbit::Packed<Self> = Self::DEFAULT.with_leaf(true);
+    pub(crate) const LEAF: ribbit::Packed<Self> = Self::DEFAULT.with_leaf(true);
 }
 
 impl MetaPacked {
@@ -155,9 +175,12 @@ pub(crate) enum Op {
     Remove,
 }
 
-#[derive(Copy, Clone, Default, ribbit::Pack)]
+#[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = DataPacked))]
-pub(crate) struct Data {
+pub(crate) struct Data<L> {
+    #[ribbit(size = 0)]
+    _leaf: PhantomData<L>,
+
     #[ribbit(size = 2)]
     kind: node::Kind,
 
@@ -167,17 +190,24 @@ pub(crate) struct Data {
     _placeholder_data: u61,
 }
 
-impl Data {
+impl<L> Copy for Data<L> {}
+impl<L> Clone for Data<L> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<L> Default for Data<L> {
+    fn default() -> Self {
+        Self::DEFAULT.unpack()
+    }
+}
+
+impl<L> Data<L> {
     const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(node::Kind::NODE_3, false, u61::new(0));
 
     #[inline]
-    fn from_leaf(value: u64) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(value) }
-    }
-
-    #[inline]
-    fn from_node<N: node::Info>(node: Box<N>) -> ribbit::Packed<Self> {
+    fn from_node<N: node::Info<L>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = Box::leak(node) as *mut N as u64;
         let kind = N::KIND as u64;
 
@@ -188,7 +218,14 @@ impl Data {
     }
 }
 
-impl DataPacked {
+impl<L: crate::Value> Data<L> {
+    #[inline]
+    fn from_leaf(leaf: L) -> ribbit::Packed<Self> {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(leaf.into_u64()) }
+    }
+}
+
+impl<L> DataPacked<L> {
     const MASK_TAG: u64 = 0b111;
     const MASK_PTR: u64 = !Self::MASK_TAG;
 
@@ -203,7 +240,7 @@ impl DataPacked {
     }
 
     #[inline]
-    pub(crate) fn is_ref(self, node: node::Ref<'_>) -> bool {
+    pub(crate) fn is_ref(self, node: node::Ref<'_, L>) -> bool {
         if self.is_null() {
             return false;
         }
@@ -218,9 +255,9 @@ impl DataPacked {
     }
 
     #[inline]
-    pub(crate) unsafe fn into_node_unchecked<'a>(self) -> node::Ref<'a> {
+    pub(crate) unsafe fn into_node_unchecked<'a>(self) -> node::Ref<'a, L> {
         #[inline]
-        unsafe fn convert<'a, N: node::Info>(ptr: u64) -> node::Ref<'a> {
+        unsafe fn convert<'a, L, N: node::Info<L> + 'a>(ptr: u64) -> node::Ref<'a, L> {
             let node = unsafe { (ptr as *const N).as_ref() };
             validate!(node.is_some());
             N::REF(unsafe { node.unwrap_unchecked() })
@@ -232,12 +269,12 @@ impl DataPacked {
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            unsafe { convert::<Node3>(ptr) }
+            unsafe { convert::<_, Node3<L>>(ptr) }
         } else if kind == node::Kind::NODE_15 {
-            unsafe { convert::<Node15>(ptr) }
+            unsafe { convert::<_, Node15<L>>(ptr) }
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { convert::<Node256>(ptr) }
+            unsafe { convert::<_, Node256<L>>(ptr) }
         }
     }
 
@@ -252,19 +289,19 @@ impl DataPacked {
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            drop(Box::from_raw(ptr as *mut Node3))
+            drop(Box::from_raw(ptr as *mut Node3<L>))
         } else if kind == node::Kind::NODE_15 {
-            drop(Box::from_raw(ptr as *mut Node15))
+            drop(Box::from_raw(ptr as *mut Node15<L>))
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256))
+            drop(Box::from_raw(ptr as *mut Node256<L>))
         }
 
         stat::increment(counter);
     }
 }
 
-impl Debug for DataPacked {
+impl<L> Debug for DataPacked<L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Data")
             .field("kind", &self.kind())
@@ -274,9 +311,9 @@ impl Debug for DataPacked {
     }
 }
 
-pub(crate) struct DebugSlice<'a>(pub(crate) &'a [Atomic128<Edge>]);
+pub(crate) struct DebugSlice<'a, L>(pub(crate) &'a [Atomic128<Edge<L>>]);
 
-impl Debug for DebugSlice<'_> {
+impl<L> Debug for DebugSlice<'_, L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list()
             .entries(

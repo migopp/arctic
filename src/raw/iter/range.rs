@@ -7,12 +7,12 @@ use crate::key;
 use crate::node;
 use crate::Edge;
 
-pub(crate) enum RangeIter<'a, R, W> {
+pub(crate) enum RangeIter<'a, R, W, V> {
     Root { key: W, next: Option<u64> },
-    Node(NodeIter<'a, R, W>),
+    Node(NodeIter<'a, R, W, V>),
 }
 
-impl<'a, R, W> RangeIter<'a, R, W>
+impl<'a, R, W, V> RangeIter<'a, R, W, V>
 where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
@@ -25,7 +25,7 @@ where
         }
     }
 
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, mut key: W, min: R, max: R) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W, min: R, max: R) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -89,14 +89,14 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'a, R, W> {
+pub(crate) struct NodeIter<'a, R, W, V> {
     min: R,
     max: R,
     key: W,
-    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'a>)>,
+    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'a, V>)>,
 }
 
-impl<'a, R, W> NodeIter<'a, R, W>
+impl<'a, R, W, V> NodeIter<'a, R, W, V>
 where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,

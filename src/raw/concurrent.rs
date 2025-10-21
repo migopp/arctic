@@ -19,7 +19,7 @@ use crate::Key;
 use crate::Value;
 
 pub(crate) struct Map<V> {
-    smr: smr::Global,
+    smr: smr::Global<V>,
     raw: sequential::Map<V>,
 }
 
@@ -50,7 +50,7 @@ impl<V> Map<V> {
 }
 
 pub(crate) struct MapRef<'g, V> {
-    smr: smr::Local<'g>,
+    smr: smr::Local<'g, V>,
     raw: &'g sequential::Map<V>,
 }
 
@@ -64,8 +64,9 @@ where
     }
 
     #[inline]
-    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
-        self.compare_exchange(key, |old| Edge::new_leaf(old.meta().key(), value))
+    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: V) -> Option<u64> {
+        let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
+        self.compare_exchange(key, |old| old.with_data(leaf.data()))
     }
 
     #[inline]
@@ -77,7 +78,7 @@ where
     fn compare_exchange<R, F>(&mut self, key: R, mut exchange: F) -> Option<u64>
     where
         R: key::Read,
-        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
         match self.compare_exchange_optimistic(key, &mut exchange) {
             Ok(old) => old,
@@ -89,7 +90,7 @@ where
     fn compare_exchange_optimistic<R, F>(&mut self, key: R, exchange: F) -> Result<Option<u64>, ()>
     where
         R: key::Read,
-        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
         self.compare_exchange_impl::<_, cursor::Optimistic, _>(key, exchange)
     }
@@ -98,9 +99,9 @@ where
     fn compare_exchange_pessimistic<R, F>(&mut self, key: R, exchange: F) -> Option<u64>
     where
         R: key::Read,
-        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        self.compare_exchange_impl::<_, cursor::Pessimistic<R>, _>(key, exchange)
+        self.compare_exchange_impl::<_, cursor::Pessimistic<R, V>, _>(key, exchange)
             .unwrap()
     }
 
@@ -112,10 +113,10 @@ where
     ) -> Result<Option<u64>, H::PopError>
     where
         R: key::Read,
-        H: cursor::History<'g, R>,
-        F: FnMut(ribbit::Packed<Edge>) -> ribbit::Packed<Edge>,
+        H: cursor::History<'g, R, V>,
+        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        let mut cursor = Cursor::<R, H>::new(&mut self.smr, self.raw.root(), key);
+        let mut cursor = Cursor::<R, V, H>::new(&mut self.smr, self.raw.root(), key);
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -143,35 +144,44 @@ where
     }
 
     #[inline]
-    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
-        match self.insert_optimistic(key, value) {
+    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: V) -> Option<u64> {
+        let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
+        match self.insert_optimistic(key, leaf) {
             Ok(old) => old,
-            Err(()) => self.insert_pessimistic(key, value),
+            Err(()) => self.insert_pessimistic(key, leaf),
         }
     }
 
     #[inline]
-    fn insert_optimistic<R: key::Read>(&mut self, key: R, value: u64) -> Result<Option<u64>, ()> {
-        self.insert_impl::<_, cursor::Optimistic>(key, value)
+    fn insert_optimistic<R: key::Read>(
+        &mut self,
+        key: R,
+        leaf: ribbit::Packed<Edge<V>>,
+    ) -> Result<Option<u64>, ()> {
+        self.insert_impl::<_, cursor::Optimistic>(key, leaf)
     }
 
     #[cold]
-    fn insert_pessimistic<R: key::Read>(&mut self, key: R, value: u64) -> Option<u64> {
+    fn insert_pessimistic<R: key::Read>(
+        &mut self,
+        key: R,
+        leaf: ribbit::Packed<Edge<V>>,
+    ) -> Option<u64> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<_, cursor::Pessimistic<R>>(key, value)
+        self.insert_impl::<_, cursor::Pessimistic<R, V>>(key, leaf)
             .unwrap()
     }
 
     #[inline]
-    fn insert_impl<R: key::Read, H: cursor::History<'g, R>>(
+    fn insert_impl<R: key::Read, H: cursor::History<'g, R, V>>(
         &mut self,
         key: R,
-        value: u64,
+        leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<Option<u64>, H::PopError> {
-        let mut cursor = Cursor::<R, H>::new(&mut self.smr, self.raw.root(), key);
+        let mut cursor = Cursor::<R, V, H>::new(&mut self.smr, self.raw.root(), key);
 
         loop {
-            let (op, old, new) = match cursor.traverse_or_insert(value) {
+            let (op, old, new) = match cursor.traverse_or_insert(leaf) {
                 Ok(cas) => cas,
                 Err(()) => {
                     Self::freeze(&mut cursor, key)?;
@@ -209,8 +219,8 @@ where
     }
 
     #[cold]
-    fn freeze<R: key::Read, H: cursor::History<'g, R>>(
-        cursor: &mut Cursor<'g, '_, R, H>,
+    fn freeze<R: key::Read, H: cursor::History<'g, R, V>>(
+        cursor: &mut Cursor<'g, '_, R, V, H>,
         key: R,
     ) -> Result<(), H::PopError> {
         let mut node = cursor.pop()?;
@@ -255,7 +265,7 @@ where
     }
 
     #[cold]
-    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge>) {
+    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge<V>>) {
         match op {
             Op::Node(node::Op::Destroy | node::Op::Compress)
             | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
@@ -270,11 +280,11 @@ where
     }
 
     #[cold]
-    unsafe fn retire<R: key::Read, H: cursor::History<'g, R>>(
-        cursor: &mut Cursor<'g, '_, R, H>,
+    unsafe fn retire<R: key::Read, H: cursor::History<'g, R, V>>(
+        cursor: &mut Cursor<'g, '_, R, V, H>,
         op: Op,
         key: R,
-        edge: ribbit::Packed<Edge>,
+        edge: ribbit::Packed<Edge<V>>,
     ) {
         match op {
             Op::Edge(_) => return,
@@ -293,14 +303,14 @@ where
     pub(crate) fn prefix_non_linearizable<'l, R, W, S>(
         &'l mut self,
         prefix: R,
-    ) -> PrefixNonLinearizable<'g, 'l, W, S>
+    ) -> PrefixNonLinearizable<'g, 'l, W, V, S>
     where
         R: key::Read,
         W: key::Write + From<R>,
         S: crate::iter::Sort,
     {
         let mut cursor =
-            Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<R, V, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         let iter = match cursor.traverse_prefix() {
             Some(_) => unsafe {
@@ -319,20 +329,20 @@ where
         &'l mut self,
         min: R,
         max: R,
-    ) -> RangeIter<'g, 'l, R, W>
+    ) -> RangeIter<'g, 'l, R, W, V>
     where
         R: key::Read,
         W: key::Write<Len = usize> + PartialOrd<R> + From<R>,
     {
         let prefix = min.prefix(&max);
         let mut cursor =
-            Cursor::<R, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         let iter = match cursor.traverse_prefix() {
             // FIXME: do not need to hold SMR guard if iterator is empty
-            None => iter::RangeIter::<R, W>::empty(),
+            None => iter::RangeIter::<R, W, V>::empty(),
             Some(_) => unsafe {
-                iter::RangeIter::<R, W>::new(
+                iter::RangeIter::<R, W, V>::new(
                     cursor.root(),
                     W::from(prefix.slice(cursor.bit())),
                     min,
@@ -356,7 +366,7 @@ where
         let prefix = min.prefix(&max);
 
         let mut cursor =
-            Cursor::<_, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
         if cursor.traverse_prefix().is_none() {
             return;
@@ -366,8 +376,8 @@ where
     }
 
     fn pessimistic<'l, K: Key>(
-        root: &'g Atomic128<Edge>,
-        cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
+        root: &'g Atomic128<Edge<V>>,
+        cursor: Cursor<'g, 'l, K::Read<'l>, V, cursor::Optimistic>,
         prefix: K::Read<'l>,
         min: K::Read<'l>,
         max: K::Read<'l>,
@@ -381,8 +391,8 @@ where
 
     #[cold]
     fn pessimistic_pessimistic<'l, K: Key>(
-        root: &'g Atomic128<Edge>,
-        cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
+        root: &'g Atomic128<Edge<V>>,
+        cursor: Cursor<'g, 'l, K::Read<'l>, V, cursor::Optimistic>,
         prefix: K::Read<'l>,
         min: K::Read<'l>,
         max: K::Read<'l>,
@@ -402,21 +412,21 @@ where
         }
     }
 
-    fn pessimistic_impl<'l, K: Key, H: cursor::History<'g, K::Read<'l>>>(
-        root: &'g Atomic128<Edge>,
-        mut cursor: Cursor<'g, 'l, K::Read<'l>, H>,
+    fn pessimistic_impl<'l, K: Key, H: cursor::History<'g, K::Read<'l>, V>>(
+        root: &'g Atomic128<Edge<V>>,
+        mut cursor: Cursor<'g, 'l, K::Read<'l>, V, H>,
         prefix: K::Read<'l>,
         min: K::Read<'l>,
         max: K::Read<'l>,
         output: &mut Vec<(K, V)>,
-    ) -> Result<(), Cursor<'g, 'l, K::Read<'l>, H>> {
+    ) -> Result<(), Cursor<'g, 'l, K::Read<'l>, V, H>> {
         match Self::lock(&mut cursor, prefix) {
             Ok(()) => (),
             Err(_) => return Err(cursor),
         }
 
         unsafe {
-            iter::RangeIter::<K::Read<'l>, K::Write>::new(
+            iter::RangeIter::<K::Read<'l>, K::Write, V>::new(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bit())),
                 min,
@@ -433,8 +443,8 @@ where
         Ok(())
     }
 
-    fn lock<'l, R: key::Read, H: cursor::History<'g, R>>(
-        cursor: &mut Cursor<'g, 'l, R, H>,
+    fn lock<'l, R: key::Read, H: cursor::History<'g, R, V>>(
+        cursor: &mut Cursor<'g, 'l, R, V, H>,
         prefix: R,
     ) -> Result<(), H::PopError> {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
@@ -470,9 +480,9 @@ where
     }
 
     #[cold]
-    fn unlock_pessimistic<'l, R: key::Read, H: cursor::History<'g, R>>(
-        root: &'g Atomic128<Edge>,
-        cursor: Cursor<'g, 'l, R, H>,
+    fn unlock_pessimistic<'l, R: key::Read, H: cursor::History<'g, R, V>>(
+        root: &'g Atomic128<Edge<V>>,
+        cursor: Cursor<'g, 'l, R, V, H>,
         prefix: R,
     ) {
         stat::increment(stat::Counter::UnlockFrozen);
@@ -487,8 +497,8 @@ where
     }
 
     #[inline]
-    fn unlock<'l, R: key::Read, H: cursor::History<'g, R>>(
-        cursor: &mut Cursor<'g, 'l, R, H>,
+    fn unlock<'l, R: key::Read, H: cursor::History<'g, R, V>>(
+        cursor: &mut Cursor<'g, 'l, R, V, H>,
         prefix: R,
     ) -> Result<(), H::PopError> {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
@@ -533,8 +543,11 @@ where
         // FIXME: deduplicate prefix traversal?
         let prefix = min.prefix(&max);
 
-        let mut cursor =
-            Cursor::<K::Read<'l>, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+        let mut cursor = Cursor::<K::Read<'l>, V, cursor::Optimistic>::new(
+            &mut self.smr,
+            self.raw.root(),
+            prefix,
+        );
 
         let Some(_) = cursor.traverse_prefix() else {
             return;
@@ -622,12 +635,12 @@ where
     }
 }
 
-pub(crate) struct RangeIter<'g, 'l, R: key::Read, W> {
-    iter: iter::RangeIter<'g, R, W>,
-    _guard: smr::Guard<'g, 'l>,
+pub(crate) struct RangeIter<'g, 'l, R: key::Read, W, V> {
+    iter: iter::RangeIter<'g, R, W, V>,
+    _guard: smr::Guard<'g, 'l, V>,
 }
 
-impl<'g, 'l, R, W> RangeIter<'g, 'l, R, W>
+impl<'g, 'l, R, W, V> RangeIter<'g, 'l, R, W, V>
 where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
@@ -643,12 +656,12 @@ where
     }
 }
 
-pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, S: crate::iter::Sort> {
-    iter: iter::LeafIter<'g, W, S>,
-    _guard: smr::Guard<'g, 'l>,
+pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, V, S: crate::iter::Sort> {
+    iter: iter::LeafIter<'g, W, V, S>,
+    _guard: smr::Guard<'g, 'l, V>,
 }
 
-impl<'g, 'l, W, S> PrefixNonLinearizable<'g, 'l, W, S>
+impl<'g, 'l, W, V, S> PrefixNonLinearizable<'g, 'l, W, V, S>
 where
     W: key::Write,
     S: crate::iter::Sort,

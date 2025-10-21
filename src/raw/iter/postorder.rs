@@ -5,17 +5,17 @@ use ribbit::atomic::Atomic128;
 use crate::node;
 use crate::Edge;
 
-pub(crate) enum PostorderIter<'a, S>
+pub(crate) enum PostorderIter<'a, V, S>
 where
-    S: Selector,
+    S: Selector<V>,
 {
     Root(Option<S::Item>),
-    Node(#[allow(private_interfaces)] Vec<RepeatIter<'a>>),
+    Node(#[allow(private_interfaces)] Vec<RepeatIter<'a, V>>),
 }
 
-impl<'a, S: Selector> PostorderIter<'a, S> {
+impl<'a, V: 'a, S: Selector<V>> PostorderIter<'a, V, S> {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge>) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge<V>>) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -32,7 +32,7 @@ impl<'a, S: Selector> PostorderIter<'a, S> {
     }
 }
 
-impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
+impl<'a, V: 'a, S: Selector<V>> Iterator for PostorderIter<'a, V, S> {
     type Item = S::Item;
 
     #[inline]
@@ -84,42 +84,42 @@ impl<'a, S: Selector> Iterator for PostorderIter<'a, S> {
     }
 }
 
-pub(crate) trait Selector {
+pub(crate) trait Selector<V> {
     type Item;
-    fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item>;
+    fn select(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item>;
 }
 
 pub(crate) struct SelectNode;
 
-impl Selector for SelectNode {
-    type Item = ribbit::Packed<Edge>;
+impl<V> Selector<V> for SelectNode {
+    type Item = ribbit::Packed<Edge<V>>;
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge>, _depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item> {
         edge.is_node().then_some(edge)
     }
 }
 
 pub(crate) struct SelectAll;
 
-impl Selector for SelectAll {
-    type Item = (ribbit::Packed<Edge>, usize);
+impl<V> Selector<V> for SelectAll {
+    type Item = (ribbit::Packed<Edge<V>>, usize);
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge>, depth: usize) -> Option<Self::Item> {
+    fn select(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item> {
         (!edge.is_null()).then_some((edge, depth))
     }
 }
 
-struct RepeatIter<'a> {
+struct RepeatIter<'a, V> {
     first: bool,
-    edge: ribbit::Packed<Edge>,
-    iter: node::UnsortedIter<'a>,
+    edge: ribbit::Packed<Edge<V>>,
+    iter: node::UnsortedIter<'a, V>,
 }
 
-impl<'a> RepeatIter<'a> {
+impl<'a, V> RepeatIter<'a, V> {
     #[inline]
-    unsafe fn new(node: node::Ref<'a>) -> Self {
+    unsafe fn new(node: node::Ref<'a, V>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,
@@ -128,9 +128,9 @@ impl<'a> RepeatIter<'a> {
     }
 }
 
-impl<'a> RepeatIter<'a> {
+impl<'a, V> RepeatIter<'a, V> {
     #[inline]
-    fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge>)> {
+    fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge<V>>)> {
         let first = self.first;
         self.first ^= true;
 

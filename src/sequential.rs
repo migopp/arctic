@@ -56,7 +56,7 @@ impl<K: Key, V: Value> Map<K, V> {
 }
 
 pub(crate) struct Iter<'a, K: Key, V, S: crate::iter::Sort> {
-    inner: raw::iter::LeafIter<'a, K::Write, S>,
+    inner: raw::iter::LeafIter<'a, K::Write, V, S>,
     _value: PhantomData<V>,
 }
 

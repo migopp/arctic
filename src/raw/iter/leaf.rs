@@ -5,20 +5,21 @@ use ribbit::atomic::Atomic128;
 use crate::key;
 use crate::Edge;
 
-pub(crate) enum LeafIter<'a, W: key::Write, S: crate::iter::Sort> {
+pub(crate) enum LeafIter<'a, W: key::Write, V: 'a, S: crate::iter::Sort> {
     Root {
         key: W,
         next: Option<u64>,
     },
     Node {
         key: W,
-        frontier: Vec<(W::Len, S::Iter<'a>)>,
+        frontier: Vec<(W::Len, S::Iter<'a, V>)>,
     },
 }
 
-impl<'a, W, S> LeafIter<'a, W, S>
+impl<'a, W, V, S> LeafIter<'a, W, V, S>
 where
     W: key::Write,
+    V: 'a,
     S: crate::iter::Sort,
 {
     #[inline]
@@ -30,7 +31,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge>, mut key: W) -> Self {
+    pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();

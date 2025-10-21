@@ -53,9 +53,7 @@ where
     }
 
     pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw
-            .insert(K::Read::from(key), value.into_u64())
-            .map(V::from_u64)
+        self.raw.insert(K::Read::from(key), value).map(V::from_u64)
     }
 
     pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
@@ -63,9 +61,7 @@ where
     }
 
     pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw
-            .update(K::Read::from(key), value.into_u64())
-            .map(V::from_u64)
+        self.raw.update(K::Read::from(key), value).map(V::from_u64)
     }
 
     pub fn prefix_non_linearizable<'l, S: crate::iter::Sort>(
@@ -114,7 +110,7 @@ where
 }
 
 pub struct PrefixNonLinearizable<'g, 'l, K: Key, V, S: crate::iter::Sort> {
-    iter: raw::concurrent::PrefixNonLinearizable<'g, 'l, K::Write, S>,
+    iter: raw::concurrent::PrefixNonLinearizable<'g, 'l, K::Write, V, S>,
     _value: PhantomData<V>,
 }
 
@@ -141,7 +137,7 @@ where
 }
 
 pub struct RangeIter<'g, 'l, K: Key, V> {
-    iter: raw::concurrent::RangeIter<'g, 'l, K::Read<'l>, K::Write>,
+    iter: raw::concurrent::RangeIter<'g, 'l, K::Read<'l>, K::Write, V>,
     _value: PhantomData<V>,
 }
 

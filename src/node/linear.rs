@@ -13,12 +13,12 @@ use crate::node::Op;
 use crate::Node;
 
 #[repr(C, align(64))]
-pub(crate) struct Linear<const LEN: usize, H> {
+pub(crate) struct Linear<const LEN: usize, H, V> {
     pub(super) header: H,
-    pub(super) edges: [Atomic128<Edge>; LEN],
+    pub(super) edges: [Atomic128<Edge<V>>; LEN],
 }
 
-impl<const LEN: usize, H: Default> Default for Linear<LEN, H> {
+impl<const LEN: usize, H: Default, V> Default for Linear<LEN, H, V> {
     fn default() -> Self {
         Self {
             header: H::default(),
@@ -27,39 +27,39 @@ impl<const LEN: usize, H: Default> Default for Linear<LEN, H> {
     }
 }
 
-impl<const LEN: usize, H> Node for Linear<LEN, H>
+impl<const LEN: usize, H, V> Node<V> for Linear<LEN, H, V>
 where
     H: Header,
-    Self: node::Info,
+    Self: node::Info<V>,
 {
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge>] {
+    fn edges(&self) -> &[Atomic128<Edge<V>>] {
         &self.edges
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge>> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
         let index = self.header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge>) {
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
 
-        let mut edges: [(u8, ribbit::Packed<Edge>); LEN] =
+        let mut edges: [(u8, ribbit::Packed<Edge<V>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
         let mut len = 0;
 
@@ -85,10 +85,10 @@ where
         });
 
         match &edges[..len] {
-            _ if len == <Self as node::Info>::GROW => {
+            _ if len == <Self as node::Info<V>>::GROW => {
                 return (
                     node::Op::Grow,
-                    Edge::new_node::<<Self as node::Info>::Grow, _>(
+                    Edge::new_node::<<Self as node::Info<V>>::Grow, _>(
                         parent.key(),
                         edges.into_iter().take(len),
                     ),
@@ -114,7 +114,7 @@ where
 }
 
 #[expect(private_bounds)]
-impl<const LEN: usize, H: Header> Linear<LEN, H> {
+impl<const LEN: usize, H: Header, V> Linear<LEN, H, V> {
     #[inline]
     pub(crate) fn keys_sorted(&self) -> SortedKeyIter {
         self.header.keys_sorted()
@@ -131,7 +131,7 @@ impl<const LEN: usize, H: Header> Linear<LEN, H> {
     }
 }
 
-impl<const LEN: usize, H: Debug> Debug for Linear<LEN, H> {
+impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = const {
             if LEN == 3 {

@@ -10,10 +10,10 @@ use crate::node::linear;
 
 use super::Node15;
 
-pub(crate) type Node3 = super::Linear<3, Atomic64<Header>>;
+pub(crate) type Node3<V> = super::Linear<3, Atomic64<Header>, V>;
 
-const _: () = assert!(core::mem::size_of::<Node3>() == 64);
-const _: () = assert!(core::mem::align_of::<Node3>() == 64);
+const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
+const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
 
 #[derive(Copy, Clone, Debug, Default, ribbit::Pack)]
 #[ribbit(size = 32)]
@@ -122,13 +122,13 @@ impl linear::Header for Atomic64<Header> {
     }
 }
 
-impl node::Info for Node3 {
+impl<V> node::Info<V> for Node3<V> {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
-    const REF: for<'a> fn(&'a Self) -> node::Ref<'a> = |node| node::Ref::Node3(node);
+    const REF: for<'a> fn(&'a Self) -> node::Ref<'a, V> = |node| node::Ref::Node3(node);
 
-    type Grow = Node15;
-    type Shrink = Node3;
+    type Grow = Node15<V>;
+    type Shrink = Node3<V>;
 }
 
 #[inline]
