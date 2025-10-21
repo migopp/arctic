@@ -53,7 +53,7 @@ mod tests {
         impl<T: ?Sized> AmbiguousIfSync<((), ())> for T {}
         impl<T: ?Sized + Sync> AmbiguousIfSync<()> for T {}
 
-        const _: () = <raw::sequential::Map>::ASSERT_NOT_SYNC;
+        const _: () = <raw::sequential::Map<()>>::ASSERT_NOT_SYNC;
         const _: () = <sequential::Map<u64, u32>>::ASSERT_NOT_SYNC;
     }
 

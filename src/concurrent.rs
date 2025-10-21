@@ -6,17 +6,15 @@ use crate::Key;
 use crate::Value;
 
 pub struct Map<K, V> {
-    raw: raw::concurrent::Map,
+    raw: raw::concurrent::Map<V>,
     _key: PhantomData<K>,
-    _value: PhantomData<V>,
 }
 
 impl<K, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            raw: raw::concurrent::Map::default(),
+            raw: raw::concurrent::Map::<V>::default(),
             _key: PhantomData,
-            _value: PhantomData,
         }
     }
 }
@@ -25,7 +23,7 @@ impl<K, V> Map<K, V> {
     #[inline]
     pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
         unsafe {
-            core::mem::transmute::<&mut raw::sequential::Map, &mut sequential::Map<K, V>>(
+            core::mem::transmute::<&mut raw::sequential::Map<V>, &mut sequential::Map<K, V>>(
                 self.raw.as_sequential(),
             )
         }
@@ -36,18 +34,20 @@ impl<K, V> Map<K, V> {
         MapRef {
             raw: self.raw.pin(),
             _key: PhantomData,
-            _value: PhantomData,
         }
     }
 }
 
 pub struct MapRef<'g, K, V> {
-    raw: raw::concurrent::MapRef<'g>,
+    raw: raw::concurrent::MapRef<'g, V>,
     _key: PhantomData<K>,
-    _value: PhantomData<V>,
 }
 
-impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
+impl<'g, K, V> MapRef<'g, K, V>
+where
+    K: Key,
+    V: Value + Send + Sync,
+{
     pub fn get<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
         self.raw.get(K::Read::from(key)).map(V::from_u64)
     }
@@ -98,7 +98,7 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         output: &mut Vec<(K, V)>,
     ) {
         self.raw
-            .range_pessimistic::<_, _>(min.into(), max.into(), output);
+            .range_pessimistic::<_>(min.into(), max.into(), output);
     }
 
     pub fn range_optimistic<'l>(
@@ -109,7 +109,7 @@ impl<'g, K: Key, V: Value> MapRef<'g, K, V> {
         output: &mut Vec<(K, V)>,
     ) {
         self.raw
-            .range_optimistic::<K, V>(min.into(), max.into(), retry, output)
+            .range_optimistic::<K>(min.into(), max.into(), retry, output)
     }
 }
 

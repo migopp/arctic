@@ -6,23 +6,21 @@ use crate::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V> {
-    raw: raw::sequential::Map,
+    raw: raw::sequential::Map<V>,
     _key: PhantomData<K>,
-    _value: PhantomData<V>,
 }
 
 impl<K, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            raw: raw::sequential::Map::default(),
+            raw: raw::sequential::Map::<V>::default(),
             _key: PhantomData,
-            _value: PhantomData,
         }
     }
 }
 
 impl<K, V> Map<K, V> {
-    pub(crate) fn as_raw(&mut self) -> &mut raw::sequential::Map {
+    pub(crate) fn as_raw(&mut self) -> &mut raw::sequential::Map<V> {
         &mut self.raw
     }
 }

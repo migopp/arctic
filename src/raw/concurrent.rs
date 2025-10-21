@@ -18,17 +18,25 @@ use crate::Edge;
 use crate::Key;
 use crate::Value;
 
-#[derive(Default)]
-pub(crate) struct Map {
+pub(crate) struct Map<V> {
     smr: smr::Global,
-    raw: sequential::Map,
+    raw: sequential::Map<V>,
 }
 
-unsafe impl Sync for Map {}
+unsafe impl<V: Send + Sync> Sync for Map<V> {}
 
-impl Map {
+impl<V> Default for Map<V> {
+    fn default() -> Self {
+        Self {
+            smr: smr::Global::default(),
+            raw: sequential::Map::<V>::default(),
+        }
+    }
+}
+
+impl<V> Map<V> {
     #[inline]
-    pub(crate) fn pin(&self) -> MapRef {
+    pub(crate) fn pin(&self) -> MapRef<V> {
         MapRef {
             smr: self.smr.pin(),
             raw: &self.raw,
@@ -36,17 +44,20 @@ impl Map {
     }
 
     #[inline]
-    pub(crate) fn as_sequential(&mut self) -> &mut sequential::Map {
+    pub(crate) fn as_sequential(&mut self) -> &mut sequential::Map<V> {
         &mut self.raw
     }
 }
 
-pub(crate) struct MapRef<'g> {
+pub(crate) struct MapRef<'g, V> {
     smr: smr::Local<'g>,
-    raw: &'g sequential::Map,
+    raw: &'g sequential::Map<V>,
 }
 
-impl<'g> MapRef<'g> {
+impl<'g, V> MapRef<'g, V>
+where
+    V: Value + Send + Sync,
+{
     #[inline]
     pub(crate) fn get<R: key::Read>(&mut self, key: R) -> Option<u64> {
         Cursor::new(&mut self.smr, self.raw.root(), key).traverse_value()
@@ -336,7 +347,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_pessimistic<'l, K: Key, V: Value>(
+    pub(crate) fn range_pessimistic<'l, K: Key>(
         &'l mut self,
         min: K::Read<'l>,
         max: K::Read<'l>,
@@ -354,7 +365,7 @@ impl<'g> MapRef<'g> {
         Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
     }
 
-    fn pessimistic<'l, K: Key, V: Value>(
+    fn pessimistic<'l, K: Key>(
         root: &'g Atomic128<Edge>,
         cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
         prefix: K::Read<'l>,
@@ -369,7 +380,7 @@ impl<'g> MapRef<'g> {
     }
 
     #[cold]
-    fn pessimistic_pessimistic<'l, K: Key, V: Value>(
+    fn pessimistic_pessimistic<'l, K: Key>(
         root: &'g Atomic128<Edge>,
         cursor: Cursor<'g, 'l, K::Read<'l>, cursor::Optimistic>,
         prefix: K::Read<'l>,
@@ -391,7 +402,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    fn pessimistic_impl<'l, K: Key, V: Value, H: cursor::History<'g, K::Read<'l>>>(
+    fn pessimistic_impl<'l, K: Key, H: cursor::History<'g, K::Read<'l>>>(
         root: &'g Atomic128<Edge>,
         mut cursor: Cursor<'g, 'l, K::Read<'l>, H>,
         prefix: K::Read<'l>,
@@ -512,7 +523,7 @@ impl<'g> MapRef<'g> {
         }
     }
 
-    pub(crate) fn range_optimistic<'l, K: Key, V: Value>(
+    pub(crate) fn range_optimistic<'l, K: Key>(
         &'l mut self,
         min: K::Read<'l>,
         max: K::Read<'l>,

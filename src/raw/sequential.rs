@@ -9,13 +9,23 @@ use crate::stat;
 use crate::Edge;
 
 #[repr(transparent)]
-#[derive(Default)]
-pub(crate) struct Map {
+pub(crate) struct Map<V> {
     root: Atomic128<Edge>,
     _not_sync: PhantomData<Cell<()>>,
+    _value: PhantomData<V>,
 }
 
-impl Map {
+impl<V> Default for Map<V> {
+    fn default() -> Self {
+        Self {
+            root: Atomic128::default(),
+            _not_sync: PhantomData,
+            _value: PhantomData,
+        }
+    }
+}
+
+impl<V> Map<V> {
     pub(crate) fn root(&self) -> &Atomic128<Edge> {
         &self.root
     }
@@ -57,7 +67,7 @@ impl Map {
     }
 }
 
-impl Drop for Map {
+impl<V> Drop for Map<V> {
     fn drop(&mut self) {
         self.postorder::<iter::postorder::SelectNode>()
             .for_each(|edge| unsafe {
