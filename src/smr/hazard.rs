@@ -58,11 +58,15 @@ pub(crate) struct Local<'g> {
 impl<'g> Local<'g> {
     #[inline]
     pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> Guard<'g, 'l> {
-        self.hazard.store(prefix.value(), Ordering::Relaxed);
+        self.hazard
+            .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
         Guard(self)
     }
 }
+
+const MASK_VALID: u64 = 0b0100_0000;
+const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
 pub(crate) struct Guard<'g, 'l>(&'l mut Local<'g>);
 
@@ -100,8 +104,8 @@ impl Guard<'_, '_> {
             .hazards
             .iter()
             .map(|hazard| hazard.0.load(Ordering::Relaxed))
-            .map(|hazard| unsafe { byte::Array::new_unchecked(hazard) })
-            .filter(|hazard| *hazard != byte::Array::EMPTY)
+            .filter(|hazard| hazard & MASK_VALID > 0)
+            .map(byte::Array::new_masked)
             .collect::<Vec<_>>();
 
         self.0.edges.retain(|edge| {
