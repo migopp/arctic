@@ -6,7 +6,15 @@ use ribbit::u6;
 
 use crate::key;
 
-/// Immutable fixed-size array of up to 7 bytes.
+/// Immutable, endian-independent array of up to 7 bytes.
+///
+/// Layout is:
+///
+/// Bit 56-64: Most significant byte
+/// ...
+/// Bit 08-16: Least significant byte
+/// Bit 06-08: Zero
+/// Bit 00-06: Length in bits
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Array(u64);
 
@@ -15,6 +23,17 @@ impl Array {
     pub(crate) const MASK_LEN: u64 = 0b0011_1111;
     pub(crate) const MASK_DATA: u64 = 0xFFFF_FFFF_FFFF_FF00;
     pub(crate) const MASK: u64 = Self::MASK_LEN | Self::MASK_DATA;
+
+    const fn is_valid(value: u64) -> bool {
+        /// Canonical byte array has all (non-length) bits after length set to 0
+        const fn is_canonical(value: u64) -> bool {
+            let bits = value & Array::MASK_LEN;
+            let mask = !(u64::MAX >> bits);
+            (value & !Array::MASK_LEN) == (value & mask)
+        }
+
+        Len::is_valid(value as u8) && is_canonical(value)
+    }
 
     #[inline]
     pub(crate) const fn from_u64_truncate(value: u64, len: Len) -> Self {
@@ -28,20 +47,7 @@ impl Array {
 
     #[inline]
     pub(crate) const unsafe fn new_unchecked(value: u64) -> Self {
-        const fn invariant(value: u64) -> bool {
-            let bytes = value.to_be_bytes();
-            let mut i = (value & Array::MASK_LEN) as usize;
-            while i < 7 {
-                if bytes[i] != 0 {
-                    return false;
-                }
-                i += 1;
-            }
-            true
-        }
-
-        validate!(value & Self::MASK == value);
-        validate!(invariant(value));
+        validate!(Self::is_valid(value));
         Self(value)
     }
 
@@ -180,6 +186,10 @@ impl Len {
     const ONE: Self = Self::from_bits(8).unwrap();
     pub(crate) const MAX: Self = Self::from_bits(56).unwrap();
 
+    const fn is_valid(len: u8) -> bool {
+        len & 0b111 == 0 && len <= 56
+    }
+
     #[inline]
     pub(crate) const fn from_bits(bits: u8) -> Option<Self> {
         validate!(bits & 0b111 == 0);
@@ -197,15 +207,13 @@ impl Len {
     }
 
     #[inline]
-    pub(crate) const unsafe fn from_bits_unchecked(len: u8) -> Self {
-        validate!(len & 0b111 == 0);
-        validate!(len <= 56);
-        Self(u6::new_unchecked(len))
+    pub(crate) const unsafe fn from_bits_unchecked(bits: u8) -> Self {
+        validate!(Self::is_valid(bits));
+        Self(u6::new_unchecked(bits))
     }
 
     #[inline]
     pub(crate) fn min_bits(self, bits: usize) -> Self {
-        validate_eq!(bits & 0b111, 0);
         unsafe { Len::from_bits_unchecked((self.0.value() as usize).min(bits) as u8) }
     }
 
