@@ -1,4 +1,5 @@
 use core::cell::RefCell;
+use core::fmt;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
@@ -151,6 +152,15 @@ pub struct Owned<'g, 'l, V, T> {
     value: &'g T,
 }
 
+impl<V, T> fmt::Debug for Owned<'_, '_, V, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
 impl<'g, 'l, V, T> Drop for Owned<'g, 'l, V, T> {
     fn drop(&mut self) {
         let hazard = self.local.hazard.load(Ordering::Relaxed);
@@ -162,6 +172,15 @@ impl<'g, 'l, V, T> Drop for Owned<'g, 'l, V, T> {
 pub struct Shared<'g, 'l, V, T> {
     local: &'l mut Local<'g, V>,
     value: &'g T,
+}
+
+impl<V, T> fmt::Debug for Shared<'_, '_, V, T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.value.fmt(f)
+    }
 }
 
 impl<'g, 'l, V, T> Shared<'g, 'l, V, T> {

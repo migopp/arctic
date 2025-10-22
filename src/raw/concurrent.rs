@@ -61,35 +61,46 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub(crate) fn get<'l, R: key::Read>(&'l mut self, key: R) -> Option<V::Shared<'g, 'l>> {
+    pub(crate) fn get<R: key::Read>(&mut self, key: R) -> Option<V::Shared<'g, '_>> {
         Cursor::new(&mut self.smr, self.raw.root(), key).traverse_value()
     }
 
     #[inline]
-    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: V) -> Option<u64> {
+    pub(crate) fn update<R: key::Read>(&mut self, key: R, value: V) -> Option<V::Owned<'g, '_>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
-        self.compare_exchange(key, |old| old.with_data(leaf.data()))
+        unsafe { self.compare_exchange(key, |old| old.with_data(leaf.data())) }
     }
 
     #[inline]
-    pub(crate) fn remove<R: key::Read>(&mut self, key: R) -> Option<u64> {
-        self.compare_exchange(key, |_| Edge::DEFAULT)
+    pub(crate) fn remove<R: key::Read>(&mut self, key: R) -> Option<V::Owned<'g, '_>> {
+        unsafe { self.compare_exchange(key, |_| Edge::DEFAULT) }
     }
 
     #[inline]
-    fn compare_exchange<R, F>(&mut self, key: R, mut exchange: F) -> Option<u64>
+    unsafe fn compare_exchange<R, F>(&mut self, key: R, mut exchange: F) -> Option<V::Owned<'g, '_>>
     where
         R: key::Read,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        match self.compare_exchange_optimistic(key, &mut exchange) {
-            Ok(old) => old,
-            Err(()) => self.compare_exchange_pessimistic(key, exchange),
-        }
+        let mut map = self;
+
+        // Cursed workaround for:
+        // https://github.com/rust-lang/rust/issues/54663
+        polonius!(|map| -> Option<V::Owned<'g, 'polonius>> {
+            if let Ok(old) = map.compare_exchange_optimistic::<R, _>(key, &mut exchange) {
+                polonius_return!(old);
+            }
+        });
+
+        map.compare_exchange_pessimistic(key, exchange)
     }
 
     #[inline]
-    fn compare_exchange_optimistic<R, F>(&mut self, key: R, exchange: F) -> Result<Option<u64>, ()>
+    unsafe fn compare_exchange_optimistic<R, F>(
+        &mut self,
+        key: R,
+        exchange: F,
+    ) -> Result<Option<V::Owned<'g, '_>>, ()>
     where
         R: key::Read,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
@@ -98,7 +109,11 @@ where
     }
 
     #[cold]
-    fn compare_exchange_pessimistic<R, F>(&mut self, key: R, exchange: F) -> Option<u64>
+    unsafe fn compare_exchange_pessimistic<R, F>(
+        &mut self,
+        key: R,
+        exchange: F,
+    ) -> Option<V::Owned<'g, '_>>
     where
         R: key::Read,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
@@ -107,12 +122,16 @@ where
             .unwrap()
     }
 
+    /// # SAFETY
+    ///
+    /// Caller must guarantee that `exchange` removes the old value from the tree,
+    /// or else we will duplicate ownership.
     #[inline]
-    fn compare_exchange_impl<R, H, F>(
+    unsafe fn compare_exchange_impl<R, H, F>(
         &mut self,
         key: R,
         mut exchange: F,
-    ) -> Result<Option<u64>, H::PopError>
+    ) -> Result<Option<V::Owned<'g, '_>>, H::PopError>
     where
         R: key::Read,
         H: cursor::History<'g, R, V>,
@@ -136,7 +155,9 @@ where
                 .is_ok()
             {
                 return if old.meta().leaf() {
-                    Ok(Some(old.data().into_leaf()))
+                    Ok(Some(unsafe {
+                        V::new_owned(cursor.into_guard(), old.data().into_leaf())
+                    }))
                 } else {
                     validate!(old.is_null());
                     Ok(None)

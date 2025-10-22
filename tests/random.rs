@@ -1,87 +1,154 @@
-use core::ops::Range;
+use core::hash::Hasher as _;
 use std::sync::Barrier;
-
-use rand::seq::SliceRandom as _;
 
 #[test]
 fn many() {
-    test_map(128, 1_000_000, true);
+    test_map(&U64, 128, 1_000_000, false);
 }
 
 #[test]
 fn two() {
-    test_map(2, 1_000_000, true);
+    test_map(&U64, 2, 1_000_000, true);
 }
 
 #[test]
 fn one() {
-    test_map(1, 1_000_000, true);
+    test_map(&U64, 1, 1_000_000, true);
 }
 
-fn test_map(thread_count: usize, key_count: u32, shuffle: bool) {
-    let barrier = &Barrier::new(thread_count);
-    let map = &arctic::concurrent::Map::<u64, u32>::default();
+trait Workload: Sized + Sync {
+    type Key: arctic::Key + Sync;
 
-    std::thread::scope(|scope| {
-        for thread_id in 0..thread_count {
-            scope.spawn(move || {
-                let keys = generate(thread_count, thread_id, 0..key_count, shuffle);
-                let mut map = map.pin();
+    type Value<'a>: arctic::Value + Send + Sync
+    where
+        Self: 'a;
 
-                barrier.wait();
+    fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a>;
 
-                for key in keys {
-                    assert_eq!(map.insert(key as u64, key), None);
-                }
-            });
-        }
-    });
+    fn value<'a>(&'a self, index: usize) -> Self::Value<'a>;
 
-    std::thread::scope(|scope| {
-        for thread_id in 0..thread_count {
-            scope.spawn(move || {
-                let keys = generate(thread_count, thread_id, 0..key_count / 2, shuffle);
-                let mut map = map.pin();
+    fn validate_owned<'a, 'g, 'l>(
+        &'a self,
+        index: usize,
+        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        value: <Self::Value<'a> as arctic::Value>::Owned<'g, 'l>,
+    ) where
+        'a: 'g,
+        'g: 'l;
 
-                barrier.wait();
-
-                for key in keys {
-                    assert_eq!(map.remove(key as u64), Some(key));
-                }
-            });
-        }
-    });
-
-    std::thread::scope(|scope| {
-        for thread_id in 0..thread_count {
-            scope.spawn(move || {
-                let keys = generate(thread_count, thread_id, key_count / 2..key_count, shuffle);
-                let mut map = map.pin();
-
-                barrier.wait();
-
-                for key in keys {
-                    assert_eq!(map.get(key as u64), Some(key));
-                }
-            });
-        }
-    });
+    fn validate_shared<'a, 'g, 'l>(
+        &'a self,
+        index: usize,
+        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        value: <Self::Value<'a> as arctic::Value>::Shared<'g, 'l>,
+    ) where
+        'a: 'g,
+        'g: 'l;
 }
 
-fn generate(
+fn test_map<'k, K: Workload>(
+    key_set: &'k K,
     thread_count: usize,
-    thread_id: usize,
-    key_range: Range<u32>,
-    shuffle: bool,
-) -> Vec<u32> {
-    let mut keys = key_range
-        .map(|key| key * thread_count as u32 + thread_id as u32)
-        .collect::<Vec<_>>();
+    key_count_per_thread: usize,
+    hash: bool,
+) where
+    for<'a> <K::Key as arctic::Key>::Borrow<'a>: Sync,
+{
+    let barrier = &Barrier::new(thread_count);
+    let items = if hash {
+        let mut indices = (0..key_count_per_thread * thread_count)
+            .map(|index| {
+                let mut hasher = rapidhash::fast::RapidHasher::default_const();
+                hasher.write_usize(index);
+                hasher.finish() as usize
+            })
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+            .into_iter()
+            .map(|index| (index, key_set.key(index)))
+            .collect::<Vec<_>>()
+    } else {
+        (0..key_count_per_thread * thread_count)
+            .map(|index| (index, key_set.key(index)))
+            .collect::<Vec<_>>()
+    };
 
-    if shuffle {
-        let mut rng = rand::rng();
-        keys.shuffle(&mut rng);
+    let map = &arctic::concurrent::Map::<K::Key, _>::default();
+
+    std::thread::scope(|scope| {
+        for chunk in items.chunks_exact(key_count_per_thread) {
+            scope.spawn(move || {
+                let mut map = map.pin();
+
+                barrier.wait();
+
+                for (index, key) in chunk {
+                    let value = key_set.value(*index);
+                    let old = map.insert(*key, value);
+                    assert!(old.is_none());
+                }
+
+                barrier.wait();
+
+                for (index, key) in chunk.iter().take(chunk.len() / 2) {
+                    let value = map.remove(*key);
+                    key_set.validate_owned(*index, *key, value.unwrap());
+                }
+
+                barrier.wait();
+
+                for (index, key) in chunk.iter().skip(chunk.len() / 2) {
+                    let value = map.get(*key);
+                    key_set.validate_shared(*index, *key, value.unwrap());
+                }
+            });
+        }
+    });
+}
+
+struct U64;
+
+impl Workload for U64 {
+    type Key = u64;
+
+    type Value<'a>
+        = u64
+    where
+        Self: 'a;
+
+    fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
+        index as u64
     }
 
-    keys
+    fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
+        index as u64
+    }
+
+    fn validate_owned<'a, 'g, 'l>(
+        &'a self,
+        index: usize,
+        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        value: <Self::Value<'a> as arctic::Value>::Owned<'g, 'l>,
+    ) where
+        'a: 'g,
+        'g: 'l,
+    {
+        assert_eq!(index as u64, key);
+        assert_eq!(index as u64, value);
+    }
+
+    fn validate_shared<'a, 'g, 'l>(
+        &'a self,
+        index: usize,
+        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        value: <Self::Value<'a> as arctic::Value>::Shared<'g, 'l>,
+    ) where
+        'a: 'g,
+        'g: 'l,
+    {
+        assert_eq!(index as u64, key);
+        assert_eq!(index as u64, value);
+    }
 }

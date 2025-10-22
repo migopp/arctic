@@ -23,6 +23,7 @@ dependencies = [
  "libc",
  "polonius-the-crab",
  "rand",
+ "rapidhash",
  "ribbit",
  "serde",
  "thread_local",
@@ -289,6 +290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapidhash"
+version = "4.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8e65c75143ce5d47c55b510297eeb1182f3c739b6043c537670e9fc18612dae"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "ribbit"
 version = "0.1.0"
 source = "git+https://github.com/nwtnni/ribbit.git#d14d2a5b3e5eef1175908a8b59a861af386142c1"
@@ -308,6 +318,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "rustversion"
+version = "1.0.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "serde"

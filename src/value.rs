@@ -65,6 +65,46 @@ impl<T: Eq> Value for Box<T> {
     }
 }
 
+impl Value for u64 {
+    type Owned<'g, 'l>
+        = Self
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
+    type Shared<'g, 'l>
+        = Self
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
+    #[inline]
+    unsafe fn new_owned<'g, 'l>(
+        _smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Shared<'g, 'l> {
+        value
+    }
+
+    #[inline]
+    unsafe fn new_shared<'g, 'l>(
+        _smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Shared<'g, 'l> {
+        value
+    }
+
+    #[inline]
+    fn from_u64(value: u64) -> Self {
+        value
+    }
+
+    #[inline]
+    fn into_u64(self) -> u64 {
+        self
+    }
+}
+
 impl Value for u32 {
     type Owned<'g, 'l>
         = Self

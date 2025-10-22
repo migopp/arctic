@@ -61,7 +61,7 @@ mod tests {
     fn smoke() {
         let map = Map::<Vec<u8>, _>::default();
         let mut map = map.pin();
-        map.insert(b"abcd", 1);
+        map.insert(b"abcd", 1u32);
         assert_eq!(map.get(b"abcd"), Some(1));
     }
 
@@ -70,7 +70,7 @@ mod tests {
         let map = Map::<Vec<u8>, _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
         let mut map = map.pin();
-        map.insert(&key, 1);
+        map.insert(&key, 1u32);
         assert_eq!(map.get(&key), Some(1));
     }
 
@@ -79,7 +79,7 @@ mod tests {
         let map = Map::<u64, _>::default();
         let mut map = map.pin();
         let key = 1u64;
-        map.insert(key, 2);
+        map.insert(key, 2u32);
         assert_eq!(
             map.range_non_linearizable(1u64, 1u64).collect::<Vec<_>>(),
             vec![(1, 2)]
@@ -125,7 +125,7 @@ mod tests {
         let mut map = Map::<u64, _>::default();
         let mut pin = map.pin();
 
-        for value in [1, 2, 3] {
+        for value in [1u32, 2, 3] {
             pin.insert(1, value);
             assert_eq!(pin.get(1), Some(value));
         }

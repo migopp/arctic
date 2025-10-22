@@ -48,20 +48,20 @@ where
     K: Key,
     V: Value + Send + Sync,
 {
-    pub fn get<'l, 'k>(&'l mut self, key: K::Borrow<'k>) -> Option<V::Shared<'g, 'l>> {
+    pub fn get<'k>(&mut self, key: K::Borrow<'k>) -> Option<V::Shared<'g, '_>> {
         self.raw.get(K::Read::from(key))
     }
 
-    pub fn insert<'l, 'k>(&'l mut self, key: K::Borrow<'k>, value: V) -> Option<V::Owned<'g, 'l>> {
+    pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V::Owned<'g, '_>> {
         self.raw.insert(K::Read::from(key), value)
     }
 
-    pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
-        self.raw.remove(K::Read::from(key)).map(V::from_u64)
+    pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V::Owned<'g, '_>> {
+        self.raw.remove(K::Read::from(key))
     }
 
-    pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw.update(K::Read::from(key), value).map(V::from_u64)
+    pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V::Owned<'g, '_>> {
+        self.raw.update(K::Read::from(key), value)
     }
 
     pub fn prefix_non_linearizable<'l, S: crate::iter::Sort>(
