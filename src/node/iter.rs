@@ -87,7 +87,7 @@ impl<'a, K, V> UnsortedIter<'a, K, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee `keys` produces at most `edges.len()` keys.
-    pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
+    pub(crate) unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
     }
 }

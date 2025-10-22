@@ -1,58 +1,51 @@
+use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::iter::Or;
 use crate::node;
+use crate::node::UnsortedIter;
 use crate::Edge;
 
-pub(crate) enum PostorderIter<'a, V, S>
+pub(crate) struct PostorderIter<'a, V, S>
 where
-    S: Selector<V>,
+    S: Selector,
 {
-    Root(Option<S::Item>),
-    Node(#[allow(private_interfaces)] Vec<RepeatIter<'a, V>>),
+    stack: Vec<RepeatIter<'a, V>>,
+    _selector: PhantomData<S>,
 }
 
-impl<'a, V: 'a, S: Selector<V>> PostorderIter<'a, V, S> {
+impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
     #[inline]
     pub(crate) unsafe fn new(root: &Atomic128<Edge<V>>) -> Self {
-        let edge = root.load_packed(Ordering::Acquire);
-        let meta = edge.meta();
-        let data = edge.data();
-
-        if meta.leaf() {
-            let next = S::select(edge, 0);
-            Self::Root(next)
-        } else if data.is_null() {
-            Self::Root(None)
-        } else {
-            let node = unsafe { data.into_node_unchecked() };
-            Self::Node(vec![RepeatIter::new(node)])
+        // HACK: we're masquerading as a node here--this is okay
+        // since this iterator doesn't keep track of the key state,
+        // so we can use an arbitrary byte.
+        let iter = Or::L(Or::L([0u8; 4].into_iter().take(1)));
+        Self {
+            stack: vec![RepeatIter {
+                first: true,
+                edge: Edge::DEFAULT,
+                iter: unsafe { UnsortedIter::new(iter, core::slice::from_ref(root)) },
+            }],
+            _selector: PhantomData,
         }
     }
 }
 
-impl<'a, V: 'a, S: Selector<V>> Iterator for PostorderIter<'a, V, S> {
-    type Item = S::Item;
+impl<'a, V: 'a, S: Selector> Iterator for PostorderIter<'a, V, S> {
+    type Item = S::Item<V>;
 
     #[inline]
-    fn next(&mut self) -> Option<S::Item> {
-        let frontier = match self {
-            PostorderIter::Root(next) => {
-                crate::cold();
-                let value = next.take()?;
-                return Some(value);
-            }
-            PostorderIter::Node(frontier) => frontier,
-        };
-
+    fn next(&mut self) -> Option<S::Item<V>> {
         'vertical: loop {
-            let depth = frontier.len();
-            let iter = frontier.last_mut()?;
+            let depth = self.stack.len();
+            let iter = self.stack.last_mut()?;
 
             loop {
                 let Some((first, edge)) = iter.next() else {
-                    frontier.pop();
+                    self.stack.pop();
                     continue 'vertical;
                 };
 
@@ -71,7 +64,7 @@ impl<'a, V: 'a, S: Selector<V>> Iterator for PostorderIter<'a, V, S> {
                     } else {
                         // Visit children before node
                         let node = unsafe { data.into_node_unchecked() };
-                        frontier.push(unsafe { RepeatIter::new(node) });
+                        self.stack.push(unsafe { RepeatIter::new(node) });
                         continue 'vertical;
                     }
                 }
@@ -84,29 +77,29 @@ impl<'a, V: 'a, S: Selector<V>> Iterator for PostorderIter<'a, V, S> {
     }
 }
 
-pub(crate) trait Selector<V> {
-    type Item;
-    fn select(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item>;
+pub(crate) trait Selector {
+    type Item<V>;
+    fn select<V>(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item<V>>;
 }
 
 pub(crate) struct SelectNode;
 
-impl<V> Selector<V> for SelectNode {
-    type Item = ribbit::Packed<Edge<V>>;
+impl Selector for SelectNode {
+    type Item<V> = ribbit::Packed<Edge<V>>;
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item> {
+    fn select<V>(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item<V>> {
         edge.is_node().then_some(edge)
     }
 }
 
 pub(crate) struct SelectAll;
 
-impl<V> Selector<V> for SelectAll {
-    type Item = (ribbit::Packed<Edge<V>>, usize);
+impl Selector for SelectAll {
+    type Item<V> = (ribbit::Packed<Edge<V>>, usize);
 
     #[inline]
-    fn select(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item> {
+    fn select<V>(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item<V>> {
         (!edge.is_null()).then_some((edge, depth))
     }
 }

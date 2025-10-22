@@ -32,7 +32,7 @@ impl<K, V: Value> Map<K, V> {
         &self.root
     }
 
-    pub(crate) fn postorder<'a, S: iter::postorder::Selector<V>>(
+    pub(crate) fn postorder<'a, S: iter::postorder::Selector>(
         &'a self,
     ) -> iter::PostorderIter<'a, V, S> {
         unsafe { iter::PostorderIter::new(&self.root) }
