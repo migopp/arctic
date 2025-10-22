@@ -32,16 +32,15 @@ impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
             _selector: PhantomData,
         }
     }
-}
-
-impl<'a, V: 'a, S: Selector> Iterator for PostorderIter<'a, V, S> {
-    type Item = S::Item<V>;
 
     #[inline]
-    fn next(&mut self) -> Option<S::Item<V>> {
+    pub(crate) fn for_each<F: FnMut(S::Item<V>)>(mut self, mut apply: F) {
         'vertical: loop {
-            let depth = self.stack.len();
-            let iter = self.stack.last_mut()?;
+            let depth = self.stack.len().saturating_sub(1);
+
+            let Some(iter) = self.stack.last_mut() else {
+                return;
+            };
 
             loop {
                 let Some((first, edge)) = iter.next() else {
@@ -70,7 +69,7 @@ impl<'a, V: 'a, S: Selector> Iterator for PostorderIter<'a, V, S> {
                 }
 
                 if let Some(item) = S::select(edge, depth) {
-                    return Some(item);
+                    apply(item);
                 }
             }
         }
@@ -93,9 +92,9 @@ impl Selector for SelectNode {
     }
 }
 
-pub(crate) struct SelectAll;
+pub(crate) struct SelectStat;
 
-impl Selector for SelectAll {
+impl Selector for SelectStat {
     type Item<V> = (ribbit::Packed<Edge<V>>, usize);
 
     #[inline]

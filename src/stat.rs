@@ -22,33 +22,32 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut node_15 = Histogram::default();
     let mut node_256 = Histogram::default();
 
-    for (edge, depth_) in map
-        .as_sequential()
-        .postorder::<iter::postorder::SelectAll>()
-    {
-        let meta = edge.meta();
-        let data = edge.data();
+    map.as_sequential()
+        .postorder::<iter::postorder::SelectStat>()
+        .for_each(|(edge, depth_)| {
+            let meta = edge.meta();
+            let data = edge.data();
 
-        compression.record(meta.key().len().bits() as u64);
+            compression.record(meta.key().len().bits() as u64);
 
-        if meta.leaf() {
-            depth.record(depth_ as u64);
-        } else {
-            let node = unsafe { data.into_node_unchecked() };
-            let histogram = match node {
-                node::Ref::Node3(_) => &mut node_3,
-                node::Ref::Node15(_) => &mut node_15,
-                node::Ref::Node256(_) => &mut node_256,
-            };
+            if meta.leaf() {
+                depth.record(depth_ as u64);
+            } else {
+                let node = unsafe { data.into_node_unchecked() };
+                let histogram = match node {
+                    node::Ref::Node3(_) => &mut node_3,
+                    node::Ref::Node15(_) => &mut node_15,
+                    node::Ref::Node256(_) => &mut node_256,
+                };
 
-            let children = node
-                .iter_unsorted()
-                .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
-                .count();
+                let children = node
+                    .iter_unsorted()
+                    .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                    .count();
 
-            histogram.record(children as u64);
-        }
-    }
+                histogram.record(children as u64);
+            }
+        });
 
     Process {
         depth,
