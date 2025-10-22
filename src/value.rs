@@ -1,9 +1,13 @@
+use crate::iter::postorder;
 use crate::smr;
+use crate::Edge;
 
 pub type Owned<'g, 'l, V> = <V as Value>::Guard<'g, 'l, true>;
 pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
 
 pub trait Value: Sized + Eq {
+    type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
+
     type Guard<'g, 'l, const RETIRE: bool>: Sized
     where
         Self: 'g + 'l,
@@ -31,6 +35,8 @@ pub trait Value: Sized + Eq {
 }
 
 impl<T: Eq> Value for Box<T> {
+    type SelectDrop = postorder::SelectNonNull;
+
     type Guard<'g, 'l, const RETIRE: bool>
         = smr::LeafGuard<'g, 'l, RETIRE, Self>
     where
@@ -84,6 +90,8 @@ macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
             impl Value for $ty {
+                type SelectDrop = postorder::SelectNode;
+
                 type Guard<'g, 'l, const RETIRE: bool>
                     = Self
                 where

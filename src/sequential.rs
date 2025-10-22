@@ -102,9 +102,8 @@ where
 
 impl<K, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
-        self.postorder::<iter::postorder::SelectNode>()
-            .for_each(|edge| unsafe {
-                edge.deallocate_unchecked(stat::Counter::FreeDrop);
-            })
+        self.postorder::<V::SelectDrop>().for_each(|edge| unsafe {
+            edge.deallocate_unchecked(stat::Counter::FreeDrop);
+        })
     }
 }

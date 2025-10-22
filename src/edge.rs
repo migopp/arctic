@@ -18,7 +18,7 @@ use crate::Value;
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
-pub(crate) struct Edge<L> {
+pub struct Edge<L> {
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
     #[ribbit(size = 64)]

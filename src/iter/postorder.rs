@@ -76,12 +76,12 @@ impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
     }
 }
 
-pub(crate) trait Selector {
+pub trait Selector {
     type Item<V>;
     fn select<V>(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item<V>>;
 }
 
-pub(crate) struct SelectNode;
+pub struct SelectNode;
 
 impl Selector for SelectNode {
     type Item<V> = ribbit::Packed<Edge<V>>;
@@ -89,6 +89,17 @@ impl Selector for SelectNode {
     #[inline]
     fn select<V>(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item<V>> {
         edge.is_node().then_some(edge)
+    }
+}
+
+pub struct SelectNonNull;
+
+impl Selector for SelectNonNull {
+    type Item<V> = ribbit::Packed<Edge<V>>;
+
+    #[inline]
+    fn select<V>(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item<V>> {
+        (!edge.is_null()).then_some(edge)
     }
 }
 
