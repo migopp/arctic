@@ -22,14 +22,14 @@ use crate::Key;
 use crate::Op;
 use crate::Value;
 
-pub struct Map<K, V> {
+pub struct Map<K, V: Value> {
     smr: smr::Global<V>,
     raw: sequential::Map<K, V>,
 }
 
-unsafe impl<K, V: Send + Sync> Sync for Map<K, V> {}
+unsafe impl<K, V: Value + Send + Sync> Sync for Map<K, V> {}
 
-impl<K, V> Default for Map<K, V> {
+impl<K, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             smr: smr::Global::default(),
@@ -38,7 +38,7 @@ impl<K, V> Default for Map<K, V> {
     }
 }
 
-impl<K, V> Map<K, V> {
+impl<K, V: Value> Map<K, V> {
     #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
@@ -53,7 +53,7 @@ impl<K, V> Map<K, V> {
     }
 }
 
-pub struct MapRef<'g, K, V> {
+pub struct MapRef<'g, K, V: Value> {
     smr: smr::Local<'g, V>,
     raw: &'g sequential::Map<K, V>,
 }
@@ -315,9 +315,8 @@ where
             Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
             | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
                 validate!(edge.is_node());
-
                 edge.data()
-                    .deallocate_unchecked(stat::Counter::FreeConflict)
+                    .deallocate_node_unchecked(stat::Counter::FreeConflict)
             },
         }
     }
@@ -684,7 +683,7 @@ where
     }
 }
 
-pub struct RangeIter<'g, 'l, 'k, K: Key, V> {
+pub struct RangeIter<'g, 'l, 'k, K: Key, V: Value> {
     iter: iter::RangeIter<'g, K::Read<'k>, K::Write, V>,
     _guard: smr::PathGuard<'g, 'l, V>,
 }
@@ -721,7 +720,7 @@ where
     }
 }
 
-pub struct PrefixNonLinearizable<'g, 'l, K: Key, V, S: crate::iter::Sort> {
+pub struct PrefixNonLinearizable<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     iter: iter::LeafIter<'g, K::Write, V, S>,
     _guard: smr::PathGuard<'g, 'l, V>,
 }

@@ -103,6 +103,23 @@ impl<L> EdgePacked<L> {
     }
 }
 
+impl<L: Value> EdgePacked<L> {
+    /// # SAFETY
+    ///
+    /// Caller must ensure there are no references to the child of this edge,
+    /// and that the child is non-null.
+    #[inline]
+    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
+        validate!(!self.is_null());
+        let data = self.data();
+        if self.meta().leaf() {
+            data.deallocate_leaf_unchecked(counter);
+        } else {
+            data.deallocate_node_unchecked(counter);
+        }
+    }
+}
+
 impl<L> Debug for EdgePacked<L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug = f.debug_struct("Edge");
@@ -206,13 +223,16 @@ impl<L> Data<L> {
     const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(node::Kind::NODE_3, false, u61::new(0));
 
+    const MASK_TAG: u64 = 0b111;
+    const MASK_PTR: u64 = !Self::MASK_TAG;
+
     #[inline]
     fn from_node<N: node::Info<L>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = Box::leak(node) as *mut N as u64;
         let kind = N::KIND as u64;
 
         validate!(ptr > 0);
-        validate_eq!(ptr & ribbit::Packed::<Self>::MASK_TAG, 0);
+        validate_eq!(ptr & Self::MASK_TAG, 0);
 
         unsafe { ribbit::Packed::<Self>::new_unchecked(kind | ptr) }
     }
@@ -230,10 +250,18 @@ impl<L: crate::Value> Data<L> {
     }
 }
 
-impl<L> DataPacked<L> {
-    const MASK_TAG: u64 = 0b111;
-    const MASK_PTR: u64 = !Self::MASK_TAG;
+impl<L: crate::Value> DataPacked<L> {
+    /// # SAFETY
+    ///
+    /// Caller must ensure this is a value, and that there are no other references to it.
+    #[inline]
+    pub(crate) unsafe fn deallocate_leaf_unchecked(self, counter: stat::Counter) {
+        stat::increment(counter);
+        L::from_u64(self.value);
+    }
+}
 
+impl<L> DataPacked<L> {
     #[inline]
     pub(crate) fn is_null(self) -> bool {
         self.value == 0
@@ -256,7 +284,7 @@ impl<L> DataPacked<L> {
             node::Ref::Node256(node) => node as *const _ as u64,
         };
 
-        self.value & Self::MASK_PTR == ptr
+        self.value & Data::<L>::MASK_PTR == ptr
     }
 
     #[inline]
@@ -270,7 +298,7 @@ impl<L> DataPacked<L> {
 
         validate!(!self.is_null());
 
-        let ptr = self.value & Self::MASK_PTR;
+        let ptr = self.value & Data::<L>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
@@ -285,12 +313,14 @@ impl<L> DataPacked<L> {
 
     /// # SAFETY
     ///
-    /// Caller must ensure there are no references to this node.
+    /// Caller must ensure this is a non-null node, and that there
+    /// are no other references to it.
     #[inline]
-    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate_node_unchecked(self, counter: stat::Counter) {
         validate!(!self.is_null());
+        stat::increment(counter);
 
-        let ptr = self.value & Self::MASK_PTR;
+        let ptr = self.value & Data::<L>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
@@ -301,8 +331,6 @@ impl<L> DataPacked<L> {
             validate_eq!(kind, node::Kind::NODE_256);
             drop(Box::from_raw(ptr as *mut Node256<L>))
         }
-
-        stat::increment(counter);
     }
 }
 
@@ -311,7 +339,7 @@ impl<L> Debug for DataPacked<L> {
         f.debug_struct("Data")
             .field("kind", &self.kind())
             .field("scan", &self.scan())
-            .field("ptr", &(self.value & Self::MASK_PTR))
+            .field("ptr", &(self.value & Data::<L>::MASK_PTR))
             .finish()
     }
 }

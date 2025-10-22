@@ -4,7 +4,9 @@ use core::sync::atomic::Ordering;
 use crate::edge;
 use crate::iter;
 use crate::node;
+use crate::Key;
 use crate::Op;
+use crate::Value;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 
@@ -13,7 +15,7 @@ thread_local! {
     pub(crate) static THREAD: core::cell::RefCell<Thread> = core::cell::RefCell::new(Thread::default()) ;
 }
 
-pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Process {
+pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Process {
     let mut depth = Histogram::default();
     let mut compression = Histogram::default();
     let mut node_3 = Histogram::default();

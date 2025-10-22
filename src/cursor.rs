@@ -16,7 +16,7 @@ use crate::Op;
 use crate::Value;
 
 /// Tree traversal state.
-pub(crate) struct Cursor<'g, 'l, R, V, H> {
+pub(crate) struct Cursor<'g, 'l, R, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: smr::PathGuard<'g, 'l, V>,
 

@@ -11,13 +11,13 @@ use crate::Key;
 use crate::Value;
 
 #[repr(transparent)]
-pub struct Map<K, V> {
+pub struct Map<K, V: Value> {
     root: Atomic128<Edge<V>>,
     _not_sync: PhantomData<Cell<()>>,
     _key: PhantomData<K>,
 }
 
-impl<K, V> Default for Map<K, V> {
+impl<K, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             root: Atomic128::default(),
@@ -27,7 +27,7 @@ impl<K, V> Default for Map<K, V> {
     }
 }
 
-impl<K, V> Map<K, V> {
+impl<K, V: Value> Map<K, V> {
     pub(crate) fn root(&self) -> &Atomic128<Edge<V>> {
         &self.root
     }
@@ -39,7 +39,7 @@ impl<K, V> Map<K, V> {
     }
 }
 
-impl<K: Key, V> Map<K, V> {
+impl<K: Key, V: Value> Map<K, V> {
     #[expect(unused_variables)]
     #[inline]
     pub fn get(&self, key: K::Borrow<'_>) -> Option<u64> {
@@ -100,11 +100,11 @@ where
     }
 }
 
-impl<K, V> Drop for Map<K, V> {
+impl<K, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
         self.postorder::<iter::postorder::SelectNode>()
             .for_each(|edge| unsafe {
-                edge.data().deallocate_unchecked(stat::Counter::FreeDrop);
+                edge.deallocate_unchecked(stat::Counter::FreeDrop);
             })
     }
 }

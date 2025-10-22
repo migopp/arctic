@@ -18,12 +18,12 @@ const RETIRED_COUNT: usize = 16;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub(crate) struct Global<V> {
+pub(crate) struct Global<V: Value> {
     hazards: ThreadLocal<Cache<AtomicU64>>,
     edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge<V>>>>>>,
 }
 
-impl<V> Global<V> {
+impl<V: Value> Global<V> {
     pub(crate) fn pin(&self) -> Local<V> {
         Local {
             hazards: &self.hazards,
@@ -33,7 +33,7 @@ impl<V> Global<V> {
     }
 }
 
-impl<V> Default for Global<V> {
+impl<V: Value> Default for Global<V> {
     fn default() -> Self {
         Self {
             hazards: ThreadLocal::with_capacity(128),
@@ -42,13 +42,13 @@ impl<V> Default for Global<V> {
     }
 }
 
-impl<V> Drop for Global<V> {
+impl<V: Value> Drop for Global<V> {
     fn drop(&mut self) {
         self.edges
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe { edge.data().deallocate_unchecked(stat::Counter::FreeDrop) })
+            .for_each(|edge| unsafe { edge.deallocate_unchecked(stat::Counter::FreeDrop) })
     }
 }
 
@@ -58,7 +58,7 @@ pub(crate) struct Local<'g, V: 'g> {
     edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge<V>>>>,
 }
 
-impl<'g, V> Local<'g, V> {
+impl<'g, V: Value> Local<'g, V> {
     #[inline]
     pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> PathGuard<'g, 'l, V> {
         self.hazard
@@ -73,7 +73,7 @@ impl<'g, V> Local<'g, V> {
     }
 
     fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
-        validate!(edge.is_node());
+        validate!(!edge.is_null());
 
         stat::increment(stat::Counter::Retire);
 
@@ -108,7 +108,7 @@ impl<'g, V> Local<'g, V> {
                 return true;
             }
 
-            unsafe { edge.data().deallocate_unchecked(stat::Counter::FreeRetire) };
+            unsafe { edge.deallocate_unchecked(stat::Counter::FreeRetire) };
             false
         })
     }
@@ -117,16 +117,16 @@ impl<'g, V> Local<'g, V> {
 const MASK_VALID: u64 = 0b0100_0000;
 const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
-pub struct PathGuard<'g, 'l, V: 'g>(&'l mut Local<'g, V>);
+pub struct PathGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
 
-impl<V> Drop for PathGuard<'_, '_, V> {
+impl<V: Value> Drop for PathGuard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
         self.0.unprotect();
     }
 }
 
-impl<'g, 'l, V> PathGuard<'g, 'l, V> {
+impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         self.0.retire(edge);
     }
