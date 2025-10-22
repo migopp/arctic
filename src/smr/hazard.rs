@@ -57,50 +57,33 @@ pub(crate) struct Local<'g, V: 'g> {
 
 impl<'g, V> Local<'g, V> {
     #[inline]
-    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> Guard<'g, 'l, V> {
+    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> PathGuard<'g, 'l, V> {
         self.hazard
             .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
-        Guard(self)
+        PathGuard(Some(self))
     }
-}
 
-const MASK_VALID: u64 = 0b0100_0000;
-const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
-
-pub(crate) struct Guard<'g, 'l, V: 'g>(&'l mut Local<'g, V>);
-
-impl<V> Drop for Guard<'_, '_, V> {
-    #[inline]
-    fn drop(&mut self) {
-        self.0
-            .hazard
-            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
-    }
-}
-
-impl<V> Guard<'_, '_, V> {
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
+    fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         validate!(edge.is_node());
 
         stat::increment(stat::Counter::Retire);
 
-        self.0.edges.push(edge);
+        self.edges.push(edge);
 
-        if self.0.edges.len() >= RETIRED_COUNT {
+        if self.edges.len() >= RETIRED_COUNT {
             self.flush();
         }
     }
 
     #[cold]
     fn flush(&mut self) {
-        stat::max(stat::Max::RetireCache, self.0.edges.len() as u64);
+        stat::max(stat::Max::RetireCache, self.edges.len() as u64);
         stat::increment(stat::Counter::Flush);
 
         membarrier::slow();
 
         let hazards = self
-            .0
             .hazards
             .iter()
             .map(|hazard| hazard.0.load(Ordering::Relaxed))
@@ -108,7 +91,7 @@ impl<V> Guard<'_, '_, V> {
             .map(byte::Array::new_masked)
             .collect::<Vec<_>>();
 
-        self.0.edges.retain(|edge| {
+        self.edges.retain(|edge| {
             if hazards
                 .iter()
                 .any(|hazard| hazard.is_overlapping(edge.meta().key()))
@@ -121,4 +104,59 @@ impl<V> Guard<'_, '_, V> {
             false
         })
     }
+}
+
+const MASK_VALID: u64 = 0b0100_0000;
+const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
+
+pub struct PathGuard<'g, 'l, V: 'g>(Option<&'l mut Local<'g, V>>);
+
+impl<V> Drop for PathGuard<'_, '_, V> {
+    #[inline]
+    fn drop(&mut self) {
+        if let Some(local) = &mut self.0 {
+            local
+                .hazard
+                .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
+        }
+    }
+}
+
+impl<'g, 'l, V> PathGuard<'g, 'l, V> {
+    pub(crate) unsafe fn own(mut self, value: &'g V) -> Owned<'g, 'l, V> {
+        Owned {
+            local: self.0.take().unwrap_unchecked(),
+            value,
+        }
+    }
+
+    pub(crate) unsafe fn share(mut self, value: &'g V) -> Shared<'g, 'l, V> {
+        Shared {
+            local: self.0.take().unwrap_unchecked(),
+            value,
+        }
+    }
+
+    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
+        let local = self.0.as_mut().unwrap_unchecked();
+        local.retire(edge);
+    }
+}
+
+pub(crate) struct Owned<'g, 'l, V: 'g> {
+    local: &'l mut Local<'g, V>,
+    value: &'g V,
+}
+
+impl<'g, 'l, V: 'g> Drop for Owned<'g, 'l, V> {
+    fn drop(&mut self) {
+        let hazard = self.local.hazard.load(Ordering::Relaxed);
+        validate!(hazard & MASK_VALID > 0);
+        todo!()
+    }
+}
+
+pub(crate) struct Shared<'g, 'l, V: 'g> {
+    local: &'l mut Local<'g, V>,
+    value: &'g V,
 }

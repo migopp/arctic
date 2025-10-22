@@ -59,7 +59,7 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub(crate) fn get<R: key::Read>(&mut self, key: R) -> Option<u64> {
+    pub(crate) fn get<'l, R: key::Read>(&'l mut self, key: R) -> Option<V::Shared<'g, 'l>> {
         Cursor::new(&mut self.smr, self.raw.root(), key).traverse_value()
     }
 
@@ -637,7 +637,7 @@ where
 
 pub(crate) struct RangeIter<'g, 'l, R: key::Read, W, V> {
     iter: iter::RangeIter<'g, R, W, V>,
-    _guard: smr::Guard<'g, 'l, V>,
+    _guard: smr::PathGuard<'g, 'l, V>,
 }
 
 impl<'g, 'l, R, W, V> RangeIter<'g, 'l, R, W, V>
@@ -658,7 +658,7 @@ where
 
 pub(crate) struct PrefixNonLinearizable<'g, 'l, W: key::Write, V, S: crate::iter::Sort> {
     iter: iter::LeafIter<'g, W, V, S>,
-    _guard: smr::Guard<'g, 'l, V>,
+    _guard: smr::PathGuard<'g, 'l, V>,
 }
 
 impl<'g, 'l, W, V, S> PrefixNonLinearizable<'g, 'l, W, V, S>

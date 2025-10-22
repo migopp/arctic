@@ -5,7 +5,7 @@ mod membarrier;
 mod hazard;
 
 #[cfg(feature = "smr-hazard")]
-pub(crate) use hazard::{Global, Guard, Local};
+pub(crate) use hazard::{Global, Local, PathGuard};
 
 #[cfg(not(feature = "smr-hazard"))]
 mod no_op;

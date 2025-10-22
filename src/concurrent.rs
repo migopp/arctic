@@ -48,8 +48,8 @@ where
     K: Key,
     V: Value + Send + Sync,
 {
-    pub fn get<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
-        self.raw.get(K::Read::from(key)).map(V::from_u64)
+    pub fn get<'l, 'k>(&'l mut self, key: K::Borrow<'k>) -> Option<V::Shared<'g, 'l>> {
+        self.raw.get(K::Read::from(key))
     }
 
     pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {

@@ -17,7 +17,7 @@ use crate::Value;
 /// Tree traversal state.
 pub(crate) struct Cursor<'g, 'l, R, V, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: smr::Guard<'g, 'l, V>,
+    guard: smr::PathGuard<'g, 'l, V>,
 
     /// Total number of bits read from `key`
     bit: usize,
@@ -84,7 +84,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::Guard<'g, 'l, V> {
+    pub(crate) fn into_guard(self) -> smr::PathGuard<'g, 'l, V> {
         self.guard
     }
 
@@ -272,9 +272,9 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V> Cursor<'g, 'l, R, V, Optimistic> {
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     #[inline]
-    pub(crate) fn traverse_value(mut self) -> Option<u64> {
+    pub(crate) fn traverse_value(mut self) -> Option<V::Shared<'g, 'l>> {
         loop {
             let edge = self.root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -283,7 +283,7 @@ impl<'g, 'l, R: key::Read, V> Cursor<'g, 'l, R, V, Optimistic> {
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(data.into_leaf());
+                return Some(V::new_shared(self.guard, data.into_leaf()));
             } else if data.is_null() {
                 return None;
             } else {
