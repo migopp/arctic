@@ -11,6 +11,10 @@ pub trait Value: Sized + Eq {
         Self: 'g + 'l,
         'g: 'l;
 
+    type Ref<'g>: Copy
+    where
+        Self: 'g;
+
     unsafe fn new_owned<'g, 'l>(
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
@@ -27,23 +31,28 @@ pub trait Value: Sized + Eq {
 
 impl<T: Eq> Value for Box<T> {
     type Owned<'g, 'l>
-        = smr::Owned<'g, 'l, Self, T>
+        = smr::LeafGuard<'g, 'l, true, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
 
     type Shared<'g, 'l>
-        = smr::Shared<'g, 'l, Self, T>
+        = smr::LeafGuard<'g, 'l, false, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
+
+    type Ref<'g>
+        = &'g T
+    where
+        Self: 'g;
 
     #[inline]
     unsafe fn new_owned<'g, 'l>(
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Owned<'g, 'l> {
-        unsafe { smr.own::<T>((value as *const T).as_ref().unwrap()) }
+        unsafe { smr.own((value as *const T).as_ref().unwrap()) }
     }
 
     #[inline]
@@ -51,7 +60,7 @@ impl<T: Eq> Value for Box<T> {
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Shared<'g, 'l> {
-        unsafe { smr.share::<T>((value as *const T).as_ref().unwrap()) }
+        unsafe { smr.share((value as *const T).as_ref().unwrap()) }
     }
 
     #[inline]
@@ -69,14 +78,14 @@ impl Value for u64 {
     type Owned<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
 
     type Shared<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
+
+    type Ref<'g> = Self;
 
     #[inline]
     unsafe fn new_owned<'g, 'l>(
@@ -109,14 +118,14 @@ impl Value for u32 {
     type Owned<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
 
     type Shared<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
+
+    type Ref<'g> = Self;
 
     #[inline]
     unsafe fn new_owned<'g, 'l>(
@@ -149,14 +158,14 @@ impl Value for () {
     type Owned<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
 
     type Shared<'g, 'l>
         = Self
     where
-        Self: 'g + 'l,
         'g: 'l;
+
+    type Ref<'g> = Self;
 
     #[inline]
     fn from_u64(value: u64) -> Self {

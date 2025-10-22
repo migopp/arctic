@@ -9,6 +9,7 @@ use crate::byte;
 use crate::smr::membarrier;
 use crate::stat;
 use crate::Edge;
+use crate::Value;
 
 const RETIRED_COUNT: usize = 16;
 
@@ -127,76 +128,66 @@ impl<V> Drop for PathGuard<'_, '_, V> {
 }
 
 impl<'g, 'l, V> PathGuard<'g, 'l, V> {
-    pub(crate) unsafe fn own<T>(mut self, value: &'g T) -> Owned<'g, 'l, V, T> {
-        Owned {
-            local: self.0.take().unwrap_unchecked(),
-            value,
-        }
-    }
-
-    pub(crate) unsafe fn share<T>(mut self, value: &'g T) -> Shared<'g, 'l, V, T> {
-        Shared {
-            local: self.0.take().unwrap_unchecked(),
-            value,
-        }
-    }
-
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         let local = self.0.as_mut().unwrap_unchecked();
         local.retire(edge);
     }
 }
 
-pub struct Owned<'g, 'l, V, T> {
-    local: &'l mut Local<'g, V>,
-    value: &'g T,
+impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
+    pub(crate) unsafe fn own(mut self, value: V::Ref<'g>) -> LeafGuard<'g, 'l, true, V> {
+        LeafGuard {
+            local: self.0.take().unwrap_unchecked(),
+            value,
+        }
+    }
+
+    pub(crate) unsafe fn share(mut self, value: V::Ref<'g>) -> LeafGuard<'g, 'l, false, V> {
+        LeafGuard {
+            local: self.0.take().unwrap_unchecked(),
+            value,
+        }
+    }
 }
 
-impl<V, T> fmt::Debug for Owned<'_, '_, V, T>
+pub struct LeafGuard<'g, 'l, const RETIRE: bool, V: Value> {
+    local: &'l mut Local<'g, V>,
+    value: V::Ref<'g>,
+}
+
+impl<'g, const RETIRE: bool, V> fmt::Debug for LeafGuard<'g, '_, RETIRE, V>
 where
-    T: fmt::Debug,
+    V: Value,
+    V::Ref<'g>: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.value.fmt(f)
     }
 }
 
-impl<'g, 'l, V, T> Drop for Owned<'g, 'l, V, T> {
-    fn drop(&mut self) {
-        let hazard = self.local.hazard.load(Ordering::Relaxed);
-        validate!(hazard & MASK_VALID > 0);
-        todo!()
-    }
-}
-
-pub struct Shared<'g, 'l, V, T> {
-    local: &'l mut Local<'g, V>,
-    value: &'g T,
-}
-
-impl<V, T> fmt::Debug for Shared<'_, '_, V, T>
+impl<'g, 'l, const RETIRE: bool, V> LeafGuard<'g, 'l, RETIRE, V>
 where
-    T: fmt::Debug,
+    V: Value,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<'g, 'l, V, T> Shared<'g, 'l, V, T> {
-    pub fn as_ref(&self) -> &'g T {
+    pub fn as_ref(&self) -> V::Ref<'g> {
         self.value
     }
 }
 
-impl<'g, 'l, V, T> core::ops::Deref for Shared<'g, 'l, V, T> {
-    type Target = T;
+impl<'g, 'l, const RETIRE: bool, V> core::ops::Deref for LeafGuard<'g, 'l, RETIRE, V>
+where
+    V: Value,
+{
+    type Target = V::Ref<'g>;
     fn deref(&self) -> &Self::Target {
-        self.value
+        &self.value
     }
 }
 
-impl<'g, 'l, V, T> Drop for Shared<'g, 'l, V, T> {
+impl<'g, 'l, const RETIRE: bool, V> Drop for LeafGuard<'g, 'l, RETIRE, V>
+where
+    V: Value,
+{
     fn drop(&mut self) {
         self.local.unprotect();
     }
