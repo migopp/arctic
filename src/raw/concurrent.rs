@@ -1,5 +1,7 @@
 use core::sync::atomic::Ordering;
 
+use polonius_the_crab::polonius;
+use polonius_the_crab::polonius_return;
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
@@ -144,12 +146,19 @@ where
     }
 
     #[inline]
-    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: V) -> Option<u64> {
+    pub(crate) fn insert<R: key::Read>(&mut self, key: R, value: V) -> Option<V::Owned<'g, '_>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
-        match self.insert_optimistic(key, leaf) {
-            Ok(old) => old,
-            Err(()) => self.insert_pessimistic(key, leaf),
-        }
+        let mut map = &mut *self;
+
+        // Cursed workaround for:
+        // https://github.com/rust-lang/rust/issues/54663
+        polonius!(|map| -> Option<V::Owned<'g, 'polonius>> {
+            if let Ok(old) = map.insert_optimistic(key, leaf) {
+                polonius_return!(old);
+            }
+        });
+
+        map.insert_pessimistic(key, leaf)
     }
 
     #[inline]
@@ -157,7 +166,7 @@ where
         &mut self,
         key: R,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<u64>, ()> {
+    ) -> Result<Option<V::Owned<'g, '_>>, ()> {
         self.insert_impl::<_, cursor::Optimistic>(key, leaf)
     }
 
@@ -166,7 +175,7 @@ where
         &mut self,
         key: R,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Option<u64> {
+    ) -> Option<V::Owned<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<_, cursor::Pessimistic<R, V>>(key, leaf)
             .unwrap()
@@ -177,7 +186,7 @@ where
         &mut self,
         key: R,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<u64>, H::PopError> {
+    ) -> Result<Option<V::Owned<'g, '_>>, H::PopError> {
         let mut cursor = Cursor::<R, V, H>::new(&mut self.smr, self.raw.root(), key);
 
         loop {
@@ -200,7 +209,9 @@ where
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
                     if old.meta().leaf() {
-                        return Ok(Some(old.data().into_leaf()));
+                        return Ok(Some(unsafe {
+                            V::new_owned(cursor.into_guard(), old.data().into_leaf())
+                        }));
                     } else {
                         validate!(old.is_null());
                         return Ok(None);

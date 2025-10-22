@@ -11,6 +11,11 @@ pub trait Value: Sized + Eq {
         Self: 'g + 'l,
         'g: 'l;
 
+    unsafe fn new_owned<'g, 'l>(
+        smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Owned<'g, 'l>;
+
     unsafe fn new_shared<'g, 'l>(
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
@@ -22,7 +27,7 @@ pub trait Value: Sized + Eq {
 
 impl<T: Eq> Value for Box<T> {
     type Owned<'g, 'l>
-        = smr::Owned<'g, 'l, Self>
+        = smr::Owned<'g, 'l, Self, T>
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -32,6 +37,14 @@ impl<T: Eq> Value for Box<T> {
     where
         Self: 'g + 'l,
         'g: 'l;
+
+    #[inline]
+    unsafe fn new_owned<'g, 'l>(
+        smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Owned<'g, 'l> {
+        unsafe { smr.own::<T>((value as *const T).as_ref().unwrap()) }
+    }
 
     #[inline]
     unsafe fn new_shared<'g, 'l>(
@@ -66,6 +79,14 @@ impl Value for u32 {
         'g: 'l;
 
     #[inline]
+    unsafe fn new_owned<'g, 'l>(
+        _smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Shared<'g, 'l> {
+        value as u32
+    }
+
+    #[inline]
     unsafe fn new_shared<'g, 'l>(
         _smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
@@ -98,11 +119,21 @@ impl Value for () {
         'g: 'l;
 
     #[inline]
-    fn from_u64(_: u64) -> Self {}
+    fn from_u64(value: u64) -> Self {
+        validate_eq!(value, 0);
+    }
 
     #[inline]
     fn into_u64(self) -> u64 {
         0
+    }
+
+    #[inline]
+    unsafe fn new_owned<'g, 'l>(
+        _smr: smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Shared<'g, 'l> {
+        validate_eq!(value, 0);
     }
 
     #[inline]

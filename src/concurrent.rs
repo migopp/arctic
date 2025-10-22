@@ -52,8 +52,8 @@ where
         self.raw.get(K::Read::from(key))
     }
 
-    pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw.insert(K::Read::from(key), value).map(V::from_u64)
+    pub fn insert<'l, 'k>(&'l mut self, key: K::Borrow<'k>, value: V) -> Option<V::Owned<'g, 'l>> {
+        self.raw.insert(K::Read::from(key), value)
     }
 
     pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {

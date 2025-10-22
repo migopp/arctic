@@ -126,7 +126,7 @@ impl<V> Drop for PathGuard<'_, '_, V> {
 }
 
 impl<'g, 'l, V> PathGuard<'g, 'l, V> {
-    pub(crate) unsafe fn own(mut self, value: &'g V) -> Owned<'g, 'l, V> {
+    pub(crate) unsafe fn own<T>(mut self, value: &'g T) -> Owned<'g, 'l, V, T> {
         Owned {
             local: self.0.take().unwrap_unchecked(),
             value,
@@ -146,12 +146,12 @@ impl<'g, 'l, V> PathGuard<'g, 'l, V> {
     }
 }
 
-pub struct Owned<'g, 'l, V: 'g> {
+pub struct Owned<'g, 'l, V, T> {
     local: &'l mut Local<'g, V>,
-    value: &'g V,
+    value: &'g T,
 }
 
-impl<'g, 'l, V: 'g> Drop for Owned<'g, 'l, V> {
+impl<'g, 'l, V, T> Drop for Owned<'g, 'l, V, T> {
     fn drop(&mut self) {
         let hazard = self.local.hazard.load(Ordering::Relaxed);
         validate!(hazard & MASK_VALID > 0);
