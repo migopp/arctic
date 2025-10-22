@@ -82,7 +82,7 @@ where
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
         self.0
             .lend()
-            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
     }
 }
 

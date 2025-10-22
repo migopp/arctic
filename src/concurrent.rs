@@ -14,6 +14,8 @@ use crate::node;
 use crate::sequential;
 use crate::smr;
 use crate::stat;
+use crate::value::Owned;
+use crate::value::Shared;
 use crate::Cursor;
 use crate::Edge;
 use crate::Key;
@@ -62,18 +64,18 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::Shared<'g, '_>> {
+    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'g, '_, V>> {
         Cursor::new(&mut self.smr, self.raw.root(), K::Read::from(key)).traverse_value()
     }
 
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::Owned<'g, '_>> {
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, V>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
         unsafe { self.compare_exchange(key, |old| old.with_data(leaf.data())) }
     }
 
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V::Owned<'g, '_>> {
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, V>> {
         unsafe { self.compare_exchange(key, |_| Edge::DEFAULT) }
     }
 
@@ -82,7 +84,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         mut exchange: F,
-    ) -> Option<V::Owned<'g, '_>>
+    ) -> Option<Owned<'g, '_, V>>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -90,7 +92,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<V::Owned<'g, 'polonius>> {
+        polonius!(|map| -> Option<Owned<'g, 'polonius, V>> {
             if let Ok(old) = map.compare_exchange_optimistic::<_>(key, &mut exchange) {
                 polonius_return!(old);
             }
@@ -104,7 +106,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         exchange: F,
-    ) -> Result<Option<V::Owned<'g, '_>>, ()>
+    ) -> Result<Option<Owned<'g, '_, V>>, ()>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -116,7 +118,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         exchange: F,
-    ) -> Option<V::Owned<'g, '_>>
+    ) -> Option<Owned<'g, '_, V>>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -133,7 +135,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         mut exchange: F,
-    ) -> Result<Option<V::Owned<'g, '_>>, H::PopError>
+    ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
     where
         H: cursor::History<'g, K::Read<'k>, V>,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
@@ -158,7 +160,7 @@ where
             {
                 return if old.meta().leaf() {
                     Ok(Some(unsafe {
-                        V::new_owned(cursor.into_guard(), old.data().into_leaf())
+                        V::protect(cursor.into_guard(), old.data().into_leaf())
                     }))
                 } else {
                     validate!(old.is_null());
@@ -169,13 +171,13 @@ where
     }
 
     #[inline]
-    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::Owned<'g, '_>> {
+    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, V>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
         let mut map = &mut *self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<V::Owned<'g, 'polonius>> {
+        polonius!(|map| -> Option<Owned<'g, 'polonius, V>> {
             if let Ok(old) = map.insert_optimistic(key, leaf) {
                 polonius_return!(old);
             }
@@ -189,7 +191,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<V::Owned<'g, '_>>, ()> {
+    ) -> Result<Option<Owned<'g, '_, V>>, ()> {
         self.insert_impl::<cursor::Optimistic>(key, leaf)
     }
 
@@ -198,7 +200,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Option<V::Owned<'g, '_>> {
+    ) -> Option<Owned<'g, '_, V>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::Pessimistic<_, _>>(key, leaf)
             .unwrap()
@@ -209,7 +211,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<V::Owned<'g, '_>>, H::PopError>
+    ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
     where
         H: cursor::History<'g, K::Read<'k>, V>,
     {
@@ -237,7 +239,7 @@ where
                     stat::increment(op);
                     if old.meta().leaf() {
                         return Ok(Some(unsafe {
-                            V::new_owned(cursor.into_guard(), old.data().into_leaf())
+                            V::protect(cursor.into_guard(), old.data().into_leaf())
                         }));
                     } else {
                         validate!(old.is_null());
@@ -475,7 +477,9 @@ where
                 max,
             )
         }
-        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
+        .for_each(|key, value| {
+            output.push((K::from(K::Borrow::from(key)), unsafe { V::from_u64(value) }))
+        });
 
         match Self::unlock(&mut cursor, prefix) {
             Ok(()) => (),
@@ -605,7 +609,9 @@ where
                 max,
             )
         }
-        .for_each(|key, value| output.push((K::from(K::Borrow::from(key)), V::from_u64(value))));
+        .for_each(|key, value| {
+            output.push((K::from(K::Borrow::from(key)), unsafe { V::from_u64(value) }))
+        });
 
         for retry in 0..=retry {
             let mut iter = unsafe {
@@ -624,7 +630,7 @@ where
                 len += 1;
 
                 let new_borrow = K::Borrow::from(new_writer);
-                let new_value = V::from_u64(new_value);
+                let new_value = unsafe { V::from_u64(new_value) };
 
                 let old = match output
                     .get_mut(index)
@@ -692,13 +698,13 @@ where
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
     }
 
     #[inline]
     pub fn for_each<F: FnMut(K::Borrow<'_>, V)>(&mut self, mut apply: F) {
         self.iter
-            .for_each(|key, value| apply(K::Borrow::from(key), V::from_u64(value)))
+            .for_each(|key, value| apply(K::Borrow::from(key), unsafe { V::from_u64(value) }))
     }
 }
 
@@ -730,7 +736,7 @@ where
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
         self.iter
             .lend()
-            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
+            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
     }
 }
 

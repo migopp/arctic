@@ -1,195 +1,129 @@
 use crate::smr;
 
+pub type Owned<'g, 'l, V> = <V as Value>::Guard<'g, 'l, true>;
+pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
+
 pub trait Value: Sized + Eq {
-    type Owned<'g, 'l>: Sized
+    type Guard<'g, 'l, const RETIRE: bool>: Sized
     where
         Self: 'g + 'l,
         'g: 'l;
 
-    type Shared<'g, 'l>: Sized
+    type Borrow<'l>: Copy
     where
-        Self: 'g + 'l,
-        'g: 'l;
+        Self: 'l;
 
-    type Ref<'g>: Copy
-    where
-        Self: 'g;
-
-    unsafe fn new_owned<'g, 'l>(
+    unsafe fn protect<'g, 'l, const RETIRE: bool>(
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Owned<'g, 'l>;
+    ) -> Self::Guard<'g, 'l, RETIRE>;
 
-    unsafe fn new_shared<'g, 'l>(
-        smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Shared<'g, 'l>;
+    unsafe fn from_u64(value: u64) -> Self;
 
-    fn from_u64(value: u64) -> Self;
     fn into_u64(self) -> u64;
+
+    unsafe fn borrow_from_u64<'g, 'l>(
+        smr: &smr::PathGuard<'g, 'l, Self>,
+        value: u64,
+    ) -> Self::Borrow<'l>;
+
+    fn borrow_into_u64(borrow: Self::Borrow<'_>) -> u64;
 }
 
 impl<T: Eq> Value for Box<T> {
-    type Owned<'g, 'l>
-        = smr::LeafGuard<'g, 'l, true, Self>
+    type Guard<'g, 'l, const RETIRE: bool>
+        = smr::LeafGuard<'g, 'l, RETIRE, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
 
-    type Shared<'g, 'l>
-        = smr::LeafGuard<'g, 'l, false, Self>
-    where
-        Self: 'g + 'l,
-        'g: 'l;
-
-    type Ref<'g>
+    type Borrow<'g>
         = &'g T
     where
         Self: 'g;
 
     #[inline]
-    unsafe fn new_owned<'g, 'l>(
+    unsafe fn protect<'g, 'l, const RETIRE: bool>(
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Owned<'g, 'l> {
-        unsafe { smr.own((value as *const T).as_ref().unwrap()) }
+    ) -> Self::Guard<'g, 'l, RETIRE> {
+        let borrow = Self::borrow_from_u64(&smr, value);
+        unsafe { smr.scope::<RETIRE>(borrow) }
     }
 
     #[inline]
-    unsafe fn new_shared<'g, 'l>(
-        smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Shared<'g, 'l> {
-        unsafe { smr.share((value as *const T).as_ref().unwrap()) }
-    }
-
-    #[inline]
-    fn from_u64(value: u64) -> Self {
-        todo!()
+    unsafe fn from_u64(value: u64) -> Self {
+        Box::from_raw(value as *mut T)
     }
 
     #[inline]
     fn into_u64(self) -> u64 {
         Box::into_raw(self) as u64
     }
-}
-
-impl Value for u64 {
-    type Owned<'g, 'l>
-        = Self
-    where
-        'g: 'l;
-
-    type Shared<'g, 'l>
-        = Self
-    where
-        'g: 'l;
-
-    type Ref<'g> = Self;
 
     #[inline]
-    unsafe fn new_owned<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
+    unsafe fn borrow_from_u64<'g, 'l>(
+        _smr: &smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Owned<'g, 'l> {
-        value
+    ) -> Self::Borrow<'l> {
+        let pointer = (value as *const T).as_ref();
+        if cfg!(feature = "validate") {
+            pointer.unwrap()
+        } else {
+            pointer.unwrap_unchecked()
+        }
     }
 
     #[inline]
-    unsafe fn new_shared<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Shared<'g, 'l> {
-        value
-    }
-
-    #[inline]
-    fn from_u64(value: u64) -> Self {
-        value
-    }
-
-    #[inline]
-    fn into_u64(self) -> u64 {
-        self
+    fn borrow_into_u64(borrow: Self::Borrow<'_>) -> u64 {
+        borrow as *const T as u64
     }
 }
 
-impl Value for u32 {
-    type Owned<'g, 'l>
-        = Self
-    where
-        'g: 'l;
+macro_rules! impl_trivial {
+    ($($ty:ty),*) => {
+        $(
+            impl Value for $ty {
+                type Guard<'g, 'l, const RETIRE: bool>
+                    = Self
+                where
+                    'g: 'l;
 
-    type Shared<'g, 'l>
-        = Self
-    where
-        'g: 'l;
+                type Borrow<'g> = Self;
 
-    type Ref<'g> = Self;
+                #[inline]
+                unsafe fn protect<'g, 'l, const RETIRE: bool>(
+                    _smr: smr::PathGuard<'g, 'l, Self>,
+                    value: u64,
+                ) -> Self::Guard<'g, 'l, RETIRE> {
+                    value as $ty
+                }
 
-    #[inline]
-    unsafe fn new_owned<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Owned<'g, 'l> {
-        value as u32
-    }
+                #[inline]
+                unsafe fn from_u64(value: u64) -> Self {
+                    value as $ty
+                }
 
-    #[inline]
-    unsafe fn new_shared<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Shared<'g, 'l> {
-        value as u32
-    }
+                #[inline]
+                fn into_u64(self) -> u64 {
+                    self as u64
+                }
 
-    #[inline]
-    fn from_u64(value: u64) -> Self {
-        value as u32
-    }
+                #[inline]
+                unsafe fn borrow_from_u64<'g, 'l>(
+                    _smr: &smr::PathGuard<'g, 'l, Self>,
+                    value: u64,
+                ) -> Self::Borrow<'l> {
+                    value as $ty
+                }
 
-    #[inline]
-    fn into_u64(self) -> u64 {
-        self as u64
-    }
+                #[inline]
+                fn borrow_into_u64(borrow: Self::Borrow<'_>) -> u64 {
+                    borrow as u64
+                }
+            }
+        )*
+    };
 }
 
-impl Value for () {
-    type Owned<'g, 'l>
-        = Self
-    where
-        'g: 'l;
-
-    type Shared<'g, 'l>
-        = Self
-    where
-        'g: 'l;
-
-    type Ref<'g> = Self;
-
-    #[inline]
-    fn from_u64(value: u64) -> Self {
-        validate_eq!(value, 0);
-    }
-
-    #[inline]
-    fn into_u64(self) -> u64 {
-        0
-    }
-
-    #[inline]
-    unsafe fn new_owned<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Owned<'g, 'l> {
-        validate_eq!(value, 0);
-    }
-
-    #[inline]
-    unsafe fn new_shared<'g, 'l>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Shared<'g, 'l> {
-        validate_eq!(value, 0);
-    }
-}
+impl_trivial!(u64, u32);

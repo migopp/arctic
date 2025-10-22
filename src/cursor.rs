@@ -10,6 +10,7 @@ use crate::node;
 use crate::node::Node3;
 use crate::smr;
 use crate::stat;
+use crate::value::Shared;
 use crate::Edge;
 use crate::Op;
 use crate::Value;
@@ -274,7 +275,7 @@ where
 
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     #[inline]
-    pub(crate) fn traverse_value(mut self) -> Option<V::Shared<'g, 'l>> {
+    pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
         loop {
             let edge = self.root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -283,7 +284,7 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(unsafe { V::new_shared(self.guard, data.into_leaf()) });
+                return Some(unsafe { V::protect(self.guard, data.into_leaf()) });
             } else if data.is_null() {
                 return None;
             } else {

@@ -6,6 +6,7 @@ use core::sync::atomic::Ordering;
 use thread_local::ThreadLocal;
 
 use crate::byte;
+use crate::edge;
 use crate::smr::membarrier;
 use crate::stat;
 use crate::Edge;
@@ -63,7 +64,7 @@ impl<'g, V> Local<'g, V> {
         self.hazard
             .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
-        PathGuard(Some(self))
+        PathGuard(self)
     }
 
     fn unprotect(&mut self) {
@@ -116,49 +117,40 @@ impl<'g, V> Local<'g, V> {
 const MASK_VALID: u64 = 0b0100_0000;
 const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
-pub struct PathGuard<'g, 'l, V: 'g>(Option<&'l mut Local<'g, V>>);
+pub struct PathGuard<'g, 'l, V: 'g>(&'l mut Local<'g, V>);
 
 impl<V> Drop for PathGuard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
-        if let Some(local) = &mut self.0 {
-            local.unprotect();
-        }
+        self.0.unprotect();
     }
 }
 
 impl<'g, 'l, V> PathGuard<'g, 'l, V> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
-        let local = self.0.as_mut().unwrap_unchecked();
-        local.retire(edge);
+        self.0.retire(edge);
     }
 }
 
 impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
-    pub(crate) unsafe fn own(mut self, value: V::Ref<'g>) -> LeafGuard<'g, 'l, true, V> {
-        LeafGuard {
-            local: self.0.take().unwrap_unchecked(),
-            value,
-        }
-    }
-
-    pub(crate) unsafe fn share(mut self, value: V::Ref<'g>) -> LeafGuard<'g, 'l, false, V> {
-        LeafGuard {
-            local: self.0.take().unwrap_unchecked(),
-            value,
-        }
+    #[inline]
+    pub(crate) unsafe fn scope<const RETIRE: bool>(
+        self,
+        value: V::Borrow<'l>,
+    ) -> LeafGuard<'g, 'l, RETIRE, V> {
+        LeafGuard { inner: self, value }
     }
 }
 
 pub struct LeafGuard<'g, 'l, const RETIRE: bool, V: Value> {
-    local: &'l mut Local<'g, V>,
-    value: V::Ref<'g>,
+    inner: PathGuard<'g, 'l, V>,
+    value: V::Borrow<'l>,
 }
 
-impl<'g, const RETIRE: bool, V> fmt::Debug for LeafGuard<'g, '_, RETIRE, V>
+impl<'l, const RETIRE: bool, V> fmt::Debug for LeafGuard<'_, 'l, RETIRE, V>
 where
     V: Value,
-    V::Ref<'g>: fmt::Debug,
+    V::Borrow<'l>: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.value.fmt(f)
@@ -169,7 +161,8 @@ impl<'g, 'l, const RETIRE: bool, V> LeafGuard<'g, 'l, RETIRE, V>
 where
     V: Value,
 {
-    pub fn as_ref(&self) -> V::Ref<'g> {
+    #[inline]
+    pub fn as_ref(&self) -> V::Borrow<'l> {
         self.value
     }
 }
@@ -178,7 +171,9 @@ impl<'g, 'l, const RETIRE: bool, V> core::ops::Deref for LeafGuard<'g, 'l, RETIR
 where
     V: Value,
 {
-    type Target = V::Ref<'g>;
+    type Target = V::Borrow<'l>;
+
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.value
     }
@@ -189,6 +184,20 @@ where
     V: Value,
 {
     fn drop(&mut self) {
-        self.local.unprotect();
+        validate!(self.inner.0.hazard.load(Ordering::Relaxed) & MASK_VALID > 0);
+
+        if RETIRE {
+            let key = self.inner.0.hazard.load(Ordering::Relaxed);
+            validate!(key & MASK_VALID > 0);
+            let key = byte::Array::new_masked(key);
+
+            // NOTE: could technically unprotect before retiring, since
+            // we cannot access `value` anymore, but then we'd want
+            // to avoid dropping `self.inner`.
+            self.inner.0.retire(ribbit::Packed::<Edge<V>>::new(
+                edge::Meta::LEAF.with_key(key),
+                edge::Data::from_borrow(self.value),
+            ))
+        }
     }
 }
