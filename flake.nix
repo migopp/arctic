@@ -20,7 +20,7 @@
       in
       with pkgs; {
         devShells.default = mkShell {
-          nativeBuildInputs = [ rustToolchain gdb ];
+          nativeBuildInputs = [ rustToolchain gdb valgrind ];
           buildInputs = [ ];
         };
       }

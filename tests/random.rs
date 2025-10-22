@@ -1,19 +1,141 @@
 use core::hash::Hasher as _;
 use std::sync::Barrier;
 
-#[test]
-fn many() {
-    test_map(&U64, 128, 1_000_000, false);
+mod u64 {
+    use super::test_map;
+    use super::Workload;
+
+    #[test]
+    fn many() {
+        test_map(&U64, 128, 1_000_000, false);
+    }
+
+    #[test]
+    fn two() {
+        test_map(&U64, 2, 1_000_000, true);
+    }
+
+    #[test]
+    fn one() {
+        test_map(&U64, 1, 1_000_000, true);
+    }
+
+    struct U64;
+
+    impl Workload for U64 {
+        type Key = u64;
+
+        type Value<'a>
+            = u64
+        where
+            Self: 'a;
+
+        fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
+            index as u64
+        }
+
+        fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
+            index as u64
+        }
+
+        fn validate_owned<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::Owned<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(index as u64, key);
+            assert_eq!(index as u64, value);
+        }
+
+        fn validate_shared<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::Shared<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(index as u64, key);
+            assert_eq!(index as u64, value);
+        }
+    }
 }
 
-#[test]
-fn two() {
-    test_map(&U64, 2, 1_000_000, true);
-}
+mod boxed {
+    use super::test_map;
+    use super::Workload;
 
-#[test]
-fn one() {
-    test_map(&U64, 1, 1_000_000, true);
+    struct Boxed;
+
+    #[test]
+    fn two() {
+        test_map(&Boxed, 2, 1_000_000, false);
+    }
+
+    #[test]
+    fn one() {
+        test_map(&Boxed, 1, 1_000_000, false);
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Entry {
+        key: u32,
+        value: u64,
+    }
+
+    impl Entry {
+        fn new(index: usize) -> Self {
+            Self {
+                key: index as u32,
+                value: index as u64 + 1,
+            }
+        }
+    }
+
+    impl Workload for Boxed {
+        type Key = u32;
+
+        type Value<'a> = Box<Entry>;
+
+        fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
+            index as u32
+        }
+
+        fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
+            Box::new(Entry::new(index))
+        }
+
+        fn validate_owned<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::Owned<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(key, index as u32);
+            assert_eq!(*value.as_ref(), Entry::new(index));
+        }
+
+        fn validate_shared<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::Shared<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(key, index as u32);
+            assert_eq!(*value.as_ref(), Entry::new(index));
+        }
+    }
 }
 
 trait Workload: Sized + Sync {
@@ -106,49 +228,4 @@ fn test_map<'k, K: Workload>(
             });
         }
     });
-}
-
-struct U64;
-
-impl Workload for U64 {
-    type Key = u64;
-
-    type Value<'a>
-        = u64
-    where
-        Self: 'a;
-
-    fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
-        index as u64
-    }
-
-    fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
-        index as u64
-    }
-
-    fn validate_owned<'a, 'g, 'l>(
-        &'a self,
-        index: usize,
-        key: <Self::Key as arctic::Key>::Borrow<'a>,
-        value: <Self::Value<'a> as arctic::Value>::Owned<'g, 'l>,
-    ) where
-        'a: 'g,
-        'g: 'l,
-    {
-        assert_eq!(index as u64, key);
-        assert_eq!(index as u64, value);
-    }
-
-    fn validate_shared<'a, 'g, 'l>(
-        &'a self,
-        index: usize,
-        key: <Self::Key as arctic::Key>::Borrow<'a>,
-        value: <Self::Value<'a> as arctic::Value>::Shared<'g, 'l>,
-    ) where
-        'a: 'g,
-        'g: 'l,
-    {
-        assert_eq!(index as u64, key);
-        assert_eq!(index as u64, value);
-    }
 }
