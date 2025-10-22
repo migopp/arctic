@@ -64,6 +64,11 @@ impl<'g, V> Local<'g, V> {
         PathGuard(Some(self))
     }
 
+    fn unprotect(&mut self) {
+        self.hazard
+            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
+    }
+
     fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         validate!(edge.is_node());
 
@@ -115,9 +120,7 @@ impl<V> Drop for PathGuard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
         if let Some(local) = &mut self.0 {
-            local
-                .hazard
-                .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
+            local.unprotect();
         }
     }
 }
@@ -130,7 +133,7 @@ impl<'g, 'l, V> PathGuard<'g, 'l, V> {
         }
     }
 
-    pub(crate) unsafe fn share(mut self, value: &'g V) -> Shared<'g, 'l, V> {
+    pub(crate) unsafe fn share<T>(mut self, value: &'g T) -> Shared<'g, 'l, V, T> {
         Shared {
             local: self.0.take().unwrap_unchecked(),
             value,
@@ -143,7 +146,7 @@ impl<'g, 'l, V> PathGuard<'g, 'l, V> {
     }
 }
 
-pub(crate) struct Owned<'g, 'l, V: 'g> {
+pub struct Owned<'g, 'l, V: 'g> {
     local: &'l mut Local<'g, V>,
     value: &'g V,
 }
@@ -156,7 +159,26 @@ impl<'g, 'l, V: 'g> Drop for Owned<'g, 'l, V> {
     }
 }
 
-pub(crate) struct Shared<'g, 'l, V: 'g> {
+pub struct Shared<'g, 'l, V, T> {
     local: &'l mut Local<'g, V>,
-    value: &'g V,
+    value: &'g T,
+}
+
+impl<'g, 'l, V, T> Shared<'g, 'l, V, T> {
+    pub fn as_ref(&self) -> &'g T {
+        self.value
+    }
+}
+
+impl<'g, 'l, V, T> core::ops::Deref for Shared<'g, 'l, V, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.value
+    }
+}
+
+impl<'g, 'l, V, T> Drop for Shared<'g, 'l, V, T> {
+    fn drop(&mut self) {
+        self.local.unprotect();
+    }
 }

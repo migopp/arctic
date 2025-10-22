@@ -283,7 +283,7 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(V::new_shared(self.guard, data.into_leaf()));
+                return Some(unsafe { V::new_shared(self.guard, data.into_leaf()) });
             } else if data.is_null() {
                 return None;
             } else {
