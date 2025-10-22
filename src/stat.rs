@@ -2,8 +2,9 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
+use crate::iter;
 use crate::node;
-use crate::raw;
+use crate::Op;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 
@@ -21,8 +22,7 @@ pub fn process<K: crate::Key, V>(map: &mut crate::concurrent::Map<K, V>) -> Proc
 
     for (edge, depth_) in map
         .as_sequential()
-        .as_raw()
-        .postorder::<raw::iter::postorder::SelectAll>()
+        .postorder::<iter::postorder::SelectAll>()
     {
         let meta = edge.meta();
         let data = edge.data();
@@ -103,7 +103,7 @@ pub struct Process {
 
 #[cfg_attr(not(feature = "stat"), expect(dead_code))]
 pub(crate) enum Counter {
-    Op(raw::Op),
+    Op(Op),
     InsertPessimistic,
     Retire,
     #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
@@ -132,21 +132,21 @@ pub(crate) enum Record {
     RangeConflict,
 }
 
-impl From<raw::Op> for Counter {
-    fn from(op: raw::Op) -> Self {
+impl From<Op> for Counter {
+    fn from(op: Op) -> Self {
         Self::Op(op)
     }
 }
 
 impl From<edge::Op> for Counter {
     fn from(op: edge::Op) -> Self {
-        Self::Op(raw::Op::Edge(op))
+        Self::Op(Op::Edge(op))
     }
 }
 
 impl From<node::Op> for Counter {
     fn from(op: node::Op) -> Self {
-        Self::Op(raw::Op::Node(op))
+        Self::Op(Op::Node(op))
     }
 }
 
@@ -196,16 +196,16 @@ struct Edge {
 
 #[cfg(feature = "stat")]
 impl Thread {
-    fn op(&mut self, op: raw::Op) -> &mut u64 {
+    fn op(&mut self, op: Op) -> &mut u64 {
         match op {
-            raw::Op::Node(op) => match op {
+            Op::Node(op) => match op {
                 crate::node::Op::Shrink => &mut self.node.shrink,
                 crate::node::Op::Replace => &mut self.node.replace,
                 crate::node::Op::Grow => &mut self.node.grow,
                 crate::node::Op::Destroy => &mut self.node.destroy,
                 crate::node::Op::Compress => &mut self.node.compress,
             },
-            raw::Op::Edge(op) => match op {
+            Op::Edge(op) => match op {
                 crate::edge::Op::Create => &mut self.edge.create,
                 crate::edge::Op::Expand => &mut self.edge.expand,
                 crate::edge::Op::Insert => &mut self.edge.insert,

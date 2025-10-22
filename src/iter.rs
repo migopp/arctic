@@ -3,6 +3,14 @@ use ribbit::atomic::Atomic128;
 use crate::node;
 use crate::Edge;
 
+pub(crate) mod leaf;
+pub(crate) mod postorder;
+mod range;
+
+pub(crate) use leaf::LeafIter;
+pub(crate) use postorder::PostorderIter;
+pub(crate) use range::RangeIter;
+
 #[expect(private_bounds)]
 pub trait Sort: SortPrivate {}
 impl<T: SortPrivate> Sort for T {}

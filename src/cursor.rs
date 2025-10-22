@@ -8,10 +8,10 @@ use crate::edge;
 use crate::key;
 use crate::node;
 use crate::node::Node3;
-use crate::raw::Op;
 use crate::smr;
 use crate::stat;
 use crate::Edge;
+use crate::Op;
 use crate::Value;
 
 /// Tree traversal state.

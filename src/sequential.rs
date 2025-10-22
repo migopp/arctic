@@ -1,88 +1,110 @@
+use core::cell::Cell;
 use core::marker::PhantomData;
 
-use crate::raw;
+use ribbit::atomic::Atomic128;
+
+use crate::iter;
+use crate::iter::Sort;
+use crate::stat;
+use crate::Edge;
 use crate::Key;
 use crate::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V> {
-    raw: raw::sequential::Map<V>,
+    root: Atomic128<Edge<V>>,
+    _not_sync: PhantomData<Cell<()>>,
     _key: PhantomData<K>,
 }
 
 impl<K, V> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            raw: raw::sequential::Map::<V>::default(),
+            root: Atomic128::default(),
+            _not_sync: PhantomData,
             _key: PhantomData,
         }
     }
 }
 
 impl<K, V> Map<K, V> {
-    pub(crate) fn as_raw(&mut self) -> &mut raw::sequential::Map<V> {
-        &mut self.raw
+    pub(crate) fn root(&self) -> &Atomic128<Edge<V>> {
+        &self.root
+    }
+
+    pub(crate) fn postorder<'a, S: iter::postorder::Selector<V>>(
+        &'a self,
+    ) -> iter::PostorderIter<'a, V, S> {
+        unsafe { iter::PostorderIter::new(&self.root) }
     }
 }
 
-impl<K: Key, V: Value> Map<K, V> {
-    pub fn get<'k>(&self, key: K::Borrow<'k>) -> Option<V> {
-        self.raw.get(K::Read::from(key)).map(V::from_u64)
+impl<K: Key, V> Map<K, V> {
+    #[expect(unused_variables)]
+    #[inline]
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<u64> {
+        todo!()
     }
 
-    pub fn insert<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw
-            .insert(K::Read::from(key), value.into_u64())
-            .map(V::from_u64)
+    #[expect(unused_variables)]
+    #[inline]
+    pub fn insert(&mut self, key: K::Borrow<'_>, value: u64) -> Option<u64> {
+        todo!()
     }
 
-    pub fn remove<'k>(&mut self, key: K::Borrow<'k>) -> Option<V> {
-        self.raw.remove(K::Read::from(key)).map(V::from_u64)
+    #[expect(unused_variables)]
+    #[inline]
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<u64> {
+        todo!()
     }
 
-    pub fn update<'k>(&mut self, key: K::Borrow<'k>, value: V) -> Option<V> {
-        self.raw
-            .update(K::Read::from(key), value.into_u64())
-            .map(V::from_u64)
+    #[expect(unused_variables)]
+    #[inline]
+    pub fn update(&mut self, key: K::Borrow<'_>, value: u64) -> Option<u64> {
+        todo!()
     }
 
-    #[expect(private_interfaces)]
-    pub fn iter<S: crate::iter::Sort>(&self) -> Iter<K, V, S> {
-        Iter {
-            inner: self.raw.iter(),
-            _value: PhantomData,
-        }
+    pub fn iter<S: crate::iter::Sort>(&self) -> Iter<'_, K, V, S> {
+        Iter(unsafe { iter::LeafIter::new(&self.root, K::Write::default()) })
     }
 }
 
-pub(crate) struct Iter<'a, K: Key, V, S: crate::iter::Sort> {
-    inner: raw::iter::LeafIter<'a, K::Write, V, S>,
-    _value: PhantomData<V>,
+#[expect(private_bounds)]
+pub struct Iter<'a, K: Key, V, S: iter::SortPrivate>(iter::LeafIter<'a, K::Write, V, S>);
+
+impl<'a, K, V, S> Iter<'a, K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Sort,
+{
+    #[inline]
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
+        self.0
+            .lend()
+            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
+    }
 }
 
-impl<'a, K, V, S> Iterator for Iter<'a, K, V, S>
+impl<K, V, S> Iterator for Iter<'_, K, V, S>
 where
     K: Key,
     V: Value,
     S: crate::iter::Sort,
 {
     type Item = (K, V);
+
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
 
-impl<'a, K, V, S> Iter<'a, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: crate::iter::Sort,
-{
-    #[inline]
-    pub fn lend<'k>(&'k mut self) -> Option<(K::Borrow<'k>, V)> {
-        self.inner
-            .lend()
-            .map(|(key, value)| (K::Borrow::from(key), V::from_u64(value)))
+impl<K, V> Drop for Map<K, V> {
+    fn drop(&mut self) {
+        self.postorder::<iter::postorder::SelectNode>()
+            .for_each(|edge| unsafe {
+                edge.data().deallocate_unchecked(stat::Counter::FreeDrop);
+            })
     }
 }

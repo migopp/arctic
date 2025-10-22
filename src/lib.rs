@@ -16,20 +16,27 @@ macro_rules! validate_eq {
 
 mod byte;
 pub mod concurrent;
+pub(crate) mod cursor;
 mod edge;
 pub mod iter;
 pub mod key;
 mod node;
-mod raw;
 pub mod sequential;
 mod smr;
 pub mod stat;
 mod value;
 
+pub(crate) use cursor::Cursor;
 pub(crate) use edge::Edge;
 pub use key::Key;
 pub(crate) use node::Node;
 pub use value::Value;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Op {
+    Node(node::Op),
+    Edge(edge::Op),
+}
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
@@ -39,7 +46,6 @@ pub(crate) fn cold() {}
 #[cfg(test)]
 mod tests {
     use crate::concurrent::Map;
-    use crate::raw;
     use crate::sequential;
 
     // https://users.rust-lang.org/t/testing-if-a-type-is-implementing-an-auto-trait/90871/6
@@ -53,7 +59,6 @@ mod tests {
         impl<T: ?Sized> AmbiguousIfSync<((), ())> for T {}
         impl<T: ?Sized + Sync> AmbiguousIfSync<()> for T {}
 
-        const _: () = <raw::sequential::Map<()>>::ASSERT_NOT_SYNC;
         const _: () = <sequential::Map<u64, u32>>::ASSERT_NOT_SYNC;
     }
 
