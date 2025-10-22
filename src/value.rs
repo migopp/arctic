@@ -91,7 +91,7 @@ impl Value for u64 {
     unsafe fn new_owned<'g, 'l>(
         _smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Shared<'g, 'l> {
+    ) -> Self::Owned<'g, 'l> {
         value
     }
 
@@ -131,7 +131,7 @@ impl Value for u32 {
     unsafe fn new_owned<'g, 'l>(
         _smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Shared<'g, 'l> {
+    ) -> Self::Owned<'g, 'l> {
         value as u32
     }
 
@@ -181,7 +181,7 @@ impl Value for () {
     unsafe fn new_owned<'g, 'l>(
         _smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Shared<'g, 'l> {
+    ) -> Self::Owned<'g, 'l> {
         validate_eq!(value, 0);
     }
 
