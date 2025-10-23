@@ -1,10 +1,11 @@
 use core::cmp;
+use core::fmt;
 
 use crate::byte;
 use crate::key;
 use crate::key::fixed;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub enum Reader<'k> {
     // INVARIANT: `len > 8`
     Large(&'k [u8]),
@@ -104,18 +105,13 @@ impl key::Read for Reader<'_> {
             Self::Large(large) => {
                 validate!(large.len() > 8);
 
+                let len = large.len();
                 let byte = large[0];
 
-                *self = if large.len() - 1 > 8 {
-                    Self::Large(&large[1..])
-                } else {
-                    Self::Small(unsafe {
-                        fixed::Buffer::new_unchecked(
-                            large[1..].as_ptr().cast::<u64>().read_unaligned().to_be(),
-                            64,
-                        )
-                    })
-                };
+                *self = Self::Large(&large[1..]);
+                if len == 9 {
+                    *self = Self::Small(self.to_small());
+                }
 
                 Some(byte)
             }
@@ -124,22 +120,16 @@ impl key::Read for Reader<'_> {
     }
 
     fn prefix(&self, other: &Self) -> Self {
-        let (left, right) = match (self, other) {
-            (Self::Large(left), Self::Large(right)) => {
-                let index = core::iter::zip(*left, *right)
-                    .position(|(l, r)| l != r)
-                    .unwrap_or_else(|| left.len().min(right.len()));
-                return Self::from(&left[index..]);
-            }
-            (Self::Small(left), Self::Small(right)) => (*left, right),
-            (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
-                // SAFETY: `large.len() > 8`
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                (unsafe { fixed::Buffer::new_unchecked(buffer, 64) }, small)
-            }
+        if let (Self::Large(left), Self::Large(right)) = (self, other) {
+            let index = core::iter::zip(*left, *right)
+                .position(|(l, r)| l != r)
+                .unwrap_or_else(|| left.len().min(right.len()));
+            return Self::from(&left[index..]);
         };
 
-        Self::Small(left.prefix(right))
+        let left = self.to_small();
+        let right = other.to_small();
+        Self::Small(left.prefix(&right))
     }
 
     #[inline]
@@ -160,11 +150,53 @@ impl key::Read for Reader<'_> {
 }
 
 impl Reader<'_> {
-    #[inline]
-    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
+    fn to_small(self) -> fixed::Buffer<u64> {
         match self {
-            Reader::Large(large) => with(large),
-            Reader::Small(small) => small.with_bytes(with),
+            Reader::Small(small) => small,
+            Reader::Large(large) => {
+                // SAFETY: `large.len() > 8`
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
+                unsafe { fixed::Buffer::new_unchecked(buffer, 64) }
+            }
+        }
+    }
+}
+
+impl Eq for Reader<'_> {}
+impl PartialEq for Reader<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Large(left), Self::Large(right)) => left == right,
+            (Self::Small(left), Self::Small(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+impl PartialOrd for Reader<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Reader<'_> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match (self, other) {
+            (Self::Large(left), Self::Large(right)) => left.cmp(right),
+            (Self::Small(left), Self::Small(right)) => left.cmp(right),
+            (left, right) => left
+                .to_small()
+                .cmp(&right.to_small())
+                .then_with(|| matches!(left, Self::Large(_)).cmp(&matches!(right, Self::Large(_)))),
+        }
+    }
+}
+
+impl fmt::Debug for Reader<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Reader::Large(large) => f.debug_list().entries(*large).finish(),
+            Reader::Small(small) => small.fmt(f),
         }
     }
 }
@@ -180,7 +212,7 @@ unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer(pub(super) Vec<u8>);
 
 impl key::Write for Writer {
@@ -207,6 +239,12 @@ impl key::Write for Writer {
     }
 }
 
+impl fmt::Debug for Writer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl<'k> From<Reader<'k>> for Writer {
     fn from(iter: Reader<'k>) -> Self {
         Self(match iter {
@@ -216,17 +254,9 @@ impl<'k> From<Reader<'k>> for Writer {
     }
 }
 
-impl PartialEq<Reader<'_>> for Writer {
-    #[inline]
-    fn eq(&self, other: &Reader<'_>) -> bool {
-        other.with_bytes(|other| self.0 == other)
-    }
-}
-
-impl PartialOrd<Reader<'_>> for Writer {
-    #[inline]
-    fn partial_cmp(&self, other: &Reader<'_>) -> Option<cmp::Ordering> {
-        other.with_bytes(|other| self.0.as_slice().partial_cmp(other))
+impl<'k> From<&'k Writer> for Reader<'k> {
+    fn from(writer: &'k Writer) -> Self {
+        Reader::from(writer.0.as_slice())
     }
 }
 

@@ -30,7 +30,8 @@ where
         key.extend(edge.meta().key());
 
         if meta.leaf() {
-            if key < min || key > max {
+            let reader = K::Read::from(&key);
+            if reader < K::reborrow(min) || reader > K::reborrow(max) {
                 return Self::Root { key, next: None };
             }
 
@@ -43,11 +44,12 @@ where
         } else {
             let node = unsafe { data.into_node_unchecked() };
 
-            validate!(key >= min.slice(key.bits()));
-            validate!(key <= max.slice(key.bits()));
+            let reader = K::Read::from(&key);
+            validate!(reader >= K::reborrow(min.slice(key.bits())));
+            validate!(reader <= K::reborrow(max.slice(key.bits())));
 
-            let first = (key == min.slice(key.bits())).then(|| min.get(key.bits()));
-            let last = (key == max.slice(key.bits())).then(|| max.get(key.bits()));
+            let first = (reader == K::reborrow(min.slice(key.bits()))).then(|| min.get(key.bits()));
+            let last = (reader == K::reborrow(max.slice(key.bits()))).then(|| max.get(key.bits()));
 
             let mut stack = Vec::with_capacity(7);
             stack.push((key.bits(), first, last, node.iter_range(first, last)));
@@ -172,11 +174,11 @@ where
                 crate::cold();
 
                 if meta.leaf() {
-                    if check_first && self.key < self.min {
+                    if check_first && K::Read::from(&self.key) < K::reborrow(self.min) {
                         continue 'horizontal;
                     }
 
-                    if check_last && self.key > self.max {
+                    if check_last && K::Read::from(&self.key) > K::reborrow(self.max) {
                         self.stack.clear();
                         return None;
                     }
@@ -188,22 +190,24 @@ where
                     }
                 } else {
                     let min = if check_first {
-                        match self.key.partial_cmp(&self.min.slice(self.key.bits())) {
-                            None => unreachable!(),
-                            Some(cmp::Ordering::Less) => continue 'horizontal,
-                            Some(cmp::Ordering::Equal) => Some(self.min.get(self.key.bits())),
-                            Some(cmp::Ordering::Greater) => None,
+                        match K::Read::from(&self.key)
+                            .cmp(&K::reborrow(self.min.slice(self.key.bits())))
+                        {
+                            cmp::Ordering::Less => continue 'horizontal,
+                            cmp::Ordering::Equal => Some(self.min.get(self.key.bits())),
+                            cmp::Ordering::Greater => None,
                         }
                     } else {
                         None
                     };
 
                     let max = if check_last {
-                        match self.key.partial_cmp(&self.max.slice(self.key.bits())) {
-                            None => unreachable!(),
-                            Some(cmp::Ordering::Less) => None,
-                            Some(cmp::Ordering::Equal) => Some(self.max.get(self.key.bits())),
-                            Some(cmp::Ordering::Greater) => {
+                        match K::Read::from(&self.key)
+                            .cmp(&K::reborrow(self.max.slice(self.key.bits())))
+                        {
+                            cmp::Ordering::Less => None,
+                            cmp::Ordering::Equal => Some(self.max.get(self.key.bits())),
+                            cmp::Ordering::Greater => {
                                 self.stack.clear();
                                 return None;
                             }

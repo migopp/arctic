@@ -1,26 +1,20 @@
 pub mod dynamic;
 pub mod fixed;
 
+use core::fmt;
 use core::marker::PhantomData;
 
 use crate::byte;
 
 pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     #[allow(private_bounds)]
-    type Borrow<'k>: Copy
-        + From<&'k Self::Write>
-        + for<'a> PartialEq<Self::Borrow<'a>>
-        + for<'a> PartialOrd<Self::Borrow<'a>>;
+    type Borrow<'k>: Copy + From<&'k Self::Write>;
 
     #[allow(private_bounds)]
-    type Read<'k>: Read + From<Self::Borrow<'k>>;
+    type Read<'k>: Read + From<Self::Borrow<'k>> + From<&'k Self::Write>;
 
     #[allow(private_bounds)]
-    type Write: Write<Len = usize>
-        + for<'k> PartialOrd<Self::Read<'k>>
-        + for<'k> From<Self::Read<'k>>
-        + Clone
-        + Ord;
+    type Write: Write<Len = usize> + for<'k> From<Self::Read<'k>>;
 
     /// HACK: work around invariant lifetime for generic associated traits
     /// https://users.rust-lang.org/t/expressing-the-covariance-of-gats/65664/4
@@ -31,7 +25,7 @@ pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
-pub(crate) trait Read: Copy + core::fmt::Debug + Default {
+pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
     fn bits(&self) -> usize;
 
     #[inline]
@@ -55,7 +49,7 @@ pub(crate) trait Read: Copy + core::fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Write: Clone + core::fmt::Debug + Default {
+pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
 
     fn bits(&self) -> Self::Len;
@@ -72,7 +66,7 @@ pub(crate) trait Write: Clone + core::fmt::Debug + Default {
     fn truncate(&mut self, bits: Self::Len);
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ignore;
 
 impl Write for Ignore {

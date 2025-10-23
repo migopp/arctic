@@ -196,6 +196,12 @@ impl<U: Uint> key::Write for Buffer<U> {
     }
 }
 
+impl<U: Copy> From<&'_ Buffer<U>> for Buffer<U> {
+    fn from(buffer: &'_ Buffer<U>) -> Self {
+        *buffer
+    }
+}
+
 impl<U: Uint> core::fmt::Debug for Buffer<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
