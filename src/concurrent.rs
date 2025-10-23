@@ -661,6 +661,69 @@ where
 
         Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
     }
+
+    fn optimistic<'l, 'k>(
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
+        iter: &iter::KeyValueIter<'g, 'k, K, V>,
+        limit: usize,
+    ) -> Result<LinearizableGuard<'g, 'l, K, V>, Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>>
+    {
+        iter.clone()
+            .for_each(|key, value| buffer.push((key.clone(), value)));
+
+        for retry in 0..=limit {
+            let mut dirty = false;
+            let mut len = 0;
+
+            iter.clone().for_each(|new_key, new_value| {
+                let index = len;
+                len += 1;
+
+                let old = match buffer.get_mut(index) {
+                    // Fast path: no change
+                    Some((old_key, old_value)) if old_key == new_key && *old_value == new_value => {
+                        return;
+                    }
+                    old => old,
+                };
+
+                crate::cold();
+                dirty = true;
+
+                match old {
+                    Some((old_key, old_value)) if old_key == new_key => {
+                        *old_value = new_value;
+                    }
+                    Some((old_key, _)) if *old_key < *new_key => {
+                        let high = buffer[len..]
+                            .iter()
+                            .position(|(key, _)| key >= new_key)
+                            .map(|offset| len + offset)
+                            .unwrap_or(buffer.len());
+                        buffer.drain(index..high);
+                        len = index;
+                    }
+                    None | Some(_) => {
+                        buffer.insert(index, (new_key.clone(), new_value));
+                    }
+                };
+            });
+
+            if len == buffer.len() && !dirty {
+                stat::record(stat::Record::RangeConflict, retry as u64);
+                return Ok(LinearizableGuard {
+                    guard: cursor.into_guard(),
+                    buffer,
+                });
+            }
+
+            validate!(buffer.len() <= len);
+            buffer.truncate(len);
+        }
+
+        Err(cursor)
+    }
 }
 
 pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
