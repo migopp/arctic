@@ -3,21 +3,27 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::key;
+use crate::key::Read as _;
+use crate::key::Write as _;
 use crate::node;
 use crate::Edge;
+use crate::Key;
 
-pub(crate) enum RangeIter<'a, R, W, V> {
-    Root { key: W, next: Option<u64> },
-    Node(NodeIter<'a, R, W, V>),
+pub(crate) enum RangeIter<'g, 'k, K: Key, V> {
+    Root { key: K::Write, next: Option<u64> },
+    Node(NodeIter<'g, 'k, K, V>),
 }
 
-impl<'a, R, W, V> RangeIter<'a, R, W, V>
+impl<'g, 'k, K, V> RangeIter<'g, 'k, K, V>
 where
-    R: key::Read,
-    W: key::Write<Len = usize> + PartialOrd<R>,
+    K: Key,
 {
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W, min: R, max: R) -> Self {
+    pub(crate) unsafe fn new(
+        root: &'g Atomic128<Edge<V>>,
+        mut key: K::Write,
+        min: K::Read<'k>,
+        max: K::Read<'k>,
+    ) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -56,7 +62,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(&mut self, mut apply: F) {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -69,7 +75,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&K::Write, u64)> {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -81,30 +87,32 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'a, R, W, V> {
-    min: R,
-    max: R,
-    key: W,
-    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'a, V>)>,
+pub(crate) struct NodeIter<'g, 'k, K: Key, V> {
+    min: K::Read<'k>,
+    max: K::Read<'k>,
+    key: K::Write,
+    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'g, V>)>,
 }
 
-impl<'a, R, W, V> NodeIter<'a, R, W, V>
+impl<'g, 'k, K, V> NodeIter<'g, 'k, K, V>
 where
-    R: key::Read,
-    W: key::Write<Len = usize> + PartialOrd<R>,
+    K: Key,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&W, u64)> {
+    fn lend(&mut self) -> Option<(&K::Write, u64)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
+    fn walk<const YIELD: bool, F: FnMut(&K::Write, u64)>(
+        &mut self,
+        mut apply: F,
+    ) -> Option<(&K::Write, u64)> {
         'vertical: loop {
             let (len, min, max, iter) = self.stack.last_mut()?;
 

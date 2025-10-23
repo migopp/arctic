@@ -46,6 +46,7 @@ pub(crate) fn cold() {}
 #[cfg(test)]
 mod tests {
     use crate::concurrent::Map;
+    use crate::key::Read as _;
     use crate::sequential;
 
     // https://users.rust-lang.org/t/testing-if-a-type-is-implementing-an-auto-trait/90871/6
@@ -236,7 +237,20 @@ mod tests {
             return map;
         };
 
-        // Concurrent iteration, non-linearizable
+        // Concurrent prefix iteration, non-linearizable
+        let prefix = pin
+            .prefix(K::Read::from(first.borrow()).prefix(&K::Read::from(last.borrow())))
+            .unwrap();
+        prefix
+            .iter::<core::iter::Rev<crate::iter::Sorted>>()
+            .zip(keys.iter().rev())
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
+        drop(prefix);
+
+        // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow(), last.borrow()).unwrap();
         range.iter().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
             assert_eq!(lk, *rk);

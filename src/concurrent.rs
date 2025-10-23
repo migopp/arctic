@@ -444,7 +444,7 @@ where
         }
 
         unsafe {
-            iter::RangeIter::<K::Read<'k>, K::Write, V>::new(
+            iter::RangeIter::<'g, '_, K, V>::new(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bits())),
                 min,
@@ -576,7 +576,7 @@ where
 
         let len = output.len();
         unsafe {
-            iter::RangeIter::new(
+            iter::RangeIter::<'g, '_, K, V>::new(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bits())),
                 min,
@@ -589,7 +589,7 @@ where
 
         for retry in 0..=retry {
             let mut iter = unsafe {
-                iter::RangeIter::new(
+                iter::RangeIter::<'g, '_, K, V>::new(
                     cursor.root(),
                     K::Write::from(prefix.slice(cursor.bits())),
                     min,
@@ -671,7 +671,7 @@ where
     V: Value,
 {
     #[inline]
-    pub fn iter<S: Sort>(&self) -> PrefixIter<'_, 'g, 'l, K, V, S> {
+    pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
         PrefixIter {
             guard: &self.guard,
             iter: unsafe { iter::LeafIter::new(self.root, self.key.clone()) },
@@ -679,19 +679,19 @@ where
     }
 }
 
-pub struct PrefixIter<'guard, 'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    guard: &'guard smr::PathGuard<'g, 'l, V>,
+pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
+    guard: &'l smr::PathGuard<'g, 'l, V>,
     iter: iter::LeafIter<'g, K::Write, V, S>,
 }
 
-impl<'guard, 'g, 'l, K, V, S> PrefixIter<'guard, 'g, 'l, K, V, S>
+impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
     S: crate::iter::Sort,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (K::Borrow::from(key), unsafe {
                 V::borrow_from_u64(self.guard, value)
@@ -700,31 +700,34 @@ where
     }
 }
 
-impl<'guard, 'g, 'l, K, V, S> Iterator for PrefixIter<'guard, 'g, 'l, K, V, S>
+impl<'g, 'l, K, V, S> Iterator for PrefixIter<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
     S: crate::iter::Sort,
 {
-    type Item = (K, V::Borrow<'guard>);
+    type Item = (K, V::Borrow<'l>);
     fn next(&mut self) -> Option<Self::Item> {
         self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
 
-pub struct RangeGuard<'g, 'l, 'k, K: Key + 'k, V: Value> {
+pub struct RangeGuard<'g, 'l, 'k, K: Key, V: Value> {
     prefix: PrefixGuard<'g, 'l, K, V>,
+    // NOTE: `K::Read<'k>` causes lifetime 'k to be invariant, so we
+    // can't merge it with `'l` (even though all of our implementations are covariant)
+    // https://stackoverflow.com/questions/77022284/lifetime-variance-issue-when-using-trait-with-associated-type-that-has-a-lifetim
     min: K::Read<'k>,
     max: K::Read<'k>,
 }
 
 impl<'g, 'l, 'k, K, V> RangeGuard<'g, 'l, 'k, K, V>
 where
-    K: Key + 'k,
+    K: Key,
     V: Value,
 {
     #[inline]
-    pub fn iter(&self) -> RangeIter<'_, 'g, 'l, 'k, K, V> {
+    pub fn iter(&self) -> RangeIter<'g, '_, 'k, K, V> {
         RangeIter {
             guard: &self.prefix.guard,
             iter: unsafe {
@@ -739,18 +742,18 @@ where
     }
 }
 
-pub struct RangeIter<'guard, 'g, 'l, 'k, K: Key, V: Value> {
-    guard: &'guard smr::PathGuard<'g, 'l, V>,
-    iter: iter::RangeIter<'g, K::Read<'k>, K::Write, V>,
+pub struct RangeIter<'g, 'l, 'k, K: Key, V: Value> {
+    guard: &'l smr::PathGuard<'g, 'l, V>,
+    iter: iter::RangeIter<'g, 'k, K, V>,
 }
 
-impl<'guard, 'g, 'l, 'k, K, V> RangeIter<'guard, 'g, 'l, 'k, K, V>
+impl<'g, 'l, 'k, K, V> RangeIter<'g, 'l, 'k, K, V>
 where
     K: Key,
     V: Value,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (K::Borrow::from(key), unsafe {
                 V::borrow_from_u64(self.guard, value)
@@ -759,7 +762,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'guard>)>(&mut self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(&mut self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(K::Borrow::from(key), unsafe {
                 V::borrow_from_u64(self.guard, value)
@@ -768,12 +771,12 @@ where
     }
 }
 
-impl<'guard, 'g, 'l, 'k, K, V> Iterator for RangeIter<'guard, 'g, 'l, 'k, K, V>
+impl<'g, 'l, 'k, K, V> Iterator for RangeIter<'g, 'l, 'k, K, V>
 where
     K: Key,
     V: Value,
 {
-    type Item = (K, V::Borrow<'guard>);
+    type Item = (K, V::Borrow<'l>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
