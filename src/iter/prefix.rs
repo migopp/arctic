@@ -6,6 +6,7 @@ use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
 
+#[derive(Clone)]
 pub(crate) enum PrefixIter<'g, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,

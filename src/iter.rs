@@ -12,6 +12,7 @@ pub use sort::Unsorted;
 
 use crate::Key;
 
+#[derive(Clone)]
 pub(crate) enum KeyValueIter<'g, 'k, K: Key, V> {
     Leaf(PrefixIter<'g, K::Write, V, crate::iter::Sorted>),
     // FIXME: take sort order in range iter?

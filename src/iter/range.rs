@@ -9,6 +9,7 @@ use crate::node;
 use crate::Edge;
 use crate::Key;
 
+#[derive(Clone)]
 pub(crate) enum RangeIter<'g, 'k, K: Key, V> {
     Root { key: K::Write, next: Option<u64> },
     Node(NodeIter<'g, 'k, K, V>),
@@ -87,6 +88,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct NodeIter<'g, 'k, K: Key, V> {
     min: K::Read<'k>,
     max: K::Read<'k>,

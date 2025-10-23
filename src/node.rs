@@ -222,6 +222,20 @@ impl SortedKeyIter {
     }
 }
 
+impl Clone for SortedKeyIter {
+    fn clone(&self) -> Self {
+        if self.is_node_256() {
+            Self {
+                node_256: unsafe { self.node_256 },
+            }
+        } else {
+            Self {
+                linear: unsafe { self.linear.clone() },
+            }
+        }
+    }
+}
+
 impl Iterator for SortedKeyIter {
     type Item = (u8, u8);
 

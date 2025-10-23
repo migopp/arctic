@@ -240,6 +240,15 @@ impl SortedKeyIter {
     }
 }
 
+impl Clone for SortedKeyIter {
+    fn clone(&self) -> Self {
+        self.with(
+            |node_3| Self { node_3: *node_3 },
+            |node_15| Self::new_15(*node_15),
+        )
+    }
+}
+
 impl Drop for SortedKeyIter {
     #[inline]
     fn drop(&mut self) {
