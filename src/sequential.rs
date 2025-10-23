@@ -4,8 +4,8 @@ use core::marker::PhantomData;
 use ribbit::atomic::Atomic128;
 
 use crate::iter::postorder;
-use crate::iter::LeafIter;
 use crate::iter::PostorderIter;
+use crate::iter::PrefixIter;
 use crate::iter::Sort;
 use crate::stat;
 use crate::Edge;
@@ -65,11 +65,11 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     pub fn iter<S: Sort>(&self) -> Iter<'_, K, V, S> {
-        Iter(unsafe { LeafIter::new(&self.root, K::Write::default()) })
+        Iter(unsafe { PrefixIter::new(&self.root, K::Write::default()) })
     }
 }
 
-pub struct Iter<'g, K: Key, V, S: Sort>(LeafIter<'g, K::Write, V, S>);
+pub struct Iter<'g, K: Key, V, S: Sort>(PrefixIter<'g, K::Write, V, S>);
 
 impl<'g, K, V, S> Iter<'g, K, V, S>
 where

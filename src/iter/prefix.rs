@@ -6,7 +6,7 @@ use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
 
-pub(crate) enum LeafIter<'g, W: key::Write, V: 'g, S: Sort> {
+pub(crate) enum PrefixIter<'g, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,
@@ -17,7 +17,7 @@ pub(crate) enum LeafIter<'g, W: key::Write, V: 'g, S: Sort> {
     },
 }
 
-impl<'g, W, V, S> LeafIter<'g, W, V, S>
+impl<'g, W, V, S> PrefixIter<'g, W, V, S>
 where
     W: key::Write,
     V: 'g,

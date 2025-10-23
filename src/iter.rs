@@ -1,10 +1,10 @@
-mod leaf;
 pub(crate) mod postorder;
+mod prefix;
 mod range;
 mod sort;
 
-pub(crate) use leaf::LeafIter;
 pub(crate) use postorder::PostorderIter;
+pub(crate) use prefix::PrefixIter;
 pub(crate) use range::RangeIter;
 pub use sort::Sort;
 pub use sort::Sorted;
@@ -13,7 +13,7 @@ pub use sort::Unsorted;
 use crate::Key;
 
 pub(crate) enum KeyValueIter<'g, 'k, K: Key, V> {
-    Leaf(LeafIter<'g, K::Write, V, crate::iter::Sorted>),
+    Leaf(PrefixIter<'g, K::Write, V, crate::iter::Sorted>),
     // FIXME: take sort order in range iter?
     Range(RangeIter<'g, 'k, K, V>),
 }

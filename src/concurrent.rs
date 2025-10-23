@@ -715,14 +715,14 @@ where
     pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
         PrefixIter {
             guard: &self.guard,
-            iter: unsafe { iter::LeafIter::new(self.root, self.key.clone()) },
+            iter: unsafe { iter::PrefixIter::new(self.root, self.key.clone()) },
         }
     }
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PathGuard<'g, 'l, V>,
-    iter: iter::LeafIter<'g, K::Write, V, S>,
+    iter: iter::PrefixIter<'g, K::Write, V, S>,
 }
 
 impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
