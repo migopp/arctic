@@ -8,7 +8,7 @@ use crate::key::fixed;
 pub enum Reader<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(fixed::Reader),
+    Small(fixed::Fixed<u64>),
 }
 
 impl<'a> From<&'a [u8]> for Reader<'a> {
@@ -19,10 +19,9 @@ impl<'a> From<&'a [u8]> for Reader<'a> {
             len => {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
-                Self::Small(fixed::Reader::new(
-                    u64::from_be_bytes(buffer),
-                    (len << 3) as u8,
-                ))
+                Self::Small(unsafe {
+                    fixed::Fixed::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
+                })
             }
         }
     }
@@ -45,7 +44,7 @@ impl<'a> From<&'a str> for Reader<'a> {
 impl Default for Reader<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(fixed::Reader::default())
+        Self::Small(fixed::Fixed::default())
     }
 }
 
@@ -89,9 +88,10 @@ impl key::Read for Reader<'_> {
                         .cast::<u64>()
                         .read_unaligned()
                 }
-                .to_be();
+                .to_be()
+                    << (64 - after);
 
-                *self = Self::Small(fixed::Reader::new(buffer << (64 - after), after as u8));
+                *self = Self::Small(unsafe { fixed::Fixed::new_unchecked(buffer, after as u8) });
                 array
             }
             Reader::Small(small) => small.take(len),
@@ -109,10 +109,12 @@ impl key::Read for Reader<'_> {
                 *self = if large.len() - 1 > 8 {
                     Self::Large(&large[1..])
                 } else {
-                    Self::Small(fixed::Reader::new(
-                        unsafe { large[1..].as_ptr().cast::<u64>().read_unaligned() }.to_be(),
-                        64,
-                    ))
+                    Self::Small(unsafe {
+                        fixed::Fixed::new_unchecked(
+                            large[1..].as_ptr().cast::<u64>().read_unaligned().to_be(),
+                            64,
+                        )
+                    })
                 };
 
                 Some(byte)
@@ -133,7 +135,7 @@ impl key::Read for Reader<'_> {
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
                 // SAFETY: `large.len() > 8`
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                (fixed::Reader::new(buffer, 64), small)
+                (unsafe { fixed::Fixed::new_unchecked(buffer, 64) }, small)
             }
         };
 

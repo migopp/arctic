@@ -1,7 +1,8 @@
 pub mod dynamic;
-pub mod fixed;
+mod fixed;
 
 use crate::byte;
+pub(crate) use fixed::Fixed;
 
 pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     #[allow(private_bounds)]
@@ -93,8 +94,8 @@ macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Read<'k> = fixed::Reader;
-                type Write = fixed::Writer;
+                type Read<'k> = Fixed<$ty>;
+                type Write = Fixed<$ty>;
                 type Borrow<'k> = Self;
 
                 #[inline]
@@ -111,9 +112,9 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl<'k> From<&'k fixed::Writer> for $ty {
+            impl<'k> From<&'k Fixed<$ty>> for $ty {
                 #[inline]
-                fn from(writer: &'k fixed::Writer) -> Self {
+                fn from(writer: &'k Fixed<$ty>) -> Self {
                     Self::from(*writer)
                 }
             }
@@ -121,7 +122,7 @@ macro_rules! impl_unsigned_int {
     };
 }
 
-impl_unsigned_int!(u8, u16, u32, u64);
+impl_unsigned_int!(u16, u32, u64, u128);
 
 impl Key for Vec<u8> {
     type Read<'a> = dynamic::Reader<'a>;

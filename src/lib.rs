@@ -147,27 +147,27 @@ mod tests {
 
     #[test]
     fn node3_full() {
-        insert_all(0u8..3);
+        insert_all(0u16..3);
     }
 
     #[test]
     fn node3_expand() {
-        insert_all(0u8..4);
+        insert_all(0u16..4);
     }
 
     #[test]
     fn node15_full() {
-        insert_all(0u8..15);
+        insert_all(0u16..15);
     }
 
     #[test]
     fn node15_expand() {
-        insert_all(0u8..16);
+        insert_all(0u16..16);
     }
 
     #[test]
     fn node256_full() {
-        insert_all(0u8..=255);
+        insert_all(0u16..=255);
     }
 
     #[test]

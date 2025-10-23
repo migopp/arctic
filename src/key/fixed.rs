@@ -1,31 +1,80 @@
 use core::fmt;
-use core::ops::BitOr as _;
 
 use crate::byte;
 use crate::key;
 use crate::key::Read as _;
 
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct Reader {
-    buffer: u64,
+trait Int:
+    Sized
+    + Copy
+    + Default
+    + fmt::Debug
+    + Ord
+    + Eq
+    + core::ops::Shl<u8, Output = Self>
+    + core::ops::ShlAssign<u8>
+    + core::ops::Shr<u8, Output = Self>
+    + core::ops::BitXor<Output = Self>
+    + core::ops::BitOr<Output = Self>
+    + core::ops::BitOrAssign
+    + core::ops::Not<Output = Self>
+    + core::ops::BitAnd<Output = Self>
+{
+    const MSB: Self;
+    const MAX: Self;
+    const BYTES: u8;
+    const BITS: u8;
+
+    fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
+
+    fn most_significant_u64(self) -> u64;
+    fn most_significant_u8(self) -> u8;
+
+    #[inline]
+    fn most_significant(self, bits: u8) -> Self {
+        Self::MAX.unbounded_shr(bits).not().bitand(self)
+    }
+
+    fn unbounded_shr(self, bits: u8) -> Self;
+    fn leading_zeros(self) -> u8;
+    fn rotate_left(self, bits: u8) -> Self;
+
+    fn from_most_significant_u64(value: u64) -> Self;
+    fn from_u8(value: u8) -> Self;
+}
+
+#[derive(Copy, Clone, Default, Eq)]
+pub struct Fixed<I> {
+    buffer: I,
     bits: u8,
 }
 
-impl Reader {
+#[expect(private_bounds)]
+impl<I: Int> Fixed<I> {
     #[inline]
-    pub fn new(buffer: u64, bits: u8) -> Self {
-        validate!(bits <= 64);
+    pub fn new_masked(buffer: I, bits: u8) -> Self {
+        unsafe {
+            let bits = bits & !0b111;
+            Self::new_unchecked(buffer.most_significant(bits), bits)
+        }
+    }
+
+    #[inline]
+    pub unsafe fn new_unchecked(buffer: I, bits: u8) -> Self {
+        validate!(bits <= I::BITS);
         validate_eq!(bits & 0b111, 0);
+        validate_eq!(buffer.most_significant(bits), buffer);
         Self { buffer, bits }
     }
 
     #[inline]
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
-        with(&self.buffer.to_be_bytes()[..self.bytes()])
+        self.buffer
+            .with_be_bytes(|bytes| with(&bytes[..self.bytes()]))
     }
 }
 
-impl key::Read for Reader {
+impl<I: Int> key::Read for Fixed<I> {
     #[inline]
     fn bits(&self) -> usize {
         self.bits as usize
@@ -34,67 +83,67 @@ impl key::Read for Reader {
     #[inline]
     fn peek(&self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.bits());
-        byte::Array::from_u64_truncate(self.buffer, len)
+        validate_eq!(len.bits() & 0b111, 0);
+
+        byte::Array::from_u64_truncate(self.buffer.most_significant_u64(), len)
     }
 
     #[inline]
     fn take(&mut self, len: byte::Len) -> byte::Array {
         validate!(len.bits() as usize <= self.bits());
+        validate_eq!(len.bits() & 0b111, 0);
+
+        if len.bits() == 0 {
+            return byte::Array::EMPTY;
+        }
+
         let array = self.peek(len);
-        self.buffer = self.buffer.unbounded_shl(len.bits() as u32);
+        self.buffer <<= len.bits();
         self.bits -= len.bits();
         array
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        let byte = (self.bits > 0).then_some(self.buffer.rotate_left(8) as u8);
+        if self.bits == 0 {
+            return None;
+        }
+
+        let byte = self.buffer.most_significant_u8();
         self.buffer <<= 8;
         self.bits = self.bits.saturating_sub(8);
-        byte
+        Some(byte)
     }
 
     fn prefix(&self, other: &Self) -> Self {
         let max = self.bits.min(other.bits);
-
-        let prefix = (self.buffer ^ other.buffer)
-            .bitor(0x8000_0000_0000_0000u64.unbounded_shr(max as u32))
-            .leading_zeros()
-            & !0b111;
-
+        let bits = (self.buffer ^ other.buffer).leading_zeros().min(max) & !0b111;
         Self {
-            buffer: self.buffer,
-            bits: prefix as u8,
+            buffer: self.buffer.most_significant(bits),
+            bits,
         }
     }
 
     #[inline]
     fn get(&self, bit: usize) -> u8 {
-        self.buffer.rotate_left(8 + bit as u32) as u8
+        validate!(bit <= I::BITS as usize - 8);
+
+        self.buffer.rotate_left(bit as u8).most_significant_u8()
     }
 
     #[inline]
-    fn slice(&self, bit: usize) -> Self {
+    fn slice(&self, bits: usize) -> Self {
+        validate!(bits <= I::BITS as usize);
+
+        let bits = bits as u8;
         Self {
-            buffer: self.buffer & !u64::MAX.unbounded_shr(bit as u32),
-            bits: bit as u8,
+            buffer: self.buffer.most_significant(bits),
+            bits,
         }
     }
 }
 
-impl fmt::Debug for Reader {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.with_bytes(|bytes| bytes.fmt(f))
-    }
-}
-
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct Writer {
-    buffer: u64,
-    bits: u8,
-}
-
-impl key::Write for Writer {
+impl<I: Int> key::Write for Fixed<I> {
     type Len = usize;
 
     #[inline]
@@ -104,96 +153,64 @@ impl key::Write for Writer {
 
     #[inline]
     fn extend(&mut self, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= 64);
-        if array.len().bits() > 0 {
-            self.buffer |= (array.value() & !0xFF) >> self.bits;
-            self.bits += array.len().bits();
+        validate!(self.bits + array.len().bits() <= I::BITS);
+
+        if array.len().bits() == 0 {
+            return;
         }
+
+        self.buffer |= I::from_most_significant_u64(array.value() & !0xFF) >> self.bits;
+        self.bits += array.len().bits();
     }
 
     #[inline]
     unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= 64);
+        validate!(self.bits + array.len().bits() <= I::BITS);
         validate!(self.bits >= 8);
-        if array.len().bits() > 0 {
-            self.buffer |= array.value() >> self.bits;
-            self.bits += array.len().bits();
+
+        if array.len().bits() == 0 {
+            return;
         }
+
+        self.buffer |= I::from_most_significant_u64(array.value()) >> self.bits;
+        self.bits += array.len().bits();
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        validate!(self.bits < 64);
-        self.buffer |= (byte as u64).rotate_right((8 + self.bits) as u32);
+        validate!(self.bits <= I::BITS - 8);
+
+        self.buffer |= I::from_u8(byte).shr(self.bits);
         self.bits += 8;
     }
 
     #[inline]
     fn truncate(&mut self, bits: usize) {
         validate!(self.bits as usize >= bits);
-        validate!(bits < 64);
-        self.buffer &= !(u64::MAX >> bits);
-        self.bits = bits as u8;
+        validate!(bits <= I::BITS as usize);
+
+        let bits = bits as u8;
+        self.buffer = self.buffer.most_significant(bits);
+        self.bits = bits;
     }
 }
 
-impl From<Reader> for Writer {
-    #[inline]
-    fn from(reader: Reader) -> Self {
-        Self {
-            buffer: reader.buffer & !u64::MAX.unbounded_shr(reader.bits as u32),
-            bits: reader.bits,
-        }
-    }
-}
-
-impl core::fmt::Debug for Writer {
+impl<I: Int> core::fmt::Debug for Fixed<I> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let bytes = self.buffer.to_be_bytes();
-        let len = self.bits as usize >> 3;
-        f.debug_list().entries(bytes.into_iter().take(len)).finish()
+        self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
     }
 }
 
-macro_rules! impl_unsigned_int {
-    ($($from:ty: $len:expr),* $(,)?) => {
-        $(
-            impl From<$from> for Reader {
-                #[inline]
-                fn from(value: $from) -> Self {
-                    let bits = $len << 3;
-                    Self {
-                        buffer: (value as u64) << (64 - bits),
-                        bits,
-                    }
-                }
-            }
-
-            impl From<Writer> for $from {
-                #[inline]
-                fn from(writer: Writer) -> Self {
-                    writer.buffer.rotate_left($len << 3) as $from
-                }
-            }
-        )*
-    };
-}
-
-impl PartialOrd<Reader> for Writer {
+#[expect(clippy::non_canonical_partial_ord_impl)]
+impl<I: Ord> PartialOrd<Fixed<I>> for Fixed<I> {
     #[inline]
-    fn partial_cmp(&self, reader: &Reader) -> Option<core::cmp::Ordering> {
-        self.buffer.partial_cmp(&reader.buffer)
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        validate_eq!(self.bits, other.bits);
+        Some(self.buffer.cmp(&other.buffer))
     }
 }
 
-impl PartialEq<Reader> for Writer {
-    #[inline]
-    fn eq(&self, reader: &Reader) -> bool {
-        self.buffer == reader.buffer
-    }
-}
-
-impl Ord for Writer {
+impl<I: Ord> Ord for Fixed<I> {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         validate_eq!(self.bits, other.bits);
@@ -201,17 +218,104 @@ impl Ord for Writer {
     }
 }
 
-impl PartialOrd for Writer {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl<I: PartialEq> PartialEq<Fixed<I>> for Fixed<I> {
+    #[inline]
+    fn eq(&self, reader: &Fixed<I>) -> bool {
+        self.buffer == reader.buffer
     }
 }
 
+macro_rules! impl_unsigned_int {
+    ($($ty:ty: $bits:expr, $into:expr, $from:expr),* $(,)?) => {
+        $(
+            impl From<$ty> for Fixed<$ty> {
+                #[inline]
+                fn from(value: $ty) -> Self {
+                    Self {
+                        buffer: value,
+                        bits: $bits,
+                    }
+                }
+            }
+
+            impl From<Fixed<$ty>> for $ty {
+                #[inline]
+                fn from(fixed: Fixed<$ty>) -> Self {
+                    validate_eq!(fixed.bits, <$ty>::BITS as u8);
+                    fixed.buffer
+                }
+            }
+
+            impl Int for $ty {
+                const MSB: Self = (1 as $ty).rotate_right(1);
+                const MAX: Self = <$ty>::MAX;
+                const BYTES: u8 = (<$ty>::BITS as u8) >> 3;
+                const BITS: u8 = <$ty>::BITS as u8;
+
+                #[inline]
+                fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
+                    apply(&self.to_be_bytes())
+                }
+
+                #[inline]
+                fn most_significant_u64(self) -> u64 {
+                    $into(self)
+                }
+
+                #[inline]
+                fn most_significant_u8(self) -> u8 {
+                    <$ty>::rotate_left(self, 8) as u8
+                }
+
+                #[inline]
+                fn unbounded_shr(self, bits: u8) -> Self {
+                    <$ty>::unbounded_shr(self, bits as u32)
+                }
+
+                #[inline]
+                fn leading_zeros(self) -> u8 {
+                    <$ty>::leading_zeros(self) as u8
+                }
+
+                #[inline]
+                fn rotate_left(self, bits: u8) -> Self {
+                    <$ty>::rotate_left(self, bits as u32)
+                }
+
+                #[inline]
+                fn from_most_significant_u64(value: u64) -> Self {
+                    $from(value)
+                }
+
+                #[inline]
+                fn from_u8(value: u8) -> Self {
+                    (value as $ty).rotate_right(8)
+                }
+            }
+        )*
+    };
+}
+
 impl_unsigned_int!(
-    u8: 1,
-    u16: 2,
-    u32: 4,
-    u64: 8,
+    u16: 16, |into: u16| {
+        (into as u64) << 48
+    }, |from: u64| {
+        (from >> 48) as u16
+    },
+
+    u32: 32, |into: u32| {
+        (into as u64) << 32
+    }, |from: u64| {
+        (from >> 32) as u32
+    },
+
+    u64: 64, core::convert::identity, core::convert::identity,
+
+    u128: 128, |into: u128| {
+        (into >> 64) as u64
+    }, |from: u64| {
+        (from as u128) << 64
+    },
 );
 
 #[cfg(test)]
