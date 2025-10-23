@@ -1,3 +1,5 @@
+use core::ptr::NonNull;
+
 use crate::iter::postorder;
 use crate::smr;
 use crate::Edge;
@@ -5,17 +7,19 @@ use crate::Edge;
 pub type Owned<'g, 'l, V> = <V as Value>::Guard<'g, 'l, true>;
 pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
 
-pub trait Value: Sized {
+pub unsafe trait Value: Sized {
     type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
 
-    type Guard<'g, 'l, const RETIRE: bool>: Sized
+    type Guard<'global, 'local, const RETIRE: bool>: Sized
     where
-        Self: 'g + 'l,
-        'g: 'l;
+        Self: 'global + 'local,
+        'global: 'local;
 
-    type Borrow<'l>: Copy
+    type Borrow<'guard>: Copy
     where
-        Self: 'l;
+        Self: 'guard;
+
+    type Target;
 
     type Clone;
 
@@ -28,21 +32,22 @@ pub trait Value: Sized {
 
     fn into_u64(self) -> u64;
 
-    unsafe fn borrow_from_u64<'g, 'l>(
-        smr: &smr::PathGuard<'g, 'l, Self>,
+    unsafe fn borrow_from_u64<'a, 'g, 'l>(
+        smr: &'a smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Borrow<'l>;
+    ) -> Self::Borrow<'a>;
 
-    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
+    fn borrow_into_u64<'guard>(borrow: Self::Borrow<'guard>) -> u64
     where
-        Self: 'l;
+        Self: 'guard;
 
-    unsafe fn clone_from_u64(smr: &smr::PathGuard<'_, '_, Self>, value: u64) -> Self::Clone
+    unsafe fn clone_from_borrow<'guard>(borrow: Self::Borrow<'guard>) -> Self::Clone
     where
+        Self: 'guard,
         Self::Clone: Clone;
 }
 
-impl<T> Value for Box<T> {
+unsafe impl<T> Value for Box<T> {
     type SelectDrop = postorder::SelectNonNull;
 
     type Guard<'g, 'l, const RETIRE: bool>
@@ -56,6 +61,8 @@ impl<T> Value for Box<T> {
     where
         Self: 'l;
 
+    type Target = T;
+
     type Clone = T;
 
     #[inline]
@@ -63,8 +70,12 @@ impl<T> Value for Box<T> {
         smr: smr::PathGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Guard<'g, 'l, RETIRE> {
-        let borrow = Self::borrow_from_u64(&smr, value);
-        unsafe { smr.scope::<RETIRE>(borrow) }
+        let pointer = if cfg!(feature = "validate") {
+            NonNull::new(value as *mut T).unwrap()
+        } else {
+            NonNull::new_unchecked(value as *mut T)
+        };
+        unsafe { smr.scope::<RETIRE>(pointer) }
     }
 
     #[inline]
@@ -78,38 +89,39 @@ impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn borrow_from_u64<'g, 'l>(
-        _smr: &smr::PathGuard<'g, 'l, Self>,
+    unsafe fn borrow_from_u64<'a, 'g, 'l>(
+        _smr: &'a smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Borrow<'l> {
-        let pointer = (value as *const T).as_ref();
+    ) -> Self::Borrow<'a> {
+        let borrow = (value as *const T).as_ref();
         if cfg!(feature = "validate") {
-            pointer.unwrap()
+            borrow.unwrap()
         } else {
-            pointer.unwrap_unchecked()
+            borrow.unwrap_unchecked()
         }
     }
 
     #[inline]
-    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
+    fn borrow_into_u64<'g>(borrow: Self::Borrow<'g>) -> u64
     where
-        Self: 'l,
+        Self: 'g,
     {
         borrow as *const T as u64
     }
 
-    unsafe fn clone_from_u64(smr: &smr::PathGuard<'_, '_, Self>, value: u64) -> Self::Clone
+    unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
     where
+        Self: 'a,
         Self::Clone: Clone,
     {
-        Self::borrow_from_u64(smr, value).clone()
+        borrow.clone()
     }
 }
 
 #[derive(Copy, Clone)]
 pub struct Inline<T>(pub T);
 
-impl<T> Value for Inline<T>
+unsafe impl<T> Value for Inline<T>
 where
     T: Copy + From<u64> + Into<u64>,
 {
@@ -125,6 +137,8 @@ where
         = Self
     where
         Self: 'l;
+
+    type Target = Self;
 
     type Clone = Self;
 
@@ -163,18 +177,19 @@ where
     }
 
     #[inline]
-    unsafe fn clone_from_u64(_smr: &smr::PathGuard<'_, '_, Self>, value: u64) -> Self::Clone
+    unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
     where
+        Self: 'a,
         Self::Clone: Clone,
     {
-        Self(T::from(value))
+        borrow
     }
 }
 
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
-            impl Value for $ty {
+            unsafe impl Value for $ty {
                 type SelectDrop = postorder::SelectNode;
 
                 type Guard<'g, 'l, const RETIRE: bool>
@@ -183,6 +198,8 @@ macro_rules! impl_trivial {
                     'g: 'l;
 
                 type Borrow<'g> = Self;
+
+                type Target = Self;
 
                 type Clone = Self;
 
@@ -218,11 +235,12 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn clone_from_u64(_smr: &smr::PathGuard<'_, '_, Self>, value: u64) -> Self::Clone
+                unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
                 where
+                    Self: 'a,
                     Self::Clone: Clone,
                 {
-                    value as $ty
+                    borrow as $ty
                 }
             }
         )*

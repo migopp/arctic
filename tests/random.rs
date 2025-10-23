@@ -107,7 +107,7 @@ mod boxed {
             'g: 'l,
         {
             assert_eq!(key, index as u32);
-            assert_eq!(*value.as_ref(), Entry::new(index));
+            assert_eq!(*value, Entry::new(index));
         }
     }
 }

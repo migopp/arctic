@@ -1,5 +1,6 @@
 use core::cell::RefCell;
 use core::fmt;
+use core::ptr::NonNull;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
@@ -133,7 +134,7 @@ impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
     #[inline]
     pub(crate) unsafe fn scope<const RETIRE: bool>(
         self,
-        value: V::Borrow<'l>,
+        value: NonNull<V::Target>,
     ) -> LeafGuard<'g, 'l, RETIRE, V> {
         LeafGuard { inner: self, value }
     }
@@ -141,7 +142,7 @@ impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
 
 pub struct LeafGuard<'g, 'l, const RETIRE: bool, V: Value> {
     inner: PathGuard<'g, 'l, V>,
-    value: V::Borrow<'l>,
+    value: NonNull<V::Target>,
 }
 
 impl<'l, const RETIRE: bool, V> fmt::Debug for LeafGuard<'_, 'l, RETIRE, V>
@@ -154,25 +155,15 @@ where
     }
 }
 
-impl<'g, 'l, const RETIRE: bool, V> LeafGuard<'g, 'l, RETIRE, V>
-where
-    V: Value,
-{
-    #[inline]
-    pub fn as_ref(&self) -> V::Borrow<'l> {
-        self.value
-    }
-}
-
 impl<'g, 'l, const RETIRE: bool, V> core::ops::Deref for LeafGuard<'g, 'l, RETIRE, V>
 where
     V: Value,
 {
-    type Target = V::Borrow<'l>;
+    type Target = V::Target;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.value
+        unsafe { self.value.as_ref() }
     }
 }
 
@@ -193,7 +184,9 @@ where
             // to avoid dropping `self.inner`.
             self.inner.0.retire(ribbit::Packed::<Edge<V>>::new(
                 edge::Meta::LEAF.with_key(key),
-                edge::Data::from_borrow(self.value),
+                unsafe {
+                    ribbit::Packed::<edge::Data<V>>::new_unchecked(self.value.as_ptr() as u64)
+                },
             ))
         }
     }

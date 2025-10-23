@@ -240,11 +240,6 @@ impl<L> Data<L> {
 
 impl<L: crate::Value> Data<L> {
     #[inline]
-    pub(crate) fn from_borrow(borrow: L::Borrow<'_>) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(L::borrow_into_u64(borrow)) }
-    }
-
-    #[inline]
     fn from_leaf(leaf: L) -> ribbit::Packed<Self> {
         unsafe { ribbit::Packed::<Self>::new_unchecked(leaf.into_u64()) }
     }
