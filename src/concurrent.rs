@@ -336,7 +336,7 @@ where
 
         validate!(edge.is_node());
 
-        let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bit()));
+        let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bits()));
 
         unsafe {
             cursor.retire(edge.with_meta(edge.meta().with_key(prefix)));
@@ -356,7 +356,7 @@ where
 
         Some(PrefixGuard {
             root: cursor.root(),
-            key: K::Write::from(prefix.slice(cursor.bit())),
+            key: K::Write::from(prefix.slice(cursor.bits())),
             guard: cursor.into_guard(),
         })
     }
@@ -446,7 +446,7 @@ where
         unsafe {
             iter::RangeIter::<K::Read<'k>, K::Write, V>::new(
                 cursor.root(),
-                K::Write::from(prefix.slice(cursor.bit())),
+                K::Write::from(prefix.slice(cursor.bits())),
                 min,
                 max,
             )
@@ -578,7 +578,7 @@ where
         unsafe {
             iter::RangeIter::new(
                 cursor.root(),
-                K::Write::from(prefix.slice(cursor.bit())),
+                K::Write::from(prefix.slice(cursor.bits())),
                 min,
                 max,
             )
@@ -591,7 +591,7 @@ where
             let mut iter = unsafe {
                 iter::RangeIter::new(
                     cursor.root(),
-                    K::Write::from(prefix.slice(cursor.bit())),
+                    K::Write::from(prefix.slice(cursor.bits())),
                     min,
                     max,
                 )

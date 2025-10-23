@@ -21,7 +21,7 @@ pub(crate) struct Cursor<'g, 'l, R, V: Value, H> {
     guard: smr::PathGuard<'g, 'l, V>,
 
     /// Total number of bits read from `key`
-    bit: usize,
+    bits: usize,
 
     /// Current key reader
     key: R,
@@ -47,7 +47,7 @@ where
     ) -> Self {
         Self {
             guard: smr.guard(key.peek_all()),
-            bit: 0,
+            bits: 0,
             key,
             root,
             history: H::default(),
@@ -62,7 +62,7 @@ where
     ) -> Cursor<'g, 'l, R, V, Pessimistic<'g, R, V>> {
         Cursor {
             guard: self.guard,
-            bit: 0,
+            bits: 0,
             key,
             root,
             history: Pessimistic::default(),
@@ -75,8 +75,8 @@ where
     }
 
     #[inline]
-    pub(crate) fn bit(&self) -> usize {
-        self.bit
+    pub(crate) fn bits(&self) -> usize {
+        self.bits
     }
 
     #[inline]
@@ -198,7 +198,7 @@ where
     }
 
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
-        loop {
+        let (key, edge) = loop {
             let edge = self.root.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let data = edge.data();
@@ -208,20 +208,20 @@ where
                 byte::MatchPrefix::Full(len) if edge.is_node() => {
                     let node = unsafe { data.into_node_unchecked() };
                     let Some(byte) = self.key.next() else {
-                        return Some(edge);
+                        break (save, edge);
                     };
                     let next = node.get(byte)?;
                     self.push(save, len, node, next);
                 }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial if edge.is_null() => {
-                    return None
-                }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => {
-                    self.key = save;
-                    return Some(edge);
-                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => match edge.is_null() {
+                    true => return None,
+                    false => break (save, edge),
+                },
             }
-        }
+        };
+
+        self.key = key;
+        Some(edge)
     }
 
     #[cold]
@@ -254,7 +254,7 @@ where
         edge: &'g Atomic128<Edge<V>>,
     ) {
         // 1 extra byte for node
-        self.bit += 8 + len.bits() as usize;
+        self.bits += 8 + len.bits() as usize;
         self.history.push(Segment {
             key,
             len,
@@ -266,7 +266,7 @@ where
     #[cold]
     pub(crate) fn pop(&mut self) -> Result<node::Ref<'g, V>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.bit -= segment.len.bits() as usize + 8;
+        self.bits -= segment.len.bits() as usize + 8;
         self.key = segment.key;
         self.root = segment.edge;
         Ok(segment.node)
