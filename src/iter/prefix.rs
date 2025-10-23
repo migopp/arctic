@@ -6,7 +6,6 @@ use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
 
-#[derive(Clone)]
 pub(crate) enum PrefixIter<'g, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
@@ -107,6 +106,25 @@ where
                     continue 'vertical;
                 }
             }
+        }
+    }
+}
+
+impl<'g, W, V, S> Clone for PrefixIter<'g, W, V, S>
+where
+    W: key::Write,
+    S: Sort,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Root { key, next } => Self::Root {
+                key: key.clone(),
+                next: *next,
+            },
+            Self::Node { key, frontier } => Self::Node {
+                key: key.clone(),
+                frontier: frontier.clone(),
+            },
         }
     }
 }

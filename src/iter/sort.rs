@@ -8,14 +8,11 @@ pub trait Sort: SortPrivate {}
 
 impl<T: SortPrivate> Sort for T {}
 
-#[derive(Clone)]
 pub struct Sorted;
-
-#[derive(Clone)]
 pub struct Unsorted;
 
-pub(crate) trait SortPrivate: Clone {
-    type Iter<'g, V>: Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+pub(crate) trait SortPrivate {
+    type Iter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
     where
         V: 'g;
     unsafe fn new<'g, V>(node: node::Ref<'g, V>) -> Self::Iter<'g, V>;

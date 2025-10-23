@@ -6,7 +6,6 @@ use ribbit::atomic::Atomic128;
 use crate::Edge;
 
 #[repr(transparent)]
-#[derive(Copy, Clone)]
 pub(crate) struct SortedIter<'g, K, V>(Iter<'g, K, V>);
 
 impl<'g, K, V> SortedIter<'g, K, V> {
@@ -15,6 +14,15 @@ impl<'g, K, V> SortedIter<'g, K, V> {
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
     pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
+    }
+}
+
+impl<K, V> Clone for SortedIter<'_, K, V>
+where
+    K: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
@@ -80,8 +88,16 @@ where
 }
 
 #[repr(transparent)]
-#[derive(Copy, Clone)]
 pub(crate) struct UnsortedIter<'g, K, V>(Iter<'g, K, V>);
+
+impl<K, V> Clone for UnsortedIter<'_, K, V>
+where
+    K: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
 impl<'g, K, V> UnsortedIter<'g, K, V> {
     /// # SAFETY
@@ -134,7 +150,6 @@ where
     }
 }
 
-#[derive(Copy, Clone)]
 struct Iter<'g, K, V> {
     keys: K,
     edges: NonNull<Atomic128<Edge<V>>>,
@@ -154,6 +169,23 @@ impl<'g, K, V> Iter<'g, K, V> {
 
             #[cfg(feature = "validate")]
             len: edges.len() as u16,
+
+            _slice: PhantomData,
+        }
+    }
+}
+
+impl<K, V> Clone for Iter<'_, K, V>
+where
+    K: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            keys: self.keys.clone(),
+            edges: self.edges,
+
+            #[cfg(feature = "validate")]
+            len: self.len,
 
             _slice: PhantomData,
         }

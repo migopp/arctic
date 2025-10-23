@@ -12,7 +12,6 @@ pub use sort::Unsorted;
 
 use crate::Key;
 
-#[derive(Clone)]
 pub(crate) enum KeyValueIter<'g, 'k, K: Key, V> {
     Leaf(PrefixIter<'g, K::Write, V, crate::iter::Sorted>),
     // FIXME: take sort order in range iter?
@@ -32,7 +31,16 @@ where
     }
 }
 
-#[derive(Debug)]
+impl<K: Key, V> Clone for KeyValueIter<'_, '_, K, V> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Leaf(iter) => Self::Leaf(iter.clone()),
+            Self::Range(iter) => Self::Range(iter.clone()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum Or<L, R> {
     L(L),
     R(R),

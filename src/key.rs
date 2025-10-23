@@ -55,7 +55,7 @@ pub(crate) trait Read: Copy + core::fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Write: core::fmt::Debug + Default {
+pub(crate) trait Write: Clone + core::fmt::Debug + Default {
     type Len: Copy;
 
     fn bits(&self) -> Self::Len;

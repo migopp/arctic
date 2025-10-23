@@ -9,7 +9,6 @@ use crate::node;
 use crate::Edge;
 use crate::Key;
 
-#[derive(Clone)]
 pub(crate) enum RangeIter<'g, 'k, K: Key, V> {
     Root { key: K::Write, next: Option<u64> },
     Node(NodeIter<'g, 'k, K, V>),
@@ -88,7 +87,18 @@ where
     }
 }
 
-#[derive(Clone)]
+impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Root { key, next } => Self::Root {
+                key: key.clone(),
+                next: *next,
+            },
+            Self::Node(iter) => Self::Node(iter.clone()),
+        }
+    }
+}
+
 pub(crate) struct NodeIter<'g, 'k, K: Key, V> {
     min: K::Read<'k>,
     max: K::Read<'k>,
@@ -208,6 +218,17 @@ where
                     continue 'vertical;
                 }
             }
+        }
+    }
+}
+
+impl<K: Key, V> Clone for NodeIter<'_, '_, K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            min: self.min,
+            max: self.max,
+            key: self.key.clone(),
+            stack: self.stack.clone(),
         }
     }
 }
