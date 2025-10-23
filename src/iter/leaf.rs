@@ -6,25 +6,25 @@ use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
 
-pub(crate) enum LeafIter<'a, W: key::Write, V: 'a, S: Sort> {
+pub(crate) enum LeafIter<'g, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,
     },
     Node {
         key: W,
-        frontier: Vec<(W::Len, S::Iter<'a, V>)>,
+        frontier: Vec<(W::Len, S::Iter<'g, V>)>,
     },
 }
 
-impl<'a, W, V, S> LeafIter<'a, W, V, S>
+impl<'g, W, V, S> LeafIter<'g, W, V, S>
 where
     W: key::Write,
-    V: 'a,
+    V: 'g,
     S: Sort,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<V>>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();

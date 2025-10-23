@@ -8,15 +8,15 @@ use crate::node;
 use crate::node::UnsortedIter;
 use crate::Edge;
 
-pub(crate) struct PostorderIter<'a, V, S>
+pub(crate) struct PostorderIter<'g, V, S>
 where
     S: Selector,
 {
-    stack: Vec<RepeatIter<'a, V>>,
+    stack: Vec<RepeatIter<'g, V>>,
     _selector: PhantomData<S>,
 }
 
-impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
+impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
     #[inline]
     pub(crate) unsafe fn new(root: &Atomic128<Edge<V>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
@@ -112,15 +112,15 @@ impl Selector for SelectStat {
     }
 }
 
-struct RepeatIter<'a, V> {
+struct RepeatIter<'g, V> {
     first: bool,
     edge: ribbit::Packed<Edge<V>>,
-    iter: node::UnsortedIter<'a, V>,
+    iter: node::UnsortedIter<'g, V>,
 }
 
-impl<'a, V> RepeatIter<'a, V> {
+impl<'g, V> RepeatIter<'g, V> {
     #[inline]
-    fn new(iter: node::UnsortedIter<'a, V>) -> Self {
+    fn new(iter: node::UnsortedIter<'g, V>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,
@@ -129,7 +129,7 @@ impl<'a, V> RepeatIter<'a, V> {
     }
 }
 
-impl<'a, V> RepeatIter<'a, V> {
+impl<V> RepeatIter<'_, V> {
     #[inline]
     fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge<V>>)> {
         let first = self.first;

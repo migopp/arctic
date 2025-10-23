@@ -7,9 +7,9 @@ use crate::Edge;
 
 #[repr(transparent)]
 #[derive(Copy, Clone)]
-pub(crate) struct SortedIter<'a, K, V>(Iter<'a, K, V>);
+pub(crate) struct SortedIter<'g, K, V>(Iter<'g, K, V>);
 
-impl<'a, K, V> SortedIter<'a, K, V> {
+impl<'g, K, V> SortedIter<'g, K, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
@@ -18,11 +18,11 @@ impl<'a, K, V> SortedIter<'a, K, V> {
     }
 }
 
-impl<'a, K, V> Iterator for SortedIter<'a, K, V>
+impl<'g, K, V> Iterator for SortedIter<'g, K, V>
 where
     K: Iterator<Item = (u8, u8)>,
 {
-    type Item = (u8, &'a Atomic128<Edge<V>>);
+    type Item = (u8, &'g Atomic128<Edge<V>>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<'a, K, V> DoubleEndedIterator for SortedIter<'a, K, V>
+impl<'g, K, V> DoubleEndedIterator for SortedIter<'g, K, V>
 where
     K: DoubleEndedIterator<Item = (u8, u8)>,
 {
@@ -67,7 +67,7 @@ where
     }
 }
 
-impl<'a, K, V> ExactSizeIterator for SortedIter<'a, K, V>
+impl<'g, K, V> ExactSizeIterator for SortedIter<'g, K, V>
 where
     K: ExactSizeIterator<Item = (u8, u8)>,
 {
@@ -81,9 +81,9 @@ where
 
 #[repr(transparent)]
 #[derive(Copy, Clone)]
-pub(crate) struct UnsortedIter<'a, K, V>(Iter<'a, K, V>);
+pub(crate) struct UnsortedIter<'g, K, V>(Iter<'g, K, V>);
 
-impl<'a, K, V> UnsortedIter<'a, K, V> {
+impl<'g, K, V> UnsortedIter<'g, K, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee `keys` produces at most `edges.len()` keys.
@@ -92,11 +92,11 @@ impl<'a, K, V> UnsortedIter<'a, K, V> {
     }
 }
 
-impl<'a, K, V> Iterator for UnsortedIter<'a, K, V>
+impl<'g, K, V> Iterator for UnsortedIter<'g, K, V>
 where
     K: Iterator<Item = u8>,
 {
-    type Item = (u8, &'a Atomic128<Edge<V>>);
+    type Item = (u8, &'g Atomic128<Edge<V>>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<'a, K, V> ExactSizeIterator for UnsortedIter<'a, K, V>
+impl<'g, K, V> ExactSizeIterator for UnsortedIter<'g, K, V>
 where
     K: ExactSizeIterator<Item = u8>,
 {
@@ -135,17 +135,17 @@ where
 }
 
 #[derive(Copy, Clone)]
-struct Iter<'a, K, V> {
+struct Iter<'g, K, V> {
     keys: K,
     edges: NonNull<Atomic128<Edge<V>>>,
 
     #[cfg(feature = "validate")]
     len: u16,
 
-    _slice: PhantomData<&'a [Atomic128<Edge<V>>]>,
+    _slice: PhantomData<&'g [Atomic128<Edge<V>>]>,
 }
 
-impl<'a, K, V> Iter<'a, K, V> {
+impl<'g, K, V> Iter<'g, K, V> {
     #[inline]
     unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self {

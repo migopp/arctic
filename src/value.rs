@@ -10,14 +10,14 @@ pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
 pub unsafe trait Value: Sized {
     type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
 
-    type Guard<'global, 'local, const RETIRE: bool>: Sized
+    type Guard<'g, 'l, const RETIRE: bool>: Sized
     where
-        Self: 'global + 'local,
-        'global: 'local;
+        Self: 'g + 'l,
+        'g: 'l;
 
-    type Borrow<'guard>: Copy
+    type Borrow<'l>: Copy
     where
-        Self: 'guard;
+        Self: 'l;
 
     type Target;
 
@@ -32,18 +32,18 @@ pub unsafe trait Value: Sized {
 
     fn into_u64(self) -> u64;
 
-    unsafe fn borrow_from_u64<'a, 'g, 'l>(
-        smr: &'a smr::PathGuard<'g, 'l, Self>,
+    unsafe fn borrow_from_u64<'g, 'l>(
+        smr: &'l smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Borrow<'a>;
+    ) -> Self::Borrow<'l>;
 
-    fn borrow_into_u64<'guard>(borrow: Self::Borrow<'guard>) -> u64
+    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
     where
-        Self: 'guard;
+        Self: 'l;
 
-    unsafe fn clone_from_borrow<'guard>(borrow: Self::Borrow<'guard>) -> Self::Clone
+    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
     where
-        Self: 'guard,
+        Self: 'l,
         Self::Clone: Clone;
 }
 
@@ -89,10 +89,10 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn borrow_from_u64<'a, 'g, 'l>(
-        _smr: &'a smr::PathGuard<'g, 'l, Self>,
+    unsafe fn borrow_from_u64<'g, 'l>(
+        _smr: &'l smr::PathGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Borrow<'a> {
+    ) -> Self::Borrow<'l> {
         let borrow = (value as *const T).as_ref();
         if cfg!(feature = "validate") {
             borrow.unwrap()
@@ -102,16 +102,16 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    fn borrow_into_u64<'g>(borrow: Self::Borrow<'g>) -> u64
+    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
     where
-        Self: 'g,
+        Self: 'l,
     {
         borrow as *const T as u64
     }
 
-    unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
+    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
     where
-        Self: 'a,
+        Self: 'l,
         Self::Clone: Clone,
     {
         borrow.clone()
@@ -177,9 +177,9 @@ where
     }
 
     #[inline]
-    unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
+    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
     where
-        Self: 'a,
+        Self: 'l,
         Self::Clone: Clone,
     {
         borrow
@@ -235,9 +235,9 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn clone_from_borrow<'a>(borrow: Self::Borrow<'a>) -> Self::Clone
+                unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
                 where
-                    Self: 'a,
+                    Self: 'l,
                     Self::Clone: Clone,
                 {
                     borrow as $ty

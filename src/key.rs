@@ -206,9 +206,9 @@ macro_rules! impl_unsigned_int {
 impl_unsigned_int!(u16, u32, u64, u128);
 
 impl Key for Vec<u8> {
-    type Read<'a> = dynamic::Reader<'a>;
+    type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
-    type Borrow<'a> = &'a [u8];
+    type Borrow<'k> = &'k [u8];
 
     #[inline]
     fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
@@ -239,9 +239,9 @@ impl From<dynamic::Writer> for Vec<u8> {
 }
 
 impl Key for String {
-    type Read<'a> = dynamic::Reader<'a>;
+    type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
-    type Borrow<'a> = &'a str;
+    type Borrow<'k> = &'k str;
 
     #[inline]
     fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>

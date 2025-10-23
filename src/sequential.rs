@@ -34,7 +34,7 @@ impl<K, V: Value> Map<K, V> {
         &self.root
     }
 
-    pub(crate) fn postorder<'a, S: postorder::Selector>(&'a self) -> PostorderIter<'a, V, S> {
+    pub(crate) fn postorder<'g, S: postorder::Selector>(&'g self) -> PostorderIter<'g, V, S> {
         unsafe { PostorderIter::new(&self.root) }
     }
 }
@@ -69,9 +69,9 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 }
 
-pub struct Iter<'a, K: Key, V, S: Sort>(LeafIter<'a, K::Write, V, S>);
+pub struct Iter<'g, K: Key, V, S: Sort>(LeafIter<'g, K::Write, V, S>);
 
-impl<'a, K, V, S> Iter<'a, K, V, S>
+impl<'g, K, V, S> Iter<'g, K, V, S>
 where
     K: Key,
     V: Value,

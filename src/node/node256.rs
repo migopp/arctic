@@ -72,7 +72,7 @@ impl<V> Debug for Node256<V> {
 impl<V> node::Info<V> for Node256<V> {
     const KIND: node::Kind = node::Kind::Node256;
     const GROW: usize = 256;
-    const REF: for<'a> fn(&'a Self) -> node::Ref<'a, V> = |node| node::Ref::Node256(node);
+    const REF: for<'g> fn(&'g Self) -> node::Ref<'g, V> = |node| node::Ref::Node256(node);
     type Grow = Node256<V>;
     type Shrink = Node15<V>;
 }

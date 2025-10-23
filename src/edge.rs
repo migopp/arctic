@@ -283,9 +283,9 @@ impl<L> DataPacked<L> {
     }
 
     #[inline]
-    pub(crate) unsafe fn into_node_unchecked<'a>(self) -> node::Ref<'a, L> {
+    pub(crate) unsafe fn into_node_unchecked<'g>(self) -> node::Ref<'g, L> {
         #[inline]
-        unsafe fn convert<'a, L, N: node::Info<L> + 'a>(ptr: u64) -> node::Ref<'a, L> {
+        unsafe fn convert<'g, L, N: node::Info<L> + 'g>(ptr: u64) -> node::Ref<'g, L> {
             let node = unsafe { (ptr as *const N).as_ref() };
             validate!(node.is_some());
             N::REF(unsafe { node.unwrap_unchecked() })
@@ -339,7 +339,7 @@ impl<L> Debug for DataPacked<L> {
     }
 }
 
-pub(crate) struct DebugSlice<'a, L>(pub(crate) &'a [Atomic128<Edge<L>>]);
+pub(crate) struct DebugSlice<'g, L>(pub(crate) &'g [Atomic128<Edge<L>>]);
 
 impl<L> Debug for DebugSlice<'_, L> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

@@ -125,7 +125,7 @@ impl linear::Header for Atomic64<Header> {
 impl<V> node::Info<V> for Node3<V> {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
-    const REF: for<'a> fn(&'a Self) -> node::Ref<'a, V> = |node| node::Ref::Node3(node);
+    const REF: for<'g> fn(&'g Self) -> node::Ref<'g, V> = |node| node::Ref::Node3(node);
 
     type Grow = Node15<V>;
     type Shrink = Node3<V>;

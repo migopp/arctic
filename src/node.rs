@@ -32,7 +32,7 @@ pub(crate) trait Node<V> {
 pub(crate) trait Info<V>: Node<V> + Default + core::fmt::Debug {
     const KIND: Kind;
     const GROW: usize;
-    const REF: for<'a> fn(&'a Self) -> Ref<'a, V>;
+    const REF: for<'g> fn(&'g Self) -> Ref<'g, V>;
 
     type Grow: Info<V>;
     type Shrink: Info<V>;
@@ -57,22 +57,22 @@ pub(crate) enum Op {
     Compress,
 }
 
-pub(crate) enum Ref<'a, V> {
-    Node3(&'a Node3<V>),
-    Node15(&'a Node15<V>),
-    Node256(&'a Node256<V>),
+pub(crate) enum Ref<'g, V> {
+    Node3(&'g Node3<V>),
+    Node15(&'g Node15<V>),
+    Node256(&'g Node256<V>),
 }
 
-impl<'a, V> Copy for Ref<'a, V> {}
-impl<'a, V> Clone for Ref<'a, V> {
+impl<'g, V> Copy for Ref<'g, V> {}
+impl<'g, V> Clone for Ref<'g, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, V> Ref<'a, V> {
+impl<'g, V> Ref<'g, V> {
     #[inline]
-    pub(crate) fn iter_sorted(&self) -> SortedIter<'a, V> {
+    pub(crate) fn iter_sorted(&self) -> SortedIter<'g, V> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
             Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
@@ -86,7 +86,7 @@ impl<'a, V> Ref<'a, V> {
     }
 
     #[inline]
-    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'a, V> {
+    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'g, V> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
@@ -97,7 +97,7 @@ impl<'a, V> Ref<'a, V> {
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'a, V> {
+    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'g, V> {
         if min.is_none() && max.is_none() {
             return self.iter_sorted();
         }
@@ -121,9 +121,9 @@ impl<'a, V> Ref<'a, V> {
     }
 }
 
-impl<'a, V> Ref<'a, V> {
+impl<'g, V> Ref<'g, V> {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'a Atomic128<Edge<V>>> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<V>>> {
         match self {
             Ref::Node3(node) => node.get(key),
             Ref::Node15(node) => node.get(key),
@@ -132,7 +132,7 @@ impl<'a, V> Ref<'a, V> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'a Atomic128<Edge<V>>> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<V>>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
@@ -186,9 +186,9 @@ impl Kind {
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }
 
-pub(crate) type SortedIter<'a, V> = iter::SortedIter<'a, SortedKeyIter, V>;
+pub(crate) type SortedIter<'g, V> = iter::SortedIter<'g, SortedKeyIter, V>;
 
-pub(crate) type UnsortedIter<'a, V> = iter::UnsortedIter<'a, UnsortedKeyIter, V>;
+pub(crate) type UnsortedIter<'g, V> = iter::UnsortedIter<'g, UnsortedKeyIter, V>;
 
 pub(crate) type UnsortedKeyIter = Or<linear::UnsortedKeyIter, node256::KeyIter>;
 

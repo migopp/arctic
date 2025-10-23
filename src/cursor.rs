@@ -297,30 +297,30 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     }
 }
 
-pub(crate) trait History<'a, R, V>: Default {
+pub(crate) trait History<'g, R, V>: Default {
     type PopError;
 
-    fn push(&mut self, segment: Segment<'a, R, V>);
-    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError>;
+    fn push(&mut self, segment: Segment<'g, R, V>);
+    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError>;
 }
 
 #[derive(Default)]
 pub(crate) struct Optimistic;
 
-impl<'a, R, V> History<'a, R, V> for Optimistic {
+impl<'g, R, V> History<'g, R, V> for Optimistic {
     type PopError = ();
 
     #[inline]
-    fn push(&mut self, _segment: Segment<'a, R, V>) {}
+    fn push(&mut self, _segment: Segment<'g, R, V>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         Err(())
     }
 }
 
-pub(crate) struct Pessimistic<'a, R, V> {
-    path: Vec<Segment<'a, R, V>>,
+pub(crate) struct Pessimistic<'g, R, V> {
+    path: Vec<Segment<'g, R, V>>,
 }
 
 impl<R, V> Default for Pessimistic<'_, R, V> {
@@ -331,24 +331,24 @@ impl<R, V> Default for Pessimistic<'_, R, V> {
     }
 }
 
-impl<'a, R, V> History<'a, R, V> for Pessimistic<'a, R, V> {
+impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
     type PopError = Infallible;
 
     #[inline]
-    fn push(&mut self, segment: Segment<'a, R, V>) {
+    fn push(&mut self, segment: Segment<'g, R, V>) {
         self.path.push(segment);
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'a, R, V>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         Ok(self.path.pop())
     }
 }
 
 /// A path along the tree is composed of 0 or more path segments.
-pub(crate) struct Segment<'a, R, V> {
+pub(crate) struct Segment<'g, R, V> {
     /// Edge to match
-    edge: &'a Atomic128<Edge<V>>,
+    edge: &'g Atomic128<Edge<V>>,
 
     /// Key before matching on `edge`
     key: R,
@@ -357,5 +357,5 @@ pub(crate) struct Segment<'a, R, V> {
     len: byte::Len,
 
     /// Node underneath `edge`
-    node: node::Ref<'a, V>,
+    node: node::Ref<'g, V>,
 }

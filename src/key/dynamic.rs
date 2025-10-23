@@ -5,15 +5,15 @@ use crate::key;
 use crate::key::fixed;
 
 #[derive(Copy, Clone, Debug)]
-pub enum Reader<'a> {
+pub enum Reader<'k> {
     // INVARIANT: `len > 8`
-    Large(&'a [u8]),
+    Large(&'k [u8]),
     Small(fixed::Buffer<u64>),
 }
 
-impl<'a> From<&'a [u8]> for Reader<'a> {
+impl<'k> From<&'k [u8]> for Reader<'k> {
     #[inline]
-    fn from(key: &'a [u8]) -> Self {
+    fn from(key: &'k [u8]) -> Self {
         match key.len() {
             9.. => Self::Large(key),
             len => {
@@ -27,16 +27,16 @@ impl<'a> From<&'a [u8]> for Reader<'a> {
     }
 }
 
-impl<'a, const N: usize> From<&'a [u8; N]> for Reader<'a> {
+impl<'k, const N: usize> From<&'k [u8; N]> for Reader<'k> {
     #[inline]
-    fn from(value: &'a [u8; N]) -> Self {
+    fn from(value: &'k [u8; N]) -> Self {
         Self::from(value.as_slice())
     }
 }
 
-impl<'a> From<&'a str> for Reader<'a> {
+impl<'k> From<&'k str> for Reader<'k> {
     #[inline]
-    fn from(value: &'a str) -> Self {
+    fn from(value: &'k str) -> Self {
         Self::from(value.as_bytes())
     }
 }
@@ -207,8 +207,8 @@ impl key::Write for Writer {
     }
 }
 
-impl<'a> From<Reader<'a>> for Writer {
-    fn from(iter: Reader<'a>) -> Self {
+impl<'k> From<Reader<'k>> for Writer {
+    fn from(iter: Reader<'k>) -> Self {
         Self(match iter {
             Reader::Large(large) => large.to_vec(),
             Reader::Small(small) => small.with_bytes(|small| small.to_vec()),
