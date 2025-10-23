@@ -49,6 +49,16 @@ where
 
     #[inline]
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
+        self.walk::<true, _>(|_, _| ())
+    }
+
+    #[inline]
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+        self.walk::<false, _>(apply);
+    }
+
+    #[inline]
+    fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         let (key, frontier) = match self {
             Self::Root { key, next } => {
                 crate::cold();
@@ -80,7 +90,11 @@ where
                 key.extend(meta.key());
 
                 if meta.leaf() {
-                    return Some((key, data.into_leaf()));
+                    if YIELD {
+                        return Some((key, data.into_leaf()));
+                    } else {
+                        apply(key, data.into_leaf());
+                    }
                 } else {
                     let node = unsafe { data.into_node_unchecked() };
                     frontier.push((key.bits(), unsafe { S::new(node) }));

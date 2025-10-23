@@ -10,6 +10,27 @@ pub use sort::Sort;
 pub use sort::Sorted;
 pub use sort::Unsorted;
 
+use crate::Key;
+
+pub(crate) enum KeyValueIter<'g, 'k, K: Key, V> {
+    Leaf(LeafIter<'g, K::Write, V, crate::iter::Sorted>),
+    // FIXME: take sort order in range iter?
+    Range(RangeIter<'g, 'k, K, V>),
+}
+
+impl<'g, 'k, K, V> KeyValueIter<'g, 'k, K, V>
+where
+    K: Key,
+{
+    #[inline]
+    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+        match self {
+            KeyValueIter::Leaf(iter) => iter.for_each(apply),
+            KeyValueIter::Range(iter) => iter.for_each(apply),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum Or<L, R> {
     L(L),
