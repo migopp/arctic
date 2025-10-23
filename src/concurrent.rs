@@ -377,196 +377,197 @@ where
         })
     }
 
-    pub fn range_pessimistic<'l>(
-        &'l mut self,
-        min: impl Into<K::Read<'l>>,
-        max: impl Into<K::Read<'l>>,
-        output: &mut Vec<(K, V)>,
-    ) {
-        let min = min.into();
-        let max = max.into();
-        let prefix = min.prefix(&max);
-
-        let mut cursor =
-            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
-
-        if cursor.traverse_prefix().is_none() {
-            return;
-        }
-
-        Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
-    }
-
-    fn pessimistic<'l, 'k>(
-        root: &'g Atomic128<Edge<V>>,
-        cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-        prefix: K::Read<'k>,
-        min: K::Read<'k>,
-        max: K::Read<'k>,
-        output: &mut Vec<(K, V)>,
-    ) {
-        match Self::pessimistic_impl(root, cursor, prefix, min, max, output) {
-            Ok(()) => (),
-            Err(cursor) => Self::pessimistic_pessimistic(root, cursor, prefix, min, max, output),
-        }
-    }
-
-    #[cold]
-    fn pessimistic_pessimistic<'l, 'k>(
-        root: &'g Atomic128<Edge<V>>,
-        cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-        prefix: K::Read<'k>,
-        min: K::Read<'k>,
-        max: K::Read<'k>,
-        output: &mut Vec<(K, V)>,
-    ) {
-        stat::increment(stat::Counter::LockFrozen);
-
-        let mut cursor = cursor.upgrade(root, prefix);
-
-        let Some(_) = cursor.traverse_prefix() else {
-            return;
-        };
-
-        match Self::pessimistic_impl(root, cursor, prefix, min, max, output) {
-            Ok(()) => (),
-            Err(_) => unreachable!(),
-        }
-    }
-
-    fn pessimistic_impl<'l, 'k, H: cursor::History<'g, K::Read<'k>, V>>(
-        root: &'g Atomic128<Edge<V>>,
-        mut cursor: Cursor<'g, 'l, K::Read<'k>, V, H>,
-        prefix: K::Read<'k>,
-        min: K::Read<'k>,
-        max: K::Read<'k>,
-        output: &mut Vec<(K, V)>,
-    ) -> Result<(), Cursor<'g, 'l, K::Read<'k>, V, H>> {
-        match Self::lock(&mut cursor, prefix) {
-            Ok(()) => (),
-            Err(_) => return Err(cursor),
-        }
-
-        unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new(
-                cursor.root(),
-                K::Write::from(prefix.slice(cursor.bits())),
-                min,
-                max,
-            )
-        }
-        .for_each(|key, value| {
-            output.push((K::from(K::Borrow::from(key)), unsafe { V::from_u64(value) }))
-        });
-
-        match Self::unlock(&mut cursor, prefix) {
-            Ok(()) => (),
-            Err(_) => Self::unlock_pessimistic(root, cursor, prefix),
-        }
-
-        Ok(())
-    }
-
-    fn lock<'k, H: cursor::History<'g, K::Read<'k>, V>>(
-        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
-        prefix: K::Read<'k>,
-    ) -> Result<(), H::PopError> {
-        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-
-        loop {
-            // No need to lock leaf
-            if edge.meta().leaf() {
-                return Ok(());
-            }
-
-            if edge.meta().frozen() || edge.data().scan() {
-                match cursor.wait_for_scan(stat::Counter::ScanScan) {
-                    Ok(safe) if !edge.meta().frozen() => edge = safe,
-                    Ok(_) | Err(()) => {
-                        Self::freeze(cursor, prefix)?;
-                    }
-                }
-            }
-
-            match cursor.root().compare_exchange_packed(
-                edge,
-                edge.with_data(edge.data().with_scan(true)),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return Ok(()),
-                Err(conflict) => {
-                    core::hint::spin_loop();
-                    edge = conflict;
-                }
-            }
-        }
-    }
-
-    #[cold]
-    fn unlock_pessimistic<'k, H: cursor::History<'g, K::Read<'k>, V>>(
-        root: &'g Atomic128<Edge<V>>,
-        cursor: Cursor<'g, '_, K::Read<'k>, V, H>,
-        prefix: K::Read<'k>,
-    ) {
-        stat::increment(stat::Counter::UnlockFrozen);
-
-        let mut cursor = cursor.upgrade(root, prefix);
-
-        let Some(_) = cursor.traverse_prefix() else {
-            unreachable!("Scan lock must exist");
-        };
-
-        Self::unlock(&mut cursor, prefix).unwrap()
-    }
-
-    #[inline]
-    fn unlock<'k, H>(
-        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
-        prefix: K::Read<'k>,
-    ) -> Result<(), H::PopError>
-    where
-        H: cursor::History<'g, K::Read<'k>, V>,
-    {
-        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-
-        if edge.meta().leaf() {
-            return Ok(());
-        }
-
-        loop {
-            validate!(edge.data().scan());
-
-            if edge.meta().frozen() {
-                Self::freeze(cursor, prefix)?;
-                edge = cursor
-                    .traverse_prefix()
-                    .expect("Scan bit must be reachable");
-                continue;
-            }
-
-            match cursor.root().compare_exchange_packed(
-                edge,
-                edge.with_data(edge.data().with_scan(false)),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return Ok(()),
-                Err(conflict) => {
-                    core::hint::spin_loop();
-                    edge = conflict;
-                }
-            }
-        }
-    }
+    // pub fn range_pessimistic<'l>(
+    //     &'l mut self,
+    //     buffer: &mut Vec<(K::Write, u64)>,
+    //     min: impl Into<K::Read<'l>>,
+    //     max: impl Into<K::Read<'l>>,
+    // ) {
+    //     let min = min.into();
+    //     let max = max.into();
+    //     let prefix = min.prefix(&max);
+    //
+    //     let mut cursor =
+    //         Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+    //
+    //     if cursor.traverse_prefix().is_none() {
+    //         return;
+    //     }
+    //
+    //     Self::pessimistic(buffer, self.raw.root(), cursor, prefix, min, max);
+    // }
+    //
+    // fn pessimistic<'l, 'k>(
+    //     buffer: &mut Vec<(K::Write, u64)>,
+    //     root: &'g Atomic128<Edge<V>>,
+    //     cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
+    //     prefix: K::Read<'k>,
+    //     min: K::Read<'k>,
+    //     max: K::Read<'k>,
+    // ) {
+    //     match Self::pessimistic_impl(buffer, root, cursor, prefix, min, max) {
+    //         Ok(()) => (),
+    //         Err(cursor) => Self::pessimistic_pessimistic(buffer, root, cursor, prefix, min, max),
+    //     }
+    // }
+    //
+    // #[cold]
+    // fn pessimistic_pessimistic<'l, 'k>(
+    //     buffer: &mut Vec<(K::Write, u64)>,
+    //     root: &'g Atomic128<Edge<V>>,
+    //     cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
+    //     prefix: K::Read<'k>,
+    //     min: K::Read<'k>,
+    //     max: K::Read<'k>,
+    // ) {
+    //     stat::increment(stat::Counter::LockFrozen);
+    //
+    //     let mut cursor = cursor.upgrade(root, prefix);
+    //
+    //     let Some(_) = cursor.traverse_prefix() else {
+    //         return;
+    //     };
+    //
+    //     match Self::pessimistic_impl(buffer, root, cursor, prefix, min, max) {
+    //         Ok(()) => (),
+    //         Err(_) => unreachable!(),
+    //     }
+    // }
+    //
+    // fn pessimistic_impl<'l, 'k, H: cursor::History<'g, K::Read<'k>, V>>(
+    //     buffer: &'l mut Vec<(K::Write, u64)>,
+    //     root: &'g Atomic128<Edge<V>>,
+    //     mut cursor: Cursor<'g, 'l, K::Read<'k>, V, H>,
+    //     prefix: K::Read<'k>,
+    //     min: K::Read<'k>,
+    //     max: K::Read<'k>,
+    // ) -> Result<LinearizableGuard<'g, 'l, K, V>, Cursor<'g, 'l, K::Read<'k>, V, H>> {
+    //     match Self::lock(&mut cursor, prefix) {
+    //         Ok(()) => (),
+    //         Err(_) => return Err(cursor),
+    //     }
+    //
+    //     unsafe {
+    //         iter::RangeIter::<'g, '_, K, V>::new(
+    //             cursor.root(),
+    //             K::Write::from(prefix.slice(cursor.bits())),
+    //             min,
+    //             max,
+    //         )
+    //     }
+    //     .for_each(|key, value| buffer.push((key.clone(), value)));
+    //
+    //     match Self::unlock(&mut cursor, prefix) {
+    //         Ok(()) => (),
+    //         Err(_) => Self::unlock_pessimistic(root, cursor, prefix),
+    //     }
+    //
+    //     Ok(LinearizableGuard {
+    //         guard: cursor.into_guard(),
+    //         buffer,
+    //     })
+    // }
+    //
+    // fn lock<'k, H: cursor::History<'g, K::Read<'k>, V>>(
+    //     cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
+    //     prefix: K::Read<'k>,
+    // ) -> Result<(), H::PopError> {
+    //     let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+    //
+    //     loop {
+    //         // No need to lock leaf
+    //         if edge.meta().leaf() {
+    //             return Ok(());
+    //         }
+    //
+    //         if edge.meta().frozen() || edge.data().scan() {
+    //             match cursor.wait_for_scan(stat::Counter::ScanScan) {
+    //                 Ok(safe) if !edge.meta().frozen() => edge = safe,
+    //                 Ok(_) | Err(()) => {
+    //                     Self::freeze(cursor, prefix)?;
+    //                 }
+    //             }
+    //         }
+    //
+    //         match cursor.root().compare_exchange_packed(
+    //             edge,
+    //             edge.with_data(edge.data().with_scan(true)),
+    //             Ordering::Relaxed,
+    //             Ordering::Relaxed,
+    //         ) {
+    //             Ok(_) => return Ok(()),
+    //             Err(conflict) => {
+    //                 core::hint::spin_loop();
+    //                 edge = conflict;
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // #[cold]
+    // fn unlock_pessimistic<'k, H: cursor::History<'g, K::Read<'k>, V>>(
+    //     root: &'g Atomic128<Edge<V>>,
+    //     cursor: Cursor<'g, '_, K::Read<'k>, V, H>,
+    //     prefix: K::Read<'k>,
+    // ) {
+    //     stat::increment(stat::Counter::UnlockFrozen);
+    //
+    //     let mut cursor = cursor.upgrade(root, prefix);
+    //
+    //     let Some(_) = cursor.traverse_prefix() else {
+    //         unreachable!("Scan lock must exist");
+    //     };
+    //
+    //     Self::unlock(&mut cursor, prefix).unwrap()
+    // }
+    //
+    // #[inline]
+    // fn unlock<'k, H>(
+    //     cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
+    //     prefix: K::Read<'k>,
+    // ) -> Result<(), H::PopError>
+    // where
+    //     H: cursor::History<'g, K::Read<'k>, V>,
+    // {
+    //     let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+    //
+    //     if edge.meta().leaf() {
+    //         return Ok(());
+    //     }
+    //
+    //     loop {
+    //         validate!(edge.data().scan());
+    //
+    //         if edge.meta().frozen() {
+    //             Self::freeze(cursor, prefix)?;
+    //             edge = cursor
+    //                 .traverse_prefix()
+    //                 .expect("Scan bit must be reachable");
+    //             continue;
+    //         }
+    //
+    //         match cursor.root().compare_exchange_packed(
+    //             edge,
+    //             edge.with_data(edge.data().with_scan(false)),
+    //             Ordering::Relaxed,
+    //             Ordering::Relaxed,
+    //         ) {
+    //             Ok(_) => return Ok(()),
+    //             Err(conflict) => {
+    //                 core::hint::spin_loop();
+    //                 edge = conflict;
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn range_optimistic<'l, 'k>(
         &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        limit: usize,
         min: impl Into<K::Read<'k>>,
         max: impl Into<K::Read<'k>>,
-        retry: usize,
-        output: &mut Vec<(K, V)>,
-    ) {
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
         let prefix = min.prefix(&max);
@@ -574,101 +575,37 @@ where
         let mut cursor =
             Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
-        let Some(_) = cursor.traverse_prefix() else {
-            return;
-        };
+        cursor.traverse_prefix()?;
 
-        let len = output.len();
-        unsafe {
+        let iter = unsafe {
             iter::RangeIter::<'g, '_, K, V>::new(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bits())),
                 min,
                 max,
             )
-        }
-        .for_each(|key, value| {
-            output.push((K::from(K::Borrow::from(key)), unsafe { V::from_u64(value) }))
-        });
+        };
 
-        for retry in 0..=retry {
-            let mut iter = unsafe {
-                iter::RangeIter::<'g, '_, K, V>::new(
-                    cursor.root(),
-                    K::Write::from(prefix.slice(cursor.bits())),
-                    min,
-                    max,
-                )
-            };
-            let mut dirty = false;
-            let mut len = len;
+        Self::optimistic(buffer, &mut cursor, &iter::KeyValueIter::Range(iter), limit).unwrap();
+        // Ok(()) => (),
+        // Err(()) => {
+        //     crate::cold();
+        //     buffer.clear();
+        //     Self::pessimistic(buffer, self.raw.root(), cursor, prefix, min, max);
+        // }
 
-            iter.for_each(|new_writer, new_value| {
-                let index = len;
-                len += 1;
-
-                let new_borrow = K::Borrow::from(new_writer);
-                let new_value = unsafe { V::from_u64(new_value) };
-
-                let old = match output
-                    .get_mut(index)
-                    .map(|(key, value)| (key.borrow(), value))
-                {
-                    // Fast path: no change
-                    Some((old_borrow, old_value))
-                        if old_borrow == new_borrow =>
-                        // FIXME: use physical equality && *old_value == new_value =>
-                    {
-                        return;
-                    }
-                    old => old,
-                };
-
-                crate::cold();
-
-                dirty = true;
-
-                match old {
-                    Some((old_borrow, old_value)) if old_borrow == new_borrow => {
-                        *old_value = new_value;
-                    }
-                    Some((old_borrow, _)) if old_borrow < new_borrow => {
-                        let high = output[len..]
-                            .iter()
-                            .map(|(key, value)| (key.borrow(), value))
-                            .position(|(old_borrow, _)| old_borrow >= new_borrow)
-                            .map(|offset| len + offset)
-                            .unwrap_or(output.len());
-                        output.drain(index..high);
-                        len = index;
-                    }
-                    None | Some(_) => {
-                        let new_key = K::from(K::Borrow::from(new_writer));
-                        output.insert(index, (new_key, new_value));
-                    }
-                };
-            });
-
-            if len == output.len() && !dirty {
-                stat::record(stat::Record::RangeConflict, retry as u64);
-                return;
-            }
-
-            crate::cold();
-            validate!(output.len() <= len);
-            output.truncate(len);
-        }
-
-        Self::pessimistic(self.raw.root(), cursor, prefix, min, max, output);
+        Some(LinearizableGuard {
+            guard: cursor.into_guard(),
+            buffer,
+        })
     }
 
     fn optimistic<'l, 'k>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
+        buffer: &mut Vec<(K::Write, u64)>,
+        _cursor: &mut Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
         iter: &iter::KeyValueIter<'g, 'k, K, V>,
         limit: usize,
-    ) -> Result<LinearizableGuard<'g, 'l, K, V>, Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>>
-    {
+    ) -> Result<(), ()> {
         iter.clone()
             .for_each(|key, value| buffer.push((key.clone(), value)));
 
@@ -712,17 +649,14 @@ where
 
             if len == buffer.len() && !dirty {
                 stat::record(stat::Record::RangeConflict, retry as u64);
-                return Ok(LinearizableGuard {
-                    guard: cursor.into_guard(),
-                    buffer,
-                });
+                return Ok(());
             }
 
             validate!(buffer.len() <= len);
             buffer.truncate(len);
         }
 
-        Err(cursor)
+        Err(())
     }
 }
 
@@ -734,7 +668,7 @@ pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
 
 impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
     #[inline]
-    pub fn drain<S: Sort>(&mut self) -> LinearizableDrain<'g, '_, K, V> {
+    pub fn drain(&mut self) -> LinearizableDrain<'g, '_, K, V> {
         LinearizableDrain {
             guard: &self.guard,
             iter: self.buffer.drain(..),

@@ -260,16 +260,16 @@ mod tests {
 
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
-        pin.range_optimistic(first.borrow(), last.borrow(), usize::MAX, &mut buffer);
-        buffer
-            .into_iter()
-            .zip(&keys)
-            .for_each(|((lk, lv), (rk, rv))| {
-                assert_eq!(lk, *rk);
-                assert_eq!(lv, *rv);
-            });
-
+        let mut range = pin
+            .range_optimistic(&mut buffer, usize::MAX, first.borrow(), last.borrow())
+            .unwrap();
+        range.drain().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
+            assert_eq!(lk, *rk);
+            assert_eq!(lv, *rv);
+        });
+        drop(range);
         drop(pin);
+
         map
     }
 }
