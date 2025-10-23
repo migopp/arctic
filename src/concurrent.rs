@@ -362,15 +362,19 @@ where
     }
 
     // FIXME: support `Option` for min, max
-    pub fn range<'l, 'k>(
+    pub fn range<'l>(
         &'l mut self,
-        min: impl Into<K::Read<'k>>,
-        max: impl Into<K::Read<'k>>,
-    ) -> Option<RangeGuard<'g, 'l, 'k, K, V>> {
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
+    ) -> Option<RangeGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
         let prefix = self.prefix(min.prefix(&max))?;
-        Some(RangeGuard { prefix, min, max })
+        Some(RangeGuard {
+            prefix,
+            min: K::reborrow(min),
+            max: K::reborrow(max),
+        })
     }
 
     pub fn range_pessimistic<'l>(
@@ -712,42 +716,39 @@ where
     }
 }
 
-pub struct RangeGuard<'g, 'l, 'k, K: Key, V: Value> {
+pub struct RangeGuard<'g, 'l, K: Key, V: Value> {
     prefix: PrefixGuard<'g, 'l, K, V>,
-    // NOTE: `K::Read<'k>` causes lifetime 'k to be invariant, so we
-    // can't merge it with `'l` (even though all of our implementations are covariant)
-    // https://stackoverflow.com/questions/77022284/lifetime-variance-issue-when-using-trait-with-associated-type-that-has-a-lifetim
-    min: K::Read<'k>,
-    max: K::Read<'k>,
+    min: K::Read<'l>,
+    max: K::Read<'l>,
 }
 
-impl<'g, 'l, 'k, K, V> RangeGuard<'g, 'l, 'k, K, V>
+impl<'g, 'l, K, V> RangeGuard<'g, 'l, K, V>
 where
     K: Key,
     V: Value,
 {
     #[inline]
-    pub fn iter(&self) -> RangeIter<'g, '_, 'k, K, V> {
+    pub fn iter(&self) -> RangeIter<'g, '_, K, V> {
         RangeIter {
             guard: &self.prefix.guard,
             iter: unsafe {
                 iter::RangeIter::new(
                     self.prefix.root,
                     self.prefix.key.clone(),
-                    self.min,
-                    self.max,
+                    K::reborrow(self.min),
+                    K::reborrow(self.max),
                 )
             },
         }
     }
 }
 
-pub struct RangeIter<'g, 'l, 'k, K: Key, V: Value> {
+pub struct RangeIter<'g, 'l, K: Key, V: Value> {
     guard: &'l smr::PathGuard<'g, 'l, V>,
-    iter: iter::RangeIter<'g, 'k, K, V>,
+    iter: iter::RangeIter<'g, 'l, K, V>,
 }
 
-impl<'g, 'l, 'k, K, V> RangeIter<'g, 'l, 'k, K, V>
+impl<'g, 'l, K, V> RangeIter<'g, 'l, K, V>
 where
     K: Key,
     V: Value,
@@ -771,7 +772,7 @@ where
     }
 }
 
-impl<'g, 'l, 'k, K, V> Iterator for RangeIter<'g, 'l, 'k, K, V>
+impl<'g, 'l, K, V> Iterator for RangeIter<'g, 'l, K, V>
 where
     K: Key,
     V: Value,

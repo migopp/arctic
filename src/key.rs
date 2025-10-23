@@ -20,6 +20,12 @@ pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
         + Clone
         + Ord;
 
+    /// HACK: work around invariant lifetime for generic associated traits
+    /// https://users.rust-lang.org/t/expressing-the-covariance-of-gats/65664/4
+    fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
+    where
+        'long: 'short;
+
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
@@ -95,6 +101,14 @@ macro_rules! impl_unsigned_int {
                 fn borrow(&self) -> Self {
                     *self
                 }
+
+                #[inline]
+                fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
+                where
+                    'long: 'short
+                {
+                    reader
+                }
             }
 
             impl<'k> From<&'k fixed::Writer> for $ty {
@@ -113,6 +127,14 @@ impl Key for Vec<u8> {
     type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
     type Borrow<'a> = &'a [u8];
+
+    #[inline]
+    fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
+    where
+        'long: 'short,
+    {
+        reader
+    }
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -138,6 +160,14 @@ impl Key for String {
     type Read<'a> = dynamic::Reader<'a>;
     type Write = dynamic::Writer;
     type Borrow<'a> = &'a str;
+
+    #[inline]
+    fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
+    where
+        'long: 'short,
+    {
+        reader
+    }
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
