@@ -8,7 +8,7 @@ use crate::key::fixed;
 pub enum Reader<'a> {
     // INVARIANT: `len > 8`
     Large(&'a [u8]),
-    Small(fixed::Fixed<u64>),
+    Small(fixed::Buffer<u64>),
 }
 
 impl<'a> From<&'a [u8]> for Reader<'a> {
@@ -20,7 +20,7 @@ impl<'a> From<&'a [u8]> for Reader<'a> {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
                 Self::Small(unsafe {
-                    fixed::Fixed::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
+                    fixed::Buffer::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
                 })
             }
         }
@@ -44,7 +44,7 @@ impl<'a> From<&'a str> for Reader<'a> {
 impl Default for Reader<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(fixed::Fixed::default())
+        Self::Small(fixed::Buffer::default())
     }
 }
 
@@ -91,7 +91,7 @@ impl key::Read for Reader<'_> {
                 .to_be()
                     << (64 - after);
 
-                *self = Self::Small(unsafe { fixed::Fixed::new_unchecked(buffer, after as u8) });
+                *self = Self::Small(unsafe { fixed::Buffer::new_unchecked(buffer, after as u8) });
                 array
             }
             Reader::Small(small) => small.take(len),
@@ -110,7 +110,7 @@ impl key::Read for Reader<'_> {
                     Self::Large(&large[1..])
                 } else {
                     Self::Small(unsafe {
-                        fixed::Fixed::new_unchecked(
+                        fixed::Buffer::new_unchecked(
                             large[1..].as_ptr().cast::<u64>().read_unaligned().to_be(),
                             64,
                         )
@@ -135,7 +135,7 @@ impl key::Read for Reader<'_> {
             (Self::Small(small), Self::Large(large)) | (Self::Large(large), Self::Small(small)) => {
                 // SAFETY: `large.len() > 8`
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                (unsafe { fixed::Fixed::new_unchecked(buffer, 64) }, small)
+                (unsafe { fixed::Buffer::new_unchecked(buffer, 64) }, small)
             }
         };
 

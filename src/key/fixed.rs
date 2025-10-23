@@ -4,8 +4,9 @@ use crate::byte;
 use crate::key;
 use crate::key::Read as _;
 
-trait Int:
-    Sized
+pub(super) trait Uint:
+    'static
+    + Sized
     + Copy
     + Default
     + fmt::Debug
@@ -43,16 +44,16 @@ trait Int:
     fn from_u8(value: u8) -> Self;
 }
 
-#[derive(Copy, Clone, Default, Eq)]
-pub struct Fixed<I> {
-    buffer: I,
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Buffer<U> {
+    buffer: U,
     bits: u8,
 }
 
 #[expect(private_bounds)]
-impl<I: Int> Fixed<I> {
+impl<U: Uint> Buffer<U> {
     #[inline]
-    pub fn new_masked(buffer: I, bits: u8) -> Self {
+    pub fn new_masked(buffer: U, bits: u8) -> Self {
         unsafe {
             let bits = bits & !0b111;
             Self::new_unchecked(buffer.most_significant(bits), bits)
@@ -60,8 +61,8 @@ impl<I: Int> Fixed<I> {
     }
 
     #[inline]
-    pub unsafe fn new_unchecked(buffer: I, bits: u8) -> Self {
-        validate!(bits <= I::BITS);
+    pub unsafe fn new_unchecked(buffer: U, bits: u8) -> Self {
+        validate!(bits <= U::BITS);
         validate_eq!(bits & 0b111, 0);
         validate_eq!(buffer.most_significant(bits), buffer);
         Self { buffer, bits }
@@ -74,7 +75,7 @@ impl<I: Int> Fixed<I> {
     }
 }
 
-impl<I: Int> key::Read for Fixed<I> {
+impl<U: Uint> key::Read for Buffer<U> {
     #[inline]
     fn bits(&self) -> usize {
         self.bits as usize
@@ -126,14 +127,14 @@ impl<I: Int> key::Read for Fixed<I> {
 
     #[inline]
     fn get(&self, bit: usize) -> u8 {
-        validate!(bit <= I::BITS as usize - 8);
+        validate!(bit <= U::BITS as usize - 8);
 
         self.buffer.rotate_left(bit as u8).most_significant_u8()
     }
 
     #[inline]
     fn slice(&self, bits: usize) -> Self {
-        validate!(bits <= I::BITS as usize);
+        validate!(bits <= U::BITS as usize);
 
         let bits = bits as u8;
         Self {
@@ -143,7 +144,7 @@ impl<I: Int> key::Read for Fixed<I> {
     }
 }
 
-impl<I: Int> key::Write for Fixed<I> {
+impl<U: Uint> key::Write for Buffer<U> {
     type Len = usize;
 
     #[inline]
@@ -153,41 +154,41 @@ impl<I: Int> key::Write for Fixed<I> {
 
     #[inline]
     fn extend(&mut self, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= I::BITS);
+        validate!(self.bits + array.len().bits() <= U::BITS);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.buffer |= I::from_most_significant_u64(array.value() & !0xFF) >> self.bits;
+        self.buffer |= U::from_most_significant_u64(array.value() & !0xFF) >> self.bits;
         self.bits += array.len().bits();
     }
 
     #[inline]
     unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= I::BITS);
+        validate!(self.bits + array.len().bits() <= U::BITS);
         validate!(self.bits >= 8);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.buffer |= I::from_most_significant_u64(array.value()) >> self.bits;
+        self.buffer |= U::from_most_significant_u64(array.value()) >> self.bits;
         self.bits += array.len().bits();
     }
 
     #[inline]
     fn push(&mut self, byte: u8) {
-        validate!(self.bits <= I::BITS - 8);
+        validate!(self.bits <= U::BITS - 8);
 
-        self.buffer |= I::from_u8(byte).shr(self.bits);
+        self.buffer |= U::from_u8(byte).shr(self.bits);
         self.bits += 8;
     }
 
     #[inline]
     fn truncate(&mut self, bits: usize) {
         validate!(self.bits as usize >= bits);
-        validate!(bits <= I::BITS as usize);
+        validate!(bits <= U::BITS as usize);
 
         let bits = bits as u8;
         self.buffer = self.buffer.most_significant(bits);
@@ -195,40 +196,16 @@ impl<I: Int> key::Write for Fixed<I> {
     }
 }
 
-impl<I: Int> core::fmt::Debug for Fixed<I> {
+impl<U: Uint> core::fmt::Debug for Buffer<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
-    }
-}
-
-#[expect(clippy::non_canonical_partial_ord_impl)]
-impl<I: Ord> PartialOrd<Fixed<I>> for Fixed<I> {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        validate_eq!(self.bits, other.bits);
-        Some(self.buffer.cmp(&other.buffer))
-    }
-}
-
-impl<I: Ord> Ord for Fixed<I> {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        validate_eq!(self.bits, other.bits);
-        self.buffer.cmp(&other.buffer)
-    }
-}
-
-impl<I: PartialEq> PartialEq<Fixed<I>> for Fixed<I> {
-    #[inline]
-    fn eq(&self, reader: &Fixed<I>) -> bool {
-        self.buffer == reader.buffer
     }
 }
 
 macro_rules! impl_unsigned_int {
     ($($ty:ty: $bits:expr, $into:expr, $from:expr),* $(,)?) => {
         $(
-            impl From<$ty> for Fixed<$ty> {
+            impl From<$ty> for Buffer<$ty> {
                 #[inline]
                 fn from(value: $ty) -> Self {
                     Self {
@@ -238,15 +215,14 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl From<Fixed<$ty>> for $ty {
+            impl From<Buffer<$ty>> for $ty {
                 #[inline]
-                fn from(fixed: Fixed<$ty>) -> Self {
-                    validate_eq!(fixed.bits, <$ty>::BITS as u8);
+                fn from(fixed: Buffer<$ty>) -> Self {
                     fixed.buffer
                 }
             }
 
-            impl Int for $ty {
+            impl Uint for $ty {
                 const MSB: Self = (1 as $ty).rotate_right(1);
                 const MAX: Self = <$ty>::MAX;
                 const BYTES: u8 = (<$ty>::BITS as u8) >> 3;

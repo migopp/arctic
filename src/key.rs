@@ -1,8 +1,9 @@
 pub mod dynamic;
-mod fixed;
+pub mod fixed;
+
+use core::marker::PhantomData;
 
 use crate::byte;
-pub(crate) use fixed::Fixed;
 
 pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     #[allow(private_bounds)]
@@ -90,12 +91,92 @@ impl Write for Ignore {
     fn truncate(&mut self, (): Self::Len) {}
 }
 
+#[derive(Copy, Clone, PartialOrd, PartialEq)]
+pub struct Fixed<K, U> {
+    key: K,
+    _uint: PhantomData<U>,
+}
+
+impl<K: Copy, U> Fixed<K, U> {
+    #[inline]
+    pub const fn new(key: K) -> Self {
+        Self {
+            key,
+            _uint: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub const fn key(self) -> K {
+        self.key
+    }
+}
+
+impl<K, U> Key for Fixed<K, U>
+where
+    K: 'static + Copy + From<U> + PartialOrd,
+    U: From<K> + fixed::Uint + From<fixed::Buffer<U>>,
+    fixed::Buffer<U>: From<U>,
+{
+    type Borrow<'k> = Self;
+    type Read<'k> = fixed::Buffer<U>;
+    type Write = fixed::Buffer<U>;
+
+    #[inline]
+    fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
+    where
+        'long: 'short,
+    {
+        reader
+    }
+
+    #[inline]
+    fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
+        *self
+    }
+}
+
+impl<K, U> From<&'_ fixed::Buffer<U>> for Fixed<K, U>
+where
+    K: From<U>,
+    U: fixed::Uint + From<fixed::Buffer<U>>,
+{
+    #[inline]
+    fn from(fixed: &'_ fixed::Buffer<U>) -> Self {
+        Self::from(*fixed)
+    }
+}
+
+impl<K, U> From<fixed::Buffer<U>> for Fixed<K, U>
+where
+    K: From<U>,
+    U: fixed::Uint + From<fixed::Buffer<U>>,
+{
+    #[inline]
+    fn from(fixed: fixed::Buffer<U>) -> Self {
+        Self {
+            key: K::from(U::from(fixed)),
+            _uint: PhantomData,
+        }
+    }
+}
+
+impl<K, U> From<Fixed<K, U>> for fixed::Buffer<U>
+where
+    fixed::Buffer<U>: From<U>,
+    U: fixed::Uint + From<K>,
+{
+    fn from(fixed: Fixed<K, U>) -> Self {
+        Self::from(U::from(fixed.key))
+    }
+}
+
 macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Read<'k> = Fixed<$ty>;
-                type Write = Fixed<$ty>;
+                type Read<'k> = fixed::Buffer<$ty>;
+                type Write = fixed::Buffer<$ty>;
                 type Borrow<'k> = Self;
 
                 #[inline]
@@ -112,9 +193,9 @@ macro_rules! impl_unsigned_int {
                 }
             }
 
-            impl<'k> From<&'k Fixed<$ty>> for $ty {
+            impl<'k> From<&'k fixed::Buffer<$ty>> for $ty {
                 #[inline]
-                fn from(writer: &'k Fixed<$ty>) -> Self {
+                fn from(writer: &'k fixed::Buffer<$ty>) -> Self {
                     Self::from(*writer)
                 }
             }
