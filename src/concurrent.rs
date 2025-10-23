@@ -8,6 +8,7 @@ use crate::byte;
 use crate::cursor;
 use crate::edge;
 use crate::iter;
+use crate::iter::Sort;
 use crate::key;
 use crate::key::Read as _;
 use crate::node;
@@ -342,29 +343,22 @@ where
         }
     }
 
-    pub fn prefix_non_linearizable<'k, S>(
+    pub fn prefix<'k>(
         &mut self,
         prefix: impl Into<K::Read<'k>>,
-    ) -> PrefixNonLinearizable<'g, '_, K, V, S>
-    where
-        S: crate::iter::Sort,
-    {
+    ) -> Option<PrefixGuard<'g, '_, K, V>> {
         let prefix = prefix.into();
 
         let mut cursor =
             Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
 
-        let iter = match cursor.traverse_prefix() {
-            Some(_) => unsafe {
-                iter::LeafIter::new(cursor.root(), K::Write::from(prefix.slice(cursor.bit())))
-            },
-            None => iter::LeafIter::empty(),
-        };
+        cursor.traverse_prefix()?;
 
-        PrefixNonLinearizable {
-            iter,
+        Some(PrefixGuard {
+            root: cursor.root(),
+            key: K::Write::from(prefix.slice(cursor.bit())),
             guard: cursor.into_guard(),
-        }
+        })
     }
 
     pub fn range_non_linearizable<'l, 'k>(
@@ -684,6 +678,59 @@ where
     }
 }
 
+pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
+    guard: smr::PathGuard<'g, 'l, V>,
+    root: &'g Atomic128<Edge<V>>,
+    key: K::Write,
+}
+
+impl<'g, 'l, K, V> PrefixGuard<'g, 'l, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    #[inline]
+    pub fn iter<S: Sort>(&self) -> PrefixIter<'_, 'g, 'l, K, V, S> {
+        PrefixIter {
+            guard: &self.guard,
+            iter: unsafe { iter::LeafIter::new(self.root, self.key.clone()) },
+        }
+    }
+}
+
+pub struct PrefixIter<'guard, 'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
+    guard: &'guard smr::PathGuard<'g, 'l, V>,
+    iter: iter::LeafIter<'g, K::Write, V, S>,
+}
+
+impl<'guard, 'g, 'l, K, V, S> PrefixIter<'guard, 'g, 'l, K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: crate::iter::Sort,
+{
+    #[inline]
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+        self.iter.lend().map(|(key, value)| {
+            (K::Borrow::from(key), unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
+    }
+}
+
+impl<'guard, 'g, 'l, K, V, S> Iterator for PrefixIter<'guard, 'g, 'l, K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: crate::iter::Sort,
+{
+    type Item = (K, V::Borrow<'guard>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lend().map(|(key, value)| (K::from(key), value))
+    }
+}
+
 pub struct RangeIter<'g, 'l, 'k, K: Key, V: Value> {
     iter: iter::RangeIter<'g, K::Read<'k>, K::Write, V>,
     _guard: smr::PathGuard<'g, 'l, V>,
@@ -720,38 +767,3 @@ where
         self.lend().map(|(key, value)| (K::from(key), value))
     }
 }
-
-pub struct PrefixNonLinearizable<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    iter: iter::LeafIter<'g, K::Write, V, S>,
-    guard: smr::PathGuard<'g, 'l, V>,
-}
-
-impl<'g, 'l, K, V, S> PrefixNonLinearizable<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: crate::iter::Sort,
-{
-    #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'_>)> {
-        self.iter.lend().map(|(key, value)| {
-            (K::Borrow::from(key), unsafe {
-                V::borrow_from_u64(&self.guard, value)
-            })
-        })
-    }
-}
-
-// impl<'g, 'l, K, V, S> Iterator for PrefixNonLinearizable<'g, 'l, K, V, S>
-// where
-//     K: Key,
-//     V: Value,
-//     S: crate::iter::Sort,
-// {
-//     type Item = (K, V::Borrow<'l>);
-//
-//     #[inline]
-//     fn next(&mut self) -> Option<Self::Item> {
-//         self.lend().map(|(key, value)| (K::from(key), value))
-//     }
-// }

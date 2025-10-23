@@ -17,6 +17,7 @@ pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     type Write: Write<Len = usize>
         + for<'k> PartialOrd<Self::Read<'k>>
         + for<'k> From<Self::Read<'k>>
+        + Clone
         + Ord;
 
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;

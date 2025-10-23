@@ -24,14 +24,6 @@ where
     S: Sort,
 {
     #[inline]
-    pub(crate) fn empty() -> Self {
-        Self::Root {
-            key: W::default(),
-            next: None,
-        }
-    }
-
-    #[inline]
     pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
