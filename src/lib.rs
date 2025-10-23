@@ -85,10 +85,8 @@ mod tests {
         let mut map = map.pin();
         let key = 1u64;
         map.insert(key, 2u32);
-        assert_eq!(
-            map.range_non_linearizable(1u64, 1u64).collect::<Vec<_>>(),
-            vec![(1, 2)]
-        );
+        let range = map.range(1u64, 1u64).unwrap();
+        assert_eq!(range.iter().collect::<Vec<_>>(), vec![(1, 2)]);
     }
 
     #[test]
@@ -115,9 +113,9 @@ mod tests {
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));
         let mut map = map.pin();
+        let range = map.range(256u64, 511u64).unwrap();
         assert_eq!(
-            map.range_non_linearizable(256u64, 511u64)
-                .collect::<Vec<_>>(),
+            range.iter().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))
@@ -239,12 +237,12 @@ mod tests {
         };
 
         // Concurrent iteration, non-linearizable
-        pin.range_non_linearizable(first.borrow(), last.borrow())
-            .zip(&keys)
-            .for_each(|((lk, lv), (rk, rv))| {
-                assert_eq!(lk, *rk);
-                assert_eq!(lv, *rv);
-            });
+        let range = pin.range(first.borrow(), last.borrow()).unwrap();
+        range.iter().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
+            assert_eq!(lk, *rk);
+            assert_eq!(lv, *rv);
+        });
+        drop(range);
 
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();

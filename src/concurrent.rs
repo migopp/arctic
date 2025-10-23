@@ -361,35 +361,16 @@ where
         })
     }
 
-    pub fn range_non_linearizable<'l, 'k>(
+    // FIXME: support `Option` for min, max
+    pub fn range<'l, 'k>(
         &'l mut self,
         min: impl Into<K::Read<'k>>,
         max: impl Into<K::Read<'k>>,
-    ) -> RangeIter<'g, 'l, 'k, K, V> {
+    ) -> Option<RangeGuard<'g, 'l, 'k, K, V>> {
         let min = min.into();
         let max = max.into();
-        let prefix = min.prefix(&max);
-
-        let mut cursor =
-            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
-
-        let iter = match cursor.traverse_prefix() {
-            // FIXME: do not need to hold SMR guard if iterator is empty
-            None => iter::RangeIter::empty(),
-            Some(_) => unsafe {
-                iter::RangeIter::new(
-                    cursor.root(),
-                    K::Write::from(prefix.slice(cursor.bit())),
-                    min,
-                    max,
-                )
-            },
-        };
-
-        RangeIter {
-            iter,
-            _guard: cursor.into_guard(),
-        }
+        let prefix = self.prefix(min.prefix(&max))?;
+        Some(RangeGuard { prefix, min, max })
     }
 
     pub fn range_pessimistic<'l>(
@@ -731,36 +712,68 @@ where
     }
 }
 
-pub struct RangeIter<'g, 'l, 'k, K: Key, V: Value> {
+pub struct RangeGuard<'g, 'l, 'k, K: Key + 'k, V: Value> {
+    prefix: PrefixGuard<'g, 'l, K, V>,
+    min: K::Read<'k>,
+    max: K::Read<'k>,
+}
+
+impl<'g, 'l, 'k, K, V> RangeGuard<'g, 'l, 'k, K, V>
+where
+    K: Key + 'k,
+    V: Value,
+{
+    #[inline]
+    pub fn iter(&self) -> RangeIter<'_, 'g, 'l, 'k, K, V> {
+        RangeIter {
+            guard: &self.prefix.guard,
+            iter: unsafe {
+                iter::RangeIter::new(
+                    self.prefix.root,
+                    self.prefix.key.clone(),
+                    self.min,
+                    self.max,
+                )
+            },
+        }
+    }
+}
+
+pub struct RangeIter<'guard, 'g, 'l, 'k, K: Key, V: Value> {
+    guard: &'guard smr::PathGuard<'g, 'l, V>,
     iter: iter::RangeIter<'g, K::Read<'k>, K::Write, V>,
-    _guard: smr::PathGuard<'g, 'l, V>,
 }
 
-impl<'g, 'l, 'k, K, V> RangeIter<'g, 'l, 'k, K, V>
+impl<'guard, 'g, 'l, 'k, K, V> RangeIter<'guard, 'g, 'l, 'k, K, V>
 where
     K: Key,
     V: Value,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
-        self.iter
-            .lend()
-            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+        self.iter.lend().map(|(key, value)| {
+            (K::Borrow::from(key), unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V)>(&mut self, mut apply: F) {
-        self.iter
-            .for_each(|key, value| apply(K::Borrow::from(key), unsafe { V::from_u64(value) }))
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'guard>)>(&mut self, mut apply: F) {
+        self.iter.for_each(|key, value| {
+            apply(K::Borrow::from(key), unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
     }
 }
 
-impl<'g, 'l, 'k, K, V> Iterator for RangeIter<'g, 'l, 'k, K, V>
+impl<'guard, 'g, 'l, 'k, K, V> Iterator for RangeIter<'guard, 'g, 'l, 'k, K, V>
 where
     K: Key,
     V: Value,
 {
-    type Item = (K, V);
+    type Item = (K, V::Borrow<'guard>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {

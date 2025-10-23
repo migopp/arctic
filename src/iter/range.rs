@@ -17,14 +17,6 @@ where
     R: key::Read,
     W: key::Write<Len = usize> + PartialOrd<R>,
 {
-    #[inline]
-    pub(crate) fn empty() -> Self {
-        Self::Root {
-            key: W::default(),
-            next: None,
-        }
-    }
-
     pub(crate) unsafe fn new(root: &'a Atomic128<Edge<V>>, mut key: W, min: R, max: R) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
