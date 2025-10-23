@@ -24,11 +24,9 @@ impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
         // so we can use an arbitrary byte.
         let iter = Or::L(Or::L([0u8; 4].into_iter().take(1)));
         Self {
-            stack: vec![RepeatIter {
-                first: true,
-                edge: Edge::DEFAULT,
-                iter: unsafe { UnsortedIter::new(iter, core::slice::from_ref(root)) },
-            }],
+            stack: vec![RepeatIter::new(unsafe {
+                UnsortedIter::new(iter, core::slice::from_ref(root))
+            })],
             _selector: PhantomData,
         }
     }
@@ -63,7 +61,7 @@ impl<'a, V: 'a, S: Selector> PostorderIter<'a, V, S> {
                     } else {
                         // Visit children before node
                         let node = unsafe { data.into_node_unchecked() };
-                        self.stack.push(unsafe { RepeatIter::new(node) });
+                        self.stack.push(RepeatIter::new(node.iter_unsorted()));
                         continue 'vertical;
                     }
                 }
@@ -122,11 +120,11 @@ struct RepeatIter<'a, V> {
 
 impl<'a, V> RepeatIter<'a, V> {
     #[inline]
-    unsafe fn new(node: node::Ref<'a, V>) -> Self {
+    fn new(iter: node::UnsortedIter<'a, V>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,
-            iter: node.iter_unsorted(),
+            iter,
         }
     }
 }
