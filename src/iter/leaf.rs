@@ -2,10 +2,11 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
 
-pub(crate) enum LeafIter<'a, W: key::Write, V: 'a, S: crate::iter::Sort> {
+pub(crate) enum LeafIter<'a, W: key::Write, V: 'a, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,
@@ -20,7 +21,7 @@ impl<'a, W, V, S> LeafIter<'a, W, V, S>
 where
     W: key::Write,
     V: 'a,
-    S: crate::iter::Sort,
+    S: Sort,
 {
     #[inline]
     pub(crate) fn empty() -> Self {

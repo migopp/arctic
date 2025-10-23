@@ -3,7 +3,9 @@ use core::marker::PhantomData;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter;
+use crate::iter::postorder;
+use crate::iter::LeafIter;
+use crate::iter::PostorderIter;
 use crate::iter::Sort;
 use crate::stat;
 use crate::Edge;
@@ -32,10 +34,8 @@ impl<K, V: Value> Map<K, V> {
         &self.root
     }
 
-    pub(crate) fn postorder<'a, S: iter::postorder::Selector>(
-        &'a self,
-    ) -> iter::PostorderIter<'a, V, S> {
-        unsafe { iter::PostorderIter::new(&self.root) }
+    pub(crate) fn postorder<'a, S: postorder::Selector>(&'a self) -> PostorderIter<'a, V, S> {
+        unsafe { PostorderIter::new(&self.root) }
     }
 }
 
@@ -64,13 +64,12 @@ impl<K: Key, V: Value> Map<K, V> {
         todo!()
     }
 
-    pub fn iter<S: crate::iter::Sort>(&self) -> Iter<'_, K, V, S> {
-        Iter(unsafe { iter::LeafIter::new(&self.root, K::Write::default()) })
+    pub fn iter<S: Sort>(&self) -> Iter<'_, K, V, S> {
+        Iter(unsafe { LeafIter::new(&self.root, K::Write::default()) })
     }
 }
 
-#[expect(private_bounds)]
-pub struct Iter<'a, K: Key, V, S: iter::SortPrivate>(iter::LeafIter<'a, K::Write, V, S>);
+pub struct Iter<'a, K: Key, V, S: Sort>(LeafIter<'a, K::Write, V, S>);
 
 impl<'a, K, V, S> Iter<'a, K, V, S>
 where
