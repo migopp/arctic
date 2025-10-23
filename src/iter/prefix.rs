@@ -63,7 +63,12 @@ where
             Self::Root { key, next } => {
                 crate::cold();
                 let value = next.take()?;
-                return Some((key, value));
+                if YIELD {
+                    return Some((key, value));
+                } else {
+                    apply(key, value);
+                    return None;
+                }
             }
             Self::Node { key, frontier } => (key, frontier),
         };
