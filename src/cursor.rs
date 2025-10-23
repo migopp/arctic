@@ -46,7 +46,7 @@ where
         key: R,
     ) -> Self {
         Self {
-            guard: smr.protect(key.peek_all()),
+            guard: smr.guard(key.peek_all()),
             bit: 0,
             key,
             root,
@@ -284,7 +284,7 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(unsafe { V::protect(self.guard, data.into_leaf()) });
+                return Some(unsafe { V::guard(self.guard, data.into_leaf()) });
             } else if data.is_null() {
                 return None;
             } else {

@@ -160,7 +160,7 @@ where
             {
                 return if old.meta().leaf() {
                     Ok(Some(unsafe {
-                        V::protect(cursor.into_guard(), old.data().into_leaf())
+                        V::guard(cursor.into_guard(), old.data().into_leaf())
                     }))
                 } else {
                     validate!(old.is_null());
@@ -239,7 +239,7 @@ where
                     stat::increment(op);
                     if old.meta().leaf() {
                         return Ok(Some(unsafe {
-                            V::protect(cursor.into_guard(), old.data().into_leaf())
+                            V::guard(cursor.into_guard(), old.data().into_leaf())
                         }));
                     } else {
                         validate!(old.is_null());
@@ -363,7 +363,7 @@ where
 
         PrefixNonLinearizable {
             iter,
-            _guard: cursor.into_guard(),
+            guard: cursor.into_guard(),
         }
     }
 
@@ -637,7 +637,8 @@ where
                 {
                     // Fast path: no change
                     Some((old_borrow, old_value))
-                        if old_borrow == new_borrow && *old_value == new_value =>
+                        if old_borrow == new_borrow =>
+                        // FIXME: use physical equality && *old_value == new_value =>
                     {
                         return;
                     }
@@ -722,7 +723,7 @@ where
 
 pub struct PrefixNonLinearizable<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     iter: iter::LeafIter<'g, K::Write, V, S>,
-    _guard: smr::PathGuard<'g, 'l, V>,
+    guard: smr::PathGuard<'g, 'l, V>,
 }
 
 impl<'g, 'l, K, V, S> PrefixNonLinearizable<'g, 'l, K, V, S>
@@ -732,23 +733,25 @@ where
     S: crate::iter::Sort,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
-        self.iter
-            .lend()
-            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'_>)> {
+        self.iter.lend().map(|(key, value)| {
+            (K::Borrow::from(key), unsafe {
+                V::borrow_from_u64(&self.guard, value)
+            })
+        })
     }
 }
 
-impl<'g, 'l, K, V, S> Iterator for PrefixNonLinearizable<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: crate::iter::Sort,
-{
-    type Item = (K, V);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.lend().map(|(key, value)| (K::from(key), value))
-    }
-}
+// impl<'g, 'l, K, V, S> Iterator for PrefixNonLinearizable<'g, 'l, K, V, S>
+// where
+//     K: Key,
+//     V: Value,
+//     S: crate::iter::Sort,
+// {
+//     type Item = (K, V::Borrow<'l>);
+//
+//     #[inline]
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.lend().map(|(key, value)| (K::from(key), value))
+//     }
+// }

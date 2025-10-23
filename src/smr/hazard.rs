@@ -60,16 +60,11 @@ pub(crate) struct Local<'g, V: 'g> {
 
 impl<'g, V: Value> Local<'g, V> {
     #[inline]
-    pub(crate) fn protect<'l>(&'l mut self, prefix: byte::Array) -> PathGuard<'g, 'l, V> {
+    pub(crate) fn guard<'l>(&'l mut self, prefix: byte::Array) -> PathGuard<'g, 'l, V> {
         self.hazard
             .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
         PathGuard(self)
-    }
-
-    fn unprotect(&mut self) {
-        self.hazard
-            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
     }
 
     fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
@@ -122,7 +117,9 @@ pub struct PathGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
 impl<V: Value> Drop for PathGuard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
-        self.0.unprotect();
+        self.0
+            .hazard
+            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
     }
 }
 
@@ -191,8 +188,8 @@ where
             validate!(key & MASK_VALID > 0);
             let key = byte::Array::new_masked(key);
 
-            // NOTE: could technically unprotect before retiring, since
-            // we cannot access `value` anymore, but then we'd want
+            // NOTE: could technically unguard before retiring, since
+            // we will not access `value` anymore, but then we'd want
             // to avoid dropping `self.inner`.
             self.inner.0.retire(ribbit::Packed::<Edge<V>>::new(
                 edge::Meta::LEAF.with_key(key),
