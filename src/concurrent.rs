@@ -663,6 +663,43 @@ where
     }
 }
 
+pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
+    // FIXME: don't need to hold guard for trivial values
+    guard: smr::PathGuard<'g, 'l, V>,
+    buffer: &'l mut Vec<(K::Write, u64)>,
+}
+
+impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
+    #[inline]
+    pub fn drain<S: Sort>(&mut self) -> LinearizableDrain<'g, '_, K, V> {
+        LinearizableDrain {
+            guard: &self.guard,
+            iter: self.buffer.drain(..),
+        }
+    }
+}
+
+pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
+    guard: &'l smr::PathGuard<'g, 'l, V>,
+    iter: std::vec::Drain<'l, (K::Write, u64)>,
+}
+
+impl<'g, 'l, K, V> Iterator for LinearizableDrain<'g, 'l, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Item = (K, V::Borrow<'l>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(key, value)| {
+            // FIXME: take ownership of key directly
+            (K::from(K::Borrow::from(&key)), unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
+    }
+}
+
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
     guard: smr::PathGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<V>>,
