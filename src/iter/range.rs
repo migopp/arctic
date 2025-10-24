@@ -3,26 +3,43 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::cursor;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::node;
+use crate::Cursor;
 use crate::Edge;
 use crate::Key;
+use crate::Value;
 
-pub(crate) enum RangeIter<'g, 'k, K: Key, V> {
+pub(crate) enum RangeIter<'g, 'l, K: Key, V> {
     Root { key: K::Write, next: Option<u64> },
-    Node(NodeIter<'g, 'k, K, V>),
+    Node(NodeIter<'g, 'l, K, V>),
 }
 
-impl<'g, 'k, K, V> RangeIter<'g, 'k, K, V>
+impl<'g, 'l, K, V> RangeIter<'g, 'l, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub(crate) fn new(
+        cursor: &'l Cursor<'g, 'l, K::Read<'l>, V, cursor::Hybrid<'g, K::Read<'l>, V>>,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
+    ) -> Self {
+        unsafe { Self::new_unchecked(cursor.root(), <K::Write>::from(cursor.prefix()), min, max) }
+    }
+}
+
+impl<'g, 'l, K, V> RangeIter<'g, 'l, K, V>
 where
     K: Key,
 {
-    pub(crate) unsafe fn new(
+    pub(crate) unsafe fn new_unchecked(
         root: &'g Atomic128<Edge<V>>,
         mut key: K::Write,
-        min: K::Read<'k>,
-        max: K::Read<'k>,
+        min: K::Read<'l>,
+        max: K::Read<'l>,
     ) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
@@ -101,9 +118,9 @@ impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
     }
 }
 
-pub(crate) struct NodeIter<'g, 'k, K: Key, V> {
-    min: K::Read<'k>,
-    max: K::Read<'k>,
+pub(crate) struct NodeIter<'g, 'l, K: Key, V> {
+    min: K::Read<'l>,
+    max: K::Read<'l>,
     key: K::Write,
     stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'g, V>)>,
 }

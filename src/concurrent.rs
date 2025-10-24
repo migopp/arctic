@@ -409,7 +409,7 @@ where
         cursor.traverse_prefix()?;
 
         let iter = unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new(
+            iter::RangeIter::<'g, '_, K, V>::new_unchecked(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bits())),
                 min,
@@ -495,7 +495,7 @@ where
         Self::lock_prefix(&mut cursor, prefix)?;
 
         unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new(
+            iter::RangeIter::<'g, '_, K, V>::new_unchecked(
                 cursor.root(),
                 K::Write::from(prefix.slice(cursor.bits())),
                 min,
@@ -640,14 +640,14 @@ where
     pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
         PrefixIter {
             guard: &self.guard,
-            iter: unsafe { iter::PrefixIter::new(self.root, self.key.clone()) },
+            iter: unsafe { iter::PrefixIter::new_unchecked(self.root, self.key.clone()) },
         }
     }
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PathGuard<'g, 'l, V>,
-    iter: iter::PrefixIter<'g, K::Write, V, S>,
+    iter: iter::PrefixIter<'g, 'l, K::Write, V, S>,
 }
 
 impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
@@ -694,7 +694,7 @@ where
         RangeIter {
             guard: &self.prefix.guard,
             iter: unsafe {
-                iter::RangeIter::new(
+                iter::RangeIter::new_unchecked(
                     self.prefix.root,
                     self.prefix.key.clone(),
                     K::reborrow(self.min),

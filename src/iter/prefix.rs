@@ -1,12 +1,17 @@
+use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::cursor;
 use crate::iter::Sort;
 use crate::key;
+use crate::Cursor;
 use crate::Edge;
+use crate::Key;
+use crate::Value;
 
-pub(crate) enum PrefixIter<'g, W: key::Write, V: 'g, S: Sort> {
+pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,
@@ -14,17 +19,35 @@ pub(crate) enum PrefixIter<'g, W: key::Write, V: 'g, S: Sort> {
     Node {
         key: W,
         frontier: Vec<(W::Len, S::Iter<'g, V>)>,
+        _cursor: PhantomData<&'l ()>,
     },
 }
 
-impl<'g, W, V, S> PrefixIter<'g, W, V, S>
+impl<'g, 'l, W, V, S> PrefixIter<'g, 'l, W, V, S>
+where
+    W: key::Write,
+    V: Value,
+    S: Sort,
+{
+    pub(crate) fn new<K>(
+        cursor: &'l Cursor<'g, 'l, K::Read<'l>, V, cursor::Hybrid<'g, K::Read<'l>, V>>,
+    ) -> Self
+    where
+        K: Key,
+        W: for<'k> From<K::Read<'k>>,
+    {
+        unsafe { Self::new_unchecked(cursor.root(), W::from(cursor.prefix())) }
+    }
+}
+
+impl<'g, 'l, W, V, S> PrefixIter<'g, 'l, W, V, S>
 where
     W: key::Write,
     V: 'g,
     S: Sort,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<V>>, mut key: W) -> Self {
+    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<V>>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
         let meta = edge.meta();
         let data = edge.data();
@@ -43,6 +66,7 @@ where
             Self::Node {
                 frontier: vec![(key.bits(), S::new(node))],
                 key,
+                _cursor: PhantomData,
             }
         }
     }
@@ -70,7 +94,11 @@ where
                     return None;
                 }
             }
-            Self::Node { key, frontier } => (key, frontier),
+            Self::Node {
+                key,
+                frontier,
+                _cursor,
+            } => (key, frontier),
         };
 
         'vertical: loop {
@@ -110,7 +138,7 @@ where
     }
 }
 
-impl<'g, W, V, S> Clone for PrefixIter<'g, W, V, S>
+impl<'g, 'l, W, V, S> Clone for PrefixIter<'g, 'l, W, V, S>
 where
     W: key::Write,
     S: Sort,
@@ -121,9 +149,14 @@ where
                 key: key.clone(),
                 next: *next,
             },
-            Self::Node { key, frontier } => Self::Node {
+            Self::Node {
+                key,
+                frontier,
+                _cursor,
+            } => Self::Node {
                 key: key.clone(),
                 frontier: frontier.clone(),
+                _cursor: PhantomData,
             },
         }
     }

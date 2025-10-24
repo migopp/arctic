@@ -259,16 +259,28 @@ where
 }
 
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
+    pub(crate) fn prefix(&self) -> R {
+        let key = match &self.history {
+            Hybrid::Optimistic { key, .. } => key,
+            Hybrid::Pessimistic { key, .. } => key,
+        };
+
+        key.slice(self.bits)
+    }
+
     pub(crate) fn upgrade(&mut self) {
         let (root, key) = match self.history {
-            Hybrid::Optimistic { root, key } => (root, key),
-            Hybrid::Pessimistic(_) => return,
+            Hybrid::Optimistic { key, root } => (root, key),
+            Hybrid::Pessimistic { .. } => return,
         };
 
         self.root = root;
         self.key = key;
         self.bits = 0;
-        self.history = Hybrid::Pessimistic(Pessimistic::new(root, key))
+        self.history = Hybrid::Pessimistic {
+            key,
+            pessimistic: Pessimistic { path: Vec::new() },
+        }
     }
 }
 
@@ -347,24 +359,27 @@ impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
 
 pub(crate) enum Hybrid<'g, R, V> {
     Optimistic {
-        root: &'g Atomic128<Edge<V>>,
         key: R,
+        root: &'g Atomic128<Edge<V>>,
     },
-    Pessimistic(Pessimistic<'g, R, V>),
+    Pessimistic {
+        key: R,
+        pessimistic: Pessimistic<'g, R, V>,
+    },
 }
 
 impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     type PopError = ();
 
     fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
-        Self::Optimistic { root, key }
+        Self::Optimistic { key, root }
     }
 
     #[inline]
     fn push(&mut self, segment: Segment<'g, R, V>) {
         match self {
             Hybrid::Optimistic { .. } => (),
-            Hybrid::Pessimistic(pessimistic) => pessimistic.push(segment),
+            Hybrid::Pessimistic { pessimistic, .. } => pessimistic.push(segment),
         }
     }
 
@@ -372,7 +387,7 @@ impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         match self {
             Hybrid::Optimistic { .. } => Err(()),
-            Hybrid::Pessimistic(pessimistic) => Ok(pessimistic.pop().unwrap()),
+            Hybrid::Pessimistic { pessimistic, .. } => Ok(pessimistic.pop().unwrap()),
         }
     }
 }

@@ -12,10 +12,10 @@ pub use sort::Unsorted;
 
 use crate::Key;
 
-pub(crate) enum KeyValueIter<'g, 'k, K: Key, V> {
-    Leaf(PrefixIter<'g, K::Write, V, crate::iter::Sorted>),
+pub(crate) enum KeyValueIter<'g, 'l, K: Key, V> {
+    Leaf(PrefixIter<'g, 'l, K::Write, V, crate::iter::Sorted>),
     // FIXME: take sort order in range iter?
-    Range(RangeIter<'g, 'k, K, V>),
+    Range(RangeIter<'g, 'l, K, V>),
 }
 
 impl<'g, 'k, K, V> KeyValueIter<'g, 'k, K, V>
