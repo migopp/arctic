@@ -392,27 +392,100 @@ where
         })
     }
 
-    // pub fn range_pessimistic<'l>(
-    //     &'l mut self,
-    //     buffer: &mut Vec<(K::Write, u64)>,
-    //     min: impl Into<K::Read<'l>>,
-    //     max: impl Into<K::Read<'l>>,
-    // ) {
-    //     let min = min.into();
-    //     let max = max.into();
-    //     let prefix = min.prefix(&max);
-    //
-    //     let mut cursor =
-    //         Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
-    //
-    //     if cursor.traverse_prefix().is_none() {
-    //         return;
-    //     }
-    //
-    //     Self::pessimistic(buffer, self.raw.root(), cursor, prefix, min, max);
-    // }
+    pub fn range_optimistic<'l, 'k>(
+        &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        limit: usize,
+        min: impl Into<K::Read<'k>>,
+        max: impl Into<K::Read<'k>>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        let min = min.into();
+        let max = max.into();
+        let prefix = min.prefix(&max);
 
-    fn pessimistic<'l, 'k>(
+        let mut cursor =
+            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+
+        cursor.traverse_prefix()?;
+
+        let iter = unsafe {
+            iter::RangeIter::<'g, '_, K, V>::new(
+                cursor.root(),
+                K::Write::from(prefix.slice(cursor.bits())),
+                min,
+                max,
+            )
+        };
+
+        Self::scan_optimistic(buffer, &mut cursor, &iter::KeyValueIter::Range(iter), limit)
+            .unwrap();
+
+        Some(LinearizableGuard {
+            guard: cursor.into_guard(),
+            buffer,
+        })
+    }
+
+    fn scan_optimistic<'l, 'k>(
+        buffer: &mut Vec<(K::Write, u64)>,
+        _cursor: &mut Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
+        iter: &iter::KeyValueIter<'g, 'k, K, V>,
+        limit: usize,
+    ) -> Result<(), ()> {
+        iter.clone()
+            .for_each(|key, value| buffer.push((key.clone(), value)));
+
+        for retry in 0..=limit {
+            let mut dirty = false;
+            let mut len = 0;
+
+            iter.clone().for_each(|new_key, new_value| {
+                let index = len;
+                len += 1;
+
+                let old = match buffer.get_mut(index) {
+                    // Fast path: no change
+                    Some((old_key, old_value)) if old_key == new_key && *old_value == new_value => {
+                        return;
+                    }
+                    old => old,
+                };
+
+                crate::cold();
+                dirty = true;
+
+                match old {
+                    Some((old_key, old_value)) if old_key == new_key => {
+                        *old_value = new_value;
+                    }
+                    Some((old_key, _)) if *old_key < *new_key => {
+                        let high = buffer[len..]
+                            .iter()
+                            .position(|(key, _)| key >= new_key)
+                            .map(|offset| len + offset)
+                            .unwrap_or(buffer.len());
+                        buffer.drain(index..high);
+                        len = index;
+                    }
+                    None | Some(_) => {
+                        buffer.insert(index, (new_key.clone(), new_value));
+                    }
+                };
+            });
+
+            if len == buffer.len() && !dirty {
+                stat::record(stat::Record::RangeConflict, retry as u64);
+                return Ok(());
+            }
+
+            validate!(buffer.len() <= len);
+            buffer.truncate(len);
+        }
+
+        Err(())
+    }
+
+    fn scan_pessimistic<'l, 'k>(
         buffer: &'l mut Vec<(K::Write, u64)>,
         mut cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
         prefix: K::Read<'k>,
@@ -512,104 +585,6 @@ where
                 }
             }
         }
-    }
-
-    pub fn range_optimistic<'l, 'k>(
-        &'l mut self,
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        limit: usize,
-        min: impl Into<K::Read<'k>>,
-        max: impl Into<K::Read<'k>>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        let min = min.into();
-        let max = max.into();
-        let prefix = min.prefix(&max);
-
-        let mut cursor =
-            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
-
-        cursor.traverse_prefix()?;
-
-        let iter = unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new(
-                cursor.root(),
-                K::Write::from(prefix.slice(cursor.bits())),
-                min,
-                max,
-            )
-        };
-
-        Self::optimistic(buffer, &mut cursor, &iter::KeyValueIter::Range(iter), limit).unwrap();
-        // Ok(()) => (),
-        // Err(()) => {
-        //     crate::cold();
-        //     buffer.clear();
-        //     Self::pessimistic(buffer, self.raw.root(), cursor, prefix, min, max);
-        // }
-
-        Some(LinearizableGuard {
-            guard: cursor.into_guard(),
-            buffer,
-        })
-    }
-
-    fn optimistic<'l, 'k>(
-        buffer: &mut Vec<(K::Write, u64)>,
-        _cursor: &mut Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-        iter: &iter::KeyValueIter<'g, 'k, K, V>,
-        limit: usize,
-    ) -> Result<(), ()> {
-        iter.clone()
-            .for_each(|key, value| buffer.push((key.clone(), value)));
-
-        for retry in 0..=limit {
-            let mut dirty = false;
-            let mut len = 0;
-
-            iter.clone().for_each(|new_key, new_value| {
-                let index = len;
-                len += 1;
-
-                let old = match buffer.get_mut(index) {
-                    // Fast path: no change
-                    Some((old_key, old_value)) if old_key == new_key && *old_value == new_value => {
-                        return;
-                    }
-                    old => old,
-                };
-
-                crate::cold();
-                dirty = true;
-
-                match old {
-                    Some((old_key, old_value)) if old_key == new_key => {
-                        *old_value = new_value;
-                    }
-                    Some((old_key, _)) if *old_key < *new_key => {
-                        let high = buffer[len..]
-                            .iter()
-                            .position(|(key, _)| key >= new_key)
-                            .map(|offset| len + offset)
-                            .unwrap_or(buffer.len());
-                        buffer.drain(index..high);
-                        len = index;
-                    }
-                    None | Some(_) => {
-                        buffer.insert(index, (new_key.clone(), new_value));
-                    }
-                };
-            });
-
-            if len == buffer.len() && !dirty {
-                stat::record(stat::Record::RangeConflict, retry as u64);
-                return Ok(());
-            }
-
-            validate!(buffer.len() <= len);
-            buffer.truncate(len);
-        }
-
-        Err(())
     }
 }
 
