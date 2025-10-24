@@ -48,24 +48,9 @@ where
         Self {
             guard: smr.guard(key.peek_all()),
             bits: 0,
-            key,
             root,
-            history: H::default(),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn upgrade(
-        self,
-        root: &'g Atomic128<Edge<V>>,
-        key: R,
-    ) -> Cursor<'g, 'l, R, V, Pessimistic<'g, R, V>> {
-        Cursor {
-            guard: self.guard,
-            bits: 0,
             key,
-            root,
-            history: Pessimistic::default(),
+            history: H::new(root, key),
         }
     }
 
@@ -273,6 +258,24 @@ where
     }
 }
 
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
+    pub(crate) fn pop_or_traverse_prefix(&mut self) -> Option<node::Ref<'g, V>> {
+        match self.pop() {
+            Ok(node) => Some(node),
+            Err((root, key)) => {
+                self.root = root;
+                self.key = key;
+                self.bits = 0;
+                self.traverse_prefix()?;
+                match self.pop() {
+                    Ok(node) => Some(node),
+                    Err(_) => unreachable!(),
+                }
+            }
+        }
+    }
+}
+
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
@@ -297,18 +300,23 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     }
 }
 
-pub(crate) trait History<'g, R, V>: Default {
+pub(crate) trait History<'g, R, V> {
     type PopError;
+
+    fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self;
 
     fn push(&mut self, segment: Segment<'g, R, V>);
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError>;
 }
 
-#[derive(Default)]
 pub(crate) struct Optimistic;
 
 impl<'g, R, V> History<'g, R, V> for Optimistic {
     type PopError = ();
+
+    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
+        Self
+    }
 
     #[inline]
     fn push(&mut self, _segment: Segment<'g, R, V>) {}
@@ -323,16 +331,12 @@ pub(crate) struct Pessimistic<'g, R, V> {
     path: Vec<Segment<'g, R, V>>,
 }
 
-impl<R, V> Default for Pessimistic<'_, R, V> {
-    fn default() -> Self {
-        Self {
-            path: Vec::default(),
-        }
-    }
-}
-
 impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
     type PopError = Infallible;
+
+    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
+        Self { path: Vec::new() }
+    }
 
     #[inline]
     fn push(&mut self, segment: Segment<'g, R, V>) {
@@ -342,6 +346,43 @@ impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
     #[inline]
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         Ok(self.path.pop())
+    }
+}
+
+pub(crate) enum Hybrid<'g, R, V> {
+    Optimistic {
+        root: &'g Atomic128<Edge<V>>,
+        key: R,
+    },
+    Pessimistic(Pessimistic<'g, R, V>),
+}
+
+impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
+    type PopError = (&'g Atomic128<Edge<V>>, R);
+
+    fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
+        Self::Optimistic { root, key }
+    }
+
+    #[inline]
+    fn push(&mut self, segment: Segment<'g, R, V>) {
+        match self {
+            Hybrid::Optimistic { .. } => (),
+            Hybrid::Pessimistic(pessimistic) => pessimistic.push(segment),
+        }
+    }
+
+    #[inline]
+    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
+        match self {
+            Hybrid::Optimistic { root, key } => {
+                let root = *root;
+                let key = *key;
+                *self = Hybrid::Pessimistic(Pessimistic { path: Vec::new() });
+                Err((root, key))
+            }
+            Hybrid::Pessimistic(pessimistic) => Ok(pessimistic.pop().unwrap()),
+        }
     }
 }
 
