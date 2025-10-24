@@ -260,6 +260,21 @@ where
     }
 
     #[cold]
+    fn freeze_prefix<'k>(
+        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        key: K::Read<'k>,
+    ) -> Option<ribbit::Packed<Edge<V>>> {
+        match Self::freeze(cursor, key) {
+            Ok(()) => return cursor.traverse_prefix(),
+            Err(()) => (),
+        }
+
+        cursor.upgrade();
+        cursor.traverse_prefix()?;
+        Self::freeze_prefix(cursor, key)
+    }
+
+    #[cold]
     fn freeze<'k, H>(
         cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
         key: K::Read<'k>,
@@ -396,170 +411,108 @@ where
     //
     //     Self::pessimistic(buffer, self.raw.root(), cursor, prefix, min, max);
     // }
-    //
-    // fn pessimistic<'l, 'k>(
-    //     buffer: &mut Vec<(K::Write, u64)>,
-    //     root: &'g Atomic128<Edge<V>>,
-    //     cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-    //     prefix: K::Read<'k>,
-    //     min: K::Read<'k>,
-    //     max: K::Read<'k>,
-    // ) {
-    //     match Self::pessimistic_impl(buffer, root, cursor, prefix, min, max) {
-    //         Ok(()) => (),
-    //         Err(cursor) => Self::pessimistic_pessimistic(buffer, root, cursor, prefix, min, max),
-    //     }
-    // }
-    //
-    // #[cold]
-    // fn pessimistic_pessimistic<'l, 'k>(
-    //     buffer: &mut Vec<(K::Write, u64)>,
-    //     root: &'g Atomic128<Edge<V>>,
-    //     cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-    //     prefix: K::Read<'k>,
-    //     min: K::Read<'k>,
-    //     max: K::Read<'k>,
-    // ) {
-    //     stat::increment(stat::Counter::LockFrozen);
-    //
-    //     let mut cursor = cursor.upgrade(root, prefix);
-    //
-    //     let Some(_) = cursor.traverse_prefix() else {
-    //         return;
-    //     };
-    //
-    //     match Self::pessimistic_impl(buffer, root, cursor, prefix, min, max) {
-    //         Ok(()) => (),
-    //         Err(_) => unreachable!(),
-    //     }
-    // }
-    //
-    // fn pessimistic_impl<'l, 'k, H: cursor::History<'g, K::Read<'k>, V>>(
-    //     buffer: &'l mut Vec<(K::Write, u64)>,
-    //     root: &'g Atomic128<Edge<V>>,
-    //     mut cursor: Cursor<'g, 'l, K::Read<'k>, V, H>,
-    //     prefix: K::Read<'k>,
-    //     min: K::Read<'k>,
-    //     max: K::Read<'k>,
-    // ) -> Result<LinearizableGuard<'g, 'l, K, V>, Cursor<'g, 'l, K::Read<'k>, V, H>> {
-    //     match Self::lock(&mut cursor, prefix) {
-    //         Ok(()) => (),
-    //         Err(_) => return Err(cursor),
-    //     }
-    //
-    //     unsafe {
-    //         iter::RangeIter::<'g, '_, K, V>::new(
-    //             cursor.root(),
-    //             K::Write::from(prefix.slice(cursor.bits())),
-    //             min,
-    //             max,
-    //         )
-    //     }
-    //     .for_each(|key, value| buffer.push((key.clone(), value)));
-    //
-    //     match Self::unlock(&mut cursor, prefix) {
-    //         Ok(()) => (),
-    //         Err(_) => Self::unlock_pessimistic(root, cursor, prefix),
-    //     }
-    //
-    //     Ok(LinearizableGuard {
-    //         guard: cursor.into_guard(),
-    //         buffer,
-    //     })
-    // }
-    //
-    // fn lock<'k, H: cursor::History<'g, K::Read<'k>, V>>(
-    //     cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
-    //     prefix: K::Read<'k>,
-    // ) -> Result<(), H::PopError> {
-    //     let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-    //
-    //     loop {
-    //         // No need to lock leaf
-    //         if edge.meta().leaf() {
-    //             return Ok(());
-    //         }
-    //
-    //         if edge.meta().frozen() || edge.data().scan() {
-    //             match cursor.wait_for_scan(stat::Counter::ScanScan) {
-    //                 Ok(safe) if !edge.meta().frozen() => edge = safe,
-    //                 Ok(_) | Err(()) => {
-    //                     Self::freeze(cursor, prefix)?;
-    //                 }
-    //             }
-    //         }
-    //
-    //         match cursor.root().compare_exchange_packed(
-    //             edge,
-    //             edge.with_data(edge.data().with_scan(true)),
-    //             Ordering::Relaxed,
-    //             Ordering::Relaxed,
-    //         ) {
-    //             Ok(_) => return Ok(()),
-    //             Err(conflict) => {
-    //                 core::hint::spin_loop();
-    //                 edge = conflict;
-    //             }
-    //         }
-    //     }
-    // }
-    //
-    // #[cold]
-    // fn unlock_pessimistic<'k, H: cursor::History<'g, K::Read<'k>, V>>(
-    //     root: &'g Atomic128<Edge<V>>,
-    //     cursor: Cursor<'g, '_, K::Read<'k>, V, H>,
-    //     prefix: K::Read<'k>,
-    // ) {
-    //     stat::increment(stat::Counter::UnlockFrozen);
-    //
-    //     let mut cursor = cursor.upgrade(root, prefix);
-    //
-    //     let Some(_) = cursor.traverse_prefix() else {
-    //         unreachable!("Scan lock must exist");
-    //     };
-    //
-    //     Self::unlock(&mut cursor, prefix).unwrap()
-    // }
-    //
-    // #[inline]
-    // fn unlock<'k, H>(
-    //     cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
-    //     prefix: K::Read<'k>,
-    // ) -> Result<(), H::PopError>
-    // where
-    //     H: cursor::History<'g, K::Read<'k>, V>,
-    // {
-    //     let mut edge = cursor.root().load_packed(Ordering::Relaxed);
-    //
-    //     if edge.meta().leaf() {
-    //         return Ok(());
-    //     }
-    //
-    //     loop {
-    //         validate!(edge.data().scan());
-    //
-    //         if edge.meta().frozen() {
-    //             Self::freeze(cursor, prefix)?;
-    //             edge = cursor
-    //                 .traverse_prefix()
-    //                 .expect("Scan bit must be reachable");
-    //             continue;
-    //         }
-    //
-    //         match cursor.root().compare_exchange_packed(
-    //             edge,
-    //             edge.with_data(edge.data().with_scan(false)),
-    //             Ordering::Relaxed,
-    //             Ordering::Relaxed,
-    //         ) {
-    //             Ok(_) => return Ok(()),
-    //             Err(conflict) => {
-    //                 core::hint::spin_loop();
-    //                 edge = conflict;
-    //             }
-    //         }
-    //     }
-    // }
+
+    fn pessimistic<'l, 'k>(
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        mut cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        prefix: K::Read<'k>,
+        min: K::Read<'k>,
+        max: K::Read<'k>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        Self::lock_prefix(&mut cursor, prefix)?;
+
+        unsafe {
+            iter::RangeIter::<'g, '_, K, V>::new(
+                cursor.root(),
+                K::Write::from(prefix.slice(cursor.bits())),
+                min,
+                max,
+            )
+        }
+        .for_each(|key, value| buffer.push((key.clone(), value)));
+
+        Self::unlock_prefix(&mut cursor, prefix);
+
+        Some(LinearizableGuard {
+            guard: cursor.into_guard(),
+            buffer,
+        })
+    }
+
+    fn lock_prefix<'k>(
+        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        prefix: K::Read<'k>,
+    ) -> Option<()> {
+        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+
+        loop {
+            // No need to lock leaf
+            if edge.meta().leaf() {
+                return Some(());
+            }
+
+            if edge.meta().frozen() || edge.data().scan() {
+                match cursor.wait_for_scan(stat::Counter::ScanScan) {
+                    Ok(safe) if !edge.meta().frozen() => edge = safe,
+                    Ok(_) | Err(()) => {
+                        edge = Self::freeze_prefix(cursor, prefix)?;
+                        continue;
+                    }
+                }
+            }
+
+            match cursor.root().compare_exchange_packed(
+                edge,
+                edge.with_data(edge.data().with_scan(true)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(()),
+                Err(conflict) => {
+                    core::hint::spin_loop();
+                    edge = conflict;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn unlock_prefix<'k>(
+        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        prefix: K::Read<'k>,
+    ) {
+        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+
+        if edge.meta().leaf() {
+            validate!(!edge.data().scan());
+            return;
+        }
+
+        loop {
+            validate!(edge.data().scan());
+
+            if edge.meta().frozen() {
+                edge = match Self::freeze_prefix(cursor, prefix) {
+                    Some(edge) => edge,
+                    None => unreachable!("Locked edge must be reachable"),
+                };
+                continue;
+            }
+
+            match cursor.root().compare_exchange_packed(
+                edge,
+                edge.with_data(edge.data().with_scan(false)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(conflict) => {
+                    core::hint::spin_loop();
+                    edge = conflict;
+                }
+            }
+        }
+    }
 
     pub fn range_optimistic<'l, 'k>(
         &'l mut self,

@@ -259,20 +259,16 @@ where
 }
 
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
-    pub(crate) fn pop_or_traverse_prefix(&mut self) -> Option<node::Ref<'g, V>> {
-        match self.pop() {
-            Ok(node) => Some(node),
-            Err((root, key)) => {
-                self.root = root;
-                self.key = key;
-                self.bits = 0;
-                self.traverse_prefix()?;
-                match self.pop() {
-                    Ok(node) => Some(node),
-                    Err(_) => unreachable!(),
-                }
-            }
-        }
+    pub(crate) fn upgrade(&mut self) {
+        let (root, key) = match self.history {
+            Hybrid::Optimistic { root, key } => (root, key),
+            Hybrid::Pessimistic(_) => return,
+        };
+
+        self.root = root;
+        self.key = key;
+        self.bits = 0;
+        self.history = Hybrid::Pessimistic(Pessimistic::new(root, key))
     }
 }
 
@@ -358,7 +354,7 @@ pub(crate) enum Hybrid<'g, R, V> {
 }
 
 impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
-    type PopError = (&'g Atomic128<Edge<V>>, R);
+    type PopError = ();
 
     fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
         Self::Optimistic { root, key }
@@ -375,12 +371,7 @@ impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     #[inline]
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         match self {
-            Hybrid::Optimistic { root, key } => {
-                let root = *root;
-                let key = *key;
-                *self = Hybrid::Pessimistic(Pessimistic { path: Vec::new() });
-                Err((root, key))
-            }
+            Hybrid::Optimistic { .. } => Err(()),
             Hybrid::Pessimistic(pessimistic) => Ok(pessimistic.pop().unwrap()),
         }
     }
