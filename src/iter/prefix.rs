@@ -4,6 +4,8 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
+use crate::iter;
+use crate::iter::ScanIter;
 use crate::iter::Sort;
 use crate::key;
 use crate::Cursor;
@@ -29,12 +31,10 @@ where
     V: Value,
     S: Sort,
 {
-    pub(crate) fn new<K>(
-        cursor: &'l Cursor<'g, 'l, K::Read<'l>, V, cursor::Hybrid<'g, K::Read<'l>, V>>,
-    ) -> Self
+    pub(crate) fn new<R>(cursor: &'l Cursor<'g, 'l, R, V, cursor::Hybrid<'g, R, V>>) -> Self
     where
-        K: Key,
-        W: for<'k> From<K::Read<'k>>,
+        R: key::Read,
+        W: From<R>,
     {
         unsafe { Self::new_unchecked(cursor.root(), W::from(cursor.prefix())) }
     }
@@ -135,6 +135,30 @@ where
                 }
             }
         }
+    }
+}
+
+impl<'g, 'l, K, V> ScanIter<'g, 'l, K, V> for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
+where
+    K: Key,
+    V: Value,
+{
+    type Arg<'k>
+        = ()
+    where
+        V: 'g,
+        'g: 'l,
+        'k: 'l;
+
+    fn new<'k: 'l>(
+        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        (): Self::Arg<'k>,
+    ) -> Self {
+        Self::new::<K::Read<'k>>(cursor)
+    }
+
+    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+        Self::for_each(self, apply)
     }
 }
 

@@ -8,6 +8,7 @@ use crate::byte;
 use crate::cursor;
 use crate::edge;
 use crate::iter;
+use crate::iter::ScanIter;
 use crate::iter::Sort;
 use crate::key;
 use crate::key::Read as _;
@@ -404,21 +405,17 @@ where
         let prefix = min.prefix(&max);
 
         let mut cursor =
-            Cursor::<_, _, cursor::Optimistic>::new(&mut self.smr, self.raw.root(), prefix);
+            Cursor::<_, _, cursor::Hybrid<_, _>>::new(&mut self.smr, self.raw.root(), prefix);
 
         cursor.traverse_prefix()?;
 
-        let iter = unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new_unchecked(
-                cursor.root(),
-                K::Write::from(prefix.slice(cursor.bits())),
-                min,
-                max,
-            )
-        };
-
-        Self::scan_optimistic(buffer, &mut cursor, &iter::KeyValueIter::Range(iter), limit)
-            .unwrap();
+        Self::scan_optimistic::<iter::RangeIter<'g, '_, K, V>>(
+            buffer,
+            &mut cursor,
+            (min, max),
+            limit,
+        )
+        .unwrap();
 
         Some(LinearizableGuard {
             guard: cursor.into_guard(),
@@ -426,20 +423,23 @@ where
         })
     }
 
-    fn scan_optimistic<'l, 'k>(
+    fn scan_optimistic<'l, 'k, S>(
         buffer: &mut Vec<(K::Write, u64)>,
-        _cursor: &mut Cursor<'g, 'l, K::Read<'k>, V, cursor::Optimistic>,
-        iter: &iter::KeyValueIter<'g, 'k, K, V>,
+        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        arg: S::Arg<'k>,
         limit: usize,
-    ) -> Result<(), ()> {
-        iter.clone()
-            .for_each(|key, value| buffer.push((key.clone(), value)));
+    ) -> Result<(), ()>
+    where
+        S: ScanIter<'g, 'l, K, V>,
+        'k: 'l,
+    {
+        S::new(&*cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            iter.clone().for_each(|new_key, new_value| {
+            S::new(&*cursor, arg).for_each(|new_key, new_value| {
                 let index = len;
                 len += 1;
 

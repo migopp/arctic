@@ -10,34 +10,24 @@ pub use sort::Sort;
 pub use sort::Sorted;
 pub use sort::Unsorted;
 
+use crate::cursor;
+use crate::Cursor;
 use crate::Key;
+use crate::Value;
 
-pub(crate) enum KeyValueIter<'g, 'l, K: Key, V> {
-    Leaf(PrefixIter<'g, 'l, K::Write, V, crate::iter::Sorted>),
-    // FIXME: take sort order in range iter?
-    Range(RangeIter<'g, 'l, K, V>),
-}
+pub(crate) trait ScanIter<'g, 'l, K: Key, V: Value> {
+    type Arg<'k>: Copy
+    where
+        V: 'g,
+        'g: 'l,
+        'k: 'l;
 
-impl<'g, 'k, K, V> KeyValueIter<'g, 'k, K, V>
-where
-    K: Key,
-{
-    #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
-        match self {
-            KeyValueIter::Leaf(iter) => iter.for_each(apply),
-            KeyValueIter::Range(iter) => iter.for_each(apply),
-        }
-    }
-}
+    fn new<'k: 'l>(
+        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        arg: Self::Arg<'k>,
+    ) -> Self;
 
-impl<K: Key, V> Clone for KeyValueIter<'_, '_, K, V> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Leaf(iter) => Self::Leaf(iter.clone()),
-            Self::Range(iter) => Self::Range(iter.clone()),
-        }
-    }
+    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F);
 }
 
 #[derive(Clone, Debug)]

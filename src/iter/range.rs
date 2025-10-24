@@ -4,6 +4,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
+use crate::iter::ScanIter;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::node;
@@ -22,12 +23,19 @@ where
     K: Key,
     V: Value,
 {
-    pub(crate) fn new(
-        cursor: &'l Cursor<'g, 'l, K::Read<'l>, V, cursor::Hybrid<'g, K::Read<'l>, V>>,
-        min: K::Read<'l>,
-        max: K::Read<'l>,
+    pub(crate) fn new<'k: 'l>(
+        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        min: K::Read<'k>,
+        max: K::Read<'k>,
     ) -> Self {
-        unsafe { Self::new_unchecked(cursor.root(), <K::Write>::from(cursor.prefix()), min, max) }
+        unsafe {
+            Self::new_unchecked(
+                cursor.root(),
+                <K::Write>::from(cursor.prefix()),
+                K::reborrow(min),
+                K::reborrow(max),
+            )
+        }
     }
 }
 
@@ -115,6 +123,30 @@ impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
             },
             Self::Node(iter) => Self::Node(iter.clone()),
         }
+    }
+}
+
+impl<'g, 'l, K, V> ScanIter<'g, 'l, K, V> for RangeIter<'g, 'l, K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Arg<'k>
+        = (K::Read<'k>, K::Read<'k>)
+    where
+        V: 'g,
+        'g: 'l,
+        'k: 'l;
+
+    fn new<'k: 'l>(
+        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        (min, max): Self::Arg<'k>,
+    ) -> Self {
+        Self::new(cursor, min, max)
+    }
+
+    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+        Self::for_each(self, apply)
     }
 }
 
