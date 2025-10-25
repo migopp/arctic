@@ -48,18 +48,14 @@ impl<'g, R, V> History<'g, R, V> for Discard {
 }
 
 pub(crate) struct Retain<'g, R, V> {
-    key: R,
     path: Vec<Segment<'g, R, V>>,
 }
 
 impl<'g, R, V> History<'g, R, V> for Retain<'g, R, V> {
     type PopError = Infallible;
 
-    fn new(_root: &'g Atomic128<Edge<V>>, key: R) -> Self {
-        Self {
-            key,
-            path: Vec::new(),
-        }
+    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
+        Self { path: Vec::new() }
     }
 
     #[inline]
