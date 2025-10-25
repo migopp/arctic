@@ -26,7 +26,6 @@ mod smr;
 pub mod stat;
 mod value;
 
-pub(crate) use cursor::Cursor;
 pub(crate) use edge::Edge;
 pub use key::Key;
 pub(crate) use node::Node;

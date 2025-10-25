@@ -18,7 +18,6 @@ use crate::smr;
 use crate::stat;
 use crate::value::Owned;
 use crate::value::Shared;
-use crate::Cursor;
 use crate::Edge;
 use crate::Key;
 use crate::Op;
@@ -67,7 +66,7 @@ where
 {
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'g, '_, V>> {
-        Cursor::new(&mut self.smr, self.raw.root(), K::Read::from(key)).traverse_value()
+        cursor::Point::new(&mut self.smr, self.raw.root(), K::Read::from(key)).traverse_value()
     }
 
     #[inline]
@@ -143,7 +142,7 @@ where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = Cursor::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -218,7 +217,7 @@ where
         H: cursor::path::History<'g, K::Read<'k>, V>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = Cursor::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(leaf) {
@@ -283,7 +282,7 @@ where
 
     #[cold]
     fn freeze<'k, H>(
-        cursor: &mut Cursor<'g, '_, K::Read<'k>, V, H>,
+        cursor: &mut cursor::Point<'g, '_, K::Read<'k>, V, H>,
         key: K::Read<'k>,
     ) -> Result<(), H::PopError>
     where
@@ -346,7 +345,7 @@ where
 
     #[cold]
     unsafe fn retire<R: key::Read, H: cursor::path::History<'g, R, V>>(
-        cursor: &mut Cursor<'g, '_, R, V, H>,
+        cursor: &mut cursor::Point<'g, '_, R, V, H>,
         op: Op,
         key: R,
         edge: ribbit::Packed<Edge<V>>,

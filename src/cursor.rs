@@ -18,7 +18,7 @@ use crate::Op;
 use crate::Value;
 
 /// Tree traversal state.
-pub(crate) struct Cursor<'g, 'l, R, V: Value, H> {
+pub(crate) struct Point<'g, 'l, R, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: smr::PathGuard<'g, 'l, V>,
 
@@ -31,11 +31,11 @@ pub(crate) struct Cursor<'g, 'l, R, V: Value, H> {
     /// Edge this cursor currently points to
     root: &'g Atomic128<Edge<V>>,
 
-    /// Path history of this cursor (sequence of path segments to `root`)
+    /// Path history of this cursor (sequence of path segments)
     history: H,
 }
 
-impl<'g, 'l, R, V, H> Cursor<'g, 'l, R, V, H>
+impl<'g, 'l, R, V, H> Point<'g, 'l, R, V, H>
 where
     R: key::Read,
     V: Value,
@@ -233,7 +233,7 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Discard> {
+impl<'g, 'l, R: key::Read, V: Value> Point<'g, 'l, R, V, path::Discard> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
         loop {
@@ -259,7 +259,7 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Discard> {
 
 pub(crate) struct Prefix<'g, 'l, R, V: Value, H> {
     prefix: R,
-    cursor: Cursor<'g, 'l, R, V, H>,
+    cursor: Point<'g, 'l, R, V, H>,
 }
 
 impl<'g, 'l, R, V, H> Prefix<'g, 'l, R, V, H>
@@ -275,7 +275,7 @@ where
     ) -> Option<Self> {
         let mut cursor = Self {
             prefix,
-            cursor: Cursor::new(smr, root, prefix),
+            cursor: Point::new(smr, root, prefix),
         };
         cursor.traverse_prefix()?;
         Some(cursor)
@@ -328,7 +328,7 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
+impl<'g, 'l, R: key::Read, V: Value> Point<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
     pub(crate) fn upgrade(&mut self) {
         let (root, key) = match self.history {
             path::Hybrid::Discard { key, root } => (root, key),
@@ -346,7 +346,7 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Hybrid<'g, R, V>
 }
 
 impl<'g, 'l, R, V: Value, H> core::ops::Deref for Prefix<'g, 'l, R, V, H> {
-    type Target = Cursor<'g, 'l, R, V, H>;
+    type Target = Point<'g, 'l, R, V, H>;
     fn deref(&self) -> &Self::Target {
         &self.cursor
     }

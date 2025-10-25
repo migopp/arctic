@@ -8,7 +8,6 @@ use crate::iter::Scan;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::node;
-use crate::Cursor;
 use crate::Edge;
 use crate::Key;
 use crate::Value;
