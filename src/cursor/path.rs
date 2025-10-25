@@ -7,7 +7,7 @@ use crate::node;
 use crate::Edge;
 
 /// A path along the tree is composed of 0 or more path segments.
-pub(super) struct Segment<'g, R, V> {
+pub(crate) struct Segment<'g, R, V> {
     /// Key before matching on `edge`
     pub(super) key: R,
 
@@ -29,9 +29,9 @@ pub(crate) trait History<'g, R, V> {
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError>;
 }
 
-pub(crate) struct Optimistic;
+pub(crate) struct Discard;
 
-impl<'g, R, V> History<'g, R, V> for Optimistic {
+impl<'g, R, V> History<'g, R, V> for Discard {
     type PopError = ();
 
     fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
@@ -47,11 +47,11 @@ impl<'g, R, V> History<'g, R, V> for Optimistic {
     }
 }
 
-pub(crate) struct Pessimistic<'g, R, V> {
+pub(crate) struct Retain<'g, R, V> {
     path: Vec<Segment<'g, R, V>>,
 }
 
-impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
+impl<'g, R, V> History<'g, R, V> for Retain<'g, R, V> {
     type PopError = Infallible;
 
     fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
@@ -70,13 +70,13 @@ impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
 }
 
 pub(crate) enum Hybrid<'g, R, V> {
-    Optimistic {
+    Discard {
         key: R,
         root: &'g Atomic128<Edge<V>>,
     },
-    Pessimistic {
+    Retain {
         key: R,
-        pessimistic: Pessimistic<'g, R, V>,
+        retain: Retain<'g, R, V>,
     },
 }
 
@@ -84,22 +84,22 @@ impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     type PopError = ();
 
     fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
-        Self::Optimistic { key, root }
+        Self::Discard { key, root }
     }
 
     #[inline]
     fn push(&mut self, segment: Segment<'g, R, V>) {
         match self {
-            Hybrid::Optimistic { .. } => (),
-            Hybrid::Pessimistic { pessimistic, .. } => pessimistic.push(segment),
+            Self::Discard { .. } => (),
+            Self::Retain { retain, .. } => retain.push(segment),
         }
     }
 
     #[inline]
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         match self {
-            Hybrid::Optimistic { .. } => Err(()),
-            Hybrid::Pessimistic { pessimistic, .. } => Ok(pessimistic.pop().unwrap()),
+            Self::Discard { .. } => Err(()),
+            Self::Retain { retain, .. } => Ok(retain.pop().unwrap()),
         }
     }
 }

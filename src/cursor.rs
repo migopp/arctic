@@ -233,7 +233,7 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Optimistic> {
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Discard> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
         loop {
@@ -331,16 +331,16 @@ where
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
     pub(crate) fn upgrade(&mut self) {
         let (root, key) = match self.history {
-            path::Hybrid::Optimistic { key, root } => (root, key),
-            path::Hybrid::Pessimistic { .. } => return,
+            path::Hybrid::Discard { key, root } => (root, key),
+            path::Hybrid::Retain { .. } => return,
         };
 
         self.root = root;
         self.key = key;
         self.bits = 0;
-        self.history = path::Hybrid::Pessimistic {
+        self.history = path::Hybrid::Retain {
             key,
-            pessimistic: path::Pessimistic::new(root, key),
+            retain: path::Retain::new(root, key),
         }
     }
 }

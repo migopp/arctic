@@ -112,7 +112,7 @@ where
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        self.compare_exchange_impl::<cursor::path::Optimistic, _>(key, exchange)
+        self.compare_exchange_impl::<cursor::path::Discard, _>(key, exchange)
     }
 
     #[cold]
@@ -124,7 +124,7 @@ where
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        self.compare_exchange_impl::<cursor::path::Pessimistic<_, _>, _>(key, exchange)
+        self.compare_exchange_impl::<cursor::path::Retain<_, _>, _>(key, exchange)
             .unwrap()
     }
 
@@ -194,7 +194,7 @@ where
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<Option<Owned<'g, '_, V>>, ()> {
-        self.insert_impl::<cursor::path::Optimistic>(key, leaf)
+        self.insert_impl::<cursor::path::Discard>(key, leaf)
     }
 
     #[cold]
@@ -204,7 +204,7 @@ where
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Option<Owned<'g, '_, V>> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::path::Pessimistic<_, _>>(key, leaf)
+        self.insert_impl::<cursor::path::Retain<_, _>>(key, leaf)
             .unwrap()
     }
 
@@ -371,7 +371,7 @@ where
     ) -> Option<PrefixGuard<'g, '_, K, V>> {
         let prefix = prefix.into();
 
-        let cursor = cursor::Prefix::<_, _, cursor::path::Optimistic>::new_prefix(
+        let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
