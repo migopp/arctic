@@ -14,19 +14,50 @@ use crate::cursor;
 use crate::Key;
 use crate::Value;
 
-pub(crate) trait Scan<'g, 'k, 'l, A, K: Key, V: Value> {
-    fn new(
-        cursor: &'l cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'k>,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
-        >,
-        arg: &A,
-    ) -> Self;
+pub(crate) trait Scan {
+    type Input<'l, K>
+    where
+        K: Key;
 
-    fn for_each<F: FnMut(&K::Write, u64)>(self, apply: F);
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, u64)>(
+        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        input: &Self::Input<'l, K>,
+        apply: F,
+    );
+}
+
+pub(crate) struct Prefix;
+
+impl Scan for Prefix {
+    type Input<'l, K>
+        = ()
+    where
+        K: Key;
+
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, u64)>(
+        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        (): &(),
+        apply: F,
+    ) {
+        PrefixIter::<K::Write, _, crate::iter::Sorted>::new(cursor).for_each(apply)
+    }
+}
+
+pub(crate) struct Range;
+
+impl Scan for Range {
+    type Input<'l, K>
+        = (K::Read<'l>, K::Read<'l>)
+    where
+        K: Key;
+
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, u64)>(
+        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        (min, max): &Self::Input<'l, K>,
+        apply: F,
+    ) {
+        RangeIter::<K, V>::new(cursor, *min, *max).for_each(apply)
+    }
 }
 
 #[derive(Clone, Debug)]

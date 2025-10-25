@@ -303,12 +303,12 @@ where
         })
     }
 
-    pub fn range_optimistic<'l, 'k>(
+    pub fn range_optimistic<'l>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
-        min: impl Into<K::Read<'k>>,
-        max: impl Into<K::Read<'k>>,
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
@@ -320,37 +320,43 @@ where
             max,
         )?;
 
-        Self::scan_optimistic::<iter::RangeIter<_, _>, _>(buffer, &cursor, &(min, max), limit)
-            .unwrap();
-
-        Some(LinearizableGuard {
-            guard: cursor.into_guard(),
-            buffer,
-        })
+        Self::scan_hybrid::<iter::Range>(buffer, cursor, &(min, max), limit)
     }
 
-    fn scan_optimistic<'l, 'k, S, A>(
+    fn scan_hybrid<'l, S>(
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        arg: &S::Input<'l, K>,
+        limit: usize,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>>
+    where
+        S: Scan,
+    {
+        match Self::scan_optimistic::<S>(buffer, &cursor, arg, limit) {
+            Ok(()) => Some(LinearizableGuard {
+                guard: cursor.into_guard(),
+                buffer,
+            }),
+            Err(()) => Self::scan_pessimistic::<S>(buffer, cursor, arg),
+        }
+    }
+
+    fn scan_optimistic<'l, S>(
         buffer: &mut Vec<(K::Write, u64)>,
-        cursor: &'l cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'k>,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
-        >,
-        arg: &A,
+        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        arg: &S::Input<'l, K>,
         limit: usize,
     ) -> Result<(), ()>
     where
-        S: Scan<'g, 'k, 'l, A, K, V>,
+        S: Scan,
     {
-        S::new(cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
+        S::scan(cursor, arg, |key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            S::new(cursor, arg).for_each(|new_key, new_value| {
+            S::scan(cursor, arg, |new_key, new_value| {
                 let index = len;
                 len += 1;
 
@@ -396,26 +402,22 @@ where
         Err(())
     }
 
-    fn scan_pessimistic<'l, 'k, A, S>(
+    fn scan_pessimistic<'l, S>(
         buffer: &'l mut Vec<(K::Write, u64)>,
         mut cursor: cursor::Prefix<
             'g,
             'l,
-            K::Read<'k>,
+            K::Read<'l>,
             V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+            cursor::path::Hybrid<'g, K::Read<'l>, V>,
         >,
-        arg: &A,
+        arg: &S::Input<'l, K>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
     where
-        S: for<'c> Scan<'g, 'k, 'c, A, K, V>,
+        S: Scan,
     {
         Self::lock_prefix(&mut cursor)?;
-
-        {
-            S::new(&cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
-        }
-
+        S::scan(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
         Self::unlock_prefix(&mut cursor);
 
         Some(LinearizableGuard {

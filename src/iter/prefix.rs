@@ -4,12 +4,9 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
-use crate::iter;
-use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
-use crate::Key;
 use crate::Value;
 
 pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
@@ -24,14 +21,14 @@ pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
     },
 }
 
-impl<'g, 'l, W, V, S> PrefixIter<'g, 'l, W, V, S>
+impl<'g, 'c, W, V, S> PrefixIter<'g, 'c, W, V, S>
 where
     W: key::Write,
     V: Value,
     S: Sort,
 {
-    pub(crate) fn new<R>(
-        cursor: &'l cursor::Prefix<'g, 'l, R, V, cursor::path::Hybrid<'g, R, V>>,
+    pub(crate) fn new<'l, R>(
+        cursor: &'c cursor::Prefix<'g, 'l, R, V, cursor::path::Hybrid<'g, R, V>>,
     ) -> Self
     where
         R: key::Read,
@@ -136,29 +133,6 @@ where
                 }
             }
         }
-    }
-}
-
-impl<'g, 'k, 'l, K, V> Scan<'g, 'k, 'l, (), K, V> for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
-where
-    K: Key,
-    V: Value,
-{
-    fn new(
-        cursor: &'l cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'k>,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
-        >,
-        (): &(),
-    ) -> Self {
-        Self::new::<K::Read<'k>>(cursor)
-    }
-
-    fn for_each<F: FnMut(&K::Write, u64)>(self, apply: F) {
-        Self::for_each(self, apply)
     }
 }
 
