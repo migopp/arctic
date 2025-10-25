@@ -277,7 +277,7 @@ mod tests {
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
         let mut range = pin
-            .range_optimistic(&mut buffer, usize::MAX, first.borrow(), last.borrow())
+            .range_hybrid(&mut buffer, usize::MAX, first.borrow(), last.borrow())
             .unwrap();
         range.drain().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
             assert_eq!(lk, *rk);

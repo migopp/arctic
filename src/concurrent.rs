@@ -301,7 +301,36 @@ where
         })
     }
 
-    pub fn range_optimistic<'l>(
+    pub fn prefix_hybrid<'l>(
+        &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        limit: usize,
+        prefix: impl Into<K::Read<'l>>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        let prefix = prefix.into();
+        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_prefix(
+            &mut self.smr,
+            self.raw.root(),
+            prefix,
+        )?;
+        Self::scan_hybrid::<iter::Prefix>(buffer, cursor, &(), limit)
+    }
+
+    pub fn prefix_pessimistic<'l>(
+        &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        prefix: impl Into<K::Read<'l>>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        let prefix = prefix.into();
+        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_prefix(
+            &mut self.smr,
+            self.raw.root(),
+            prefix,
+        )?;
+        Self::scan_pessimistic::<iter::Prefix>(buffer, cursor, &())
+    }
+
+    pub fn range_hybrid<'l>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
@@ -310,15 +339,30 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
-
         let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_range(
             &mut self.smr,
             self.raw.root(),
             min,
             max,
         )?;
-
         Self::scan_hybrid::<iter::Range>(buffer, cursor, &(min, max), limit)
+    }
+
+    pub fn range_pessimistic<'l>(
+        &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        let min = min.into();
+        let max = max.into();
+        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_range(
+            &mut self.smr,
+            self.raw.root(),
+            min,
+            max,
+        )?;
+        Self::scan_pessimistic::<iter::Range>(buffer, cursor, &(min, max))
     }
 
     fn scan_hybrid<'l, S>(
