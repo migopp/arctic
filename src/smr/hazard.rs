@@ -125,6 +125,12 @@ impl<V: Value> Drop for PathGuard<'_, '_, V> {
 }
 
 impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
+    pub(crate) fn prefix(&self) -> byte::Array {
+        let prefix = self.0.hazard.load(Ordering::Relaxed);
+        validate!(prefix & MASK_VALID > 0);
+        byte::Array::new_masked(prefix)
+    }
+
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         self.0.retire(edge);
     }

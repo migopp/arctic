@@ -35,7 +35,7 @@ where
     ) -> Self {
         unsafe {
             Self::new_unchecked(
-                cursor.root(),
+                cursor.edge(),
                 <K::Write>::from(cursor.prefix()),
                 K::reborrow(min),
                 K::reborrow(max),

@@ -149,13 +149,13 @@ where
                 None => return Ok(None),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
-                    Self::freeze(&mut cursor, reader)?;
+                    Self::freeze(&mut cursor)?;
                     continue;
                 }
             };
 
             if cursor
-                .root()
+                .edge()
                 .compare_exchange_packed(old, exchange(old), Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
@@ -223,14 +223,14 @@ where
             let (op, old, new) = match cursor.traverse_or_insert(leaf) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    Self::freeze(&mut cursor, reader)?;
+                    Self::freeze(&mut cursor)?;
                     continue;
                 }
             };
 
             validate!(!old.meta().frozen());
 
-            match cursor.root().compare_exchange_packed(
+            match cursor.edge().compare_exchange_packed(
                 old,
                 new,
                 Ordering::AcqRel,
@@ -249,7 +249,7 @@ where
                 }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut cursor, op, reader, old) };
+                    unsafe { Self::retire(&mut cursor, op, old) };
                 }
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
@@ -269,32 +269,30 @@ where
             cursor::path::Hybrid<'g, K::Read<'k>, V>,
         >,
     ) -> Option<ribbit::Packed<Edge<V>>> {
-        let prefix = cursor.prefix();
-        match Self::freeze(cursor, prefix) {
-            Ok(()) => return cursor.traverse_prefix(),
+        match Self::freeze(cursor) {
+            Ok(()) => return cursor.traverse(),
             Err(()) => (),
         }
 
         cursor.upgrade();
-        cursor.traverse_prefix()?;
+        cursor.traverse()?;
         Self::freeze_prefix(cursor)
     }
 
     #[cold]
     fn freeze<'k, H>(
         cursor: &mut cursor::Point<'g, '_, K::Read<'k>, V, H>,
-        key: K::Read<'k>,
     ) -> Result<(), H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, V>,
     {
         let mut node = cursor.pop()?;
-        let mut edge = cursor.root().load_packed(Ordering::Acquire);
+        let mut edge = cursor.edge().load_packed(Ordering::Acquire);
 
         loop {
             while edge.meta().frozen() {
                 node = cursor.pop()?;
-                edge = cursor.root().load_packed(Ordering::Acquire);
+                edge = cursor.edge().load_packed(Ordering::Acquire);
             }
 
             let meta = edge.meta();
@@ -310,7 +308,7 @@ where
 
             let (op, new) = node.replace(meta);
 
-            match cursor.root().compare_exchange_packed(
+            match cursor.edge().compare_exchange_packed(
                 edge,
                 new.with_data(new.data().with_scan(data.scan())),
                 Ordering::AcqRel,
@@ -318,7 +316,7 @@ where
             ) {
                 Ok(_) => unsafe {
                     stat::increment(op);
-                    Self::retire(cursor, Op::Node(op), key, edge);
+                    Self::retire(cursor, Op::Node(op), edge);
                     return Ok(());
                 },
                 Err(conflict) => unsafe {
@@ -347,7 +345,6 @@ where
     unsafe fn retire<R: key::Read, H: cursor::path::History<'g, R, V>>(
         cursor: &mut cursor::Point<'g, '_, R, V, H>,
         op: Op,
-        key: R,
         edge: ribbit::Packed<Edge<V>>,
     ) {
         match op {
@@ -357,10 +354,8 @@ where
 
         validate!(edge.is_node());
 
-        let prefix = key.peek(byte::Len::MAX.min_bits(cursor.bits()));
-
         unsafe {
-            cursor.retire(edge.with_meta(edge.meta().with_key(prefix)));
+            cursor.retire(edge);
         }
     }
 
@@ -377,7 +372,7 @@ where
         )?;
 
         Some(PrefixGuard {
-            root: cursor.root(),
+            root: cursor.edge(),
             key: K::Write::from(cursor.prefix()),
             guard: cursor.into_guard(),
         })
@@ -529,7 +524,7 @@ where
             cursor::path::Hybrid<'g, K::Read<'k>, V>,
         >,
     ) -> Option<()> {
-        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+        let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
 
         loop {
             // No need to lock leaf
@@ -547,7 +542,7 @@ where
                 }
             }
 
-            match cursor.root().compare_exchange_packed(
+            match cursor.edge().compare_exchange_packed(
                 edge,
                 edge.with_data(edge.data().with_scan(true)),
                 Ordering::Relaxed,
@@ -572,7 +567,7 @@ where
             cursor::path::Hybrid<'g, K::Read<'k>, V>,
         >,
     ) {
-        let mut edge = cursor.root().load_packed(Ordering::Relaxed);
+        let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
 
         if edge.meta().leaf() {
             validate!(!edge.data().scan());
@@ -590,7 +585,7 @@ where
                 continue;
             }
 
-            match cursor.root().compare_exchange_packed(
+            match cursor.edge().compare_exchange_packed(
                 edge,
                 edge.with_data(edge.data().with_scan(false)),
                 Ordering::Relaxed,

@@ -37,7 +37,7 @@ where
         R: key::Read,
         W: From<R>,
     {
-        unsafe { Self::new_unchecked(cursor.root(), W::from(cursor.prefix())) }
+        unsafe { Self::new_unchecked(cursor.edge(), W::from(cursor.prefix())) }
     }
 }
 

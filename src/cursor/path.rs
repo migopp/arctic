@@ -48,14 +48,18 @@ impl<'g, R, V> History<'g, R, V> for Discard {
 }
 
 pub(crate) struct Retain<'g, R, V> {
+    key: R,
     path: Vec<Segment<'g, R, V>>,
 }
 
 impl<'g, R, V> History<'g, R, V> for Retain<'g, R, V> {
     type PopError = Infallible;
 
-    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
-        Self { path: Vec::new() }
+    fn new(_root: &'g Atomic128<Edge<V>>, key: R) -> Self {
+        Self {
+            key,
+            path: Vec::new(),
+        }
     }
 
     #[inline]
@@ -70,28 +74,22 @@ impl<'g, R, V> History<'g, R, V> for Retain<'g, R, V> {
 }
 
 pub(crate) enum Hybrid<'g, R, V> {
-    Discard {
-        key: R,
-        root: &'g Atomic128<Edge<V>>,
-    },
-    Retain {
-        key: R,
-        retain: Retain<'g, R, V>,
-    },
+    Discard { root: &'g Atomic128<Edge<V>> },
+    Retain(Retain<'g, R, V>),
 }
 
 impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     type PopError = ();
 
-    fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
-        Self::Discard { key, root }
+    fn new(root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
+        Self::Discard { root }
     }
 
     #[inline]
     fn push(&mut self, segment: Segment<'g, R, V>) {
         match self {
             Self::Discard { .. } => (),
-            Self::Retain { retain, .. } => retain.push(segment),
+            Self::Retain(retain) => retain.push(segment),
         }
     }
 
@@ -99,7 +97,7 @@ impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
     fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
         match self {
             Self::Discard { .. } => Err(()),
-            Self::Retain { retain, .. } => Ok(retain.pop().unwrap()),
+            Self::Retain(retain) => Ok(retain.pop().unwrap()),
         }
     }
 }

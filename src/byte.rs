@@ -46,6 +46,11 @@ impl Array {
     }
 
     #[inline]
+    pub(crate) const fn truncate(self, len: Len) -> Self {
+        Self::from_u64_truncate(self.value(), len)
+    }
+
+    #[inline]
     pub(crate) const unsafe fn new_unchecked(value: u64) -> Self {
         validate!(Self::is_valid(value));
         Self(value)

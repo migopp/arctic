@@ -29,7 +29,7 @@ pub(crate) struct Point<'g, 'l, R, V: Value, H> {
     key: R,
 
     /// Edge this cursor currently points to
-    root: &'g Atomic128<Edge<V>>,
+    edge: &'g Atomic128<Edge<V>>,
 
     /// Path history of this cursor (sequence of path segments)
     history: H,
@@ -50,25 +50,22 @@ where
         Self {
             guard: smr.guard(key.peek_all()),
             bits: 0,
-            root,
+            edge: root,
             key,
             history: H::new(root, key),
         }
     }
 
     #[inline]
-    pub(crate) fn root(&self) -> &'g Atomic128<Edge<V>> {
-        self.root
-    }
-
-    #[inline]
-    pub(crate) fn bits(&self) -> usize {
-        self.bits
+    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<V>> {
+        self.edge
     }
 
     #[inline]
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
-        unsafe { self.guard.retire(edge) }
+        let prefix = self.guard.prefix();
+        let key = prefix.truncate(byte::Len::MAX.min_bits(self.bits));
+        unsafe { self.guard.retire(edge.with_meta(edge.meta().with_key(key))) }
     }
 
     #[inline]
@@ -79,7 +76,7 @@ where
     #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<V>>, ()>> {
         loop {
-            let mut edge = self.root().load_packed(Ordering::Relaxed);
+            let mut edge = self.edge().load_packed(Ordering::Relaxed);
 
             if edge.is_scan() {
                 match self.wait_for_scan(stat::Counter::ScanUpdate) {
@@ -123,7 +120,7 @@ where
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<(Op, ribbit::Packed<Edge<V>>, ribbit::Packed<Edge<V>>), ()> {
         loop {
-            let mut old = self.root().load_packed(Ordering::Relaxed);
+            let mut old = self.edge().load_packed(Ordering::Relaxed);
 
             if old.is_scan() {
                 old = self.wait_for_scan(stat::Counter::ScanInsert)?;
@@ -193,7 +190,7 @@ where
 
         loop {
             core::hint::spin_loop();
-            let edge = self.root().load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
 
             if !edge.is_scan() {
                 return Ok(edge);
@@ -218,7 +215,7 @@ where
         self.history.push(path::Segment {
             key,
             len,
-            edge: core::mem::replace(&mut self.root, edge),
+            edge: core::mem::replace(&mut self.edge, edge),
             node,
         })
     }
@@ -228,7 +225,7 @@ where
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.bits -= segment.len.bits() as usize + 8;
         self.key = segment.key;
-        self.root = segment.edge;
+        self.edge = segment.edge;
         Ok(segment.node)
     }
 }
@@ -255,7 +252,7 @@ where
         let mut cursor = Self::new(smr, root, key);
 
         loop {
-            let edge = cursor.root.load_packed(Ordering::Relaxed);
+            let edge = cursor.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
 
             let _ = meta.key().match_exact(&mut cursor.key)?;
@@ -269,7 +266,7 @@ where
                 let byte = cursor.key.next()?;
                 let data = edge.data();
                 let node = unsafe { data.into_node_unchecked() };
-                cursor.root = node.get(byte)?;
+                cursor.edge = node.get(byte)?;
             }
         }
     }
@@ -295,7 +292,7 @@ where
             prefix,
             cursor: Point::new(smr, root, prefix),
         };
-        cursor.traverse_prefix()?;
+        cursor.traverse()?;
         Some(cursor)
     }
 
@@ -310,7 +307,7 @@ where
     }
 
     pub(crate) fn prefix(&self) -> R {
-        self.prefix.slice(self.cursor.bits())
+        self.prefix.slice(self.cursor.bits)
     }
 
     #[inline]
@@ -318,9 +315,9 @@ where
         self.cursor.guard
     }
 
-    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
+    pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
         let (key, edge) = loop {
-            let edge = self.cursor.root.load_packed(Ordering::Acquire);
+            let edge = self.cursor.edge.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let data = edge.data();
             let save = self.cursor.key;
@@ -346,20 +343,17 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Point<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
+impl<'g, 'l, R: key::Read, V: Value> Prefix<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
     pub(crate) fn upgrade(&mut self) {
-        let (root, key) = match self.history {
-            path::Hybrid::Discard { key, root } => (root, key),
+        let root = match self.history {
+            path::Hybrid::Discard { root } => root,
             path::Hybrid::Retain { .. } => return,
         };
 
-        self.root = root;
-        self.key = key;
+        self.edge = root;
+        self.key = self.prefix;
         self.bits = 0;
-        self.history = path::Hybrid::Retain {
-            key,
-            retain: path::Retain::new(root, key),
-        }
+        self.history = path::Hybrid::Retain(path::Retain::new(root, self.key));
     }
 }
 
