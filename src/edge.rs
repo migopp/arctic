@@ -192,6 +192,17 @@ pub(crate) enum Op {
     Remove,
 }
 
+impl Op {
+    /// Whether this operation allocates a new node.
+    #[inline]
+    pub(crate) fn is_allocate(self) -> bool {
+        match self {
+            Self::Insert | Self::Remove => false,
+            Self::Create | Self::Expand => true,
+        }
+    }
+}
+
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = DataPacked))]
 pub(crate) struct Data<L> {

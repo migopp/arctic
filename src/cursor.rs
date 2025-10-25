@@ -76,7 +76,7 @@ where
     #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<V>>, ()>> {
         loop {
-            let mut edge = self.edge().load_packed(Ordering::Relaxed);
+            let mut edge = self.edge.load_packed(Ordering::Relaxed);
 
             if edge.is_scan() {
                 match self.wait_for_scan(stat::Counter::ScanUpdate) {
@@ -120,7 +120,7 @@ where
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<(Op, ribbit::Packed<Edge<V>>, ribbit::Packed<Edge<V>>), ()> {
         loop {
-            let mut old = self.edge().load_packed(Ordering::Relaxed);
+            let mut old = self.edge.load_packed(Ordering::Relaxed);
 
             if old.is_scan() {
                 old = self.wait_for_scan(stat::Counter::ScanInsert)?;
@@ -182,6 +182,56 @@ where
     }
 
     #[cold]
+    pub(crate) fn freeze(&mut self) -> Result<(), H::PopError> {
+        let mut node = self.pop()?;
+        let mut edge = self.edge.load_packed(Ordering::Acquire);
+
+        loop {
+            while edge.meta().frozen() {
+                node = self.pop()?;
+                edge = self.edge.load_packed(Ordering::Acquire);
+            }
+
+            let meta = edge.meta();
+            let data = edge.data();
+
+            // Should be impossible to freeze leaf
+            validate!(!meta.leaf());
+
+            // Already helped by another thread
+            if !data.is_ref(node) {
+                return Ok(());
+            }
+
+            let (op, new) = node.replace(meta);
+
+            match self.edge.compare_exchange_packed(
+                edge,
+                new.with_data(new.data().with_scan(data.scan())),
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    stat::increment(op);
+                    unsafe {
+                        self.retire(edge);
+                    }
+                    return Ok(());
+                }
+                Err(conflict) => {
+                    if op.is_allocate() {
+                        unsafe {
+                            new.data()
+                                .deallocate_node_unchecked(stat::Counter::FreeConflict);
+                        }
+                    }
+                    edge = conflict;
+                }
+            };
+        }
+    }
+
+    #[cold]
     pub(crate) fn wait_for_scan(
         &self,
         counter: stat::Counter,
@@ -190,7 +240,7 @@ where
 
         loop {
             core::hint::spin_loop();
-            let edge = self.edge().load_packed(Ordering::Acquire);
+            let edge = self.edge.load_packed(Ordering::Acquire);
 
             if !edge.is_scan() {
                 return Ok(edge);
@@ -344,7 +394,23 @@ where
 }
 
 impl<'g, 'l, R: key::Read, V: Value> Prefix<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
-    pub(crate) fn upgrade(&mut self) {
+    #[cold]
+    pub(crate) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
+        match self.cursor.freeze() {
+            Ok(()) => return self.traverse(),
+            Err(()) => (),
+        }
+
+        self.upgrade();
+        self.traverse()?;
+        match self.cursor.freeze() {
+            Ok(()) => return self.traverse(),
+            Err(()) => unreachable!(),
+        }
+    }
+
+    #[cold]
+    fn upgrade(&mut self) {
         let root = match self.history {
             path::Hybrid::Discard { root } => root,
             path::Hybrid::Retain { .. } => return,

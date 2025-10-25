@@ -149,7 +149,7 @@ where
                 None => return Ok(None),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
-                    Self::freeze(&mut cursor)?;
+                    cursor.freeze()?;
                     continue;
                 }
             };
@@ -223,7 +223,7 @@ where
             let (op, old, new) = match cursor.traverse_or_insert(leaf) {
                 Ok(cas) => cas,
                 Err(()) => {
-                    Self::freeze(&mut cursor)?;
+                    cursor.freeze()?;
                     continue;
                 }
             };
@@ -249,113 +249,22 @@ where
                 }
                 Ok(_) => {
                     stat::increment(op);
-                    unsafe { Self::retire(&mut cursor, op, old) };
+                    if op.is_retire() {
+                        unsafe {
+                            cursor.retire(old);
+                        }
+                    }
                 }
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
-                    unsafe { Self::deallocate(op, new) };
+                    if op.is_allocate() {
+                        unsafe {
+                            new.data()
+                                .deallocate_node_unchecked(stat::Counter::FreeConflict)
+                        };
+                    }
                 }
             }
-        }
-    }
-
-    #[cold]
-    fn freeze_prefix<'k>(
-        cursor: &mut cursor::Prefix<
-            'g,
-            '_,
-            K::Read<'k>,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
-        >,
-    ) -> Option<ribbit::Packed<Edge<V>>> {
-        match Self::freeze(cursor) {
-            Ok(()) => return cursor.traverse(),
-            Err(()) => (),
-        }
-
-        cursor.upgrade();
-        cursor.traverse()?;
-        Self::freeze_prefix(cursor)
-    }
-
-    #[cold]
-    fn freeze<'k, H>(
-        cursor: &mut cursor::Point<'g, '_, K::Read<'k>, V, H>,
-    ) -> Result<(), H::PopError>
-    where
-        H: cursor::path::History<'g, K::Read<'k>, V>,
-    {
-        let mut node = cursor.pop()?;
-        let mut edge = cursor.edge().load_packed(Ordering::Acquire);
-
-        loop {
-            while edge.meta().frozen() {
-                node = cursor.pop()?;
-                edge = cursor.edge().load_packed(Ordering::Acquire);
-            }
-
-            let meta = edge.meta();
-            let data = edge.data();
-
-            // Should be impossible to freeze leaf
-            validate!(!meta.leaf());
-
-            // Already helped by another thread
-            if !data.is_ref(node) {
-                return Ok(());
-            }
-
-            let (op, new) = node.replace(meta);
-
-            match cursor.edge().compare_exchange_packed(
-                edge,
-                new.with_data(new.data().with_scan(data.scan())),
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => unsafe {
-                    stat::increment(op);
-                    Self::retire(cursor, Op::Node(op), edge);
-                    return Ok(());
-                },
-                Err(conflict) => unsafe {
-                    Self::deallocate(Op::Node(op), new);
-                    edge = conflict;
-                },
-            };
-        }
-    }
-
-    #[cold]
-    unsafe fn deallocate(op: Op, edge: ribbit::Packed<Edge<V>>) {
-        match op {
-            Op::Node(node::Op::Destroy | node::Op::Compress)
-            | Op::Edge(edge::Op::Insert | edge::Op::Remove) => (),
-            Op::Node(node::Op::Grow | node::Op::Replace | node::Op::Shrink)
-            | Op::Edge(edge::Op::Create | edge::Op::Expand) => unsafe {
-                validate!(edge.is_node());
-                edge.data()
-                    .deallocate_node_unchecked(stat::Counter::FreeConflict)
-            },
-        }
-    }
-
-    #[cold]
-    unsafe fn retire<R: key::Read, H: cursor::path::History<'g, R, V>>(
-        cursor: &mut cursor::Point<'g, '_, R, V, H>,
-        op: Op,
-        edge: ribbit::Packed<Edge<V>>,
-    ) {
-        match op {
-            Op::Edge(_) => return,
-            Op::Node(_) => (),
-        }
-
-        validate!(edge.is_node());
-
-        unsafe {
-            cursor.retire(edge);
         }
     }
 
@@ -536,7 +445,7 @@ where
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
                     Ok(safe) if !edge.meta().frozen() => edge = safe,
                     Ok(_) | Err(()) => {
-                        edge = Self::freeze_prefix(cursor)?;
+                        edge = cursor.freeze()?;
                         continue;
                     }
                 }
@@ -578,7 +487,7 @@ where
             validate!(edge.data().scan());
 
             if edge.meta().frozen() {
-                edge = match Self::freeze_prefix(cursor) {
+                edge = match cursor.freeze() {
                     Some(edge) => edge,
                     None => unreachable!("Locked edge must be reachable"),
                 };

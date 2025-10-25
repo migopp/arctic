@@ -57,6 +57,17 @@ pub(crate) enum Op {
     Compress,
 }
 
+impl Op {
+    /// Whether this operation allocates a new node.
+    #[inline]
+    pub(crate) fn is_allocate(self) -> bool {
+        match self {
+            Self::Destroy | Self::Compress => false,
+            Self::Grow | Self::Replace | Self::Shrink => true,
+        }
+    }
+}
+
 pub(crate) enum Ref<'g, V> {
     Node3(&'g Node3<V>),
     Node15(&'g Node15<V>),
