@@ -112,7 +112,7 @@ where
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        self.compare_exchange_impl::<cursor::Optimistic, _>(key, exchange)
+        self.compare_exchange_impl::<cursor::path::Optimistic, _>(key, exchange)
     }
 
     #[cold]
@@ -124,7 +124,7 @@ where
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
-        self.compare_exchange_impl::<cursor::Pessimistic<_, _>, _>(key, exchange)
+        self.compare_exchange_impl::<cursor::path::Pessimistic<_, _>, _>(key, exchange)
             .unwrap()
     }
 
@@ -139,7 +139,7 @@ where
         mut exchange: F,
     ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
     where
-        H: cursor::History<'g, K::Read<'k>, V>,
+        H: cursor::path::History<'g, K::Read<'k>, V>,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
         let reader = K::Read::from(key);
@@ -194,7 +194,7 @@ where
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<Option<Owned<'g, '_, V>>, ()> {
-        self.insert_impl::<cursor::Optimistic>(key, leaf)
+        self.insert_impl::<cursor::path::Optimistic>(key, leaf)
     }
 
     #[cold]
@@ -204,7 +204,7 @@ where
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Option<Owned<'g, '_, V>> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::Pessimistic<_, _>>(key, leaf)
+        self.insert_impl::<cursor::path::Pessimistic<_, _>>(key, leaf)
             .unwrap()
     }
 
@@ -215,7 +215,7 @@ where
         leaf: ribbit::Packed<Edge<V>>,
     ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
     where
-        H: cursor::History<'g, K::Read<'k>, V>,
+        H: cursor::path::History<'g, K::Read<'k>, V>,
     {
         let reader = K::Read::from(key);
         let mut cursor = Cursor::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
@@ -262,7 +262,13 @@ where
 
     #[cold]
     fn freeze_prefix<'k>(
-        cursor: &mut cursor::Prefix<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &mut cursor::Prefix<
+            'g,
+            '_,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
     ) -> Option<ribbit::Packed<Edge<V>>> {
         let prefix = cursor.prefix();
         match Self::freeze(cursor, prefix) {
@@ -281,7 +287,7 @@ where
         key: K::Read<'k>,
     ) -> Result<(), H::PopError>
     where
-        H: cursor::History<'g, K::Read<'k>, V>,
+        H: cursor::path::History<'g, K::Read<'k>, V>,
     {
         let mut node = cursor.pop()?;
         let mut edge = cursor.root().load_packed(Ordering::Acquire);
@@ -339,7 +345,7 @@ where
     }
 
     #[cold]
-    unsafe fn retire<R: key::Read, H: cursor::History<'g, R, V>>(
+    unsafe fn retire<R: key::Read, H: cursor::path::History<'g, R, V>>(
         cursor: &mut Cursor<'g, '_, R, V, H>,
         op: Op,
         key: R,
@@ -365,7 +371,7 @@ where
     ) -> Option<PrefixGuard<'g, '_, K, V>> {
         let prefix = prefix.into();
 
-        let cursor = cursor::Prefix::<_, _, cursor::Optimistic>::new_prefix(
+        let cursor = cursor::Prefix::<_, _, cursor::path::Optimistic>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
@@ -404,7 +410,7 @@ where
         let min = min.into();
         let max = max.into();
 
-        let cursor = cursor::Prefix::<_, _, cursor::Hybrid<_, _>>::new_range(
+        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_range(
             &mut self.smr,
             self.raw.root(),
             min,
@@ -422,7 +428,13 @@ where
 
     fn scan_optimistic<'l, 'k, S, A>(
         buffer: &mut Vec<(K::Write, u64)>,
-        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         arg: &A,
         limit: usize,
     ) -> Result<(), ()>
@@ -483,7 +495,13 @@ where
 
     fn scan_pessimistic<'l, 'k, A, S>(
         buffer: &'l mut Vec<(K::Write, u64)>,
-        mut cursor: cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        mut cursor: cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         arg: &A,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
     where
@@ -504,7 +522,13 @@ where
     }
 
     fn lock_prefix<'k>(
-        cursor: &mut cursor::Prefix<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &mut cursor::Prefix<
+            'g,
+            '_,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
     ) -> Option<()> {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 
@@ -541,7 +565,13 @@ where
 
     #[inline]
     fn unlock_prefix<'k>(
-        cursor: &mut cursor::Prefix<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &mut cursor::Prefix<
+            'g,
+            '_,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
     ) {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 

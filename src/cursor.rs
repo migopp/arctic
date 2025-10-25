@@ -1,6 +1,8 @@
-use core::convert::Infallible;
+pub(crate) mod path;
+
 use core::sync::atomic::Ordering;
 
+use path::History as _;
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
@@ -37,7 +39,7 @@ impl<'g, 'l, R, V, H> Cursor<'g, 'l, R, V, H>
 where
     R: key::Read,
     V: Value,
-    H: History<'g, R, V>,
+    H: path::History<'g, R, V>,
 {
     #[inline]
     pub(crate) fn new(
@@ -213,7 +215,7 @@ where
     ) {
         // 1 extra byte for node
         self.bits += 8 + len.bits() as usize;
-        self.history.push(Segment {
+        self.history.push(path::Segment {
             key,
             len,
             edge: core::mem::replace(&mut self.root, edge),
@@ -231,7 +233,7 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Optimistic> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
         loop {
@@ -264,7 +266,7 @@ impl<'g, 'l, R, V, H> Prefix<'g, 'l, R, V, H>
 where
     R: key::Read,
     V: Value,
-    H: History<'g, R, V>,
+    H: path::History<'g, R, V>,
 {
     pub(crate) fn new_prefix(
         smr: &'l mut smr::Local<'g, V>,
@@ -326,19 +328,19 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, path::Hybrid<'g, R, V>> {
     pub(crate) fn upgrade(&mut self) {
         let (root, key) = match self.history {
-            Hybrid::Optimistic { key, root } => (root, key),
-            Hybrid::Pessimistic { .. } => return,
+            path::Hybrid::Optimistic { key, root } => (root, key),
+            path::Hybrid::Pessimistic { .. } => return,
         };
 
         self.root = root;
         self.key = key;
         self.bits = 0;
-        self.history = Hybrid::Pessimistic {
+        self.history = path::Hybrid::Pessimistic {
             key,
-            pessimistic: Pessimistic { path: Vec::new() },
+            pessimistic: path::Pessimistic::new(root, key),
         }
     }
 }
@@ -354,103 +356,4 @@ impl<'g, 'l, R, V: Value, H> core::ops::DerefMut for Prefix<'g, 'l, R, V, H> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cursor
     }
-}
-
-pub(crate) trait History<'g, R, V> {
-    type PopError;
-
-    fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self;
-
-    fn push(&mut self, segment: Segment<'g, R, V>);
-    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError>;
-}
-
-pub(crate) struct Optimistic;
-
-impl<'g, R, V> History<'g, R, V> for Optimistic {
-    type PopError = ();
-
-    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
-        Self
-    }
-
-    #[inline]
-    fn push(&mut self, _segment: Segment<'g, R, V>) {}
-
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
-        Err(())
-    }
-}
-
-pub(crate) struct Pessimistic<'g, R, V> {
-    path: Vec<Segment<'g, R, V>>,
-}
-
-impl<'g, R, V> History<'g, R, V> for Pessimistic<'g, R, V> {
-    type PopError = Infallible;
-
-    fn new(_root: &'g Atomic128<Edge<V>>, _key: R) -> Self {
-        Self { path: Vec::new() }
-    }
-
-    #[inline]
-    fn push(&mut self, segment: Segment<'g, R, V>) {
-        self.path.push(segment);
-    }
-
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
-        Ok(self.path.pop())
-    }
-}
-
-pub(crate) enum Hybrid<'g, R, V> {
-    Optimistic {
-        key: R,
-        root: &'g Atomic128<Edge<V>>,
-    },
-    Pessimistic {
-        key: R,
-        pessimistic: Pessimistic<'g, R, V>,
-    },
-}
-
-impl<'g, R: Copy, V> History<'g, R, V> for Hybrid<'g, R, V> {
-    type PopError = ();
-
-    fn new(root: &'g Atomic128<Edge<V>>, key: R) -> Self {
-        Self::Optimistic { key, root }
-    }
-
-    #[inline]
-    fn push(&mut self, segment: Segment<'g, R, V>) {
-        match self {
-            Hybrid::Optimistic { .. } => (),
-            Hybrid::Pessimistic { pessimistic, .. } => pessimistic.push(segment),
-        }
-    }
-
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, R, V>>, Self::PopError> {
-        match self {
-            Hybrid::Optimistic { .. } => Err(()),
-            Hybrid::Pessimistic { pessimistic, .. } => Ok(pessimistic.pop().unwrap()),
-        }
-    }
-}
-
-/// A path along the tree is composed of 0 or more path segments.
-pub(crate) struct Segment<'g, R, V> {
-    /// Edge to match
-    edge: &'g Atomic128<Edge<V>>,
-
-    /// Key before matching on `edge`
-    key: R,
-
-    /// Number of bytes matched along `edge`
-    len: byte::Len,
-
-    /// Node underneath `edge`
-    node: node::Ref<'g, V>,
 }

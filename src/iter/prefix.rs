@@ -8,7 +8,6 @@ use crate::iter;
 use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
-use crate::Cursor;
 use crate::Edge;
 use crate::Key;
 use crate::Value;
@@ -31,7 +30,9 @@ where
     V: Value,
     S: Sort,
 {
-    pub(crate) fn new<R>(cursor: &'l cursor::Prefix<'g, 'l, R, V, cursor::Hybrid<'g, R, V>>) -> Self
+    pub(crate) fn new<R>(
+        cursor: &'l cursor::Prefix<'g, 'l, R, V, cursor::path::Hybrid<'g, R, V>>,
+    ) -> Self
     where
         R: key::Read,
         W: From<R>,
@@ -144,7 +145,13 @@ where
     V: Value,
 {
     fn new(
-        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         (): &(),
     ) -> Self {
         Self::new::<K::Read<'k>>(cursor)

@@ -24,7 +24,13 @@ where
     V: Value,
 {
     pub(crate) fn new<'k: 'l>(
-        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         min: K::Read<'k>,
         max: K::Read<'k>,
     ) -> Self {
@@ -134,7 +140,13 @@ where
     'k: 'l,
 {
     fn new(
-        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         (min, max): &(K::Read<'k>, K::Read<'k>),
     ) -> Self {
         Self::new(cursor, *min, *max)

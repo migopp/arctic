@@ -16,7 +16,13 @@ use crate::Value;
 
 pub(crate) trait Scan<'g, 'k, 'l, A, K: Key, V: Value> {
     fn new(
-        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'k>,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+        >,
         arg: &A,
     ) -> Self;
 
