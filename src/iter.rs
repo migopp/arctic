@@ -15,7 +15,7 @@ use crate::Cursor;
 use crate::Key;
 use crate::Value;
 
-pub(crate) trait ScanIter<'g, 'k, 'l, A, K: Key, V: Value> {
+pub(crate) trait Scan<'g, 'k, 'l, A, K: Key, V: Value> {
     fn new(
         cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
         arg: &A,

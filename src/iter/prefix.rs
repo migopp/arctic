@@ -5,7 +5,7 @@ use ribbit::atomic::Atomic128;
 
 use crate::cursor;
 use crate::iter;
-use crate::iter::ScanIter;
+use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
 use crate::Cursor;
@@ -138,8 +138,7 @@ where
     }
 }
 
-impl<'g, 'k, 'l, K, V> ScanIter<'g, 'k, 'l, (), K, V>
-    for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
+impl<'g, 'k, 'l, K, V> Scan<'g, 'k, 'l, (), K, V> for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
 where
     K: Key,
     V: Value,

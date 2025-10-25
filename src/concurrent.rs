@@ -8,7 +8,7 @@ use crate::byte;
 use crate::cursor;
 use crate::edge;
 use crate::iter;
-use crate::iter::ScanIter;
+use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
 use crate::key::Read as _;
@@ -424,7 +424,7 @@ where
         limit: usize,
     ) -> Result<(), ()>
     where
-        S: ScanIter<'g, 'k, 'l, A, K, V>,
+        S: Scan<'g, 'k, 'l, A, K, V>,
     {
         S::new(cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
 
@@ -484,7 +484,7 @@ where
         arg: &A,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
     where
-        S: for<'c> ScanIter<'g, 'k, 'c, A, K, V>,
+        S: for<'c> Scan<'g, 'k, 'c, A, K, V>,
     {
         Self::lock_prefix(&mut cursor)?;
 

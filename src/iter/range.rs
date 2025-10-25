@@ -4,7 +4,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
-use crate::iter::ScanIter;
+use crate::iter::Scan;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::node;
@@ -126,7 +126,7 @@ impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
     }
 }
 
-impl<'g, 'k, 'l, K, V> ScanIter<'g, 'k, 'l, (K::Read<'k>, K::Read<'k>), K, V>
+impl<'g, 'k, 'l, K, V> Scan<'g, 'k, 'l, (K::Read<'k>, K::Read<'k>), K, V>
     for RangeIter<'g, 'l, K, V>
 where
     K: Key,
