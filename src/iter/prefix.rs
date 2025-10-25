@@ -31,7 +31,7 @@ where
     V: Value,
     S: Sort,
 {
-    pub(crate) fn new<R>(cursor: &'l Cursor<'g, 'l, R, V, cursor::Hybrid<'g, R, V>>) -> Self
+    pub(crate) fn new<R>(cursor: &'l cursor::Prefix<'g, 'l, R, V, cursor::Hybrid<'g, R, V>>) -> Self
     where
         R: key::Read,
         W: From<R>,
@@ -144,7 +144,7 @@ where
     V: Value,
 {
     fn new(
-        cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
+        cursor: &'l cursor::Prefix<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
         (): &(),
     ) -> Self {
         Self::new::<K::Read<'k>>(cursor)

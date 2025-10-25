@@ -182,33 +182,6 @@ where
         }
     }
 
-    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
-        let (key, edge) = loop {
-            let edge = self.root.load_packed(Ordering::Acquire);
-            let meta = edge.meta();
-            let data = edge.data();
-            let save = self.key;
-
-            match meta.key().match_prefix(&mut self.key)? {
-                byte::MatchPrefix::Full(len) if edge.is_node() => {
-                    let node = unsafe { data.into_node_unchecked() };
-                    let Some(byte) = self.key.next() else {
-                        break (save, edge);
-                    };
-                    let next = node.get(byte)?;
-                    self.push(save, len, node, next);
-                }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => match edge.is_null() {
-                    true => return None,
-                    false => break (save, edge),
-                },
-            }
-        };
-
-        self.key = key;
-        Some(edge)
-    }
-
     #[cold]
     pub(crate) fn wait_for_scan(
         &self,
@@ -258,32 +231,6 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
-    pub(crate) fn prefix(&self) -> R {
-        let key = match &self.history {
-            Hybrid::Optimistic { key, .. } => key,
-            Hybrid::Pessimistic { key, .. } => key,
-        };
-
-        key.slice(self.bits)
-    }
-
-    pub(crate) fn upgrade(&mut self) {
-        let (root, key) = match self.history {
-            Hybrid::Optimistic { key, root } => (root, key),
-            Hybrid::Pessimistic { .. } => return,
-        };
-
-        self.root = root;
-        self.key = key;
-        self.bits = 0;
-        self.history = Hybrid::Pessimistic {
-            key,
-            pessimistic: Pessimistic { path: Vec::new() },
-        }
-    }
-}
-
 impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
     #[inline]
     pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
@@ -305,6 +252,107 @@ impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Optimistic> {
                 self.root = node.get(byte)?;
             }
         }
+    }
+}
+
+pub(crate) struct Prefix<'g, 'l, R, V: Value, H> {
+    prefix: R,
+    cursor: Cursor<'g, 'l, R, V, H>,
+}
+
+impl<'g, 'l, R, V, H> Prefix<'g, 'l, R, V, H>
+where
+    R: key::Read,
+    V: Value,
+    H: History<'g, R, V>,
+{
+    pub(crate) fn new_prefix(
+        smr: &'l mut smr::Local<'g, V>,
+        root: &'g Atomic128<Edge<V>>,
+        prefix: R,
+    ) -> Option<Self> {
+        let mut cursor = Self {
+            prefix,
+            cursor: Cursor::new(smr, root, prefix),
+        };
+        cursor.traverse_prefix()?;
+        Some(cursor)
+    }
+
+    pub(crate) fn new_range(
+        smr: &'l mut smr::Local<'g, V>,
+        root: &'g Atomic128<Edge<V>>,
+        min: R,
+        max: R,
+    ) -> Option<Self> {
+        let prefix = min.prefix(&max);
+        Self::new_prefix(smr, root, prefix)
+    }
+
+    pub(crate) fn prefix(&self) -> R {
+        self.prefix.slice(self.cursor.bits())
+    }
+
+    #[inline]
+    pub(crate) fn into_guard(self) -> smr::PathGuard<'g, 'l, V> {
+        self.cursor.guard
+    }
+
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<V>>> {
+        let (key, edge) = loop {
+            let edge = self.cursor.root.load_packed(Ordering::Acquire);
+            let meta = edge.meta();
+            let data = edge.data();
+            let save = self.cursor.key;
+
+            match meta.key().match_prefix(&mut self.cursor.key)? {
+                byte::MatchPrefix::Full(len) if edge.is_node() => {
+                    let node = unsafe { data.into_node_unchecked() };
+                    let Some(byte) = self.cursor.key.next() else {
+                        break (save, edge);
+                    };
+                    let next = node.get(byte)?;
+                    self.cursor.push(save, len, node, next);
+                }
+                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => match edge.is_null() {
+                    true => return None,
+                    false => break (save, edge),
+                },
+            }
+        };
+
+        self.cursor.key = key;
+        Some(edge)
+    }
+}
+
+impl<'g, 'l, R: key::Read, V: Value> Cursor<'g, 'l, R, V, Hybrid<'g, R, V>> {
+    pub(crate) fn upgrade(&mut self) {
+        let (root, key) = match self.history {
+            Hybrid::Optimistic { key, root } => (root, key),
+            Hybrid::Pessimistic { .. } => return,
+        };
+
+        self.root = root;
+        self.key = key;
+        self.bits = 0;
+        self.history = Hybrid::Pessimistic {
+            key,
+            pessimistic: Pessimistic { path: Vec::new() },
+        }
+    }
+}
+
+impl<'g, 'l, R, V: Value, H> core::ops::Deref for Prefix<'g, 'l, R, V, H> {
+    type Target = Cursor<'g, 'l, R, V, H>;
+    fn deref(&self) -> &Self::Target {
+        &self.cursor
+    }
+}
+
+impl<'g, 'l, R, V: Value, H> core::ops::DerefMut for Prefix<'g, 'l, R, V, H> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cursor
     }
 }
 
