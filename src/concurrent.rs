@@ -66,7 +66,7 @@ where
 {
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'g, '_, V>> {
-        cursor::Point::new(&mut self.smr, self.raw.root(), K::Read::from(key)).traverse_value()
+        cursor::Point::get(&mut self.smr, self.raw.root(), K::Read::from(key))
     }
 
     #[inline]

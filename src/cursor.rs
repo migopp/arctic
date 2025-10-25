@@ -233,25 +233,43 @@ where
     }
 }
 
-impl<'g, 'l, R: key::Read, V: Value> Point<'g, 'l, R, V, path::Discard> {
+impl<'g, 'l, R, V> Point<'g, 'l, R, V, path::Discard>
+where
+    R: key::Read,
+    V: Value,
+{
+    // A point `get` operation is wait-free and never requires back-tracking.
+    //
+    // This means we don't need to expose any intermediate `cursor::Point`
+    // state and can always discard path history.
     #[inline]
-    pub(crate) fn traverse_value(mut self) -> Option<Shared<'g, 'l, V>> {
+    pub(crate) fn get(
+        smr: &'l mut smr::Local<'g, V>,
+        root: &'g Atomic128<Edge<V>>,
+        key: R,
+    ) -> Option<Shared<'g, 'l, V>>
+    where
+        R: key::Read,
+        V: Value,
+    {
+        let mut cursor = Self::new(smr, root, key);
+
         loop {
-            let edge = self.root.load_packed(Ordering::Relaxed);
+            let edge = cursor.root.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
 
-            let _ = meta.key().match_exact(&mut self.key)?;
+            let _ = meta.key().match_exact(&mut cursor.key)?;
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(unsafe { V::guard(self.guard, data.into_leaf()) });
+                return Some(unsafe { V::guard(cursor.guard, data.into_leaf()) });
             } else if data.is_null() {
                 return None;
             } else {
-                let byte = self.key.next()?;
+                let byte = cursor.key.next()?;
                 let data = edge.data();
                 let node = unsafe { data.into_node_unchecked() };
-                self.root = node.get(byte)?;
+                cursor.root = node.get(byte)?;
             }
         }
     }
