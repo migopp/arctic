@@ -15,19 +15,13 @@ use crate::Cursor;
 use crate::Key;
 use crate::Value;
 
-pub(crate) trait ScanIter<'g, 'l, K: Key, V: Value> {
-    type Arg<'k>: Copy
-    where
-        V: 'g,
-        'g: 'l,
-        'k: 'l;
-
-    fn new<'k: 'l>(
+pub(crate) trait ScanIter<'g, 'k, 'l, A, K: Key, V: Value> {
+    fn new(
         cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        arg: Self::Arg<'k>,
+        arg: &A,
     ) -> Self;
 
-    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F);
+    fn for_each<F: FnMut(&K::Write, u64)>(self, apply: F);
 }
 
 #[derive(Clone, Debug)]

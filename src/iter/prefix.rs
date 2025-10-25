@@ -77,7 +77,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
@@ -138,26 +138,20 @@ where
     }
 }
 
-impl<'g, 'l, K, V> ScanIter<'g, 'l, K, V> for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
+impl<'g, 'k, 'l, K, V> ScanIter<'g, 'k, 'l, (), K, V>
+    for PrefixIter<'g, 'l, K::Write, V, iter::Sorted>
 where
     K: Key,
     V: Value,
 {
-    type Arg<'k>
-        = ()
-    where
-        V: 'g,
-        'g: 'l,
-        'k: 'l;
-
-    fn new<'k: 'l>(
+    fn new(
         cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        (): Self::Arg<'k>,
+        (): &(),
     ) -> Self {
         Self::new::<K::Read<'k>>(cursor)
     }
 
-    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, u64)>(self, apply: F) {
         Self::for_each(self, apply)
     }
 }

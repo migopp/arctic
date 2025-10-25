@@ -89,15 +89,15 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(&mut self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(self, mut apply: F) {
         match self {
-            RangeIter::Root { key, next } => {
+            RangeIter::Root { key, mut next } => {
                 crate::cold();
                 if let Some(value) = next.take() {
-                    apply(key, value);
+                    apply(&key, value);
                 }
             }
-            RangeIter::Node(iter) => iter.for_each(apply),
+            RangeIter::Node(mut iter) => iter.for_each(apply),
         }
     }
 
@@ -126,26 +126,21 @@ impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
     }
 }
 
-impl<'g, 'l, K, V> ScanIter<'g, 'l, K, V> for RangeIter<'g, 'l, K, V>
+impl<'g, 'k, 'l, K, V> ScanIter<'g, 'k, 'l, (K::Read<'k>, K::Read<'k>), K, V>
+    for RangeIter<'g, 'l, K, V>
 where
     K: Key,
     V: Value,
+    'k: 'l,
 {
-    type Arg<'k>
-        = (K::Read<'k>, K::Read<'k>)
-    where
-        V: 'g,
-        'g: 'l,
-        'k: 'l;
-
-    fn new<'k: 'l>(
+    fn new(
         cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        (min, max): Self::Arg<'k>,
+        (min, max): &(K::Read<'k>, K::Read<'k>),
     ) -> Self {
-        Self::new(cursor, min, max)
+        Self::new(cursor, *min, *max)
     }
 
-    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, u64)>(self, apply: F) {
         Self::for_each(self, apply)
     }
 }

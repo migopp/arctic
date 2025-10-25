@@ -263,16 +263,15 @@ where
     #[cold]
     fn freeze_prefix<'k>(
         cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        key: K::Read<'k>,
     ) -> Option<ribbit::Packed<Edge<V>>> {
-        match Self::freeze(cursor, key) {
+        match Self::freeze(cursor, cursor.prefix()) {
             Ok(()) => return cursor.traverse_prefix(),
             Err(()) => (),
         }
 
         cursor.upgrade();
         cursor.traverse_prefix()?;
-        Self::freeze_prefix(cursor, key)
+        Self::freeze_prefix(cursor)
     }
 
     #[cold]
@@ -409,13 +408,8 @@ where
 
         cursor.traverse_prefix()?;
 
-        Self::scan_optimistic::<iter::RangeIter<'g, '_, K, V>>(
-            buffer,
-            &mut cursor,
-            (min, max),
-            limit,
-        )
-        .unwrap();
+        Self::scan_optimistic::<iter::RangeIter<_, _>, _>(buffer, &cursor, &(min, max), limit)
+            .unwrap();
 
         Some(LinearizableGuard {
             guard: cursor.into_guard(),
@@ -423,23 +417,22 @@ where
         })
     }
 
-    fn scan_optimistic<'l, 'k, S>(
+    fn scan_optimistic<'l, 'k, S, A>(
         buffer: &mut Vec<(K::Write, u64)>,
         cursor: &'l Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        arg: S::Arg<'k>,
+        arg: &A,
         limit: usize,
     ) -> Result<(), ()>
     where
-        S: ScanIter<'g, 'l, K, V>,
-        'k: 'l,
+        S: ScanIter<'g, 'k, 'l, A, K, V>,
     {
-        S::new(&*cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
+        S::new(cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            S::new(&*cursor, arg).for_each(|new_key, new_value| {
+            S::new(cursor, arg).for_each(|new_key, new_value| {
                 let index = len;
                 len += 1;
 
@@ -485,26 +478,21 @@ where
         Err(())
     }
 
-    fn scan_pessimistic<'l, 'k>(
+    fn scan_pessimistic<'l, 'k, A, S>(
         buffer: &'l mut Vec<(K::Write, u64)>,
         mut cursor: Cursor<'g, 'l, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        prefix: K::Read<'k>,
-        min: K::Read<'k>,
-        max: K::Read<'k>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        Self::lock_prefix(&mut cursor, prefix)?;
+        arg: &A,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>>
+    where
+        S: for<'c> ScanIter<'g, 'k, 'c, A, K, V>,
+    {
+        Self::lock_prefix(&mut cursor)?;
 
-        unsafe {
-            iter::RangeIter::<'g, '_, K, V>::new_unchecked(
-                cursor.root(),
-                K::Write::from(prefix.slice(cursor.bits())),
-                min,
-                max,
-            )
+        {
+            S::new(&cursor, arg).for_each(|key, value| buffer.push((key.clone(), value)));
         }
-        .for_each(|key, value| buffer.push((key.clone(), value)));
 
-        Self::unlock_prefix(&mut cursor, prefix);
+        Self::unlock_prefix(&mut cursor);
 
         Some(LinearizableGuard {
             guard: cursor.into_guard(),
@@ -514,7 +502,6 @@ where
 
     fn lock_prefix<'k>(
         cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        prefix: K::Read<'k>,
     ) -> Option<()> {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 
@@ -528,7 +515,7 @@ where
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
                     Ok(safe) if !edge.meta().frozen() => edge = safe,
                     Ok(_) | Err(()) => {
-                        edge = Self::freeze_prefix(cursor, prefix)?;
+                        edge = Self::freeze_prefix(cursor)?;
                         continue;
                     }
                 }
@@ -552,7 +539,6 @@ where
     #[inline]
     fn unlock_prefix<'k>(
         cursor: &mut Cursor<'g, '_, K::Read<'k>, V, cursor::Hybrid<'g, K::Read<'k>, V>>,
-        prefix: K::Read<'k>,
     ) {
         let mut edge = cursor.root().load_packed(Ordering::Relaxed);
 
@@ -565,7 +551,7 @@ where
             validate!(edge.data().scan());
 
             if edge.meta().frozen() {
-                edge = match Self::freeze_prefix(cursor, prefix) {
+                edge = match Self::freeze_prefix(cursor) {
                     Some(edge) => edge,
                     None => unreachable!("Locked edge must be reachable"),
                 };
@@ -725,7 +711,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(&mut self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(K::Borrow::from(key), unsafe {
                 V::borrow_from_u64(self.guard, value)
