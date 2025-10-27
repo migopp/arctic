@@ -73,6 +73,12 @@ impl<U: Uint> Buffer<U> {
         self.buffer
             .with_be_bytes(|bytes| with(&bytes[..self.bytes()]))
     }
+
+    #[inline]
+    pub(super) fn into_value_unchecked(self) -> U {
+        validate_eq!(self.bits, U::BITS);
+        self.buffer
+    }
 }
 
 impl<U: Uint> key::Read for Buffer<U> {
@@ -218,13 +224,6 @@ macro_rules! impl_unsigned_int {
                         buffer: value,
                         bits: $bits,
                     }
-                }
-            }
-
-            impl From<Buffer<$ty>> for $ty {
-                #[inline]
-                fn from(fixed: Buffer<$ty>) -> Self {
-                    fixed.buffer
                 }
             }
 

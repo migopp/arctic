@@ -625,7 +625,7 @@ where
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
-            (K::Borrow::from(key), unsafe {
+            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::borrow_from_u64(self.guard, value)
             })
         })
@@ -688,7 +688,7 @@ where
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
-            (K::Borrow::from(key), unsafe {
+            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::borrow_from_u64(self.guard, value)
             })
         })
@@ -697,7 +697,7 @@ where
     #[inline]
     pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
-            apply(K::Borrow::from(key), unsafe {
+            apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::borrow_from_u64(self.guard, value)
             })
         })

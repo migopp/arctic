@@ -8,7 +8,7 @@ use crate::byte;
 
 pub trait Key: 'static {
     #[allow(private_bounds)]
-    type Borrow<'k>: Copy + From<&'k Self::Write>;
+    type Borrow<'k>: Copy;
 
     #[allow(private_bounds)]
     type Read<'k>: Read + From<Self::Borrow<'k>> + From<&'k Self::Write>;
@@ -21,6 +21,8 @@ pub trait Key: 'static {
     fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
     where
         'long: 'short;
+
+    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
 
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
@@ -132,31 +134,14 @@ where
     }
 
     #[inline]
+    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        Self::from_writer_unchecked(*writer)
+    }
+
+    #[inline]
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-        Self::from(writer)
-    }
-}
-
-impl<K, U> From<&'_ fixed::Buffer<U>> for Fixed<K, U>
-where
-    K: From<U>,
-    U: fixed::Uint + From<fixed::Buffer<U>>,
-{
-    #[inline]
-    fn from(fixed: &'_ fixed::Buffer<U>) -> Self {
-        Self::from(*fixed)
-    }
-}
-
-impl<K, U> From<fixed::Buffer<U>> for Fixed<K, U>
-where
-    K: From<U>,
-    U: fixed::Uint + From<fixed::Buffer<U>>,
-{
-    #[inline]
-    fn from(fixed: fixed::Buffer<U>) -> Self {
         Self {
-            key: K::from(U::from(fixed)),
+            key: K::from(U::from(writer)),
             _uint: PhantomData,
         }
     }
@@ -195,15 +180,13 @@ macro_rules! impl_unsigned_int {
                 }
 
                 #[inline]
-                unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-                    Self::from(writer)
+                unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+                    writer.into_value_unchecked()
                 }
-            }
 
-            impl<'k> From<&'k fixed::Buffer<$ty>> for $ty {
                 #[inline]
-                fn from(writer: &'k fixed::Buffer<$ty>) -> Self {
-                    Self::from(*writer)
+                unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+                    writer.into_value_unchecked()
                 }
             }
         )*
@@ -228,6 +211,11 @@ impl Key for Vec<u8> {
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        &writer.0
     }
 
     #[inline]
@@ -266,6 +254,15 @@ impl Key for String {
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        if cfg!(feature = "validate") {
+            core::str::from_utf8(&writer.0).unwrap()
+        } else {
+            unsafe { core::str::from_utf8_unchecked(&writer.0) }
+        }
     }
 
     #[inline]

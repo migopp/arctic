@@ -79,9 +79,12 @@ where
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
-        self.0
-            .lend()
-            .map(|(key, value)| (K::Borrow::from(key), unsafe { V::from_u64(value) }))
+        self.0.lend().map(|(key, value)| {
+            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
+                // FIXME: borrow without guard
+                V::from_u64(value)
+            })
+        })
     }
 }
 
