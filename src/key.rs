@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 
 use crate::byte;
 
-pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
+pub trait Key: 'static {
     #[allow(private_bounds)]
     type Borrow<'k>: Copy + From<&'k Self::Write>;
 
@@ -21,6 +21,8 @@ pub trait Key: for<'k> From<Self::Borrow<'k>> + 'static {
     fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
     where
         'long: 'short;
+
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
@@ -128,6 +130,11 @@ where
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         *self
     }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        Self::from(writer)
+    }
 }
 
 impl<K, U> From<&'_ fixed::Buffer<U>> for Fixed<K, U>
@@ -160,6 +167,7 @@ where
     fixed::Buffer<U>: From<U>,
     U: fixed::Uint + From<K>,
 {
+    #[inline]
     fn from(fixed: Fixed<K, U>) -> Self {
         Self::from(U::from(fixed.key))
     }
@@ -184,6 +192,11 @@ macro_rules! impl_unsigned_int {
                     'long: 'short
                 {
                     reader
+                }
+
+                #[inline]
+                unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+                    Self::from(writer)
                 }
             }
 
@@ -215,6 +228,11 @@ impl Key for Vec<u8> {
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
+    }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        writer.0
     }
 }
 
@@ -249,19 +267,21 @@ impl Key for String {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
     }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        if cfg!(feature = "validate") {
+            String::from_utf8(writer.0).unwrap()
+        } else {
+            unsafe { String::from_utf8_unchecked(writer.0) }
+        }
+    }
 }
 
 impl<'w> From<&'w dynamic::Writer> for &'w str {
     #[inline]
     fn from(writer: &'w dynamic::Writer) -> Self {
         str::from_utf8(writer.0.as_slice()).expect("key::Write should be valid UTF-8")
-    }
-}
-
-impl From<dynamic::Writer> for String {
-    #[inline]
-    fn from(writer: dynamic::Writer) -> Self {
-        String::from_utf8(writer.0).expect("key::Write should be valid UTF-8")
     }
 }
 

@@ -95,7 +95,11 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.lend().map(|(key, value)| (K::from(key), value))
+        self.0.lend().map(|(key, value)| {
+            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
+                V::from_u64(value)
+            })
+        })
     }
 }
 

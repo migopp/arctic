@@ -584,7 +584,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(key, value)| {
             // FIXME: take ownership of key directly
-            (K::from(K::Borrow::from(&key)), unsafe {
+            (unsafe { K::from_writer_unchecked(key) }, unsafe {
                 V::borrow_from_u64(self.guard, value)
             })
         })
@@ -640,7 +640,11 @@ where
 {
     type Item = (K, V::Borrow<'l>);
     fn next(&mut self) -> Option<Self::Item> {
-        self.lend().map(|(key, value)| (K::from(key), value))
+        self.iter.lend().map(|(key, value)| {
+            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
     }
 }
 
@@ -709,6 +713,10 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.lend().map(|(key, value)| (K::from(key), value))
+        self.iter.lend().map(|(key, value)| {
+            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
+                V::borrow_from_u64(self.guard, value)
+            })
+        })
     }
 }
