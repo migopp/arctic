@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -9,15 +8,11 @@ use crate::node;
 use crate::node::UnsortedIter;
 use crate::Edge;
 
-pub(crate) struct PostorderIter<'g, V, S>
-where
-    S: Selector,
-{
+pub(crate) struct PostorderIter<'g, V> {
     stack: Vec<RepeatIter<'g, V>>,
-    _selector: PhantomData<S>,
 }
 
-impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
+impl<'g, V> PostorderIter<'g, V> {
     #[inline]
     pub(crate) unsafe fn new(root: &Atomic128<Edge<V>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
@@ -28,12 +23,11 @@ impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
             stack: vec![RepeatIter::new(unsafe {
                 UnsortedIter::new(iter, core::slice::from_ref(root))
             })],
-            _selector: PhantomData,
         }
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(S::Item<V>)>(mut self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(ribbit::Packed<Edge<V>>, usize)>(mut self, mut apply: F) {
         'vertical: loop {
             let depth = self.stack.len().saturating_sub(1);
 
@@ -41,24 +35,20 @@ impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
                 return;
             };
 
-            'horizontal: loop {
+            loop {
                 let Some((first, edge)) = iter.next() else {
                     self.stack.pop();
                     continue 'vertical;
                 };
 
-                let Some(child) = edge.child() else {
-                    continue 'horizontal;
-                };
-
                 if first {
-                    // Fall through for value
-                    match child {
-                        edge::Child::Value(_) => {
+                    match edge.child() {
+                        // Fall through for non-nodes
+                        None | Some(edge::Child::Value(_)) => {
                             iter.skip();
                         }
-                        edge::Child::Node(node) => {
-                            // Visit children before node
+                        // Visit children before node
+                        Some(edge::Child::Node(node)) => {
                             let node = unsafe { node.into_ref_unchecked() };
                             self.stack.push(RepeatIter::new(node.iter_unsorted()));
                             continue 'vertical;
@@ -66,49 +56,9 @@ impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
                     }
                 }
 
-                if let Some(item) = S::select(edge, depth) {
-                    apply(item);
-                }
+                apply(edge, depth);
             }
         }
-    }
-}
-
-pub trait Selector {
-    type Item<V>;
-    fn select<V>(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item<V>>;
-}
-
-pub struct SelectNode;
-
-impl Selector for SelectNode {
-    type Item<V> = ribbit::Packed<Edge<V>>;
-
-    #[inline]
-    fn select<V>(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item<V>> {
-        edge.is_node().then_some(edge)
-    }
-}
-
-pub struct SelectNonNull;
-
-impl Selector for SelectNonNull {
-    type Item<V> = ribbit::Packed<Edge<V>>;
-
-    #[inline]
-    fn select<V>(edge: ribbit::Packed<Edge<V>>, _depth: usize) -> Option<Self::Item<V>> {
-        (!edge.is_null()).then_some(edge)
-    }
-}
-
-pub(crate) struct SelectStat;
-
-impl Selector for SelectStat {
-    type Item<V> = (ribbit::Packed<Edge<V>>, usize);
-
-    #[inline]
-    fn select<V>(edge: ribbit::Packed<Edge<V>>, depth: usize) -> Option<Self::Item<V>> {
-        (!edge.is_null()).then_some((edge, depth))
     }
 }
 

@@ -1,11 +1,7 @@
 use crate::edge;
-use crate::iter::postorder;
 use crate::smr;
-use crate::Edge;
 
 pub unsafe trait Value: Sized {
-    type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
-
     type OwnedGuard<'g, 'l>: Sized
     where
         Self: 'g + 'l,
@@ -49,8 +45,6 @@ pub unsafe trait Value: Sized {
 }
 
 unsafe impl<T> Value for Box<T> {
-    type SelectDrop = postorder::SelectNonNull;
-
     type OwnedGuard<'g, 'l>
         = smr::ValueGuard<'g, 'l, true, Self>
     where
@@ -193,8 +187,6 @@ macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
             unsafe impl Value for $ty {
-                type SelectDrop = postorder::SelectNode;
-
                 type OwnedGuard<'g, 'l>
                     = Self
                 where

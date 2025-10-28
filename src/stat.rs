@@ -2,7 +2,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::edge;
-use crate::iter;
 use crate::node;
 use crate::Key;
 use crate::Op;
@@ -22,35 +21,35 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut node_15 = Histogram::default();
     let mut node_256 = Histogram::default();
 
-    map.as_sequential()
-        .postorder::<iter::postorder::SelectStat>()
-        .for_each(|(edge, depth_)| {
-            let meta = edge.meta();
+    map.as_sequential().postorder().for_each(|edge, depth_| {
+        let Some(child) = edge.child() else {
+            return;
+        };
 
-            compression.record(meta.key().len().bits() as u64);
+        compression.record(edge.meta().key().len().bytes() as u64);
 
-            match edge.child().unwrap() {
-                edge::Child::Value(_) => {
-                    depth.record(depth_ as u64);
-                }
-                edge::Child::Node(node) => {
-                    let node = unsafe { node.into_ref_unchecked() };
-
-                    let histogram = match node {
-                        node::Ref::Node3(_) => &mut node_3,
-                        node::Ref::Node15(_) => &mut node_15,
-                        node::Ref::Node256(_) => &mut node_256,
-                    };
-
-                    let children = node
-                        .iter_unsorted()
-                        .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
-                        .count();
-
-                    histogram.record(children as u64);
-                }
+        match child {
+            edge::Child::Value(_) => {
+                depth.record(depth_ as u64);
             }
-        });
+            edge::Child::Node(node) => {
+                let node = unsafe { node.into_ref_unchecked() };
+
+                let histogram = match node {
+                    node::Ref::Node3(_) => &mut node_3,
+                    node::Ref::Node15(_) => &mut node_15,
+                    node::Ref::Node256(_) => &mut node_256,
+                };
+
+                let children = node
+                    .iter_unsorted()
+                    .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                    .count();
+
+                histogram.record(children as u64);
+            }
+        }
+    });
 
     Process {
         depth,

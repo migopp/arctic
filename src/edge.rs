@@ -148,6 +148,18 @@ impl<V> EdgePacked<V> {
 impl<V: value::Value> EdgePacked<V> {
     /// # SAFETY
     ///
+    /// Caller must ensure there are no references to the child of this edge.
+    #[inline]
+    pub(crate) unsafe fn deallocate(self, counter: stat::Counter) {
+        match self.child() {
+            None => (),
+            Some(Child::Value(value)) => value.deallocate_unchecked(counter),
+            Some(Child::Node(node)) => node.deallocate_unchecked(counter),
+        }
+    }
+
+    /// # SAFETY
+    ///
     /// Caller must ensure there are no references to the child of this edge,
     /// and that the child is non-null.
     #[inline]

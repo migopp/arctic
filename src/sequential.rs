@@ -3,7 +3,6 @@ use core::marker::PhantomData;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::postorder;
 use crate::iter::PostorderIter;
 use crate::iter::PrefixIter;
 use crate::iter::Sort;
@@ -34,7 +33,7 @@ impl<K, V: Value> Map<K, V> {
         &self.root
     }
 
-    pub(crate) fn postorder<'g, S: postorder::Selector>(&'g self) -> PostorderIter<'g, V, S> {
+    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, V> {
         unsafe { PostorderIter::new(&self.root) }
     }
 }
@@ -108,8 +107,8 @@ where
 
 impl<K, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
-        self.postorder::<V::SelectDrop>().for_each(|edge| unsafe {
-            edge.deallocate_unchecked(stat::Counter::FreeDrop);
+        self.postorder().for_each(|edge, _| unsafe {
+            edge.deallocate(stat::Counter::FreeDrop);
         })
     }
 }
