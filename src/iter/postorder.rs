@@ -3,6 +3,7 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
+use crate::edge;
 use crate::iter::Or;
 use crate::node;
 use crate::node::UnsortedIter;
@@ -40,29 +41,28 @@ impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
                 return;
             };
 
-            loop {
+            'horizontal: loop {
                 let Some((first, edge)) = iter.next() else {
                     self.stack.pop();
                     continue 'vertical;
                 };
 
-                if edge.is_null() {
-                    iter.skip();
-                    continue;
-                }
-
-                let meta = edge.meta();
-                let data = edge.data();
+                let Some(child) = edge.child() else {
+                    continue 'horizontal;
+                };
 
                 if first {
                     // Fall through for value
-                    if meta.is_value() {
-                        iter.skip();
-                    } else {
-                        // Visit children before node
-                        let node = unsafe { data.into_node_unchecked() };
-                        self.stack.push(RepeatIter::new(node.iter_unsorted()));
-                        continue 'vertical;
+                    match child {
+                        edge::Child::Value(_) => {
+                            iter.skip();
+                        }
+                        edge::Child::Node(node) => {
+                            // Visit children before node
+                            let node = unsafe { node.into_ref_unchecked() };
+                            self.stack.push(RepeatIter::new(node.iter_unsorted()));
+                            continue 'vertical;
+                        }
                     }
                 }
 

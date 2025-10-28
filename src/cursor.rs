@@ -75,24 +75,23 @@ where
     #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<V>>, ()>> {
         loop {
-            let mut edge = self.edge.load_packed(Ordering::Relaxed);
-
-            if edge.is_scan() {
-                match self.wait_for_scan(stat::Counter::ScanUpdate) {
-                    Ok(safe) => edge = safe,
-                    Err(()) => return Some(Err(())),
-                }
-            }
-
+            let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
 
             let save = self.key;
             let len = meta.key().match_exact(&mut self.key)?;
 
             // Fast path: traversal
-            if edge.is_node() {
+            if let Some(node) = edge.as_node() {
+                if node.scan() {
+                    match self.wait_for_scan(stat::Counter::ScanUpdate) {
+                        Ok(_) => continue,
+                        Err(()) => return Some(Err(())),
+                    }
+                }
+
                 let byte = self.key.next()?;
-                let node = unsafe { edge.data().into_node_unchecked() };
+                let node = unsafe { node.into_ref_unchecked() };
                 let next = node.get(byte)?;
                 self.push(save, len, node, next);
                 continue;
@@ -105,7 +104,7 @@ where
             } else if meta.is_value() {
                 Some(Ok(edge))
             } else {
-                validate!(edge.data().is_null());
+                validate!(edge.is_null());
                 None
             };
         }
@@ -116,25 +115,24 @@ where
     #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
-        value: ribbit::Packed<edge::Data<V>>,
+        value: ribbit::Packed<edge::Value<V>>,
     ) -> Result<(Op, ribbit::Packed<Edge<V>>, ribbit::Packed<Edge<V>>), ()> {
         loop {
-            let mut old = self.edge.load_packed(Ordering::Relaxed);
-
-            if old.is_scan() {
-                old = self.wait_for_scan(stat::Counter::ScanInsert)?;
-            }
-
+            let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
-            let old_data = old.data();
             let save = self.key;
             let r#match = old_meta.key().match_split(&mut self.key);
 
             // Fast path: traverse
             if let byte::MatchSplit::Full(len) = r#match {
-                if old.is_node() {
+                if let Some(node) = old.as_node() {
+                    if node.scan() {
+                        self.wait_for_scan(stat::Counter::ScanInsert)?;
+                        continue;
+                    }
+
                     let byte = self.key.next().unwrap();
-                    let node = unsafe { old_data.into_node_unchecked() };
+                    let node = unsafe { node.into_ref_unchecked() };
                     if let Some(next) = node.get_or_reserve(byte) {
                         self.push(save, len, node, next);
                         continue;
@@ -150,24 +148,31 @@ where
             self.key = save;
 
             let (op, new) = match r#match {
-                byte::MatchSplit::Full(_) if old.is_node() => {
-                    let node = unsafe { old_data.into_node_unchecked() };
-                    let (op, new) = node.replace(old_meta);
-                    (Op::Node(op), new)
-                }
-                byte::MatchSplit::Full(_) if self.key.bits() > byte::Len::MAX.bits() as usize => (
-                    Op::Edge(edge::Op::Create),
-                    Edge::new_node::<Node3<V>, _>(self.key.peek(byte::Len::MAX), None),
-                ),
-                byte::MatchSplit::Full(_) => (
-                    Op::Edge(edge::Op::Insert),
-                    ribbit::Packed::<Edge<V>>::new(
-                        edge::Meta::VALUE.with_key(self.key.peek(unsafe {
-                            byte::Len::from_bits_unchecked(self.key.bits() as u8)
-                        })),
-                        value,
-                    ),
-                ),
+                byte::MatchSplit::Full(_) => match old.child() {
+                    Some(edge::Child::Node(node)) => {
+                        let node = unsafe { node.into_ref_unchecked() };
+                        let (op, new) = node.replace(old_meta);
+                        (Op::Node(op), new)
+                    }
+                    None | Some(edge::Child::Value(_)) => {
+                        if self.key.bits() > byte::Len::MAX.bits() as usize {
+                            (
+                                Op::Edge(edge::Op::Create),
+                                Edge::new_node::<Node3<V>, _>(self.key.peek(byte::Len::MAX), None),
+                            )
+                        } else {
+                            (
+                                Op::Edge(edge::Op::Insert),
+                                Edge::new_value(
+                                    self.key.peek(unsafe {
+                                        byte::Len::from_bits_unchecked(self.key.bits() as u8)
+                                    }),
+                                    value,
+                                ),
+                            )
+                        }
+                    }
+                },
                 byte::MatchSplit::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3<V>, _>(
@@ -193,21 +198,22 @@ where
             }
 
             let meta = edge.meta();
-            let data = edge.data();
 
-            // Should be impossible to freeze value
-            validate!(!meta.is_value());
-
-            // Already helped by another thread
-            if !data.is_ref(node) {
-                return Ok(());
-            }
+            let old = match edge.child() {
+                None => return Ok(()),
+                Some(edge::Child::Node(old)) if old.is_ref(node) => old,
+                // Already helped by another thread
+                Some(edge::Child::Node(_)) => return Ok(()),
+                // Should be impossible to freeze value
+                Some(edge::Child::Value(_)) => unreachable!(),
+            };
 
             let (op, new) = node.replace(meta);
 
             match self.edge.compare_exchange_packed(
                 edge,
-                new.with_data(new.data().with_scan(data.scan())),
+                // FIXME: shouldn't need to unwrap here
+                new.with_node(unsafe { new.as_node().unwrap_unchecked() }.with_scan(old.scan())),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -221,8 +227,7 @@ where
                 Err(conflict) => {
                     if op.is_allocate() {
                         unsafe {
-                            new.data()
-                                .deallocate_node_unchecked(stat::Counter::FreeConflict);
+                            new.deallocate_unchecked(stat::Counter::FreeConflict);
                         }
                     }
                     edge = conflict;
@@ -242,12 +247,12 @@ where
             core::hint::spin_loop();
             let edge = self.edge.load_packed(Ordering::Acquire);
 
-            if !edge.is_scan() {
-                return Ok(edge);
-            }
-
-            if edge.meta().is_frozen() {
-                return Err(());
+            match edge.child() {
+                None => return Ok(edge),
+                Some(edge::Child::Value(_)) => unreachable!(),
+                Some(edge::Child::Node(node)) if !node.scan() => return Ok(edge),
+                Some(edge::Child::Node(_)) if edge.meta().is_frozen() => return Err(()),
+                Some(edge::Child::Node(_)) => continue,
             }
         }
     }
@@ -306,17 +311,16 @@ where
             let meta = edge.meta();
 
             let _ = meta.key().match_exact(&mut cursor.key)?;
-            let data = edge.data();
 
-            if meta.is_value() {
-                return Some(unsafe { V::guard_shared(cursor.guard, data) });
-            } else if data.is_null() {
-                return None;
-            } else {
-                let byte = cursor.key.next()?;
-                let data = edge.data();
-                let node = unsafe { data.into_node_unchecked() };
-                cursor.edge = node.get(byte)?;
+            match edge.child()? {
+                edge::Child::Node(node) => {
+                    let byte = cursor.key.next()?;
+                    let node = unsafe { node.into_ref_unchecked() };
+                    cursor.edge = node.get(byte)?;
+                }
+                edge::Child::Value(value) => {
+                    return Some(unsafe { V::guard_shared(cursor.guard, value) });
+                }
             }
         }
     }
@@ -369,22 +373,24 @@ where
         let (key, edge) = loop {
             let edge = self.cursor.edge.load_packed(Ordering::Acquire);
             let meta = edge.meta();
-            let data = edge.data();
             let save = self.cursor.key;
 
-            match meta.key().match_prefix(&mut self.cursor.key)? {
-                byte::MatchPrefix::Full(len) if edge.is_node() => {
-                    let node = unsafe { data.into_node_unchecked() };
+            if let byte::MatchPrefix::Full(len) = meta.key().match_prefix(&mut self.cursor.key)? {
+                if let Some(node) = edge.as_node() {
+                    let node = unsafe { node.into_ref_unchecked() };
                     let Some(byte) = self.cursor.key.next() else {
                         break (save, edge);
                     };
                     let next = node.get(byte)?;
                     self.cursor.push(save, len, node, next);
+                    continue;
                 }
-                byte::MatchPrefix::Full(_) | byte::MatchPrefix::Partial => match edge.is_null() {
-                    true => return None,
-                    false => break (save, edge),
-                },
+            }
+
+            if edge.is_null() {
+                return None;
+            } else {
+                break (save, edge);
             }
         };
 
@@ -404,7 +410,7 @@ impl<'g, 'l, R: key::Read, V: Value> Prefix<'g, 'l, R, V, path::Hybrid<'g, R, V>
         self.upgrade();
         self.traverse()?;
         match self.cursor.freeze() {
-            Ok(()) => return self.traverse(),
+            Ok(()) => self.traverse(),
             Err(()) => unreachable!(),
         }
     }

@@ -15,7 +15,7 @@ use crate::Value;
 pub(crate) enum RangeIter<'g, 'l, K: Key, V> {
     Root {
         key: K::Write,
-        next: Option<ribbit::Packed<edge::Data<V>>>,
+        next: Option<ribbit::Packed<edge::Value<V>>>,
     },
     Node(NodeIter<'g, 'l, K, V>),
 }
@@ -58,46 +58,52 @@ where
         max: K::Read<'l>,
     ) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
-        let meta = edge.meta();
-        let data = edge.data();
+
         key.extend(edge.meta().key());
 
-        if meta.is_value() {
-            let reader = K::Read::from(&key);
-            if reader < K::reborrow(min) || reader > K::reborrow(max) {
-                return Self::Root { key, next: None };
+        match edge.child() {
+            None => Self::Root { key, next: None },
+            Some(edge::Child::Value(value)) => {
+                let reader = K::Read::from(&key);
+                if reader < K::reborrow(min) || reader > K::reborrow(max) {
+                    return Self::Root { key, next: None };
+                }
+
+                Self::Root {
+                    key,
+                    next: Some(value),
+                }
             }
+            Some(edge::Child::Node(node)) => {
+                let node = unsafe { node.into_ref_unchecked() };
 
-            Self::Root {
-                key,
-                next: Some(data),
+                let reader = K::Read::from(&key);
+                validate!(reader >= K::reborrow(min.slice(key.bits())));
+                validate!(reader <= K::reborrow(max.slice(key.bits())));
+
+                let first =
+                    (reader == K::reborrow(min.slice(key.bits()))).then(|| min.get(key.bits()));
+                let last =
+                    (reader == K::reborrow(max.slice(key.bits()))).then(|| max.get(key.bits()));
+
+                let mut stack = Vec::with_capacity(7);
+                stack.push((key.bits(), first, last, node.iter_range(first, last)));
+
+                Self::Node(NodeIter {
+                    stack,
+                    key,
+                    min,
+                    max,
+                })
             }
-        } else if data.is_null() {
-            Self::Root { key, next: None }
-        } else {
-            let node = unsafe { data.into_node_unchecked() };
-
-            let reader = K::Read::from(&key);
-            validate!(reader >= K::reborrow(min.slice(key.bits())));
-            validate!(reader <= K::reborrow(max.slice(key.bits())));
-
-            let first = (reader == K::reborrow(min.slice(key.bits()))).then(|| min.get(key.bits()));
-            let last = (reader == K::reborrow(max.slice(key.bits()))).then(|| max.get(key.bits()));
-
-            let mut stack = Vec::with_capacity(7);
-            stack.push((key.bits(), first, last, node.iter_range(first, last)));
-
-            Self::Node(NodeIter {
-                stack,
-                key,
-                min,
-                max,
-            })
         }
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
+        self,
+        mut apply: F,
+    ) {
         match self {
             RangeIter::Root { key, mut next } => {
                 crate::cold();
@@ -110,7 +116,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
+    pub(crate) fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -146,20 +152,20 @@ where
     K: Key,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
+    fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(
+    fn walk<const YIELD: bool, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
         &mut self,
         mut apply: F,
-    ) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
+    ) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
         'vertical: loop {
             let (len, min, max, iter) = self.stack.last_mut()?;
 
@@ -170,13 +176,11 @@ where
                 };
 
                 let edge = edge.load_packed(Ordering::Acquire);
-                if edge.is_null() {
+                let Some(child) = edge.child() else {
                     continue 'horizontal;
-                }
+                };
 
                 let meta = edge.meta();
-                let data = edge.data();
-
                 self.key.truncate(*len);
                 self.key.push(byte);
 
@@ -189,70 +193,80 @@ where
                 let check_last = Some(byte) == *max;
 
                 if !check_first && !check_last {
-                    if meta.is_value() {
-                        if YIELD {
-                            return Some((&self.key, data));
-                        } else {
-                            apply(&self.key, data);
-                            continue 'horizontal;
+                    match child {
+                        edge::Child::Value(value) => {
+                            if YIELD {
+                                return Some((&self.key, value));
+                            } else {
+                                apply(&self.key, value);
+                                continue 'horizontal;
+                            }
                         }
-                    } else {
-                        let node = unsafe { data.into_node_unchecked() };
-                        self.stack
-                            .push((self.key.bits(), None, None, node.iter_range(None, None)));
-                        continue 'vertical;
+                        edge::Child::Node(node) => {
+                            let node = unsafe { node.into_ref_unchecked() };
+                            self.stack.push((
+                                self.key.bits(),
+                                None,
+                                None,
+                                node.iter_range(None, None),
+                            ));
+                            continue 'vertical;
+                        }
                     }
                 }
 
                 crate::cold();
 
-                if meta.is_value() {
-                    if check_first && K::Read::from(&self.key) < K::reborrow(self.min) {
-                        continue 'horizontal;
-                    }
-
-                    if check_last && K::Read::from(&self.key) > K::reborrow(self.max) {
-                        self.stack.clear();
-                        return None;
-                    }
-
-                    if YIELD {
-                        return Some((&self.key, data));
-                    } else {
-                        apply(&self.key, data);
-                    }
-                } else {
-                    let min = if check_first {
-                        match K::Read::from(&self.key)
-                            .cmp(&K::reborrow(self.min.slice(self.key.bits())))
-                        {
-                            cmp::Ordering::Less => continue 'horizontal,
-                            cmp::Ordering::Equal => Some(self.min.get(self.key.bits())),
-                            cmp::Ordering::Greater => None,
+                match child {
+                    edge::Child::Value(value) => {
+                        if check_first && K::Read::from(&self.key) < K::reborrow(self.min) {
+                            continue 'horizontal;
                         }
-                    } else {
-                        None
-                    };
 
-                    let max = if check_last {
-                        match K::Read::from(&self.key)
-                            .cmp(&K::reborrow(self.max.slice(self.key.bits())))
-                        {
-                            cmp::Ordering::Less => None,
-                            cmp::Ordering::Equal => Some(self.max.get(self.key.bits())),
-                            cmp::Ordering::Greater => {
-                                self.stack.clear();
-                                return None;
+                        if check_last && K::Read::from(&self.key) > K::reborrow(self.max) {
+                            self.stack.clear();
+                            return None;
+                        }
+
+                        if YIELD {
+                            return Some((&self.key, value));
+                        } else {
+                            apply(&self.key, value);
+                        }
+                    }
+                    edge::Child::Node(node) => {
+                        let min = if check_first {
+                            match K::Read::from(&self.key)
+                                .cmp(&K::reborrow(self.min.slice(self.key.bits())))
+                            {
+                                cmp::Ordering::Less => continue 'horizontal,
+                                cmp::Ordering::Equal => Some(self.min.get(self.key.bits())),
+                                cmp::Ordering::Greater => None,
                             }
-                        }
-                    } else {
-                        None
-                    };
+                        } else {
+                            None
+                        };
 
-                    let node = unsafe { data.into_node_unchecked() };
-                    self.stack
-                        .push((self.key.bits(), min, max, node.iter_range(min, max)));
-                    continue 'vertical;
+                        let max = if check_last {
+                            match K::Read::from(&self.key)
+                                .cmp(&K::reborrow(self.max.slice(self.key.bits())))
+                            {
+                                cmp::Ordering::Less => None,
+                                cmp::Ordering::Equal => Some(self.max.get(self.key.bits())),
+                                cmp::Ordering::Greater => {
+                                    self.stack.clear();
+                                    return None;
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        let node = unsafe { node.into_ref_unchecked() };
+                        self.stack
+                            .push((self.key.bits(), min, max, node.iter_range(min, max)));
+                        continue 'vertical;
+                    }
                 }
             }
         }

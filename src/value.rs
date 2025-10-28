@@ -26,20 +26,20 @@ pub unsafe trait Value: Sized {
 
     unsafe fn guard_borrow<'g, 'l>(
         smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::Borrow<'l>;
 
     unsafe fn guard_owned<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::OwnedGuard<'g, 'l>;
 
     unsafe fn guard_shared<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::SharedGuard<'g, 'l>;
 
-    unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self;
+    unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self;
 
     fn into_u64(self) -> u64;
 
@@ -75,9 +75,9 @@ unsafe impl<T> Value for Box<T> {
     #[inline]
     unsafe fn guard_owned<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::OwnedGuard<'g, 'l> {
-        let borrow = (data.value() as *const T).as_ref();
+        let borrow = (data.raw() as *const T).as_ref();
         let borrow = if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -89,9 +89,9 @@ unsafe impl<T> Value for Box<T> {
     #[inline]
     unsafe fn guard_shared<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::SharedGuard<'g, 'l> {
-        let borrow = (data.value() as *const T).as_ref();
+        let borrow = (data.raw() as *const T).as_ref();
         let borrow = if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -101,8 +101,8 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self {
-        Box::from_raw(data.value() as *mut T)
+    unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self {
+        Box::from_raw(data.raw() as *mut T)
     }
 
     #[inline]
@@ -113,9 +113,9 @@ unsafe impl<T> Value for Box<T> {
     #[inline]
     unsafe fn guard_borrow<'g, 'l>(
         _smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Data<Self>>,
+        data: ribbit::Packed<edge::Value<Self>>,
     ) -> Self::Borrow<'l> {
-        let borrow = (data.value() as *const T).as_ref();
+        let borrow = (data.raw() as *const T).as_ref();
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -212,18 +212,18 @@ macro_rules! impl_trivial {
                 type Clone = Self;
 
                 #[inline]
-                unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Data<Self>>) -> Self {
-                    data.value() as $ty
+                unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Value<Self>>) -> Self {
+                    data.raw() as $ty
                 }
 
                 #[inline]
-                unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Data<Self>>) -> Self {
-                    data.value() as $ty
+                unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Value<Self>>) -> Self {
+                    data.raw() as $ty
                 }
 
                 #[inline]
-                unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self {
-                    data.value() as $ty
+                unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self {
+                    data.raw() as $ty
                 }
 
                 #[inline]
@@ -234,9 +234,9 @@ macro_rules! impl_trivial {
                 #[inline]
                 unsafe fn guard_borrow<'g, 'l>(
                     _smr: &smr::TraverseGuard<'g, 'l, Self>,
-                    data: ribbit::Packed<edge::Data<Self>>,
+                    data: ribbit::Packed<edge::Value<Self>>,
                 ) -> Self::Borrow<'l> {
-                    data.value() as $ty
+                    data.raw() as $ty
                 }
 
                 #[inline]

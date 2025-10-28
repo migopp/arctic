@@ -13,7 +13,7 @@ use crate::Value;
 pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
-        next: Option<ribbit::Packed<edge::Data<V>>>,
+        next: Option<ribbit::Packed<edge::Value<V>>>,
     },
     Node {
         key: W,
@@ -48,43 +48,41 @@ where
     #[inline]
     pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<V>>, mut key: W) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
-        let meta = edge.meta();
-        let data = edge.data();
 
         key.extend(edge.meta().key());
 
-        if meta.is_value() {
-            Self::Root {
+        match edge.child() {
+            None => Self::Root { key, next: None },
+            Some(edge::Child::Value(value)) => Self::Root {
                 key,
-                next: Some(data),
-            }
-        } else if data.is_null() {
-            Self::Root { key, next: None }
-        } else {
-            let node = unsafe { data.into_node_unchecked() };
-            Self::Node {
-                frontier: vec![(key.bits(), S::new(node))],
-                key,
-                _cursor: PhantomData,
+                next: Some(value),
+            },
+            Some(edge::Child::Node(node)) => {
+                let node = unsafe { node.into_ref_unchecked() };
+                Self::Node {
+                    frontier: vec![(key.bits(), S::new(node))],
+                    key,
+                    _cursor: PhantomData,
+                }
             }
         }
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&W, ribbit::Packed<edge::Data<V>>)> {
+    pub(crate) fn lend(&mut self) -> Option<(&W, ribbit::Packed<edge::Value<V>>)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, ribbit::Packed<edge::Data<V>>)>(mut self, apply: F) {
+    pub(crate) fn for_each<F: FnMut(&W, ribbit::Packed<edge::Value<V>>)>(mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&W, ribbit::Packed<edge::Data<V>>)>(
+    fn walk<const YIELD: bool, F: FnMut(&W, ribbit::Packed<edge::Value<V>>)>(
         &mut self,
         mut apply: F,
-    ) -> Option<(&W, ribbit::Packed<edge::Data<V>>)> {
+    ) -> Option<(&W, ribbit::Packed<edge::Value<V>>)> {
         let (key, frontier) = match self {
             Self::Root { key, next } => {
                 crate::cold();
@@ -106,34 +104,37 @@ where
         'vertical: loop {
             let (len, iter) = frontier.last_mut()?;
 
-            loop {
+            'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
                     frontier.pop();
                     continue 'vertical;
                 };
 
                 let edge = edge.load_packed(Ordering::Acquire);
-                if edge.is_null() {
-                    continue;
-                }
+
+                let Some(child) = edge.child() else {
+                    continue 'horizontal;
+                };
 
                 let meta = edge.meta();
-                let data = edge.data();
 
                 key.truncate(*len);
                 key.push(byte);
                 key.extend(meta.key());
 
-                if meta.is_value() {
-                    if YIELD {
-                        return Some((key, data));
-                    } else {
-                        apply(key, data);
+                match child {
+                    edge::Child::Value(value) => {
+                        if YIELD {
+                            return Some((key, value));
+                        } else {
+                            apply(key, value);
+                        }
                     }
-                } else {
-                    let node = unsafe { data.into_node_unchecked() };
-                    frontier.push((key.bits(), unsafe { S::new(node) }));
-                    continue 'vertical;
+                    edge::Child::Node(node) => {
+                        let node = unsafe { node.into_ref_unchecked() };
+                        frontier.push((key.bits(), unsafe { S::new(node) }));
+                        continue 'vertical;
+                    }
                 }
             }
         }

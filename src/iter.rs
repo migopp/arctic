@@ -20,7 +20,7 @@ pub(crate) trait Scan {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         input: &Self::Input<'l, K>,
         apply: F,
@@ -35,7 +35,7 @@ impl Scan for Prefix {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         (): &(),
         apply: F,
@@ -52,7 +52,7 @@ impl Scan for Range {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(
+    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         (min, max): &Self::Input<'l, K>,
         apply: F,

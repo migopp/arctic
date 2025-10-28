@@ -66,8 +66,8 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = edge::Data::from_value(value);
-        unsafe { self.compare_exchange(key, |old| old.with_data(value)) }
+        let value = edge::Value::from_value(value);
+        unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
     }
 
     #[inline]
@@ -154,21 +154,20 @@ where
                 .compare_exchange_packed(old, exchange(old), Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
-                return if old.meta().is_value() {
-                    Ok(Some(unsafe {
-                        V::guard_owned(cursor.into_guard(), old.data())
-                    }))
-                } else {
-                    validate!(old.is_null());
-                    Ok(None)
-                };
+                return Ok(match old.as_value() {
+                    Some(value) => Some(unsafe { V::guard_owned(cursor.into_guard(), value) }),
+                    None => {
+                        validate!(old.is_null());
+                        None
+                    }
+                });
             }
         }
     }
 
     #[inline]
     pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = edge::Data::from_value(value);
+        let value = edge::Value::from_value(value);
         let mut map = &mut *self;
 
         // Cursed workaround for:
@@ -186,7 +185,7 @@ where
     fn insert_optimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: ribbit::Packed<edge::Data<V>>,
+        value: ribbit::Packed<edge::Value<V>>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
         self.insert_impl::<cursor::path::Discard>(key, value)
     }
@@ -195,7 +194,7 @@ where
     fn insert_pessimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: ribbit::Packed<edge::Data<V>>,
+        value: ribbit::Packed<edge::Value<V>>,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::path::Retain<_, _>>(key, value)
@@ -206,7 +205,7 @@ where
     fn insert_impl<'k, H>(
         &mut self,
         key: K::Borrow<'k>,
-        value: ribbit::Packed<edge::Data<V>>,
+        value: ribbit::Packed<edge::Value<V>>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, V>,
@@ -233,14 +232,15 @@ where
             ) {
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-                    if old.meta().is_value() {
-                        return Ok(Some(unsafe {
-                            V::guard_owned(cursor.into_guard(), old.data())
-                        }));
-                    } else {
-                        validate!(old.is_null());
-                        return Ok(None);
-                    }
+                    return match old.as_value() {
+                        Some(value) => {
+                            Ok(Some(unsafe { V::guard_owned(cursor.into_guard(), value) }))
+                        }
+                        None => {
+                            validate!(old.is_null());
+                            Ok(None)
+                        }
+                    };
                 }
                 Ok(_) => {
                     stat::increment(op);
@@ -253,10 +253,7 @@ where
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
                     if op.is_allocate() {
-                        unsafe {
-                            new.data()
-                                .deallocate_node_unchecked(stat::Counter::FreeConflict)
-                        };
+                        unsafe { new.deallocate_unchecked(stat::Counter::FreeConflict) };
                     }
                 }
             }
@@ -366,14 +363,14 @@ where
     #[expect(clippy::needless_lifetimes)]
     fn transmute_buffer<'l>(
         buffer: &'l mut Vec<(K::Write, u64)>,
-    ) -> &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)> {
+    ) -> &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)> {
         const {
             assert!(
-                core::mem::size_of::<ribbit::Packed<edge::Data<V>>>()
+                core::mem::size_of::<ribbit::Packed<edge::Value<V>>>()
                     == core::mem::size_of::<u64>()
             );
             assert!(
-                core::mem::align_of::<ribbit::Packed<edge::Data<V>>>()
+                core::mem::align_of::<ribbit::Packed<edge::Value<V>>>()
                     == core::mem::align_of::<u64>()
             )
         };
@@ -381,7 +378,7 @@ where
     }
 
     fn scan_hybrid<'l, S>(
-        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
+        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
         limit: usize,
@@ -399,7 +396,7 @@ where
     }
 
     fn scan_optimistic<'l, S>(
-        buffer: &mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
+        buffer: &mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
         limit: usize,
@@ -460,7 +457,7 @@ where
     }
 
     fn scan_pessimistic<'l, S>(
-        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
+        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         mut cursor: cursor::Prefix<
             'g,
             'l,
@@ -496,11 +493,11 @@ where
 
         loop {
             // No need to lock value
-            if edge.meta().is_value() {
+            let Some(node) = edge.as_node() else {
                 return Some(());
-            }
+            };
 
-            if edge.meta().is_frozen() || edge.data().scan() {
+            if edge.meta().is_frozen() || node.scan() {
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
                     Ok(safe) if !edge.meta().is_frozen() => edge = safe,
                     Ok(_) | Err(()) => {
@@ -512,7 +509,7 @@ where
 
             match cursor.edge().compare_exchange_packed(
                 edge,
-                edge.with_data(edge.data().with_scan(true)),
+                edge.with_node(node.with_scan(true)),
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -537,13 +534,10 @@ where
     ) {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
 
-        if edge.meta().is_value() {
-            validate!(!edge.data().scan());
-            return;
-        }
+        let Some(node) = edge.as_node() else { return };
 
         loop {
-            validate!(edge.data().scan());
+            validate!(node.scan());
 
             if edge.meta().is_frozen() {
                 edge = match cursor.freeze() {
@@ -555,7 +549,7 @@ where
 
             match cursor.edge().compare_exchange_packed(
                 edge,
-                edge.with_data(edge.data().with_scan(false)),
+                edge.with_node(node.with_scan(false)),
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -572,7 +566,7 @@ where
 pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
     // FIXME: don't need to hold guard for trivial values
     guard: smr::TraverseGuard<'g, 'l, V>,
-    buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
+    buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
 }
 
 impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
@@ -587,7 +581,7 @@ impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
 
 pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
     guard: &'l smr::TraverseGuard<'g, 'l, V>,
-    iter: std::vec::Drain<'l, (K::Write, ribbit::Packed<edge::Data<V>>)>,
+    iter: std::vec::Drain<'l, (K::Write, ribbit::Packed<edge::Value<V>>)>,
 }
 
 impl<'g, 'l, K, V> Iterator for LinearizableDrain<'g, 'l, K, V>
