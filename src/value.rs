@@ -10,7 +10,7 @@ pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
 pub unsafe trait Value: Sized {
     type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
 
-    type Guard<'g, 'l, const RETIRE: bool>: Sized
+    type Guard<'g, 'l, const OWNED: bool>: Sized
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -23,17 +23,17 @@ pub unsafe trait Value: Sized {
 
     type Clone;
 
-    unsafe fn guard<'g, 'l, const RETIRE: bool>(
-        smr: smr::PathGuard<'g, 'l, Self>,
+    unsafe fn guard<'g, 'l, const OWNED: bool>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Guard<'g, 'l, RETIRE>;
+    ) -> Self::Guard<'g, 'l, OWNED>;
 
     unsafe fn from_u64(value: u64) -> Self;
 
     fn into_u64(self) -> u64;
 
     unsafe fn borrow_from_u64<'g, 'l>(
-        smr: &'l smr::PathGuard<'g, 'l, Self>,
+        smr: &'l smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Borrow<'l>;
 
@@ -45,8 +45,8 @@ pub unsafe trait Value: Sized {
 unsafe impl<T> Value for Box<T> {
     type SelectDrop = postorder::SelectNonNull;
 
-    type Guard<'g, 'l, const RETIRE: bool>
-        = smr::LeafGuard<'g, 'l, RETIRE, Self>
+    type Guard<'g, 'l, const OWNED: bool>
+        = smr::ValueGuard<'g, 'l, OWNED, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -61,16 +61,16 @@ unsafe impl<T> Value for Box<T> {
     type Clone = T;
 
     #[inline]
-    unsafe fn guard<'g, 'l, const RETIRE: bool>(
-        smr: smr::PathGuard<'g, 'l, Self>,
+    unsafe fn guard<'g, 'l, const OWNED: bool>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Guard<'g, 'l, RETIRE> {
+    ) -> Self::Guard<'g, 'l, OWNED> {
         let pointer = if cfg!(feature = "validate") {
             NonNull::new(value as *mut T).unwrap()
         } else {
             NonNull::new_unchecked(value as *mut T)
         };
-        unsafe { smr.scope::<RETIRE>(pointer) }
+        unsafe { smr.scope::<OWNED>(pointer) }
     }
 
     #[inline]
@@ -85,7 +85,7 @@ unsafe impl<T> Value for Box<T> {
 
     #[inline]
     unsafe fn borrow_from_u64<'g, 'l>(
-        _smr: &'l smr::PathGuard<'g, 'l, Self>,
+        _smr: &'l smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Borrow<'l> {
         let borrow = (value as *const T).as_ref();
@@ -114,7 +114,7 @@ where
 {
     type SelectDrop = postorder::SelectNode;
 
-    type Guard<'g, 'l, const RETIRE: bool>
+    type Guard<'g, 'l, const OWNED: bool>
         = Self
     where
         Self: 'g + 'l,
@@ -130,10 +130,10 @@ where
     type Clone = Self;
 
     #[inline]
-    unsafe fn guard<'g, 'l, const RETIRE: bool>(
-        _smr: smr::PathGuard<'g, 'l, Self>,
+    unsafe fn guard<'g, 'l, const OWNED: bool>(
+        _smr: smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
-    ) -> Self::Guard<'g, 'l, RETIRE> {
+    ) -> Self::Guard<'g, 'l, OWNED> {
         Self(T::from(value))
     }
 
@@ -149,7 +149,7 @@ where
 
     #[inline]
     unsafe fn borrow_from_u64<'g, 'l>(
-        _smr: &smr::PathGuard<'g, 'l, Self>,
+        _smr: &smr::TraverseGuard<'g, 'l, Self>,
         value: u64,
     ) -> Self::Borrow<'l> {
         Self(T::from(value))
@@ -170,7 +170,7 @@ macro_rules! impl_trivial {
             unsafe impl Value for $ty {
                 type SelectDrop = postorder::SelectNode;
 
-                type Guard<'g, 'l, const RETIRE: bool>
+                type Guard<'g, 'l, const OWNED: bool>
                     = Self
                 where
                     'g: 'l;
@@ -182,10 +182,10 @@ macro_rules! impl_trivial {
                 type Clone = Self;
 
                 #[inline]
-                unsafe fn guard<'g, 'l, const RETIRE: bool>(
-                    _smr: smr::PathGuard<'g, 'l, Self>,
+                unsafe fn guard<'g, 'l, const OWNED: bool>(
+                    _smr: smr::TraverseGuard<'g, 'l, Self>,
                     value: u64,
-                ) -> Self::Guard<'g, 'l, RETIRE> {
+                ) -> Self::Guard<'g, 'l, OWNED> {
                     value as $ty
                 }
 
@@ -201,7 +201,7 @@ macro_rules! impl_trivial {
 
                 #[inline]
                 unsafe fn borrow_from_u64<'g, 'l>(
-                    _smr: &smr::PathGuard<'g, 'l, Self>,
+                    _smr: &smr::TraverseGuard<'g, 'l, Self>,
                     value: u64,
                 ) -> Self::Borrow<'l> {
                     value as $ty

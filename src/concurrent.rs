@@ -556,7 +556,7 @@ where
 
 pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
     // FIXME: don't need to hold guard for trivial values
-    guard: smr::PathGuard<'g, 'l, V>,
+    guard: smr::TraverseGuard<'g, 'l, V>,
     buffer: &'l mut Vec<(K::Write, u64)>,
 }
 
@@ -571,7 +571,7 @@ impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
 }
 
 pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
-    guard: &'l smr::PathGuard<'g, 'l, V>,
+    guard: &'l smr::TraverseGuard<'g, 'l, V>,
     iter: std::vec::Drain<'l, (K::Write, u64)>,
 }
 
@@ -592,7 +592,7 @@ where
 }
 
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
-    guard: smr::PathGuard<'g, 'l, V>,
+    guard: smr::TraverseGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<V>>,
     key: K::Write,
 }
@@ -612,7 +612,7 @@ where
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    guard: &'l smr::PathGuard<'g, 'l, V>,
+    guard: &'l smr::TraverseGuard<'g, 'l, V>,
     iter: iter::PrefixIter<'g, 'l, K::Write, V, S>,
 }
 
@@ -676,7 +676,7 @@ where
 }
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value> {
-    guard: &'l smr::PathGuard<'g, 'l, V>,
+    guard: &'l smr::TraverseGuard<'g, 'l, V>,
     iter: iter::RangeIter<'g, 'l, K, V>,
 }
 

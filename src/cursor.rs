@@ -20,7 +20,7 @@ use crate::Value;
 /// Tree traversal state.
 pub(crate) struct Point<'g, 'l, R, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: smr::PathGuard<'g, 'l, V>,
+    guard: smr::TraverseGuard<'g, 'l, V>,
 
     /// Total number of bits read from `key`
     bits: usize,
@@ -69,7 +69,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::PathGuard<'g, 'l, V> {
+    pub(crate) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
         self.guard
     }
 
@@ -361,7 +361,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::PathGuard<'g, 'l, V> {
+    pub(crate) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
         self.cursor.guard
     }
 

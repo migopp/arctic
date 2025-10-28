@@ -85,7 +85,7 @@ mod membarrier;
 mod hazard;
 
 #[cfg(feature = "smr-hazard")]
-pub(crate) use hazard::{Global, LeafGuard, Local, PathGuard};
+pub(crate) use hazard::{Global, Local, TraverseGuard, ValueGuard};
 
 #[cfg(not(feature = "smr-hazard"))]
 mod no_op;

@@ -61,11 +61,11 @@ pub(crate) struct Local<'g, V: 'g> {
 
 impl<'g, V: Value> Local<'g, V> {
     #[inline]
-    pub(crate) fn guard<'l>(&'l mut self, prefix: byte::Array) -> PathGuard<'g, 'l, V> {
+    pub(crate) fn guard<'l>(&'l mut self, prefix: byte::Array) -> TraverseGuard<'g, 'l, V> {
         self.hazard
             .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
         membarrier::fast();
-        PathGuard(self)
+        TraverseGuard(self)
     }
 
     fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
@@ -113,9 +113,9 @@ impl<'g, V: Value> Local<'g, V> {
 const MASK_VALID: u64 = 0b0100_0000;
 const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
-pub struct PathGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
+pub struct TraverseGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
 
-impl<V: Value> Drop for PathGuard<'_, '_, V> {
+impl<V: Value> Drop for TraverseGuard<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
         self.0
@@ -124,7 +124,7 @@ impl<V: Value> Drop for PathGuard<'_, '_, V> {
     }
 }
 
-impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
+impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     pub(crate) fn prefix(&self) -> byte::Array {
         let prefix = self.0.hazard.load(Ordering::Relaxed);
         validate!(prefix & MASK_VALID > 0);
@@ -136,22 +136,22 @@ impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
     }
 }
 
-impl<'g, 'l, V: Value> PathGuard<'g, 'l, V> {
+impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     #[inline]
-    pub(crate) unsafe fn scope<const RETIRE: bool>(
+    pub(crate) unsafe fn scope<const OWNED: bool>(
         self,
         value: NonNull<V::Target>,
-    ) -> LeafGuard<'g, 'l, RETIRE, V> {
-        LeafGuard { inner: self, value }
+    ) -> ValueGuard<'g, 'l, OWNED, V> {
+        ValueGuard { inner: self, value }
     }
 }
 
-pub struct LeafGuard<'g, 'l, const RETIRE: bool, V: Value> {
-    inner: PathGuard<'g, 'l, V>,
+pub struct ValueGuard<'g, 'l, const OWNED: bool, V: Value> {
+    inner: TraverseGuard<'g, 'l, V>,
     value: NonNull<V::Target>,
 }
 
-impl<'l, const RETIRE: bool, V> fmt::Debug for LeafGuard<'_, 'l, RETIRE, V>
+impl<'l, const OWNED: bool, V> fmt::Debug for ValueGuard<'_, 'l, OWNED, V>
 where
     V: Value,
     V::Borrow<'l>: fmt::Debug,
@@ -161,7 +161,7 @@ where
     }
 }
 
-impl<'g, 'l, const RETIRE: bool, V> core::ops::Deref for LeafGuard<'g, 'l, RETIRE, V>
+impl<'g, 'l, const OWNED: bool, V> core::ops::Deref for ValueGuard<'g, 'l, OWNED, V>
 where
     V: Value,
 {
@@ -173,14 +173,14 @@ where
     }
 }
 
-impl<'g, 'l, const RETIRE: bool, V> Drop for LeafGuard<'g, 'l, RETIRE, V>
+impl<'g, 'l, const OWNED: bool, V> Drop for ValueGuard<'g, 'l, OWNED, V>
 where
     V: Value,
 {
     fn drop(&mut self) {
         validate!(self.inner.0.hazard.load(Ordering::Relaxed) & MASK_VALID > 0);
 
-        if RETIRE {
+        if OWNED {
             let key = self.inner.0.hazard.load(Ordering::Relaxed);
             validate!(key & MASK_VALID > 0);
             let key = byte::Array::new_masked(key);
