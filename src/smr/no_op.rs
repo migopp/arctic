@@ -27,7 +27,7 @@ pub(crate) struct Guard<'g, 'l>(PhantomData<&'l mut Local<'g>>);
 impl Guard<'_, '_> {
     #[inline]
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge>) {
-        if edge.meta().leaf() || edge.data() == 0 {
+        if edge.meta().is_value() || edge.data() == 0 {
             return;
         }
 

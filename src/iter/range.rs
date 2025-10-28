@@ -62,7 +62,7 @@ where
         let data = edge.data();
         key.extend(edge.meta().key());
 
-        if meta.leaf() {
+        if meta.is_value() {
             let reader = K::Read::from(&key);
             if reader < K::reborrow(min) || reader > K::reborrow(max) {
                 return Self::Root { key, next: None };
@@ -189,7 +189,7 @@ where
                 let check_last = Some(byte) == *max;
 
                 if !check_first && !check_last {
-                    if meta.leaf() {
+                    if meta.is_value() {
                         if YIELD {
                             return Some((&self.key, data));
                         } else {
@@ -206,7 +206,7 @@ where
 
                 crate::cold();
 
-                if meta.leaf() {
+                if meta.is_value() {
                     if check_first && K::Read::from(&self.key) < K::reborrow(self.min) {
                         continue 'horizontal;
                     }

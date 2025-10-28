@@ -53,7 +53,7 @@ where
 
         key.extend(edge.meta().key());
 
-        if meta.leaf() {
+        if meta.is_value() {
             Self::Root {
                 key,
                 next: Some(data),
@@ -124,7 +124,7 @@ where
                 key.push(byte);
                 key.extend(meta.key());
 
-                if meta.leaf() {
+                if meta.is_value() {
                     if YIELD {
                         return Some((key, data));
                     } else {

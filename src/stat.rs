@@ -30,7 +30,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
 
             compression.record(meta.key().len().bits() as u64);
 
-            if meta.leaf() {
+            if meta.is_value() {
                 depth.record(depth_ as u64);
             } else {
                 let node = unsafe { data.into_node_unchecked() };

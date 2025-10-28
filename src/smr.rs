@@ -43,7 +43,7 @@
 //! A traversal guard is held by a cursor during traversal.
 //! It protects all nodes and values with overlapping key prefixes from
 //! reclamation. A traversal guard can be downgraded at runtime to
-//! either a prefix guard or a leaf guard.
+//! either a prefix guard or a value guard.
 //!
 //! In our example trie...
 //!

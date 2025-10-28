@@ -72,11 +72,11 @@ where
         .filter(|(_, edge)| !edge.is_null())
         .map(|(key, edge)| {
             validate!(
-                edge.meta().frozen(),
+                edge.meta().is_frozen(),
                 "{} edge must be frozen before replace",
                 core::any::type_name::<Self>(),
             );
-            (key, edge.with_meta(edge.meta().with_frozen(false)))
+            (key, edge.unfreeze())
         })
         .zip(&mut edges)
         .for_each(|(edge, save)| {

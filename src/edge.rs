@@ -48,7 +48,7 @@ impl<V> Edge<V> {
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
-        while !old.meta().frozen() {
+        while !old.meta().is_frozen() {
             match edge.compare_exchange_packed(
                 old,
                 old.with_meta(old.meta().with_frozen(true)),
@@ -79,27 +79,25 @@ impl<V> Edge<V> {
     }
 }
 
-impl<V: Value> Edge<V> {
-    #[inline]
-    pub(crate) fn new_leaf(key: byte::Array, leaf: V) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(Meta::LEAF.with_key(key), Data::from_leaf(leaf))
-    }
-}
-
 impl<V> EdgePacked<V> {
     #[inline]
     pub(crate) fn is_node(self) -> bool {
-        !self.meta().leaf() && !self.data().is_null()
+        !self.meta().is_value() && !self.data().is_null()
     }
 
     #[inline]
     pub(crate) fn is_null(self) -> bool {
-        !self.meta().leaf() && self.data().is_null()
+        !self.meta().is_value() && self.data().is_null()
     }
 
     #[inline]
     pub(crate) fn is_scan(self) -> bool {
-        !self.meta().leaf() && self.data().scan()
+        !self.meta().is_value() && self.data().scan()
+    }
+
+    #[inline]
+    pub(crate) fn unfreeze(self) -> Self {
+        self.with_meta(self.meta().with_frozen(false))
     }
 }
 
@@ -112,8 +110,8 @@ impl<V: Value> EdgePacked<V> {
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         validate!(!self.is_null());
         let data = self.data();
-        if self.meta().leaf() {
-            data.deallocate_leaf_unchecked(counter);
+        if self.meta().is_value() {
+            data.deallocate_value_unchecked(counter);
         } else {
             data.deallocate_node_unchecked(counter);
         }
@@ -126,8 +124,8 @@ impl<V> Debug for EdgePacked<V> {
 
         debug.field("meta", &self.meta());
 
-        if self.meta().leaf() {
-            debug.field("leaf", &self.data().value);
+        if self.meta().is_value() {
+            debug.field("value", &self.data().value);
         } else {
             debug.field("node", &self.data());
         }
@@ -141,8 +139,8 @@ impl<V> Debug for EdgePacked<V> {
 pub(crate) struct Meta {
     #[ribbit(with(skip))]
     _placeholder_len: u6,
-    pub(crate) leaf: bool,
-    pub(crate) frozen: bool,
+    value: bool,
+    frozen: bool,
     #[ribbit(with(skip))]
     _placeholder_array: u56,
 }
@@ -151,7 +149,7 @@ impl Meta {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(u6::new(0), false, false, u56::new(0));
 
-    pub(crate) const LEAF: ribbit::Packed<Self> = Self::DEFAULT.with_leaf(true);
+    pub(crate) const VALUE: ribbit::Packed<Self> = Self::DEFAULT.with_value(true);
 }
 
 impl MetaPacked {
@@ -164,13 +162,23 @@ impl MetaPacked {
     pub(crate) fn with_key(self, key: byte::Array) -> Self {
         unsafe { Self::new_unchecked(self.value & !byte::Array::MASK | key.value()) }
     }
+
+    #[inline]
+    pub(crate) fn is_value(self) -> bool {
+        self.value()
+    }
+
+    #[inline]
+    pub(crate) fn is_frozen(self) -> bool {
+        self.frozen()
+    }
 }
 
 impl Debug for MetaPacked {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Meta")
-            .field("leaf", &self.leaf())
-            .field("frozen", &self.frozen())
+            .field("value", &self.is_value())
+            .field("frozen", &self.is_frozen())
             .field("key", &self.key())
             .finish()
     }
@@ -184,10 +192,10 @@ pub(crate) enum Op {
     /// Path expansion
     Expand,
 
-    /// Leaf insertion
+    /// Value insertion
     Insert,
 
-    /// Leaf removal
+    /// Value removal
     #[expect(dead_code)]
     Remove,
 }
@@ -207,7 +215,7 @@ impl Op {
 #[ribbit(size = 64, packed(rename = DataPacked), eq)]
 pub struct Data<V> {
     #[ribbit(size = 0)]
-    _leaf: PhantomData<V>,
+    _value: PhantomData<V>,
 
     #[ribbit(size = 2)]
     kind: node::Kind,
@@ -251,8 +259,8 @@ impl<V> Data<V> {
 
 impl<V: Value> Data<V> {
     #[inline]
-    fn from_leaf(leaf: V) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(leaf.into_u64()) }
+    pub(crate) fn from_value(value: V) -> ribbit::Packed<Self> {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(value.into_u64()) }
     }
 
     #[inline]
@@ -266,7 +274,7 @@ impl<V: Value> DataPacked<V> {
     ///
     /// Caller must ensure this is a value, and that there are no other references to it.
     #[inline]
-    pub(crate) unsafe fn deallocate_leaf_unchecked(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate_value_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
         unsafe { V::from_data(self) };
     }

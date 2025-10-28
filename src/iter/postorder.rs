@@ -55,8 +55,8 @@ impl<'g, V, S: Selector> PostorderIter<'g, V, S> {
                 let data = edge.data();
 
                 if first {
-                    // Fall through for leaf
-                    if meta.leaf() {
+                    // Fall through for value
+                    if meta.is_value() {
                         iter.skip();
                     } else {
                         // Visit children before node

@@ -100,9 +100,9 @@ where
 
             self.key = save;
 
-            return if meta.frozen() {
+            return if meta.is_frozen() {
                 Some(Err(()))
-            } else if meta.leaf() {
+            } else if meta.is_value() {
                 Some(Ok(edge))
             } else {
                 validate!(edge.data().is_null());
@@ -111,12 +111,12 @@ where
         }
     }
 
-    /// Return CAS operands to either insert the leaf or structurally update
-    /// the tree on the way to inserting the leaf.
+    /// Return CAS operands to either insert the value or structurally update
+    /// the tree on the way to inserting the value.
     #[inline]
     pub(crate) fn traverse_or_insert(
         &mut self,
-        leaf: ribbit::Packed<Edge<V>>,
+        value: ribbit::Packed<edge::Data<V>>,
     ) -> Result<(Op, ribbit::Packed<Edge<V>>, ribbit::Packed<Edge<V>>), ()> {
         loop {
             let mut old = self.edge.load_packed(Ordering::Relaxed);
@@ -142,7 +142,7 @@ where
                 }
             }
 
-            if old_meta.frozen() {
+            if old_meta.is_frozen() {
                 return Err(());
             }
 
@@ -159,14 +159,15 @@ where
                     Op::Edge(edge::Op::Create),
                     Edge::new_node::<Node3<V>, _>(self.key.peek(byte::Len::MAX), None),
                 ),
-                byte::MatchSplit::Full(_) => {
-                    (
-                        Op::Edge(edge::Op::Insert),
-                        leaf.with_meta(edge::Meta::LEAF.with_key(self.key.peek(unsafe {
+                byte::MatchSplit::Full(_) => (
+                    Op::Edge(edge::Op::Insert),
+                    ribbit::Packed::<Edge<V>>::new(
+                        edge::Meta::VALUE.with_key(self.key.peek(unsafe {
                             byte::Len::from_bits_unchecked(self.key.bits() as u8)
-                        }))),
-                    )
-                }
+                        })),
+                        value,
+                    ),
+                ),
                 byte::MatchSplit::Partial { start, middle, end } => (
                     Op::Edge(edge::Op::Expand),
                     Edge::new_node::<Node3<V>, _>(
@@ -186,7 +187,7 @@ where
         let mut edge = self.edge.load_packed(Ordering::Acquire);
 
         loop {
-            while edge.meta().frozen() {
+            while edge.meta().is_frozen() {
                 node = self.pop()?;
                 edge = self.edge.load_packed(Ordering::Acquire);
             }
@@ -194,8 +195,8 @@ where
             let meta = edge.meta();
             let data = edge.data();
 
-            // Should be impossible to freeze leaf
-            validate!(!meta.leaf());
+            // Should be impossible to freeze value
+            validate!(!meta.is_value());
 
             // Already helped by another thread
             if !data.is_ref(node) {
@@ -245,7 +246,7 @@ where
                 return Ok(edge);
             }
 
-            if edge.meta().frozen() {
+            if edge.meta().is_frozen() {
                 return Err(());
             }
         }
@@ -307,7 +308,7 @@ where
             let _ = meta.key().match_exact(&mut cursor.key)?;
             let data = edge.data();
 
-            if meta.leaf() {
+            if meta.is_value() {
                 return Some(unsafe { V::guard_shared(cursor.guard, data) });
             } else if data.is_null() {
                 return None;

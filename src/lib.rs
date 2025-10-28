@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_leaf() {
+    fn scan_value() {
         let map = Map::<u64, _>::default();
         let mut map = map.pin();
         let key = 1u64;

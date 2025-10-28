@@ -4,7 +4,6 @@ use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
 use crate::cursor;
 use crate::edge;
 use crate::iter;
@@ -67,8 +66,8 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
-        unsafe { self.compare_exchange(key, |old| old.with_data(leaf.data())) }
+        let value = edge::Data::from_value(value);
+        unsafe { self.compare_exchange(key, |old| old.with_data(value)) }
     }
 
     #[inline]
@@ -155,7 +154,7 @@ where
                 .compare_exchange_packed(old, exchange(old), Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
-                return if old.meta().leaf() {
+                return if old.meta().is_value() {
                     Ok(Some(unsafe {
                         V::guard_owned(cursor.into_guard(), old.data())
                     }))
@@ -169,37 +168,37 @@ where
 
     #[inline]
     pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
+        let value = edge::Data::from_value(value);
         let mut map = &mut *self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = map.insert_optimistic(key, leaf) {
+            if let Ok(old) = map.insert_optimistic(key, value) {
                 polonius_return!(old);
             }
         });
 
-        map.insert_pessimistic(key, leaf)
+        map.insert_pessimistic(key, value)
     }
 
     #[inline]
     fn insert_optimistic(
         &mut self,
         key: K::Borrow<'_>,
-        leaf: ribbit::Packed<Edge<V>>,
+        value: ribbit::Packed<edge::Data<V>>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
-        self.insert_impl::<cursor::path::Discard>(key, leaf)
+        self.insert_impl::<cursor::path::Discard>(key, value)
     }
 
     #[cold]
     fn insert_pessimistic(
         &mut self,
         key: K::Borrow<'_>,
-        leaf: ribbit::Packed<Edge<V>>,
+        value: ribbit::Packed<edge::Data<V>>,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::path::Retain<_, _>>(key, leaf)
+        self.insert_impl::<cursor::path::Retain<_, _>>(key, value)
             .unwrap()
     }
 
@@ -207,7 +206,7 @@ where
     fn insert_impl<'k, H>(
         &mut self,
         key: K::Borrow<'k>,
-        leaf: ribbit::Packed<Edge<V>>,
+        value: ribbit::Packed<edge::Data<V>>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, V>,
@@ -216,7 +215,7 @@ where
         let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
-            let (op, old, new) = match cursor.traverse_or_insert(leaf) {
+            let (op, old, new) = match cursor.traverse_or_insert(value) {
                 Ok(cas) => cas,
                 Err(()) => {
                     cursor.freeze()?;
@@ -224,7 +223,7 @@ where
                 }
             };
 
-            validate!(!old.meta().frozen());
+            validate!(!old.meta().is_frozen());
 
             match cursor.edge().compare_exchange_packed(
                 old,
@@ -234,7 +233,7 @@ where
             ) {
                 Ok(_) if op == Op::Edge(edge::Op::Insert) => {
                     stat::increment(op);
-                    if old.meta().leaf() {
+                    if old.meta().is_value() {
                         return Ok(Some(unsafe {
                             V::guard_owned(cursor.into_guard(), old.data())
                         }));
@@ -364,6 +363,7 @@ where
     }
 
     // HACK: hide `Edge` type from public API
+    #[expect(clippy::needless_lifetimes)]
     fn transmute_buffer<'l>(
         buffer: &'l mut Vec<(K::Write, u64)>,
     ) -> &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)> {
@@ -495,14 +495,14 @@ where
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
 
         loop {
-            // No need to lock leaf
-            if edge.meta().leaf() {
+            // No need to lock value
+            if edge.meta().is_value() {
                 return Some(());
             }
 
-            if edge.meta().frozen() || edge.data().scan() {
+            if edge.meta().is_frozen() || edge.data().scan() {
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
-                    Ok(safe) if !edge.meta().frozen() => edge = safe,
+                    Ok(safe) if !edge.meta().is_frozen() => edge = safe,
                     Ok(_) | Err(()) => {
                         edge = cursor.freeze()?;
                         continue;
@@ -537,7 +537,7 @@ where
     ) {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
 
-        if edge.meta().leaf() {
+        if edge.meta().is_value() {
             validate!(!edge.data().scan());
             return;
         }
@@ -545,7 +545,7 @@ where
         loop {
             validate!(edge.data().scan());
 
-            if edge.meta().frozen() {
+            if edge.meta().is_frozen() {
                 edge = match cursor.freeze() {
                     Some(edge) => edge,
                     None => unreachable!("Locked edge must be reachable"),

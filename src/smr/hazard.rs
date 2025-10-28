@@ -205,7 +205,7 @@ where
             // we will not access `value` anymore, but then we'd want
             // to avoid dropping `self.inner`.
             self.inner.0.retire(ribbit::Packed::<Edge<V>>::new(
-                edge::Meta::LEAF.with_key(key),
+                edge::Meta::VALUE.with_key(key),
                 edge::Data::from_borrow(self.value),
             ))
         }
