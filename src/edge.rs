@@ -1,12 +1,13 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
+use core::num::NonZeroU32;
+use core::num::NonZeroU64;
+use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 use ribbit::u56;
 use ribbit::u6;
-use ribbit::u61;
-use ribbit::Unpack as _;
 
 use crate::byte;
 use crate::node;
@@ -78,7 +79,7 @@ impl<V> Edge<V> {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Node::new(node).value)
+        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Node::new(node).value.get())
     }
 
     pub(crate) fn new_value(
@@ -91,19 +92,18 @@ impl<V> Edge<V> {
 
 impl<V> EdgePacked<V> {
     #[inline]
-    pub(crate) fn is_node(self) -> bool {
-        !self.meta().is_value() && self.data() != 0
-    }
-
-    #[inline]
     pub(crate) fn is_null(self) -> bool {
         !self.meta().is_value() && self.data() == 0
     }
 
     #[inline]
     pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<V>>> {
-        self.is_node()
-            .then(|| unsafe { ribbit::Packed::<Node<V>>::new_unchecked(self.data()) })
+        if self.meta().is_value() {
+            return None;
+        }
+
+        // FIXME: no transmute?
+        unsafe { core::mem::transmute::<u64, ribbit::Packed<Option<Node<V>>>>(self.data()) }
     }
 
     #[inline]
@@ -120,18 +120,16 @@ impl<V> EdgePacked<V> {
             Some(Child::Value(unsafe {
                 ribbit::Packed::<Value<V>>::new_unchecked(data)
             }))
-        } else if data == 0 {
-            None
         } else {
-            Some(Child::Node(unsafe {
-                ribbit::Packed::<Node<V>>::new_unchecked(data)
-            }))
+            // FIXME: no transmute?
+            unsafe { core::mem::transmute::<u64, ribbit::Packed<Option<Node<V>>>>(data) }
+                .map(Child::Node)
         }
     }
 
     #[inline]
     pub(crate) fn with_node(self, node: ribbit::Packed<Node<V>>) -> Self {
-        self.with_data(node.value)
+        self.with_data(node.value.get())
     }
 
     #[inline]
@@ -278,7 +276,7 @@ impl<V> Debug for Child<V> {
 }
 
 #[derive(ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = NodePacked), eq)]
+#[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
 pub struct Node<V> {
     #[ribbit(size = 0)]
     _value: PhantomData<V>,
@@ -289,7 +287,7 @@ pub struct Node<V> {
     pub(crate) scan: bool,
 
     #[ribbit(with(skip))]
-    _placeholder_data: u61,
+    _placeholder: NonZeroU32,
 }
 
 impl<V> Copy for Node<V> {}
@@ -298,28 +296,23 @@ impl<V> Clone for Node<V> {
         *self
     }
 }
-impl<V> Default for Node<V> {
-    fn default() -> Self {
-        Self::DEFAULT.unpack()
-    }
-}
 
 impl<V> Node<V> {
-    const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(node::Kind::NODE_3, false, u61::new(0));
-
     const MASK_TAG: u64 = 0b111;
     const MASK_PTR: u64 = !Self::MASK_TAG;
 
     #[inline]
     fn new<N: node::Info<V>>(node: Box<N>) -> ribbit::Packed<Self> {
-        let ptr = Box::leak(node) as *mut N as u64;
+        let ptr = NonNull::from(Box::leak(node));
         let kind = N::KIND as u64;
 
-        validate!(ptr > 0);
-        validate_eq!(ptr & Self::MASK_TAG, 0);
+        validate_eq!(ptr.addr().get() as u64 & Self::MASK_TAG, 0);
 
-        unsafe { ribbit::Packed::<Self>::new_unchecked(kind | ptr) }
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
+                kind | ptr.addr().get() as u64,
+            ))
+        }
     }
 }
 
@@ -332,7 +325,7 @@ impl<V> NodePacked<V> {
             node::Ref::Node256(node) => node as *const _ as u64,
         };
 
-        self.value & Node::<V>::MASK_PTR == ptr
+        self.value.get() & Node::<V>::MASK_PTR == ptr
     }
 
     #[inline]
@@ -344,7 +337,7 @@ impl<V> NodePacked<V> {
             N::REF(unsafe { node.unwrap_unchecked() })
         }
 
-        let ptr = self.value & Node::<V>::MASK_PTR;
+        let ptr = self.value.get() & Node::<V>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
@@ -364,7 +357,7 @@ impl<V> NodePacked<V> {
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        let ptr = self.value & Node::<V>::MASK_PTR;
+        let ptr = self.value.get() & Node::<V>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
@@ -380,10 +373,10 @@ impl<V> NodePacked<V> {
 
 impl<V> Debug for NodePacked<V> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Data")
+        f.debug_struct("Node")
             .field("kind", &self.kind())
             .field("scan", &self.scan())
-            .field("ptr", &(self.value & Node::<V>::MASK_PTR))
+            .field("ptr", &(self.value.get() & Node::<V>::MASK_PTR))
             .finish()
     }
 }
