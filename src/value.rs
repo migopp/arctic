@@ -40,11 +40,6 @@ pub unsafe trait Value: Sized {
     fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l;
-
-    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
-    where
-        Self: 'l,
-        Self::Clone: Clone;
 }
 
 unsafe impl<T> Value for Box<T> {
@@ -108,14 +103,6 @@ unsafe impl<T> Value for Box<T> {
     {
         borrow as *const T as u64
     }
-
-    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
-    where
-        Self: 'l,
-        Self::Clone: Clone,
-    {
-        borrow.clone()
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -175,15 +162,6 @@ where
     {
         borrow.0.into()
     }
-
-    #[inline]
-    unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
-    where
-        Self: 'l,
-        Self::Clone: Clone,
-    {
-        borrow
-    }
 }
 
 macro_rules! impl_trivial {
@@ -232,15 +210,6 @@ macro_rules! impl_trivial {
                 #[inline]
                 fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64 where Self: 'l {
                     borrow as u64
-                }
-
-                #[inline]
-                unsafe fn clone_from_borrow<'l>(borrow: Self::Borrow<'l>) -> Self::Clone
-                where
-                    Self: 'l,
-                    Self::Clone: Clone,
-                {
-                    borrow as $ty
                 }
             }
         )*
