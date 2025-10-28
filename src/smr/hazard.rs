@@ -1,6 +1,5 @@
 use core::cell::RefCell;
 use core::fmt;
-use core::ptr::NonNull;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
@@ -134,21 +133,38 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
         self.0.retire(edge);
     }
+
+    /// # SAFETY
+    ///
+    /// Caller must ensure that only one thread calls this for any given value.
+    #[inline]
+    pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, true, V> {
+        ValueGuard { inner: self, value }
+    }
+
+    #[inline]
+    pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, false, V> {
+        ValueGuard { inner: self, value }
+    }
+
+    #[inline]
+    pub(crate) fn guard_prefix(self) -> PrefixGuard<'g, 'l, V> {
+        PrefixGuard(self)
+    }
 }
 
-impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
-    #[inline]
-    pub(crate) unsafe fn scope<const OWNED: bool>(
-        self,
-        value: NonNull<V::Target>,
-    ) -> ValueGuard<'g, 'l, OWNED, V> {
-        ValueGuard { inner: self, value }
+pub struct PrefixGuard<'g, 'l, V: Value>(TraverseGuard<'g, 'l, V>);
+
+impl<'g, 'l, V: Value> core::ops::Deref for PrefixGuard<'g, 'l, V> {
+    type Target = TraverseGuard<'g, 'l, V>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 pub struct ValueGuard<'g, 'l, const OWNED: bool, V: Value> {
     inner: TraverseGuard<'g, 'l, V>,
-    value: NonNull<V::Target>,
+    value: V::Borrow<'l>,
 }
 
 impl<'l, const OWNED: bool, V> fmt::Debug for ValueGuard<'_, 'l, OWNED, V>
@@ -165,11 +181,11 @@ impl<'g, 'l, const OWNED: bool, V> core::ops::Deref for ValueGuard<'g, 'l, OWNED
 where
     V: Value,
 {
-    type Target = V::Target;
+    type Target = V::Borrow<'l>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        unsafe { self.value.as_ref() }
+        &self.value
     }
 }
 
@@ -190,9 +206,7 @@ where
             // to avoid dropping `self.inner`.
             self.inner.0.retire(ribbit::Packed::<Edge<V>>::new(
                 edge::Meta::LEAF.with_key(key),
-                unsafe {
-                    ribbit::Packed::<edge::Data<V>>::new_unchecked(self.value.as_ptr() as u64)
-                },
+                edge::Data::from_borrow(self.value),
             ))
         }
     }

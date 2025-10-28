@@ -4,6 +4,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
+use crate::edge;
 use crate::iter::Sort;
 use crate::key;
 use crate::Edge;
@@ -12,7 +13,7 @@ use crate::Value;
 pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
     Root {
         key: W,
-        next: Option<u64>,
+        next: Option<ribbit::Packed<edge::Data<V>>>,
     },
     Node {
         key: W,
@@ -55,7 +56,7 @@ where
         if meta.leaf() {
             Self::Root {
                 key,
-                next: Some(data.into_leaf()),
+                next: Some(data),
             }
         } else if data.is_null() {
             Self::Root { key, next: None }
@@ -70,17 +71,20 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&W, ribbit::Packed<edge::Data<V>>)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, u64)>(mut self, apply: F) {
+    pub(crate) fn for_each<F: FnMut(&W, ribbit::Packed<edge::Data<V>>)>(mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
+    fn walk<const YIELD: bool, F: FnMut(&W, ribbit::Packed<edge::Data<V>>)>(
+        &mut self,
+        mut apply: F,
+    ) -> Option<(&W, ribbit::Packed<edge::Data<V>>)> {
         let (key, frontier) = match self {
             Self::Root { key, next } => {
                 crate::cold();
@@ -122,9 +126,9 @@ where
 
                 if meta.leaf() {
                     if YIELD {
-                        return Some((key, data.into_leaf()));
+                        return Some((key, data));
                     } else {
-                        apply(key, data.into_leaf());
+                        apply(key, data);
                     }
                 } else {
                     let node = unsafe { data.into_node_unchecked() };

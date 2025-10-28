@@ -204,8 +204,8 @@ impl Op {
 }
 
 #[derive(ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = DataPacked))]
-pub(crate) struct Data<V> {
+#[ribbit(size = 64, packed(rename = DataPacked), eq)]
+pub struct Data<V> {
     #[ribbit(size = 0)]
     _leaf: PhantomData<V>,
 
@@ -254,6 +254,11 @@ impl<V: Value> Data<V> {
     fn from_leaf(leaf: V) -> ribbit::Packed<Self> {
         unsafe { ribbit::Packed::<Self>::new_unchecked(leaf.into_u64()) }
     }
+
+    #[inline]
+    pub(crate) fn from_borrow<'l>(borrow: V::Borrow<'l>) -> ribbit::Packed<Self> {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(V::borrow_into_u64(borrow)) }
+    }
 }
 
 impl<V: Value> DataPacked<V> {
@@ -263,19 +268,18 @@ impl<V: Value> DataPacked<V> {
     #[inline]
     pub(crate) unsafe fn deallocate_leaf_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
-        V::from_u64(self.value);
+        unsafe { V::from_data(self) };
     }
 }
 
 impl<V> DataPacked<V> {
-    #[inline]
-    pub(crate) fn is_null(self) -> bool {
-        self.value == 0
+    pub(crate) fn value(self) -> u64 {
+        self.value
     }
 
     #[inline]
-    pub(crate) fn into_leaf(self) -> u64 {
-        self.value
+    pub(crate) fn is_null(self) -> bool {
+        self.value == 0
     }
 
     #[inline]

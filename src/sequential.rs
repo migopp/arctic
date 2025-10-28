@@ -82,7 +82,7 @@ where
         self.0.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 // FIXME: borrow without guard
-                V::from_u64(value)
+                V::from_data(value)
             })
         })
     }
@@ -100,7 +100,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.0.lend().map(|(key, value)| {
             (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::from_u64(value)
+                V::from_data(value)
             })
         })
     }

@@ -14,8 +14,6 @@ use crate::key::Read as _;
 use crate::sequential;
 use crate::smr;
 use crate::stat;
-use crate::value::Owned;
-use crate::value::Shared;
 use crate::Edge;
 use crate::Key;
 use crate::Op;
@@ -63,18 +61,18 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'g, '_, V>> {
+    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
         cursor::Point::get(&mut self.smr, self.raw.root(), K::Read::from(key))
     }
 
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, V>> {
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
         unsafe { self.compare_exchange(key, |old| old.with_data(leaf.data())) }
     }
 
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, V>> {
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
         unsafe { self.compare_exchange(key, |_| Edge::DEFAULT) }
     }
 
@@ -83,7 +81,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         mut exchange: F,
-    ) -> Option<Owned<'g, '_, V>>
+    ) -> Option<V::OwnedGuard<'g, '_>>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -91,7 +89,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<Owned<'g, 'polonius, V>> {
+        polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
             if let Ok(old) = map.compare_exchange_optimistic::<_>(key, &mut exchange) {
                 polonius_return!(old);
             }
@@ -105,7 +103,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         exchange: F,
-    ) -> Result<Option<Owned<'g, '_, V>>, ()>
+    ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -117,7 +115,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         exchange: F,
-    ) -> Option<Owned<'g, '_, V>>
+    ) -> Option<V::OwnedGuard<'g, '_>>
     where
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
     {
@@ -134,7 +132,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         mut exchange: F,
-    ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
+    ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, V>,
         F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
@@ -159,7 +157,7 @@ where
             {
                 return if old.meta().leaf() {
                     Ok(Some(unsafe {
-                        V::guard(cursor.into_guard(), old.data().into_leaf())
+                        V::guard_owned(cursor.into_guard(), old.data())
                     }))
                 } else {
                     validate!(old.is_null());
@@ -170,13 +168,13 @@ where
     }
 
     #[inline]
-    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, V>> {
+    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
         let leaf = Edge::new_leaf(byte::Array::EMPTY, value);
         let mut map = &mut *self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<Owned<'g, 'polonius, V>> {
+        polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
             if let Ok(old) = map.insert_optimistic(key, leaf) {
                 polonius_return!(old);
             }
@@ -190,7 +188,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<Owned<'g, '_, V>>, ()> {
+    ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
         self.insert_impl::<cursor::path::Discard>(key, leaf)
     }
 
@@ -199,7 +197,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Option<Owned<'g, '_, V>> {
+    ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::path::Retain<_, _>>(key, leaf)
             .unwrap()
@@ -210,7 +208,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         leaf: ribbit::Packed<Edge<V>>,
-    ) -> Result<Option<Owned<'g, '_, V>>, H::PopError>
+    ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, V>,
     {
@@ -238,7 +236,7 @@ where
                     stat::increment(op);
                     if old.meta().leaf() {
                         return Ok(Some(unsafe {
-                            V::guard(cursor.into_guard(), old.data().into_leaf())
+                            V::guard_owned(cursor.into_guard(), old.data())
                         }));
                     } else {
                         validate!(old.is_null());
@@ -281,7 +279,7 @@ where
         Some(PrefixGuard {
             root: cursor.edge(),
             key: K::Write::from(cursor.prefix()),
-            guard: cursor.into_guard(),
+            guard: cursor.into_guard().guard_prefix(),
         })
     }
 
@@ -313,7 +311,7 @@ where
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_hybrid::<iter::Prefix>(buffer, cursor, &(), limit)
+        Self::scan_hybrid::<iter::Prefix>(Self::transmute_buffer(buffer), cursor, &(), limit)
     }
 
     pub fn prefix_pessimistic<'l>(
@@ -327,7 +325,7 @@ where
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_pessimistic::<iter::Prefix>(buffer, cursor, &())
+        Self::scan_pessimistic::<iter::Prefix>(Self::transmute_buffer(buffer), cursor, &())
     }
 
     pub fn range_hybrid<'l>(
@@ -345,7 +343,7 @@ where
             min,
             max,
         )?;
-        Self::scan_hybrid::<iter::Range>(buffer, cursor, &(min, max), limit)
+        Self::scan_hybrid::<iter::Range>(Self::transmute_buffer(buffer), cursor, &(min, max), limit)
     }
 
     pub fn range_pessimistic<'l>(
@@ -362,11 +360,28 @@ where
             min,
             max,
         )?;
-        Self::scan_pessimistic::<iter::Range>(buffer, cursor, &(min, max))
+        Self::scan_pessimistic::<iter::Range>(Self::transmute_buffer(buffer), cursor, &(min, max))
+    }
+
+    // HACK: hide `Edge` type from public API
+    fn transmute_buffer<'l>(
+        buffer: &'l mut Vec<(K::Write, u64)>,
+    ) -> &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)> {
+        const {
+            assert!(
+                core::mem::size_of::<ribbit::Packed<edge::Data<V>>>()
+                    == core::mem::size_of::<u64>()
+            );
+            assert!(
+                core::mem::align_of::<ribbit::Packed<edge::Data<V>>>()
+                    == core::mem::align_of::<u64>()
+            )
+        };
+        unsafe { core::mem::transmute(buffer) }
     }
 
     fn scan_hybrid<'l, S>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
+        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
         limit: usize,
@@ -384,7 +399,7 @@ where
     }
 
     fn scan_optimistic<'l, S>(
-        buffer: &mut Vec<(K::Write, u64)>,
+        buffer: &mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
         limit: usize,
@@ -445,7 +460,7 @@ where
     }
 
     fn scan_pessimistic<'l, S>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
+        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
         mut cursor: cursor::Prefix<
             'g,
             'l,
@@ -557,7 +572,7 @@ where
 pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
     // FIXME: don't need to hold guard for trivial values
     guard: smr::TraverseGuard<'g, 'l, V>,
-    buffer: &'l mut Vec<(K::Write, u64)>,
+    buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Data<V>>)>,
 }
 
 impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
@@ -572,7 +587,7 @@ impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
 
 pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
     guard: &'l smr::TraverseGuard<'g, 'l, V>,
-    iter: std::vec::Drain<'l, (K::Write, u64)>,
+    iter: std::vec::Drain<'l, (K::Write, ribbit::Packed<edge::Data<V>>)>,
 }
 
 impl<'g, 'l, K, V> Iterator for LinearizableDrain<'g, 'l, K, V>
@@ -585,14 +600,14 @@ where
         self.iter.next().map(|(key, value)| {
             // FIXME: take ownership of key directly
             (unsafe { K::from_writer_unchecked(key) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }
 }
 
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
-    guard: smr::TraverseGuard<'g, 'l, V>,
+    guard: smr::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<V>>,
     key: K::Write,
 }
@@ -612,7 +627,7 @@ where
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    guard: &'l smr::TraverseGuard<'g, 'l, V>,
+    guard: &'l smr::PrefixGuard<'g, 'l, V>,
     iter: iter::PrefixIter<'g, 'l, K::Write, V, S>,
 }
 
@@ -626,7 +641,7 @@ where
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }
@@ -642,7 +657,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }
@@ -676,7 +691,7 @@ where
 }
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value> {
-    guard: &'l smr::TraverseGuard<'g, 'l, V>,
+    guard: &'l smr::PrefixGuard<'g, 'l, V>,
     iter: iter::RangeIter<'g, 'l, K, V>,
 }
 
@@ -689,7 +704,7 @@ where
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }
@@ -698,7 +713,7 @@ where
     pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }
@@ -715,7 +730,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::borrow_from_u64(self.guard, value)
+                V::guard_borrow(self.guard, value)
             })
         })
     }

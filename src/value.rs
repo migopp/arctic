@@ -1,16 +1,17 @@
-use core::ptr::NonNull;
-
+use crate::edge;
 use crate::iter::postorder;
 use crate::smr;
 use crate::Edge;
 
-pub type Owned<'g, 'l, V> = <V as Value>::Guard<'g, 'l, true>;
-pub type Shared<'g, 'l, V> = <V as Value>::Guard<'g, 'l, false>;
-
 pub unsafe trait Value: Sized {
     type SelectDrop: postorder::Selector<Item<Self> = ribbit::Packed<Edge<Self>>>;
 
-    type Guard<'g, 'l, const OWNED: bool>: Sized
+    type OwnedGuard<'g, 'l>: Sized
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
+    type SharedGuard<'g, 'l>: Sized
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -23,19 +24,24 @@ pub unsafe trait Value: Sized {
 
     type Clone;
 
-    unsafe fn guard<'g, 'l, const OWNED: bool>(
-        smr: smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Guard<'g, 'l, OWNED>;
+    unsafe fn guard_borrow<'g, 'l>(
+        smr: &'l smr::TraverseGuard<'g, 'l, Self>,
+        data: ribbit::Packed<edge::Data<Self>>,
+    ) -> Self::Borrow<'l>;
 
-    unsafe fn from_u64(value: u64) -> Self;
+    unsafe fn guard_owned<'g, 'l>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
+        data: ribbit::Packed<edge::Data<Self>>,
+    ) -> Self::OwnedGuard<'g, 'l>;
+
+    unsafe fn guard_shared<'g, 'l>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
+        data: ribbit::Packed<edge::Data<Self>>,
+    ) -> Self::SharedGuard<'g, 'l>;
+
+    unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self;
 
     fn into_u64(self) -> u64;
-
-    unsafe fn borrow_from_u64<'g, 'l>(
-        smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Borrow<'l>;
 
     fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
     where
@@ -45,8 +51,14 @@ pub unsafe trait Value: Sized {
 unsafe impl<T> Value for Box<T> {
     type SelectDrop = postorder::SelectNonNull;
 
-    type Guard<'g, 'l, const OWNED: bool>
-        = smr::ValueGuard<'g, 'l, OWNED, Self>
+    type OwnedGuard<'g, 'l>
+        = smr::ValueGuard<'g, 'l, true, Self>
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
+    type SharedGuard<'g, 'l>
+        = smr::ValueGuard<'g, 'l, false, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -61,21 +73,36 @@ unsafe impl<T> Value for Box<T> {
     type Clone = T;
 
     #[inline]
-    unsafe fn guard<'g, 'l, const OWNED: bool>(
+    unsafe fn guard_owned<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Guard<'g, 'l, OWNED> {
-        let pointer = if cfg!(feature = "validate") {
-            NonNull::new(value as *mut T).unwrap()
+        data: ribbit::Packed<edge::Data<Self>>,
+    ) -> Self::OwnedGuard<'g, 'l> {
+        let borrow = (data.value() as *const T).as_ref();
+        let borrow = if cfg!(feature = "validate") {
+            borrow.unwrap()
         } else {
-            NonNull::new_unchecked(value as *mut T)
+            unsafe { borrow.unwrap_unchecked() }
         };
-        unsafe { smr.scope::<OWNED>(pointer) }
+        unsafe { smr.guard_owned(borrow) }
     }
 
     #[inline]
-    unsafe fn from_u64(value: u64) -> Self {
-        Box::from_raw(value as *mut T)
+    unsafe fn guard_shared<'g, 'l>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
+        data: ribbit::Packed<edge::Data<Self>>,
+    ) -> Self::SharedGuard<'g, 'l> {
+        let borrow = (data.value() as *const T).as_ref();
+        let borrow = if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        };
+        smr.guard_shared(borrow)
+    }
+
+    #[inline]
+    unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self {
+        Box::from_raw(data.value() as *mut T)
     }
 
     #[inline]
@@ -84,11 +111,11 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn borrow_from_u64<'g, 'l>(
+    unsafe fn guard_borrow<'g, 'l>(
         _smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
+        data: ribbit::Packed<edge::Data<Self>>,
     ) -> Self::Borrow<'l> {
-        let borrow = (value as *const T).as_ref();
+        let borrow = (data.value() as *const T).as_ref();
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -105,64 +132,62 @@ unsafe impl<T> Value for Box<T> {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct Inline<T>(pub T);
-
-unsafe impl<T> Value for Inline<T>
-where
-    T: Copy + From<u64> + Into<u64>,
-{
-    type SelectDrop = postorder::SelectNode;
-
-    type Guard<'g, 'l, const OWNED: bool>
-        = Self
-    where
-        Self: 'g + 'l,
-        'g: 'l;
-
-    type Borrow<'l>
-        = Self
-    where
-        Self: 'l;
-
-    type Target = Self;
-
-    type Clone = Self;
-
-    #[inline]
-    unsafe fn guard<'g, 'l, const OWNED: bool>(
-        _smr: smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Guard<'g, 'l, OWNED> {
-        Self(T::from(value))
-    }
-
-    #[inline]
-    unsafe fn from_u64(value: u64) -> Self {
-        Inline(T::from(value))
-    }
-
-    #[inline]
-    fn into_u64(self) -> u64 {
-        self.0.into()
-    }
-
-    #[inline]
-    unsafe fn borrow_from_u64<'g, 'l>(
-        _smr: &smr::TraverseGuard<'g, 'l, Self>,
-        value: u64,
-    ) -> Self::Borrow<'l> {
-        Self(T::from(value))
-    }
-
-    #[inline]
-    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
-    where
-        Self: 'l,
-    {
-        borrow.0.into()
-    }
-}
+// #[derive(Copy, Clone)]
+// pub struct Inline<T>(pub T);
+//
+// unsafe impl<T> Value for Inline<T>
+// where
+//     T: Copy + From<u64> + Into<u64>,
+// {
+//     type SelectDrop = postorder::SelectNode;
+//
+//     type OwnedGuard<'g, 'l>
+//         = Self
+//     where
+//         Self: 'g + 'l,
+//         'g: 'l;
+//
+//     type SharedGuard<'g, 'l>
+//         = Self
+//     where
+//         Self: 'g + 'l,
+//         'g: 'l;
+//
+//     type Borrow<'l>
+//         = Self
+//     where
+//         Self: 'l;
+//
+//     type Target = Self;
+//
+//     type Clone = Self;
+//
+//     #[inline]
+//     unsafe fn from_u64(value: u64) -> Self {
+//         Inline(T::from(value))
+//     }
+//
+//     #[inline]
+//     fn into_u64(self) -> u64 {
+//         self.0.into()
+//     }
+//
+//     #[inline]
+//     unsafe fn borrow_from_u64<'g, 'l>(
+//         _smr: &smr::TraverseGuard<'g, 'l, Self>,
+//         value: u64,
+//     ) -> Self::Borrow<'l> {
+//         Self(T::from(value))
+//     }
+//
+//     #[inline]
+//     fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
+//     where
+//         Self: 'l,
+//     {
+//         borrow.0.into()
+//     }
+// }
 
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
@@ -170,7 +195,12 @@ macro_rules! impl_trivial {
             unsafe impl Value for $ty {
                 type SelectDrop = postorder::SelectNode;
 
-                type Guard<'g, 'l, const OWNED: bool>
+                type OwnedGuard<'g, 'l>
+                    = Self
+                where
+                    'g: 'l;
+
+                type SharedGuard<'g, 'l>
                     = Self
                 where
                     'g: 'l;
@@ -182,16 +212,18 @@ macro_rules! impl_trivial {
                 type Clone = Self;
 
                 #[inline]
-                unsafe fn guard<'g, 'l, const OWNED: bool>(
-                    _smr: smr::TraverseGuard<'g, 'l, Self>,
-                    value: u64,
-                ) -> Self::Guard<'g, 'l, OWNED> {
-                    value as $ty
+                unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Data<Self>>) -> Self {
+                    data.value() as $ty
                 }
 
                 #[inline]
-                unsafe fn from_u64(value: u64) -> Self {
-                    value as $ty
+                unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Data<Self>>) -> Self {
+                    data.value() as $ty
+                }
+
+                #[inline]
+                unsafe fn from_data(data: ribbit::Packed<edge::Data<Self>>) -> Self {
+                    data.value() as $ty
                 }
 
                 #[inline]
@@ -200,11 +232,11 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn borrow_from_u64<'g, 'l>(
+                unsafe fn guard_borrow<'g, 'l>(
                     _smr: &smr::TraverseGuard<'g, 'l, Self>,
-                    value: u64,
+                    data: ribbit::Packed<edge::Data<Self>>,
                 ) -> Self::Borrow<'l> {
-                    value as $ty
+                    data.value() as $ty
                 }
 
                 #[inline]

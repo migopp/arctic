@@ -38,11 +38,24 @@ mod u64 {
             index as u64
         }
 
-        fn validate<'a, 'g, 'l, const RETIRE: bool>(
+        fn validate_owned<'a, 'g, 'l>(
             &'a self,
             index: usize,
             key: <Self::Key as arctic::Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::Guard<'g, 'l, RETIRE>,
+            value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(index as u64, key);
+            assert_eq!(index as u64, value);
+        }
+
+        fn validate_shared<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
         ) where
             'a: 'g,
             'g: 'l,
@@ -97,17 +110,30 @@ mod boxed {
             Box::new(Entry::new(index))
         }
 
-        fn validate<'a, 'g, 'l, const RETIRE: bool>(
+        fn validate_owned<'a, 'g, 'l>(
             &'a self,
             index: usize,
             key: <Self::Key as arctic::Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::Guard<'g, 'l, RETIRE>,
+            value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
         ) where
             'a: 'g,
             'g: 'l,
         {
             assert_eq!(key, index as u32);
-            assert_eq!(*value, Entry::new(index));
+            assert_eq!(**value, Entry::new(index));
+        }
+
+        fn validate_shared<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(key, index as u32);
+            assert_eq!(**value, Entry::new(index));
         }
     }
 }
@@ -123,11 +149,20 @@ trait Workload: Sized + Sync {
 
     fn value<'a>(&'a self, index: usize) -> Self::Value<'a>;
 
-    fn validate<'a, 'g, 'l, const RETIRE: bool>(
+    fn validate_owned<'a, 'g, 'l>(
         &'a self,
         index: usize,
         key: <Self::Key as arctic::Key>::Borrow<'a>,
-        value: <Self::Value<'a> as arctic::Value>::Guard<'g, 'l, RETIRE>,
+        value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
+    ) where
+        'a: 'g,
+        'g: 'l;
+
+    fn validate_shared<'a, 'g, 'l>(
+        &'a self,
+        index: usize,
+        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
     ) where
         'a: 'g,
         'g: 'l;
@@ -181,14 +216,14 @@ fn test_map<'k, K: Workload>(
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
                     let value = map.remove(*key);
-                    key_set.validate(*index, *key, value.unwrap());
+                    key_set.validate_owned(*index, *key, value.unwrap());
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().skip(chunk.len() / 2) {
                     let value = map.get(*key);
-                    key_set.validate(*index, *key, value.unwrap());
+                    key_set.validate_shared(*index, *key, value.unwrap());
                 }
             });
         }

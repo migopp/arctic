@@ -4,6 +4,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
+use crate::edge;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::node;
@@ -12,7 +13,10 @@ use crate::Key;
 use crate::Value;
 
 pub(crate) enum RangeIter<'g, 'l, K: Key, V> {
-    Root { key: K::Write, next: Option<u64> },
+    Root {
+        key: K::Write,
+        next: Option<ribbit::Packed<edge::Data<V>>>,
+    },
     Node(NodeIter<'g, 'l, K, V>),
 }
 
@@ -66,7 +70,7 @@ where
 
             Self::Root {
                 key,
-                next: Some(data.into_leaf()),
+                next: Some(data),
             }
         } else if data.is_null() {
             Self::Root { key, next: None }
@@ -93,7 +97,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(self, mut apply: F) {
         match self {
             RangeIter::Root { key, mut next } => {
                 crate::cold();
@@ -106,7 +110,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&K::Write, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -142,20 +146,20 @@ where
     K: Key,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&K::Write, u64)> {
+    fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&K::Write, u64)>(
+    fn walk<const YIELD: bool, F: FnMut(&K::Write, ribbit::Packed<edge::Data<V>>)>(
         &mut self,
         mut apply: F,
-    ) -> Option<(&K::Write, u64)> {
+    ) -> Option<(&K::Write, ribbit::Packed<edge::Data<V>>)> {
         'vertical: loop {
             let (len, min, max, iter) = self.stack.last_mut()?;
 
@@ -187,9 +191,9 @@ where
                 if !check_first && !check_last {
                     if meta.leaf() {
                         if YIELD {
-                            return Some((&self.key, data.into_leaf()));
+                            return Some((&self.key, data));
                         } else {
-                            apply(&self.key, data.into_leaf());
+                            apply(&self.key, data);
                             continue 'horizontal;
                         }
                     } else {
@@ -213,9 +217,9 @@ where
                     }
 
                     if YIELD {
-                        return Some((&self.key, data.into_leaf()));
+                        return Some((&self.key, data));
                     } else {
-                        apply(&self.key, data.into_leaf());
+                        apply(&self.key, data);
                     }
                 } else {
                     let min = if check_first {

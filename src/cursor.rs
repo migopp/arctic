@@ -12,7 +12,6 @@ use crate::node;
 use crate::node::Node3;
 use crate::smr;
 use crate::stat;
-use crate::value::Shared;
 use crate::Edge;
 use crate::Op;
 use crate::Value;
@@ -294,7 +293,7 @@ where
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<V>>,
         key: R,
-    ) -> Option<Shared<'g, 'l, V>>
+    ) -> Option<V::SharedGuard<'g, 'l>>
     where
         R: key::Read,
         V: Value,
@@ -309,7 +308,7 @@ where
             let data = edge.data();
 
             if meta.leaf() {
-                return Some(unsafe { V::guard(cursor.guard, data.into_leaf()) });
+                return Some(unsafe { V::guard_shared(cursor.guard, data) });
             } else if data.is_null() {
                 return None;
             } else {
