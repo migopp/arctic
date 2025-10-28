@@ -16,10 +16,6 @@ pub unsafe trait Value: Sized {
     where
         Self: 'l;
 
-    type Target;
-
-    type Clone;
-
     unsafe fn guard_borrow<'g, 'l>(
         smr: &'l smr::TraverseGuard<'g, 'l, Self>,
         data: ribbit::Packed<edge::Value<Self>>,
@@ -61,10 +57,6 @@ unsafe impl<T> Value for Box<T> {
         = &'l T
     where
         Self: 'l;
-
-    type Target = T;
-
-    type Clone = T;
 
     #[inline]
     unsafe fn guard_owned<'g, 'l>(
@@ -198,10 +190,6 @@ macro_rules! impl_trivial {
                     'g: 'l;
 
                 type Borrow<'g> = Self;
-
-                type Target = Self;
-
-                type Clone = Self;
 
                 #[inline]
                 unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Value<Self>>) -> Self {
