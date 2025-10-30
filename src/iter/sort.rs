@@ -1,5 +1,8 @@
+use core::cmp;
+
 use ribbit::atomic::Atomic128;
 
+use crate::key;
 use crate::node;
 use crate::Edge;
 
@@ -12,44 +15,115 @@ pub struct Sorted;
 pub struct Unsorted;
 
 pub(crate) trait SortPrivate {
-    type Iter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    type PrefixIter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
     where
         V: 'g;
-    unsafe fn new<'g, V>(node: node::Ref<'g, V>) -> Self::Iter<'g, V>;
+
+    type RangeIter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    where
+        V: 'g;
+
+    unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V>;
+
+    unsafe fn range<'g, V>(
+        node: node::Ref<'g, V>,
+        min: Option<u8>,
+        max: Option<u8>,
+    ) -> Self::RangeIter<'g, V>;
+
+    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering;
 }
 
 impl SortPrivate for Sorted {
-    type Iter<'g, V>
+    type PrefixIter<'g, V>
+        = node::SortedIter<'g, V>
+    where
+        V: 'g;
+
+    type RangeIter<'g, V>
         = node::SortedIter<'g, V>
     where
         V: 'g;
 
     #[inline]
-    unsafe fn new<'g, V>(node: node::Ref<'g, V>) -> Self::Iter<'g, V> {
+    unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V> {
         node.iter_sorted()
+    }
+
+    #[inline]
+    unsafe fn range<'g, V>(
+        node: node::Ref<'g, V>,
+        min: Option<u8>,
+        max: Option<u8>,
+    ) -> Self::PrefixIter<'g, V> {
+        node.iter_range(min, max)
+    }
+
+    #[inline]
+    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
+        left.cmp(&right)
     }
 }
 
 impl SortPrivate for core::iter::Rev<Sorted> {
-    type Iter<'g, V>
+    type PrefixIter<'g, V>
+        = core::iter::Rev<node::SortedIter<'g, V>>
+    where
+        V: 'g;
+
+    type RangeIter<'g, V>
         = core::iter::Rev<node::SortedIter<'g, V>>
     where
         V: 'g;
 
     #[inline]
-    unsafe fn new<'g, V>(node: node::Ref<'g, V>) -> Self::Iter<'g, V> {
+    unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V> {
         node.iter_sorted().rev()
+    }
+
+    #[inline]
+    unsafe fn range<'g, V>(
+        node: node::Ref<'g, V>,
+        min: Option<u8>,
+        max: Option<u8>,
+    ) -> Self::RangeIter<'g, V> {
+        validate!(min.zip(max).map(|(min, max)| min >= max).unwrap_or(true));
+        node.iter_range(max, min).rev()
+    }
+
+    #[inline]
+    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
+        right.cmp(&left)
     }
 }
 
 impl SortPrivate for Unsorted {
-    type Iter<'g, V>
+    type PrefixIter<'g, V>
         = node::UnsortedIter<'g, V>
     where
         V: 'g;
 
+    type RangeIter<'g, V>
+        = node::SortedIter<'g, V>
+    where
+        V: 'g;
+
     #[inline]
-    unsafe fn new<'g, V>(node: node::Ref<'g, V>) -> Self::Iter<'g, V> {
+    unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V> {
         node.iter_unsorted()
+    }
+
+    #[inline]
+    unsafe fn range<'g, V>(
+        node: node::Ref<'g, V>,
+        min: Option<u8>,
+        max: Option<u8>,
+    ) -> Self::RangeIter<'g, V> {
+        node.iter_range(min, max)
+    }
+
+    #[inline]
+    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
+        left.cmp(&right)
     }
 }

@@ -20,11 +20,15 @@ pub(crate) trait Scan {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
+    fn scan<'g, 'l, K, V, S, F>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         input: &Self::Input<'l, K>,
         apply: F,
-    );
+    ) where
+        K: Key,
+        V: Value,
+        S: Sort,
+        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>);
 }
 
 pub(crate) struct Prefix;
@@ -35,12 +39,17 @@ impl Scan for Prefix {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
+    fn scan<'g, 'l, K, V, S, F>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         (): &(),
         apply: F,
-    ) {
-        PrefixIter::<K::Write, _, crate::iter::Sorted>::new(cursor).for_each(apply)
+    ) where
+        K: Key,
+        V: Value,
+        S: Sort,
+        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>),
+    {
+        PrefixIter::<K::Write, _, S>::new(cursor).for_each(apply)
     }
 }
 
@@ -52,12 +61,17 @@ impl Scan for Range {
     where
         K: Key;
 
-    fn scan<'g, 'l, K: Key, V: Value, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
+    fn scan<'g, 'l, K, V, S, F>(
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         (min, max): &Self::Input<'l, K>,
         apply: F,
-    ) {
-        RangeIter::<K, V>::new(cursor, *min, *max).for_each(apply)
+    ) where
+        K: Key,
+        V: Value,
+        S: Sort,
+        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>),
+    {
+        RangeIter::<K, V, S>::new(cursor, *min, *max).for_each(apply)
     }
 }
 

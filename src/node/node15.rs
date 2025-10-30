@@ -88,45 +88,33 @@ impl linear::Header for Atomic128<Header> {
         let (keys, len) = unsafe {
             use core::arch::x86_64::_mm_and_si128;
             use core::arch::x86_64::_mm_cmpeq_epi8;
-            use core::arch::x86_64::_mm_cvtsi128_si64x;
-            use core::arch::x86_64::_mm_extract_epi64;
             use core::arch::x86_64::_mm_max_epu8;
             use core::arch::x86_64::_mm_min_epu8;
             use core::arch::x86_64::_mm_set1_epi8;
-            use core::arch::x86_64::_pext_u64;
 
             let keys = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(header.value);
             let len = header.len().value() as usize;
 
-            let within_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
+            let mask_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
                 (1u128 << (len << 3)) - 1,
             );
 
             let min = _mm_set1_epi8(min as i8);
             let max = _mm_set1_epi8(max as i8);
-            let within_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
+            let mask_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
 
-            let valid = _mm_and_si128(within_len, within_range);
-            let len = (core::mem::transmute::<core::arch::x86_64::__m128i, u128>(valid)
-                .count_ones()
-                >> 3) as u8;
+            let mask_valid = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(
+                _mm_and_si128(mask_len, mask_range),
+            );
+            let len = (mask_valid.count_ones() >> 3) as u8;
 
-            let valid_low = _mm_cvtsi128_si64x(valid) as u64;
-            let keys_low = _mm_cvtsi128_si64x(keys) as u64;
-            let keys_low = _pext_u64(keys_low, valid_low);
-
-            let valid_high = _mm_extract_epi64::<1>(valid) as u64;
-            let keys_high = _mm_extract_epi64::<1>(keys) as u64;
-            let keys_high = _pext_u64(keys_high, valid_high);
-
-            let keys = ((keys_high as u128) << valid_low.count_ones()) | (keys_low as u128);
-            (keys, len)
+            (header.value & mask_valid | !mask_valid, len)
         };
 
         // TODO: SIMD sorting network?
         let keys = keys.to_le_bytes();
         let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
-        indexes[..len as usize].sort_unstable();
+        indexes.sort_unstable();
         linear::SortedKeyIter::new_15(linear::RawKeyIter::new(indexes, len))
     }
 

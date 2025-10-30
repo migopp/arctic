@@ -295,7 +295,7 @@ where
         })
     }
 
-    pub fn prefix_hybrid<'l>(
+    pub fn prefix_hybrid<'l, S: Sort>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
@@ -307,10 +307,10 @@ where
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_hybrid::<iter::Prefix>(Self::transmute_buffer(buffer), cursor, &(), limit)
+        Self::scan_hybrid::<iter::Prefix, S>(Self::transmute_buffer(buffer), cursor, &(), limit)
     }
 
-    pub fn prefix_pessimistic<'l>(
+    pub fn prefix_pessimistic<'l, S: Sort>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         prefix: impl Into<K::Read<'l>>,
@@ -321,10 +321,10 @@ where
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_pessimistic::<iter::Prefix>(Self::transmute_buffer(buffer), cursor, &())
+        Self::scan_pessimistic::<iter::Prefix, S>(Self::transmute_buffer(buffer), cursor, &())
     }
 
-    pub fn range_hybrid<'l>(
+    pub fn range_hybrid<'l, S: Sort>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
@@ -339,10 +339,15 @@ where
             min,
             max,
         )?;
-        Self::scan_hybrid::<iter::Range>(Self::transmute_buffer(buffer), cursor, &(min, max), limit)
+        Self::scan_hybrid::<iter::Range, S>(
+            Self::transmute_buffer(buffer),
+            cursor,
+            &(min, max),
+            limit,
+        )
     }
 
-    pub fn range_pessimistic<'l>(
+    pub fn range_pessimistic<'l, S: Sort>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         min: impl Into<K::Read<'l>>,
@@ -356,7 +361,11 @@ where
             min,
             max,
         )?;
-        Self::scan_pessimistic::<iter::Range>(Self::transmute_buffer(buffer), cursor, &(min, max))
+        Self::scan_pessimistic::<iter::Range, S>(
+            Self::transmute_buffer(buffer),
+            cursor,
+            &(min, max),
+        )
     }
 
     // HACK: hide `Edge` type from public API
@@ -377,7 +386,7 @@ where
         unsafe { core::mem::transmute(buffer) }
     }
 
-    fn scan_hybrid<'l, S>(
+    fn scan_hybrid<'l, S, O>(
         buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
@@ -385,17 +394,18 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
     where
         S: Scan,
+        O: Sort,
     {
-        match Self::scan_optimistic::<S>(buffer, &cursor, arg, limit) {
+        match Self::scan_optimistic::<S, O>(buffer, &cursor, arg, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: cursor.into_guard(),
                 buffer,
             }),
-            Err(()) => Self::scan_pessimistic::<S>(buffer, cursor, arg),
+            Err(()) => Self::scan_pessimistic::<S, O>(buffer, cursor, arg),
         }
     }
 
-    fn scan_optimistic<'l, S>(
+    fn scan_optimistic<'l, S, O>(
         buffer: &mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
         arg: &S::Input<'l, K>,
@@ -403,14 +413,15 @@ where
     ) -> Result<(), ()>
     where
         S: Scan,
+        O: Sort,
     {
-        S::scan(cursor, arg, |key, value| buffer.push((key.clone(), value)));
+        S::scan::<_, _, O, _>(cursor, arg, |key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            S::scan(cursor, arg, |new_key, new_value| {
+            S::scan::<_, _, O, _>(cursor, arg, |new_key, new_value| {
                 let index = len;
                 len += 1;
 
@@ -456,7 +467,7 @@ where
         Err(())
     }
 
-    fn scan_pessimistic<'l, S>(
+    fn scan_pessimistic<'l, S, O>(
         buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
         mut cursor: cursor::Prefix<
             'g,
@@ -469,9 +480,10 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
     where
         S: Scan,
+        O: Sort,
     {
         Self::lock_prefix(&mut cursor)?;
-        S::scan(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
+        S::scan::<_, _, O, _>(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
         Self::unlock_prefix(&mut cursor);
 
         Some(LinearizableGuard {
@@ -639,6 +651,15 @@ where
             })
         })
     }
+
+    #[inline]
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
+        self.iter.for_each(|key, value| {
+            apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
+                V::guard_borrow(self.guard, value)
+            })
+        })
+    }
 }
 
 impl<'g, 'l, K, V, S> Iterator for PrefixIter<'g, 'l, K, V, S>
@@ -669,7 +690,7 @@ where
     V: Value,
 {
     #[inline]
-    pub fn iter(&self) -> RangeIter<'g, '_, K, V> {
+    pub fn iter<S: Sort>(&self) -> RangeIter<'g, '_, K, V, S> {
         RangeIter {
             guard: &self.prefix.guard,
             iter: unsafe {
@@ -684,15 +705,16 @@ where
     }
 }
 
-pub struct RangeIter<'g, 'l, K: Key, V: Value> {
+pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::RangeIter<'g, 'l, K, V>,
+    iter: iter::RangeIter<'g, 'l, K, V, S>,
 }
 
-impl<'g, 'l, K, V> RangeIter<'g, 'l, K, V>
+impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
+    S: Sort,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
@@ -713,10 +735,11 @@ where
     }
 }
 
-impl<'g, 'l, K, V> Iterator for RangeIter<'g, 'l, K, V>
+impl<'g, 'l, K, V, S> Iterator for RangeIter<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
+    S: Sort,
 {
     type Item = (K, V::Borrow<'l>);
 

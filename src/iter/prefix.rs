@@ -17,7 +17,7 @@ pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {
     },
     Node {
         key: W,
-        frontier: Vec<(W::Len, S::Iter<'g, V>)>,
+        frontier: Vec<(W::Len, S::PrefixIter<'g, V>)>,
         _cursor: PhantomData<&'l ()>,
     },
 }
@@ -60,7 +60,7 @@ where
             Some(edge::Child::Node(node)) => {
                 let node = unsafe { node.into_ref_unchecked() };
                 Self::Node {
-                    frontier: vec![(key.bits(), S::new(node))],
+                    frontier: vec![(key.bits(), S::prefix(node))],
                     key,
                     _cursor: PhantomData,
                 }
@@ -132,7 +132,7 @@ where
                     }
                     edge::Child::Node(node) => {
                         let node = unsafe { node.into_ref_unchecked() };
-                        frontier.push((key.bits(), unsafe { S::new(node) }));
+                        frontier.push((key.bits(), unsafe { S::prefix(node) }));
                         continue 'vertical;
                     }
                 }

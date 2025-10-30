@@ -103,7 +103,10 @@ mod tests {
         let key = 1u64;
         map.insert(key, 2u32);
         let range = map.range(1u64, 1u64).unwrap();
-        assert_eq!(range.iter().collect::<Vec<_>>(), vec![(1, 2)]);
+        assert_eq!(
+            range.iter::<crate::iter::Sorted>().collect::<Vec<_>>(),
+            vec![(1, 2)]
+        );
     }
 
     #[test]
@@ -132,7 +135,7 @@ mod tests {
         let mut map = map.pin();
         let range = map.range(256u64, 511u64).unwrap();
         assert_eq!(
-            range.iter().collect::<Vec<_>>(),
+            range.iter::<crate::iter::Sorted>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))
@@ -162,6 +165,11 @@ mod tests {
     }
 
     #[test]
+    fn node3_reverse() {
+        insert_all((0u16..3).rev());
+    }
+
+    #[test]
     fn node3_full() {
         insert_all(0u16..3);
     }
@@ -184,6 +192,25 @@ mod tests {
     #[test]
     fn node256_full() {
         insert_all(0u16..=255);
+    }
+
+    #[test]
+    fn range_reverse() {
+        let map = Map::<u64, _>::default();
+        let mut pin = map.pin();
+
+        for key in [5, 1, 4, 3, 2] {
+            pin.insert(key, key);
+            assert_eq!(pin.get(key), Some(key));
+        }
+        let range = pin.range(2, 4).unwrap();
+
+        assert_eq!(
+            range
+                .iter::<core::iter::Rev<crate::iter::Sorted>>()
+                .collect::<Vec<_>>(),
+            vec![(4, 4), (3, 3), (2, 2)]
+        );
     }
 
     #[test]
@@ -268,16 +295,24 @@ mod tests {
 
         // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow(), last.borrow()).unwrap();
-        range.iter().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
-            assert_eq!(lk, *rk);
-            assert_eq!(lv, *rv);
-        });
+        range
+            .iter::<crate::iter::Sorted>()
+            .zip(&keys)
+            .for_each(|((lk, lv), (rk, rv))| {
+                assert_eq!(lk, *rk);
+                assert_eq!(lv, *rv);
+            });
         drop(range);
 
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
         let mut range = pin
-            .range_hybrid(&mut buffer, usize::MAX, first.borrow(), last.borrow())
+            .range_hybrid::<crate::iter::Sorted>(
+                &mut buffer,
+                usize::MAX,
+                first.borrow(),
+                last.borrow(),
+            )
             .unwrap();
         range.drain().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
             assert_eq!(lk, *rk);

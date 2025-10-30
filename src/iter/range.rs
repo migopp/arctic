@@ -1,29 +1,31 @@
 use core::cmp;
+use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
 use crate::edge;
+use crate::iter::Sort;
 use crate::key::Read as _;
 use crate::key::Write as _;
-use crate::node;
 use crate::Edge;
 use crate::Key;
 use crate::Value;
 
-pub(crate) enum RangeIter<'g, 'l, K: Key, V> {
+pub(crate) enum RangeIter<'g, 'l, K: Key, V, S: Sort> {
     Root {
         key: K::Write,
         next: Option<ribbit::Packed<edge::Value<V>>>,
     },
-    Node(NodeIter<'g, 'l, K, V>),
+    Node(NodeIter<'g, 'l, K, V, S>),
 }
 
-impl<'g, 'c, K, V> RangeIter<'g, 'c, K, V>
+impl<'g, 'c, K, V, S> RangeIter<'g, 'c, K, V, S>
 where
     K: Key,
     V: Value,
+    S: Sort,
 {
     pub(crate) fn new<'l>(
         cursor: &'c cursor::Prefix<
@@ -47,16 +49,23 @@ where
     }
 }
 
-impl<'g, 'l, K, V> RangeIter<'g, 'l, K, V>
+impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>
 where
     K: Key,
+    S: Sort,
 {
     pub(crate) unsafe fn new_unchecked(
         root: &'g Atomic128<Edge<V>>,
         mut key: K::Write,
-        min: K::Read<'l>,
-        max: K::Read<'l>,
+        mut min: K::Read<'l>,
+        mut max: K::Read<'l>,
     ) -> Self {
+        validate!(min <= max);
+
+        if matches!(S::compare(min, max), cmp::Ordering::Greater) {
+            core::mem::swap(&mut min, &mut max);
+        }
+
         let edge = root.load_packed(Ordering::Acquire);
 
         key.extend(edge.meta().key());
@@ -78,8 +87,14 @@ where
                 let node = unsafe { node.into_ref_unchecked() };
 
                 let reader = K::Read::from(&key);
-                validate!(reader >= K::reborrow(min.slice(key.bits())));
-                validate!(reader <= K::reborrow(max.slice(key.bits())));
+                validate!(matches!(
+                    S::compare(reader, K::reborrow(min.slice(key.bits()))),
+                    cmp::Ordering::Equal | cmp::Ordering::Greater
+                ));
+                validate!(matches!(
+                    S::compare(reader, K::reborrow(max.slice(key.bits()))),
+                    cmp::Ordering::Equal | cmp::Ordering::Less
+                ));
 
                 let first =
                     (reader == K::reborrow(min.slice(key.bits()))).then(|| min.get(key.bits()));
@@ -87,13 +102,14 @@ where
                     (reader == K::reborrow(max.slice(key.bits()))).then(|| max.get(key.bits()));
 
                 let mut stack = Vec::with_capacity(7);
-                stack.push((key.bits(), first, last, node.iter_range(first, last)));
+                stack.push((key.bits(), first, last, S::range(node, first, last)));
 
                 Self::Node(NodeIter {
                     stack,
                     key,
                     min,
                     max,
+                    _sort: PhantomData,
                 })
             }
         }
@@ -128,7 +144,7 @@ where
     }
 }
 
-impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
+impl<K: Key, V, S: Sort> Clone for RangeIter<'_, '_, K, V, S> {
     fn clone(&self) -> Self {
         match self {
             Self::Root { key, next } => Self::Root {
@@ -140,16 +156,18 @@ impl<K: Key, V> Clone for RangeIter<'_, '_, K, V> {
     }
 }
 
-pub(crate) struct NodeIter<'g, 'l, K: Key, V> {
+pub(crate) struct NodeIter<'g, 'l, K: Key, V: 'g, S: Sort> {
     min: K::Read<'l>,
     max: K::Read<'l>,
     key: K::Write,
-    stack: Vec<(usize, Option<u8>, Option<u8>, node::SortedIter<'g, V>)>,
+    stack: Vec<(usize, Option<u8>, Option<u8>, S::RangeIter<'g, V>)>,
+    _sort: PhantomData<S>,
 }
 
-impl<'g, 'k, K, V> NodeIter<'g, 'k, K, V>
+impl<'g, 'k, K, V, S> NodeIter<'g, 'k, K, V, S>
 where
     K: Key,
+    S: Sort,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
@@ -167,7 +185,7 @@ where
         mut apply: F,
     ) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
         'vertical: loop {
-            let (len, min, max, iter) = self.stack.last_mut()?;
+            let (len, first, last, iter) = self.stack.last_mut()?;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -189,8 +207,8 @@ where
                     self.key.extend_nonempty_unchecked(meta.key());
                 }
 
-                let check_first = Some(byte) == *min;
-                let check_last = Some(byte) == *max;
+                let check_first = Some(byte) == *first;
+                let check_last = Some(byte) == *last;
 
                 if !check_first && !check_last {
                     match child {
@@ -204,12 +222,9 @@ where
                         }
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
-                            self.stack.push((
-                                self.key.bits(),
-                                None,
-                                None,
-                                node.iter_range(None, None),
-                            ));
+                            self.stack.push((self.key.bits(), None, None, unsafe {
+                                S::range(node, None, None)
+                            }));
                             continue 'vertical;
                         }
                     }
@@ -235,10 +250,11 @@ where
                         }
                     }
                     edge::Child::Node(node) => {
-                        let min = if check_first {
-                            match K::Read::from(&self.key)
-                                .cmp(&K::reborrow(self.min.slice(self.key.bits())))
-                            {
+                        let first = if check_first {
+                            match S::compare(
+                                K::Read::from(&self.key),
+                                K::reborrow(self.min.slice(self.key.bits())),
+                            ) {
                                 cmp::Ordering::Less => continue 'horizontal,
                                 cmp::Ordering::Equal => Some(self.min.get(self.key.bits())),
                                 cmp::Ordering::Greater => None,
@@ -247,10 +263,11 @@ where
                             None
                         };
 
-                        let max = if check_last {
-                            match K::Read::from(&self.key)
-                                .cmp(&K::reborrow(self.max.slice(self.key.bits())))
-                            {
+                        let last = if check_last {
+                            match S::compare(
+                                K::Read::from(&self.key),
+                                K::reborrow(self.max.slice(self.key.bits())),
+                            ) {
                                 cmp::Ordering::Less => None,
                                 cmp::Ordering::Equal => Some(self.max.get(self.key.bits())),
                                 cmp::Ordering::Greater => {
@@ -263,8 +280,9 @@ where
                         };
 
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack
-                            .push((self.key.bits(), min, max, node.iter_range(min, max)));
+                        self.stack.push((self.key.bits(), first, last, unsafe {
+                            S::range(node, first, last)
+                        }));
                         continue 'vertical;
                     }
                 }
@@ -273,13 +291,14 @@ where
     }
 }
 
-impl<K: Key, V> Clone for NodeIter<'_, '_, K, V> {
+impl<K: Key, V, S: Sort> Clone for NodeIter<'_, '_, K, V, S> {
     fn clone(&self) -> Self {
         Self {
             min: self.min,
             max: self.max,
             key: self.key.clone(),
             stack: self.stack.clone(),
+            _sort: PhantomData,
         }
     }
 }
