@@ -55,9 +55,20 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
+    fn try_freeze(&self) -> Result<(), ()> {
+        let len = self.header.try_freeze()?;
+        self.edges.iter().take(len).try_for_each(Edge::try_freeze)?;
+        Ok(())
+    }
+
+    fn freeze(&self) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
+    }
+
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
+        // FIXME: back off if `try_freeze` fails
+        self.freeze();
 
         let mut edges: [(u8, ribbit::Packed<Edge<V>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
@@ -151,6 +162,7 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
 }
 
 pub(super) trait Header {
+    fn try_freeze(&self) -> Result<usize, ()>;
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
