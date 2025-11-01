@@ -44,14 +44,6 @@ impl<V> Node<V> for Node256<V> {
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn try_freeze(&self) -> Result<(), ()> {
-        todo!()
-    }
-
-    fn freeze(&self) {
-        todo!()
-    }
-
     fn replace(&self, _parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
         todo!()
     }

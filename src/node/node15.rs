@@ -24,23 +24,6 @@ pub(crate) struct Header {
 }
 
 impl linear::Header for Atomic128<Header> {
-    fn try_freeze(&self) -> Result<usize, ()> {
-        let old = self.load_packed(Ordering::Relaxed);
-
-        if old.frozen() {
-            return Err(());
-        }
-
-        self.compare_exchange_packed(
-            old,
-            old.with_frozen(true),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        )
-        .map(|_| old.len().value() as usize)
-        .map_err(|_| ())
-    }
-
     fn freeze(&self) -> usize {
         let mut old = self.load_packed(Ordering::Relaxed);
 
