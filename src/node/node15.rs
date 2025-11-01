@@ -24,24 +24,11 @@ pub(crate) struct Header {
 }
 
 impl linear::Header for Atomic128<Header> {
-    fn try_freeze(&self) -> Result<usize, ()> {
-        let old = self.load_packed(Ordering::Relaxed);
-
-        if old.frozen() {
-            return Err(());
-        }
-
-        self.compare_exchange_packed(
-            old,
-            old.with_frozen(true),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        )
-        .map(|_| old.len().value() as usize)
-        .map_err(|_| ())
+    fn is_frozen(&self) -> bool {
+        self.load_packed(Ordering::Relaxed).frozen()
     }
 
-    fn freeze(&self) -> usize {
+    fn freeze(&self) -> Result<usize, usize> {
         let mut old = self.load_packed(Ordering::Relaxed);
 
         while !old.frozen() {
@@ -51,12 +38,12 @@ impl linear::Header for Atomic128<Header> {
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
-                Ok(old) => return old.len().value() as usize,
+                Ok(old) => return Ok(old.len().value() as usize),
                 Err(conflict) => old = conflict,
             }
         }
 
-        old.len().value() as usize
+        Err(old.len().value() as usize)
     }
 
     #[cold]

@@ -151,6 +151,16 @@ where
                 byte::MatchSplit::Full(_) => match old.child() {
                     Some(edge::Child::Node(node)) => {
                         let node = unsafe { node.into_ref_unchecked() };
+
+                        match node.try_freeze() {
+                            Ok(()) => (),
+                            #[expect(clippy::single_match)]
+                            Err(()) => match self.wait_for_freeze(node) {
+                                Ok(()) => continue,
+                                Err(()) => (),
+                            },
+                        }
+
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
                     }
@@ -208,6 +218,12 @@ where
                 Some(edge::Child::Value(_)) => unreachable!(),
             };
 
+            #[expect(clippy::single_match)]
+            match self.wait_for_freeze(node) {
+                Ok(()) => return Ok(()),
+                Err(()) => (),
+            }
+
             let (op, new) = node.replace(meta);
 
             match self.edge.compare_exchange_packed(
@@ -255,6 +271,38 @@ where
                 Some(edge::Child::Node(_)) => continue,
             }
         }
+    }
+
+    // Return `Ok(())` if we successfully waited for someone else to freeze + replace
+    #[cold]
+    fn wait_for_freeze(&self, old: node::Ref<'g, V>) -> Result<(), ()> {
+        // FIXME: tune + futex
+        const SPIN: usize = 100;
+
+        for i in 0.. {
+            core::hint::spin_loop();
+
+            let edge = self.edge.load_packed(Ordering::Acquire);
+
+            if edge.meta().is_frozen() {
+                panic!();
+            }
+
+            match edge.child() {
+                Some(edge::Child::Node(new)) if new.is_ref(old) => {
+                    if i < SPIN {
+                        continue;
+                    } else {
+                        unsafe { new.into_ref_unchecked() }.freeze();
+                        return Err(());
+                    }
+                }
+
+                None | Some(_) => return Ok(()),
+            }
+        }
+
+        unreachable!()
     }
 
     #[inline]

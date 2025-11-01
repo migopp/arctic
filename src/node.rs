@@ -156,7 +156,6 @@ impl<'g, V> Ref<'g, V> {
     }
 
     #[cold]
-    #[expect(unused)]
     pub(crate) fn try_freeze(&self) -> Result<(), ()> {
         match self {
             Ref::Node3(node) => node.try_freeze(),
@@ -166,7 +165,6 @@ impl<'g, V> Ref<'g, V> {
     }
 
     #[cold]
-    #[expect(unused)]
     pub(crate) fn freeze(&self) {
         match self {
             Ref::Node3(node) => node.freeze(),
