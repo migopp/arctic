@@ -56,18 +56,19 @@ where
     }
 
     fn try_freeze(&self) -> Result<(), ()> {
-        let len = self.header.freeze().map_err(|_| ())?;
-        self.edges.iter().take(len).for_each(Edge::freeze);
+        let len = self.header.try_freeze()?;
+        self.edges.iter().take(len).try_for_each(Edge::try_freeze)?;
         Ok(())
     }
 
     fn freeze(&self) {
-        let len = self.header.freeze().unwrap_or_else(core::convert::identity);
+        let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
     }
 
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
-        validate!(self.header.is_frozen());
+        // FIXME: back off if `try_freeze` fails
+        self.freeze();
 
         let mut edges: [(u8, ribbit::Packed<Edge<V>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
@@ -161,9 +162,8 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
 }
 
 pub(super) trait Header {
-    fn is_frozen(&self) -> bool;
-
-    fn freeze(&self) -> Result<usize, usize>;
+    fn try_freeze(&self) -> Result<usize, ()>;
+    fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 

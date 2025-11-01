@@ -49,6 +49,24 @@ impl<V> Edge<V> {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
     #[inline]
+    pub(crate) fn try_freeze(edge: &Atomic128<Self>) -> Result<(), ()> {
+        let old = edge.load_packed(Ordering::Relaxed);
+
+        if old.meta().is_frozen() {
+            return Err(());
+        }
+
+        edge.compare_exchange_packed(
+            old,
+            old.with_meta(old.meta().with_frozen(true)),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        )
+        .map(|_| ())
+        .map_err(|_| ())
+    }
+
+    #[inline]
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
