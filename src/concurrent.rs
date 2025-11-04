@@ -9,6 +9,7 @@ use crate::edge;
 use crate::iter;
 use crate::iter::Scan;
 use crate::iter::Sort;
+use crate::key;
 use crate::key::Read as _;
 use crate::sequential;
 use crate::smr;
@@ -629,6 +630,44 @@ where
             guard: &self.guard,
             iter: unsafe { iter::PrefixIter::new_unchecked(self.root, self.key.clone()) },
         }
+    }
+
+    #[inline]
+    pub fn values<S: Sort>(&self) -> PrefixValueIter<'g, '_, V, S> {
+        PrefixValueIter {
+            guard: &self.guard,
+            iter: unsafe { iter::PrefixIter::new_unchecked(self.root, key::Ignore) },
+        }
+    }
+}
+
+pub struct PrefixValueIter<'g, 'l, V: Value, S: crate::iter::Sort> {
+    guard: &'l smr::PrefixGuard<'g, 'l, V>,
+    iter: iter::PrefixIter<'g, 'l, key::Ignore, V, S>,
+}
+
+impl<'g, 'l, V, S> PrefixValueIter<'g, 'l, V, S>
+where
+    V: Value,
+    S: crate::iter::Sort,
+{
+    #[inline]
+    pub fn for_each<F: FnMut(V::Borrow<'l>)>(self, mut apply: F) {
+        self.iter
+            .for_each(|key::Ignore, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
+    }
+}
+
+impl<'g, 'l, V, S> Iterator for PrefixValueIter<'g, 'l, V, S>
+where
+    V: Value,
+    S: crate::iter::Sort,
+{
+    type Item = V::Borrow<'l>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter
+            .lend()
+            .map(|(key::Ignore, value)| (unsafe { V::guard_borrow(self.guard, value) }))
     }
 }
 
