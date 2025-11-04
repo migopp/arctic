@@ -337,6 +337,14 @@ where
     V: Value,
     H: path::History<'g, R, V>,
 {
+    pub(crate) fn new_root(smr: &'l mut smr::Local<'g, V>, root: &'g Atomic128<Edge<V>>) -> Self {
+        let prefix = R::default();
+        Self {
+            prefix,
+            cursor: Point::new(smr, root, prefix),
+        }
+    }
+
     pub(crate) fn new_prefix(
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<V>>,

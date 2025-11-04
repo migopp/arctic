@@ -261,6 +261,19 @@ where
         }
     }
 
+    pub fn all(&mut self) -> PrefixGuard<'g, '_, K, V> {
+        let cursor = cursor::Prefix::<K::Read<'_>, _, cursor::path::Discard>::new_root(
+            &mut self.smr,
+            self.raw.root(),
+        );
+
+        PrefixGuard {
+            root: cursor.edge(),
+            key: K::Write::from(K::Read::default()),
+            guard: cursor.into_guard().guard_prefix(),
+        }
+    }
+
     pub fn prefix<'k>(
         &mut self,
         prefix: impl Into<K::Read<'k>>,
