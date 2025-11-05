@@ -17,15 +17,6 @@ impl<'g, K, V> SortedIter<'g, K, V> {
     }
 }
 
-impl<K, V> Clone for SortedIter<'_, K, V>
-where
-    K: Clone,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
 impl<'g, K, V> Iterator for SortedIter<'g, K, V>
 where
     K: Iterator<Item = (u8, u8)>,
@@ -89,15 +80,6 @@ where
 
 #[repr(transparent)]
 pub(crate) struct UnsortedIter<'g, K, V>(Iter<'g, K, V>);
-
-impl<K, V> Clone for UnsortedIter<'_, K, V>
-where
-    K: Clone,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
 
 impl<'g, K, V> UnsortedIter<'g, K, V> {
     /// # SAFETY
@@ -169,23 +151,6 @@ impl<'g, K, V> Iter<'g, K, V> {
 
             #[cfg(feature = "validate")]
             len: edges.len() as u16,
-
-            _slice: PhantomData,
-        }
-    }
-}
-
-impl<K, V> Clone for Iter<'_, K, V>
-where
-    K: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            keys: self.keys.clone(),
-            edges: self.edges,
-
-            #[cfg(feature = "validate")]
-            len: self.len,
 
             _slice: PhantomData,
         }

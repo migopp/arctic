@@ -144,18 +144,6 @@ where
     }
 }
 
-impl<K: Key, V, S: Sort> Clone for RangeIter<'_, '_, K, V, S> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Root { key, next } => Self::Root {
-                key: key.clone(),
-                next: *next,
-            },
-            Self::Node(iter) => Self::Node(iter.clone()),
-        }
-    }
-}
-
 pub(crate) struct NodeIter<'g, 'l, K: Key, V: 'g, S: Sort> {
     min: K::Read<'l>,
     max: K::Read<'l>,
@@ -287,18 +275,6 @@ where
                     }
                 }
             }
-        }
-    }
-}
-
-impl<K: Key, V, S: Sort> Clone for NodeIter<'_, '_, K, V, S> {
-    fn clone(&self) -> Self {
-        Self {
-            min: self.min,
-            max: self.max,
-            key: self.key.clone(),
-            stack: self.stack.clone(),
-            _sort: PhantomData,
         }
     }
 }

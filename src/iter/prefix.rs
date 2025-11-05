@@ -140,27 +140,3 @@ where
         }
     }
 }
-
-impl<'g, 'l, W, V, S> Clone for PrefixIter<'g, 'l, W, V, S>
-where
-    W: key::Write,
-    S: Sort,
-{
-    fn clone(&self) -> Self {
-        match self {
-            Self::Root { key, next } => Self::Root {
-                key: key.clone(),
-                next: *next,
-            },
-            Self::Node {
-                key,
-                frontier,
-                _cursor,
-            } => Self::Node {
-                key: key.clone(),
-                frontier: frontier.clone(),
-                _cursor: PhantomData,
-            },
-        }
-    }
-}

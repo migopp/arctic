@@ -15,11 +15,11 @@ pub struct Sorted;
 pub struct Unsorted;
 
 pub(crate) trait SortPrivate {
-    type PrefixIter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    type PrefixIter<'g, V>: Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
     where
         V: 'g;
 
-    type RangeIter<'g, V>: Clone + Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    type RangeIter<'g, V>: Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
     where
         V: 'g;
 
