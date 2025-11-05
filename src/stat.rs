@@ -1,10 +1,10 @@
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use crate::edge;
-use crate::node;
+use crate::raw::edge;
+use crate::raw::node;
+use crate::raw::Op;
 use crate::Key;
-use crate::Op;
 use crate::Value;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
@@ -202,17 +202,17 @@ impl Thread {
     fn op(&mut self, op: Op) -> &mut u64 {
         match op {
             Op::Node(op) => match op {
-                crate::node::Op::Shrink => &mut self.node.shrink,
-                crate::node::Op::Replace => &mut self.node.replace,
-                crate::node::Op::Grow => &mut self.node.grow,
-                crate::node::Op::Destroy => &mut self.node.destroy,
-                crate::node::Op::Compress => &mut self.node.compress,
+                node::Op::Shrink => &mut self.node.shrink,
+                node::Op::Replace => &mut self.node.replace,
+                node::Op::Grow => &mut self.node.grow,
+                node::Op::Destroy => &mut self.node.destroy,
+                node::Op::Compress => &mut self.node.compress,
             },
             Op::Edge(op) => match op {
-                crate::edge::Op::Create => &mut self.edge.create,
-                crate::edge::Op::Expand => &mut self.edge.expand,
-                crate::edge::Op::Insert => &mut self.edge.insert,
-                crate::edge::Op::Remove => &mut self.edge.remove,
+                edge::Op::Create => &mut self.edge.create,
+                edge::Op::Expand => &mut self.edge.expand,
+                edge::Op::Insert => &mut self.edge.insert,
+                edge::Op::Remove => &mut self.edge.remove,
             },
         }
     }

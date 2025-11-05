@@ -3,8 +3,8 @@ use core::convert::Infallible;
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
-use crate::node;
-use crate::Edge;
+use crate::raw::node;
+use crate::raw::Edge;
 
 /// A path along the tree is composed of 0 or more path segments.
 pub(crate) struct Segment<'g, R, V> {

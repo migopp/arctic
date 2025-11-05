@@ -11,7 +11,7 @@ pub use sort::Sorted;
 pub use sort::Unsorted;
 
 use crate::cursor;
-use crate::edge;
+use crate::raw::edge;
 use crate::Key;
 use crate::Value;
 

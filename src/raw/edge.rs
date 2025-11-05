@@ -11,10 +11,10 @@ use ribbit::u6;
 use ribbit::OptionExt as _;
 
 use crate::byte;
-use crate::node;
-use crate::node::Node15;
-use crate::node::Node256;
-use crate::node::Node3;
+use crate::raw::node;
+use crate::raw::node::Node15;
+use crate::raw::node::Node256;
+use crate::raw::node::Node3;
 use crate::stat;
 use crate::value;
 

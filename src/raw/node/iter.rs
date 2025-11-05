@@ -3,7 +3,7 @@ use core::ptr::NonNull;
 
 use ribbit::atomic::Atomic128;
 
-use crate::Edge;
+use crate::raw::Edge;
 
 #[repr(transparent)]
 pub(crate) struct SortedIter<'g, K, V>(Iter<'g, K, V>);

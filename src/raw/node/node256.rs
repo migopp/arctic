@@ -2,12 +2,12 @@ use core::fmt::Debug;
 
 use ribbit::atomic::Atomic128;
 
-use crate::edge;
-use crate::node;
-use crate::node::Edge;
-use crate::node::Node15;
-use crate::node::Op;
-use crate::Node;
+use crate::raw::edge;
+use crate::raw::node;
+use crate::raw::node::Edge;
+use crate::raw::node::Node15;
+use crate::raw::node::Op;
+use crate::raw::Node;
 
 #[repr(C, align(4096))]
 pub(crate) struct Node256<V>([Atomic128<Edge<V>>; 256]);

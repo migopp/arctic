@@ -17,42 +17,16 @@ macro_rules! validate_eq {
 mod byte;
 pub mod concurrent;
 pub(crate) mod cursor;
-mod edge;
 pub mod iter;
 pub mod key;
-mod node;
+mod raw;
 pub mod sequential;
 mod smr;
 pub mod stat;
 mod value;
 
-pub(crate) use edge::Edge;
 pub use key::Key;
-pub(crate) use node::Node;
 pub use value::Value;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Op {
-    Node(node::Op),
-    Edge(edge::Op),
-}
-
-impl Op {
-    /// Whether this operation allocates a new node.
-    #[inline]
-    pub fn is_allocate(self) -> bool {
-        match self {
-            Self::Node(node) => node.is_allocate(),
-            Self::Edge(edge) => edge.is_allocate(),
-        }
-    }
-
-    /// Whether this operation retires an old node.
-    #[inline]
-    pub fn is_retire(self) -> bool {
-        matches!(self, Self::Node(_))
-    }
-}
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]

@@ -5,8 +5,8 @@ use ribbit::u24;
 use ribbit::u4;
 
 use crate::iter::Or;
-use crate::node;
-use crate::node::linear;
+use crate::raw::node;
+use crate::raw::node::linear;
 
 use super::Node15;
 

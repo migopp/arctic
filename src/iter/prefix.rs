@@ -4,10 +4,10 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
-use crate::edge;
 use crate::iter::Sort;
 use crate::key;
-use crate::Edge;
+use crate::raw::edge;
+use crate::raw::Edge;
 use crate::Value;
 
 pub(crate) enum PrefixIter<'g, 'l, W: key::Write, V: 'g, S: Sort> {

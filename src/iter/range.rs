@@ -5,11 +5,11 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
-use crate::edge;
 use crate::iter::Sort;
 use crate::key::Read as _;
 use crate::key::Write as _;
-use crate::Edge;
+use crate::raw::edge;
+use crate::raw::Edge;
 use crate::Key;
 use crate::Value;
 

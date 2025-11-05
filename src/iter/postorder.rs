@@ -2,11 +2,11 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::edge;
 use crate::iter::Or;
-use crate::node;
-use crate::node::UnsortedIter;
-use crate::Edge;
+use crate::raw::edge;
+use crate::raw::node;
+use crate::raw::node::UnsortedIter;
+use crate::raw::Edge;
 
 pub(crate) struct PostorderIter<'g, V> {
     stack: Vec<RepeatIter<'g, V>>,

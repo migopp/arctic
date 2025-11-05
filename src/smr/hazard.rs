@@ -6,10 +6,10 @@ use core::sync::atomic::Ordering;
 use thread_local::ThreadLocal;
 
 use crate::byte;
-use crate::edge;
+use crate::raw::edge;
+use crate::raw::Edge;
 use crate::smr::membarrier;
 use crate::stat;
-use crate::Edge;
 use crate::Value;
 
 const RETIRED_COUNT: usize = 16;

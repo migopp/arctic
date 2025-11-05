@@ -6,14 +6,14 @@ use path::History as _;
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
-use crate::edge;
 use crate::key;
-use crate::node;
-use crate::node::Node3;
+use crate::raw::edge;
+use crate::raw::node;
+use crate::raw::node::Node3;
+use crate::raw::Edge;
+use crate::raw::Op;
 use crate::smr;
 use crate::stat;
-use crate::Edge;
-use crate::Op;
 use crate::Value;
 
 /// Tree traversal state.

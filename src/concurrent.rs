@@ -5,18 +5,18 @@ use polonius_the_crab::polonius_return;
 use ribbit::atomic::Atomic128;
 
 use crate::cursor;
-use crate::edge;
 use crate::iter;
 use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
 use crate::key::Read as _;
+use crate::raw::edge;
+use crate::raw::Edge;
+use crate::raw::Op;
 use crate::sequential;
 use crate::smr;
 use crate::stat;
-use crate::Edge;
 use crate::Key;
-use crate::Op;
 use crate::Value;
 
 pub struct Map<K, V: Value> {

@@ -5,12 +5,12 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::edge;
 use crate::iter::Or;
-use crate::node;
-use crate::node::Edge;
-use crate::node::Op;
-use crate::Node;
+use crate::raw::edge;
+use crate::raw::node;
+use crate::raw::node::Edge;
+use crate::raw::node::Op;
+use crate::raw::Node;
 
 #[repr(C, align(64))]
 pub(crate) struct Linear<const LEN: usize, H, V> {

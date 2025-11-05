@@ -5,10 +5,10 @@ use ribbit::u120;
 use ribbit::u4;
 
 use crate::iter::Or;
-use crate::node;
-use crate::node::linear;
-use crate::node::Node256;
-use crate::node::Node3;
+use crate::raw::node;
+use crate::raw::node::linear;
+use crate::raw::node::Node256;
+use crate::raw::node::Node3;
 
 pub(crate) type Node15<V> = super::Linear<15, Atomic128<Header>, V>;
 

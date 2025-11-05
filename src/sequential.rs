@@ -6,8 +6,8 @@ use ribbit::atomic::Atomic128;
 use crate::iter::PostorderIter;
 use crate::iter::PrefixIter;
 use crate::iter::Sort;
+use crate::raw::Edge;
 use crate::stat;
-use crate::Edge;
 use crate::Key;
 use crate::Value;
 

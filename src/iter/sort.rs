@@ -3,8 +3,8 @@ use core::cmp;
 use ribbit::atomic::Atomic128;
 
 use crate::key;
-use crate::node;
-use crate::Edge;
+use crate::raw::node;
+use crate::raw::Edge;
 
 #[expect(private_bounds)]
 pub trait Sort: SortPrivate {}

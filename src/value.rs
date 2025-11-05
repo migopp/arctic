@@ -1,4 +1,4 @@
-use crate::edge;
+use crate::raw::edge;
 use crate::smr;
 
 pub unsafe trait Value: Sized {
