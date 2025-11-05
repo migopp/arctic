@@ -8,6 +8,7 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 use ribbit::u56;
 use ribbit::u6;
+use ribbit::OptionExt as _;
 
 use crate::byte;
 use crate::node;
@@ -102,8 +103,7 @@ impl<V> EdgePacked<V> {
             return None;
         }
 
-        // FIXME: no transmute?
-        unsafe { core::mem::transmute::<u64, ribbit::Packed<Option<Node<V>>>>(self.data()) }
+        unsafe { ribbit::Packed::<Option<Node<V>>>::new_unchecked(self.data()) }
     }
 
     #[inline]
@@ -121,8 +121,7 @@ impl<V> EdgePacked<V> {
                 ribbit::Packed::<Value<V>>::new_unchecked(data)
             }))
         } else {
-            // FIXME: no transmute?
-            unsafe { core::mem::transmute::<u64, ribbit::Packed<Option<Node<V>>>>(data) }
+            unsafe { ribbit::Packed::<Option<Node<V>>>::new_unchecked(self.data()) }
                 .map(Child::Node)
         }
     }
