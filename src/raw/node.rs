@@ -17,7 +17,13 @@ use crate::iter::Or;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) trait Node<V> {
+pub(crate) trait Node<V>: Default {
+    const KIND: Kind;
+    const GROW: usize;
+
+    type Grow: Node<V>;
+    type Shrink: Node<V>;
+
     fn edges(&self) -> &[Atomic128<Edge<V>>];
 
     fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>>;
@@ -27,15 +33,6 @@ pub(crate) trait Node<V> {
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>>;
 
     fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>);
-}
-
-pub(crate) trait Info<V>: Node<V> + Default + core::fmt::Debug {
-    const KIND: Kind;
-    const GROW: usize;
-    const REF: for<'g> fn(&'g Self) -> Ref<'g, V>;
-
-    type Grow: Info<V>;
-    type Shrink: Info<V>;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

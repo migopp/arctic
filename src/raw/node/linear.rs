@@ -29,9 +29,14 @@ impl<const LEN: usize, H: Default, V> Default for Linear<LEN, H, V> {
 
 impl<const LEN: usize, H, V> Node<V> for Linear<LEN, H, V>
 where
-    H: Header,
-    Self: node::Info<V>,
+    H: Header<V>,
 {
+    const KIND: node::Kind = H::KIND;
+    const GROW: usize = H::GROW;
+
+    type Grow = H::Grow;
+    type Shrink = H::Shrink;
+
     #[inline]
     fn edges(&self) -> &[Atomic128<Edge<V>>] {
         &self.edges
@@ -85,13 +90,10 @@ where
         });
 
         match &edges[..len] {
-            _ if len == <Self as node::Info<V>>::GROW => {
+            _ if len == Self::GROW => {
                 return (
                     node::Op::Grow,
-                    Edge::new_node::<<Self as node::Info<V>>::Grow, _>(
-                        parent.key(),
-                        edges.into_iter().take(len),
-                    ),
+                    Edge::new_node::<Self::Grow, _>(parent.key(), edges.into_iter().take(len)),
                 )
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
@@ -113,8 +115,7 @@ where
     }
 }
 
-#[expect(private_bounds)]
-impl<const LEN: usize, H: Header, V> Linear<LEN, H, V> {
+impl<const LEN: usize, H: Header<V>, V> Linear<LEN, H, V> {
     #[inline]
     pub(crate) fn keys_sorted(&self) -> SortedKeyIter {
         self.header.keys_sorted()
@@ -150,7 +151,13 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
     }
 }
 
-pub(super) trait Header {
+pub(crate) trait Header<V>: Default {
+    const KIND: node::Kind = node::Kind::Node3;
+    const GROW: usize = 3;
+
+    type Grow: Node<V>;
+    type Shrink: Node<V>;
+
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;

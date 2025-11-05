@@ -23,7 +23,13 @@ pub(crate) struct Header {
     frozen: bool,
 }
 
-impl linear::Header for Atomic128<Header> {
+impl<V> linear::Header<V> for Atomic128<Header> {
+    const KIND: node::Kind = node::Kind::Node15;
+    const GROW: usize = 15;
+
+    type Grow = Node256<V>;
+    type Shrink = Node3<V>;
+
     fn freeze(&self) -> usize {
         let mut old = self.load_packed(Ordering::Relaxed);
 
@@ -139,15 +145,6 @@ impl linear::Header for Atomic128<Header> {
                 .take(header.len().value() as usize),
         )
     }
-}
-
-impl<V> node::Info<V> for Node15<V> {
-    const KIND: node::Kind = node::Kind::Node15;
-    const GROW: usize = 15;
-    const REF: for<'g> fn(&'g Self) -> node::Ref<'g, V> = |node| node::Ref::Node15(node);
-
-    type Grow = Node256<V>;
-    type Shrink = Node3<V>;
 }
 
 #[inline]

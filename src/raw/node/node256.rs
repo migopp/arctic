@@ -22,6 +22,12 @@ impl<V> Default for Node256<V> {
 }
 
 impl<V> Node<V> for Node256<V> {
+    const KIND: node::Kind = node::Kind::Node256;
+    const GROW: usize = 256;
+
+    type Grow = Node256<V>;
+    type Shrink = Node15<V>;
+
     #[inline]
     fn edges(&self) -> &[Atomic128<Edge<V>>] {
         &self.0
@@ -67,14 +73,6 @@ impl<V> Debug for Node256<V> {
             .field("edges", &edge::DebugSlice(&self.0))
             .finish()
     }
-}
-
-impl<V> node::Info<V> for Node256<V> {
-    const KIND: node::Kind = node::Kind::Node256;
-    const GROW: usize = 256;
-    const REF: for<'g> fn(&'g Self) -> node::Ref<'g, V> = |node| node::Ref::Node256(node);
-    type Grow = Node256<V>;
-    type Shrink = Node15<V>;
 }
 
 #[repr(C)]

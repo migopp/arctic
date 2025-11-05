@@ -69,7 +69,7 @@ impl<V> Edge<V> {
     #[cold]
     pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
     where
-        N: node::Info<V>,
+        N: node::Node<V>,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge<V>>)>,
     {
         let mut node = Box::new(N::default());
@@ -301,7 +301,7 @@ impl<V> Node<V> {
     const MASK_PTR: u64 = !Self::MASK_TAG;
 
     #[inline]
-    fn new<N: node::Info<V>>(node: Box<N>) -> ribbit::Packed<Self> {
+    fn new<N: node::Node<V>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = NonNull::from(Box::leak(node));
         let kind = N::KIND as u64;
 
@@ -330,22 +330,22 @@ impl<V> NodePacked<V> {
     #[inline]
     pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, V> {
         #[inline]
-        unsafe fn convert<'g, V, N: node::Info<V> + 'g>(ptr: u64) -> node::Ref<'g, V> {
+        unsafe fn as_ref<'g, V, N: node::Node<V> + 'g>(ptr: u64) -> &'g N {
             let node = unsafe { (ptr as *const N).as_ref() };
             validate!(node.is_some());
-            N::REF(unsafe { node.unwrap_unchecked() })
+            unsafe { node.unwrap_unchecked() }
         }
 
         let ptr = self.value.get() & Node::<V>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            unsafe { convert::<_, Node3<V>>(ptr) }
+            node::Ref::Node3(unsafe { as_ref::<_, Node3<V>>(ptr) })
         } else if kind == node::Kind::NODE_15 {
-            unsafe { convert::<_, Node15<V>>(ptr) }
+            node::Ref::Node15(unsafe { as_ref::<_, Node15<V>>(ptr) })
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { convert::<_, Node256<V>>(ptr) }
+            node::Ref::Node256(unsafe { as_ref::<_, Node256<V>>(ptr) })
         }
     }
 
