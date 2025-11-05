@@ -20,9 +20,9 @@ use crate::value;
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
-pub struct Edge<V> {
+pub struct Edge<C> {
     #[ribbit(size = 0)]
-    _value: PhantomData<V>,
+    _compressed: PhantomData<C>,
 
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
@@ -30,23 +30,23 @@ pub struct Edge<V> {
     data: u64,
 }
 
-impl<V> Copy for Edge<V> {}
-impl<V> Clone for Edge<V> {
+impl<C> Copy for Edge<C> {}
+impl<C> Clone for Edge<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<V> Default for Edge<V> {
+impl<C> Default for Edge<C> {
     fn default() -> Self {
         Self {
-            _value: PhantomData,
+            _compressed: PhantomData,
             meta: Meta::default(),
             data: 0,
         }
     }
 }
 
-impl<V> Edge<V> {
+impl<C> Edge<C> {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
 
     #[inline]
@@ -69,8 +69,8 @@ impl<V> Edge<V> {
     #[cold]
     pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
     where
-        N: node::Node<V>,
-        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<V>>)>,
+        N: node::Node<C>,
+        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<C>>)>,
     {
         let mut node = Box::new(N::default());
 
@@ -85,54 +85,54 @@ impl<V> Edge<V> {
 
     pub(crate) fn new_value(
         key: byte::Array,
-        value: ribbit::Packed<Value<V>>,
+        value: ribbit::Packed<Value<C>>,
     ) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(Meta::VALUE.with_key(key), value.value)
     }
 }
 
-impl<V> EdgePacked<V> {
+impl<C> EdgePacked<C> {
     #[inline]
     pub(crate) fn is_null(self) -> bool {
         !self.meta().is_value() && self.data() == 0
     }
 
     #[inline]
-    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<V>>> {
+    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<C>>> {
         if self.meta().is_value() {
             return None;
         }
 
-        unsafe { ribbit::Packed::<Option<Node<V>>>::new_unchecked(self.data()) }
+        unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(self.data()) }
     }
 
     #[inline]
-    pub(crate) fn as_value(self) -> Option<ribbit::Packed<Value<V>>> {
+    pub(crate) fn as_value(self) -> Option<ribbit::Packed<Value<C>>> {
         self.meta()
             .is_value()
-            .then(|| unsafe { ribbit::Packed::<Value<V>>::new_unchecked(self.data()) })
+            .then(|| unsafe { ribbit::Packed::<Value<C>>::new_unchecked(self.data()) })
     }
 
     #[inline]
-    pub(crate) fn child(self) -> Option<Child<V>> {
+    pub(crate) fn child(self) -> Option<Child<C>> {
         let data = self.data();
         if self.meta().is_value() {
             Some(Child::Value(unsafe {
-                ribbit::Packed::<Value<V>>::new_unchecked(data)
+                ribbit::Packed::<Value<C>>::new_unchecked(data)
             }))
         } else {
-            unsafe { ribbit::Packed::<Option<Node<V>>>::new_unchecked(self.data()) }
+            unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(self.data()) }
                 .map(Child::Node)
         }
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<Node<V>>) -> Self {
+    pub(crate) fn with_node(self, node: ribbit::Packed<Node<C>>) -> Self {
         self.with_data(node.value.get())
     }
 
     #[inline]
-    pub(crate) fn with_value(self, value: ribbit::Packed<Value<V>>) -> Self {
+    pub(crate) fn with_value(self, value: ribbit::Packed<Value<C>>) -> Self {
         self.with_data(value.value)
     }
 
@@ -142,7 +142,7 @@ impl<V> EdgePacked<V> {
     }
 }
 
-impl<V: value::Value> EdgePacked<V> {
+impl<C: value::Value> EdgePacked<C> {
     /// # SAFETY
     ///
     /// Caller must ensure there are no references to the child of this edge.
@@ -172,7 +172,7 @@ impl<V: value::Value> EdgePacked<V> {
     }
 }
 
-impl<V> Debug for EdgePacked<V> {
+impl<C> Debug for EdgePacked<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug = f.debug_struct("Edge");
 
@@ -260,12 +260,12 @@ impl Op {
     }
 }
 
-pub(crate) enum Child<V> {
-    Node(ribbit::Packed<Node<V>>),
-    Value(ribbit::Packed<Value<V>>),
+pub(crate) enum Child<C> {
+    Node(ribbit::Packed<Node<C>>),
+    Value(ribbit::Packed<Value<C>>),
 }
 
-impl<V> Debug for Child<V> {
+impl<C> Debug for Child<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Node(node) => f.debug_tuple("Node").field(node).finish(),
@@ -276,9 +276,9 @@ impl<V> Debug for Child<V> {
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
-pub struct Node<V> {
+pub struct Node<C> {
     #[ribbit(size = 0)]
-    _value: PhantomData<V>,
+    _compressed: PhantomData<C>,
 
     #[ribbit(size = 2)]
     kind: node::Kind,
@@ -289,19 +289,19 @@ pub struct Node<V> {
     _placeholder: NonZeroU32,
 }
 
-impl<V> Copy for Node<V> {}
-impl<V> Clone for Node<V> {
+impl<C> Copy for Node<C> {}
+impl<C> Clone for Node<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<V> Node<V> {
+impl<C> Node<C> {
     const MASK_TAG: u64 = 0b111;
     const MASK_PTR: u64 = !Self::MASK_TAG;
 
     #[inline]
-    fn new<N: node::Node<V>>(node: Box<N>) -> ribbit::Packed<Self> {
+    fn new<N: node::Node<C>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = NonNull::from(Box::leak(node));
         let kind = N::KIND as u64;
 
@@ -315,37 +315,37 @@ impl<V> Node<V> {
     }
 }
 
-impl<V> NodePacked<V> {
+impl<C> NodePacked<C> {
     #[inline]
-    pub(crate) fn is_ref(self, node: node::Ref<'_, V>) -> bool {
+    pub(crate) fn is_ref(self, node: node::Ref<'_, C>) -> bool {
         let ptr = match node {
             node::Ref::Node3(node) => node as *const _ as u64,
             node::Ref::Node15(node) => node as *const _ as u64,
             node::Ref::Node256(node) => node as *const _ as u64,
         };
 
-        self.value.get() & Node::<V>::MASK_PTR == ptr
+        self.value.get() & Node::<C>::MASK_PTR == ptr
     }
 
     #[inline]
-    pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, V> {
+    pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, C> {
         #[inline]
-        unsafe fn as_ref<'g, V, N: node::Node<V> + 'g>(ptr: u64) -> &'g N {
+        unsafe fn as_ref<'g, C, N: node::Node<C> + 'g>(ptr: u64) -> &'g N {
             let node = unsafe { (ptr as *const N).as_ref() };
             validate!(node.is_some());
             unsafe { node.unwrap_unchecked() }
         }
 
-        let ptr = self.value.get() & Node::<V>::MASK_PTR;
+        let ptr = self.value.get() & Node::<C>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            node::Ref::Node3(unsafe { as_ref::<_, Node3<V>>(ptr) })
+            node::Ref::Node3(unsafe { as_ref::<_, Node3<C>>(ptr) })
         } else if kind == node::Kind::NODE_15 {
-            node::Ref::Node15(unsafe { as_ref::<_, Node15<V>>(ptr) })
+            node::Ref::Node15(unsafe { as_ref::<_, Node15<C>>(ptr) })
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            node::Ref::Node256(unsafe { as_ref::<_, Node256<V>>(ptr) })
+            node::Ref::Node256(unsafe { as_ref::<_, Node256<C>>(ptr) })
         }
     }
 
@@ -356,26 +356,26 @@ impl<V> NodePacked<V> {
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        let ptr = self.value.get() & Node::<V>::MASK_PTR;
+        let ptr = self.value.get() & Node::<C>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            drop(Box::from_raw(ptr as *mut Node3<V>))
+            drop(Box::from_raw(ptr as *mut Node3<C>))
         } else if kind == node::Kind::NODE_15 {
-            drop(Box::from_raw(ptr as *mut Node15<V>))
+            drop(Box::from_raw(ptr as *mut Node15<C>))
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256<V>))
+            drop(Box::from_raw(ptr as *mut Node256<C>))
         }
     }
 }
 
-impl<V> Debug for NodePacked<V> {
+impl<C> Debug for NodePacked<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
             .field("kind", &self.kind())
             .field("scan", &self.scan())
-            .field("ptr", &(self.value.get() & Node::<V>::MASK_PTR))
+            .field("ptr", &(self.value.get() & Node::<C>::MASK_PTR))
             .finish()
     }
 }
@@ -390,45 +390,45 @@ pub struct Value<V> {
     raw: u64,
 }
 
-impl<V> Copy for Value<V> {}
-impl<V> Clone for Value<V> {
+impl<C> Copy for Value<C> {}
+impl<C> Clone for Value<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<V> Debug for ValuePacked<V> {
+impl<C> Debug for ValuePacked<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.value.fmt(f)
     }
 }
 
-impl<V: value::Value> Value<V> {
+impl<C: value::Value> Value<C> {
     #[inline]
-    pub(crate) fn from_value(value: V) -> ribbit::Packed<Self> {
+    pub(crate) fn from_value(value: C) -> ribbit::Packed<Self> {
         unsafe { ribbit::Packed::<Self>::new_unchecked(value.into_u64()) }
     }
 
     #[inline]
-    pub(crate) fn from_borrow<'l>(borrow: V::Borrow<'l>) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(V::borrow_into_u64(borrow)) }
+    pub(crate) fn from_borrow<'l>(borrow: C::Borrow<'l>) -> ribbit::Packed<Self> {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(C::borrow_into_u64(borrow)) }
     }
 }
 
-impl<V: value::Value> ValuePacked<V> {
+impl<C: value::Value> ValuePacked<C> {
     /// # SAFETY
     ///
     /// Caller must ensure there are no other references to this value.
     #[inline]
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
-        unsafe { V::from_data(self) };
+        unsafe { C::from_data(self) };
     }
 }
 
-pub(crate) struct DebugSlice<'g, V>(pub(crate) &'g [Atomic128<Edge<V>>]);
+pub(crate) struct DebugSlice<'g, C>(pub(crate) &'g [Atomic128<Edge<C>>]);
 
-impl<V> Debug for DebugSlice<'_, V> {
+impl<C> Debug for DebugSlice<'_, C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list()
             .entries(

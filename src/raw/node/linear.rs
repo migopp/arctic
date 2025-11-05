@@ -27,9 +27,9 @@ impl<const LEN: usize, H: Default, V> Default for Linear<LEN, H, V> {
     }
 }
 
-impl<const LEN: usize, H, V> Node<V> for Linear<LEN, H, V>
+impl<const LEN: usize, H, C> Node<C> for Linear<LEN, H, C>
 where
-    H: Header<V>,
+    H: Header<C>,
 {
     const KIND: node::Kind = H::KIND;
     const GROW: usize = H::GROW;
@@ -38,33 +38,33 @@ where
     type Shrink = H::Shrink;
 
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge<V>>] {
+    fn edges(&self) -> &[Atomic128<Edge<C>>] {
         &self.edges
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<C>>> {
         let index = self.header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<V>>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<C>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<C>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>) {
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<C>>) {
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
 
-        let mut edges: [(u8, ribbit::Packed<Edge<V>>); LEN] =
+        let mut edges: [(u8, ribbit::Packed<Edge<C>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
         let mut len = 0;
 
@@ -151,12 +151,12 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
     }
 }
 
-pub(crate) trait Header<V>: Default {
+pub(crate) trait Header<C>: Default {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
 
-    type Grow: Node<V>;
-    type Shrink: Node<V>;
+    type Grow: Node<C>;
+    type Shrink: Node<C>;
 
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;

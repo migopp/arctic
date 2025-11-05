@@ -17,22 +17,22 @@ use crate::iter::Or;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) trait Node<V>: Default {
+pub(crate) trait Node<C>: Default {
     const KIND: Kind;
     const GROW: usize;
 
-    type Grow: Node<V>;
-    type Shrink: Node<V>;
+    type Grow: Node<C>;
+    type Shrink: Node<C>;
 
-    fn edges(&self) -> &[Atomic128<Edge<V>>];
+    fn edges(&self) -> &[Atomic128<Edge<C>>];
 
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<V>>>;
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<C>>>;
 
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<V>>>;
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<C>>>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<V>>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<C>>>;
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<V>>);
+    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<C>>);
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -65,22 +65,22 @@ impl Op {
     }
 }
 
-pub(crate) enum Ref<'g, V> {
-    Node3(&'g Node3<V>),
-    Node15(&'g Node15<V>),
-    Node256(&'g Node256<V>),
+pub(crate) enum Ref<'g, C> {
+    Node3(&'g Node3<C>),
+    Node15(&'g Node15<C>),
+    Node256(&'g Node256<C>),
 }
 
-impl<'g, V> Copy for Ref<'g, V> {}
-impl<'g, V> Clone for Ref<'g, V> {
+impl<'g, C> Copy for Ref<'g, C> {}
+impl<'g, C> Clone for Ref<'g, C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'g, V> Ref<'g, V> {
+impl<'g, C> Ref<'g, C> {
     #[inline]
-    pub(crate) fn iter_sorted(&self) -> SortedIter<'g, V> {
+    pub(crate) fn iter_sorted(&self) -> SortedIter<'g, C> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
             Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
@@ -94,7 +94,7 @@ impl<'g, V> Ref<'g, V> {
     }
 
     #[inline]
-    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'g, V> {
+    pub(crate) fn iter_unsorted(&self) -> UnsortedIter<'g, C> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
@@ -105,7 +105,7 @@ impl<'g, V> Ref<'g, V> {
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'g, V> {
+    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'g, C> {
         if min.is_none() && max.is_none() {
             return self.iter_sorted();
         }
@@ -129,9 +129,9 @@ impl<'g, V> Ref<'g, V> {
     }
 }
 
-impl<'g, V> Ref<'g, V> {
+impl<'g, C> Ref<'g, C> {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<V>>> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<C>>> {
         match self {
             Ref::Node3(node) => node.get(key),
             Ref::Node15(node) => node.get(key),
@@ -140,7 +140,7 @@ impl<'g, V> Ref<'g, V> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<V>>> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<C>>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
@@ -152,7 +152,7 @@ impl<'g, V> Ref<'g, V> {
     pub(crate) fn replace(
         &self,
         parent: ribbit::Packed<edge::Meta>,
-    ) -> (Op, ribbit::Packed<Edge<V>>) {
+    ) -> (Op, ribbit::Packed<Edge<C>>) {
         match self {
             Ref::Node3(node) => node.replace(parent),
             Ref::Node15(node) => node.replace(parent),

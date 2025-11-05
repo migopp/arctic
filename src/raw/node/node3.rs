@@ -10,7 +10,7 @@ use crate::raw::node::linear;
 
 use super::Node15;
 
-pub(crate) type Node3<V> = super::Linear<3, Atomic64<Header>, V>;
+pub(crate) type Node3<C> = super::Linear<3, Atomic64<Header>, C>;
 
 const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
@@ -23,12 +23,12 @@ pub(crate) struct Header {
     frozen: bool,
 }
 
-impl<V> linear::Header<V> for Atomic64<Header> {
+impl<C> linear::Header<C> for Atomic64<Header> {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
 
-    type Grow = Node15<V>;
-    type Shrink = Node3<V>;
+    type Grow = Node15<C>;
+    type Shrink = Node3<C>;
 
     fn freeze(&self) -> usize {
         let mut old = self.load_packed(Ordering::Relaxed);
