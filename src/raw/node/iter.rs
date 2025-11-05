@@ -6,20 +6,20 @@ use ribbit::atomic::Atomic128;
 use crate::raw::Edge;
 
 #[repr(transparent)]
-pub(crate) struct SortedIter<'g, K, V>(Iter<'g, K, V>);
+pub(crate) struct SortedIter<'g, I, V>(Iter<'g, I, V>);
 
-impl<'g, K, V> SortedIter<'g, K, V> {
+impl<'g, I, V> SortedIter<'g, I, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
-    pub(super) unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
+    pub(super) unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
     }
 }
 
-impl<'g, K, V> Iterator for SortedIter<'g, K, V>
+impl<'g, I, V> Iterator for SortedIter<'g, I, V>
 where
-    K: Iterator<Item = (u8, u8)>,
+    I: Iterator<Item = (u8, u8)>,
 {
     type Item = (u8, &'g Atomic128<Edge<V>>);
 
@@ -45,9 +45,9 @@ where
     }
 }
 
-impl<'g, K, V> DoubleEndedIterator for SortedIter<'g, K, V>
+impl<'g, I, V> DoubleEndedIterator for SortedIter<'g, I, V>
 where
-    K: DoubleEndedIterator<Item = (u8, u8)>,
+    I: DoubleEndedIterator<Item = (u8, u8)>,
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -66,9 +66,9 @@ where
     }
 }
 
-impl<'g, K, V> ExactSizeIterator for SortedIter<'g, K, V>
+impl<'g, I, V> ExactSizeIterator for SortedIter<'g, I, V>
 where
-    K: ExactSizeIterator<Item = (u8, u8)>,
+    I: ExactSizeIterator<Item = (u8, u8)>,
 {
     #[inline]
     fn len(&self) -> usize {
@@ -79,20 +79,20 @@ where
 }
 
 #[repr(transparent)]
-pub(crate) struct UnsortedIter<'g, K, V>(Iter<'g, K, V>);
+pub(crate) struct UnsortedIter<'g, I, V>(Iter<'g, I, V>);
 
-impl<'g, K, V> UnsortedIter<'g, K, V> {
+impl<'g, I, V> UnsortedIter<'g, I, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee `keys` produces at most `edges.len()` keys.
-    pub(crate) unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
+    pub(crate) unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
     }
 }
 
-impl<'g, K, V> Iterator for UnsortedIter<'g, K, V>
+impl<'g, I, V> Iterator for UnsortedIter<'g, I, V>
 where
-    K: Iterator<Item = u8>,
+    I: Iterator<Item = u8>,
 {
     type Item = (u8, &'g Atomic128<Edge<V>>);
 
@@ -120,9 +120,9 @@ where
     }
 }
 
-impl<'g, K, V> ExactSizeIterator for UnsortedIter<'g, K, V>
+impl<'g, I, V> ExactSizeIterator for UnsortedIter<'g, I, V>
 where
-    K: ExactSizeIterator<Item = u8>,
+    I: ExactSizeIterator<Item = u8>,
 {
     #[inline]
     fn len(&self) -> usize {
@@ -132,8 +132,8 @@ where
     }
 }
 
-struct Iter<'g, K, V> {
-    keys: K,
+struct Iter<'g, I, V> {
+    keys: I,
     edges: NonNull<Atomic128<Edge<V>>>,
 
     #[cfg(feature = "validate")]
@@ -142,9 +142,9 @@ struct Iter<'g, K, V> {
     _slice: PhantomData<&'g [Atomic128<Edge<V>>]>,
 }
 
-impl<'g, K, V> Iter<'g, K, V> {
+impl<'g, I, V> Iter<'g, I, V> {
     #[inline]
-    unsafe fn new(keys: K, edges: &[Atomic128<Edge<V>>]) -> Self {
+    unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
         Self {
             keys,
             edges: NonNull::from(edges).cast(),
