@@ -1,3 +1,5 @@
+mod value;
+
 use core::cell::Cell;
 use core::marker::PhantomData;
 

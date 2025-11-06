@@ -3,9 +3,16 @@
 //! **indirect**, and must be encapsulated in a smart pointer type like
 //! [`Box`] or [`std::sync::Arc`].
 
-mod inline;
+pub trait Inline: Copy {
+    fn into_raw(self) -> u64;
 
-pub trait Value {
+    /// # Safety
+    ///
+    /// Caller must guarantee that `raw` was created by a previous [`Inline::into_raw`] call.
+    unsafe fn from_raw(raw: u64) -> Self;
+}
+
+pub unsafe trait Value {
     type Borrow<'l>
     where
         Self: 'l;
@@ -41,7 +48,7 @@ pub trait Value {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-impl<T> Value for Box<T> {
+unsafe impl<T> Value for Box<T> {
     type Borrow<'l>
         = &'l T
     where

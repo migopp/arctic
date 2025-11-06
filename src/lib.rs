@@ -21,7 +21,6 @@ pub mod key;
 mod raw;
 pub mod sequential;
 pub mod stat;
-mod value;
 
 pub use key::Key;
 
