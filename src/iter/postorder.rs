@@ -8,13 +8,13 @@ use crate::raw::node;
 use crate::raw::node::UnsortedIter;
 use crate::raw::Edge;
 
-pub(crate) struct PostorderIter<'g, V> {
-    stack: Vec<RepeatIter<'g, V>>,
+pub(crate) struct PostorderIter<'g, C> {
+    stack: Vec<RepeatIter<'g, C>>,
 }
 
-impl<'g, V> PostorderIter<'g, V> {
+impl<'g, C> PostorderIter<'g, C> {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge<V>>) -> Self {
+    pub(crate) unsafe fn new(root: &Atomic128<Edge<C>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
         // since this iterator doesn't keep track of the key state,
         // so we can use an arbitrary byte.
@@ -27,7 +27,7 @@ impl<'g, V> PostorderIter<'g, V> {
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(ribbit::Packed<Edge<V>>, usize)>(mut self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(ribbit::Packed<Edge<C>>, usize)>(mut self, mut apply: F) {
         'vertical: loop {
             let depth = self.stack.len().saturating_sub(1);
 
@@ -62,15 +62,15 @@ impl<'g, V> PostorderIter<'g, V> {
     }
 }
 
-struct RepeatIter<'g, V> {
+struct RepeatIter<'g, C> {
     first: bool,
-    edge: ribbit::Packed<Edge<V>>,
-    iter: node::UnsortedIter<'g, V>,
+    edge: ribbit::Packed<Edge<C>>,
+    iter: node::UnsortedIter<'g, C>,
 }
 
-impl<'g, V> RepeatIter<'g, V> {
+impl<'g, C> RepeatIter<'g, C> {
     #[inline]
-    fn new(iter: node::UnsortedIter<'g, V>) -> Self {
+    fn new(iter: node::UnsortedIter<'g, C>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,
@@ -79,9 +79,9 @@ impl<'g, V> RepeatIter<'g, V> {
     }
 }
 
-impl<V> RepeatIter<'_, V> {
+impl<C> RepeatIter<'_, C> {
     #[inline]
-    fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge<V>>)> {
+    fn next(&mut self) -> Option<(bool, ribbit::Packed<Edge<C>>)> {
         let first = self.first;
         self.first ^= true;
 

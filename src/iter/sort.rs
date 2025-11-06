@@ -15,13 +15,13 @@ pub struct Sorted;
 pub struct Unsorted;
 
 pub(crate) trait SortPrivate {
-    type PrefixIter<'g, V>: Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    type PrefixIter<'g, C>: Iterator<Item = (u8, &'g Atomic128<Edge<C>>)>
     where
-        V: 'g;
+        C: 'g;
 
-    type RangeIter<'g, V>: Iterator<Item = (u8, &'g Atomic128<Edge<V>>)>
+    type RangeIter<'g, C>: Iterator<Item = (u8, &'g Atomic128<Edge<C>>)>
     where
-        V: 'g;
+        C: 'g;
 
     unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V>;
 

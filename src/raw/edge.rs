@@ -17,6 +17,7 @@ use crate::raw::node::Node256;
 use crate::raw::node::Node3;
 use crate::stat;
 use crate::value;
+use crate::Value;
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
@@ -83,15 +84,18 @@ impl<C> Edge<C> {
         ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Node::new(node).value.get())
     }
 
-    pub(crate) fn new_value(
-        key: byte::Array,
-        value: ribbit::Packed<Value<C>>,
-    ) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(Meta::VALUE.with_key(key), value.value)
+    pub(crate) fn new_value(key: byte::Array, value: u64) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(Meta::VALUE.with_key(key), value)
     }
 }
 
 impl<C> EdgePacked<C> {
+    // FIXME: remove
+    #[inline]
+    pub(crate) fn erase(self) -> ribbit::Packed<Edge<()>> {
+        ribbit::Packed::<Edge<()>>::new(self.meta(), self.data())
+    }
+
     #[inline]
     pub(crate) fn is_null(self) -> bool {
         !self.meta().is_value() && self.data() == 0
@@ -107,22 +111,17 @@ impl<C> EdgePacked<C> {
     }
 
     #[inline]
-    pub(crate) fn as_value(self) -> Option<ribbit::Packed<Value<C>>> {
-        self.meta()
-            .is_value()
-            .then(|| unsafe { ribbit::Packed::<Value<C>>::new_unchecked(self.data()) })
+    pub(crate) fn as_value(self) -> Option<u64> {
+        self.meta().is_value().then(|| self.data())
     }
 
     #[inline]
     pub(crate) fn child(self) -> Option<Child<C>> {
         let data = self.data();
         if self.meta().is_value() {
-            Some(Child::Value(unsafe {
-                ribbit::Packed::<Value<C>>::new_unchecked(data)
-            }))
+            Some(Child::Value(data))
         } else {
-            unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(self.data()) }
-                .map(Child::Node)
+            unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(data) }.map(Child::Node)
         }
     }
 
@@ -132,42 +131,31 @@ impl<C> EdgePacked<C> {
     }
 
     #[inline]
-    pub(crate) fn with_value(self, value: ribbit::Packed<Value<C>>) -> Self {
-        self.with_data(value.value)
+    pub(crate) fn with_value<V: Value>(self, value: value::Raw<V>) -> Self {
+        self.with_data(u64::from(value))
     }
 
     #[inline]
     pub(crate) fn unfreeze(self) -> Self {
         self.with_meta(self.meta().with_frozen(false))
     }
-}
 
-impl<C: value::Value> EdgePacked<C> {
-    /// # SAFETY
-    ///
-    /// Caller must ensure there are no references to the child of this edge.
     #[inline]
-    pub(crate) unsafe fn deallocate(self, counter: stat::Counter) {
-        match self.child() {
-            None => (),
-            Some(Child::Value(value)) => value.deallocate_unchecked(counter),
-            Some(Child::Node(node)) => node.deallocate_unchecked(counter),
+    pub(crate) unsafe fn deallocate<V: Value>(self, counter: stat::Counter) {
+        if self.is_null() {
+            return;
         }
+
+        unsafe { self.deallocate_unchecked::<V>(counter) }
     }
 
-    /// # SAFETY
-    ///
-    /// Caller must ensure there are no references to the child of this edge,
-    /// and that the child is non-null.
     #[inline]
-    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
-        match if cfg!(feature = "validate") {
-            self.child().unwrap()
-        } else {
-            unsafe { self.child().unwrap_unchecked() }
-        } {
-            Child::Value(value) => value.deallocate_unchecked(counter),
-            Child::Node(node) => node.deallocate_unchecked(counter),
+    pub(crate) unsafe fn deallocate_unchecked<V: Value>(self, counter: stat::Counter) {
+        match self.child() {
+            None if cfg!(feature = "validate") => unreachable!(),
+            None => unsafe { core::hint::unreachable_unchecked() },
+            Some(Child::Node(node)) => node.deallocate_unchecked(counter),
+            Some(Child::Value(value)) => drop(V::from_raw(value)),
         }
     }
 }
@@ -262,7 +250,7 @@ impl Op {
 
 pub(crate) enum Child<C> {
     Node(ribbit::Packed<Node<C>>),
-    Value(ribbit::Packed<Value<C>>),
+    Value(u64),
 }
 
 impl<C> Debug for Child<C> {
@@ -377,52 +365,6 @@ impl<C> Debug for NodePacked<C> {
             .field("scan", &self.scan())
             .field("ptr", &(self.value.get() & Node::<C>::MASK_PTR))
             .finish()
-    }
-}
-
-#[derive(ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = ValuePacked), eq)]
-pub struct Value<V> {
-    #[ribbit(size = 0)]
-    _value: PhantomData<V>,
-
-    #[ribbit(get(vis = "pub(crate)"))]
-    raw: u64,
-}
-
-impl<C> Copy for Value<C> {}
-impl<C> Clone for Value<C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<C> Debug for ValuePacked<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<C: value::Value> Value<C> {
-    #[inline]
-    pub(crate) fn from_value(value: C) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(value.into_u64()) }
-    }
-
-    #[inline]
-    pub(crate) fn from_borrow<'l>(borrow: C::Borrow<'l>) -> ribbit::Packed<Self> {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(C::borrow_into_u64(borrow)) }
-    }
-}
-
-impl<C: value::Value> ValuePacked<C> {
-    /// # SAFETY
-    ///
-    /// Caller must ensure there are no other references to this value.
-    #[inline]
-    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
-        stat::increment(counter);
-        unsafe { C::from_data(self) };
     }
 }
 

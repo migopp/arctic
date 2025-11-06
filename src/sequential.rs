@@ -13,9 +13,9 @@ use crate::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V: Value> {
-    root: Atomic128<Edge<V>>,
+    root: Atomic128<Edge<()>>,
     _not_sync: PhantomData<Cell<()>>,
-    _key: PhantomData<K>,
+    _type: PhantomData<(K, V)>,
 }
 
 impl<K, V: Value> Default for Map<K, V> {
@@ -23,17 +23,17 @@ impl<K, V: Value> Default for Map<K, V> {
         Self {
             root: Atomic128::default(),
             _not_sync: PhantomData,
-            _key: PhantomData,
+            _type: PhantomData,
         }
     }
 }
 
 impl<K, V: Value> Map<K, V> {
-    pub(crate) fn root(&self) -> &Atomic128<Edge<V>> {
+    pub(crate) fn root(&self) -> &Atomic128<Edge<()>> {
         &self.root
     }
 
-    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, V> {
+    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, ()> {
         unsafe { PostorderIter::new(&self.root) }
     }
 }
@@ -64,11 +64,17 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     pub fn iter<S: Sort>(&self) -> Iter<'_, K, V, S> {
-        Iter(unsafe { PrefixIter::new_unchecked(&self.root, K::Write::default()) })
+        Iter {
+            _value: PhantomData,
+            iter: unsafe { PrefixIter::new_unchecked(&self.root, K::Write::default()) },
+        }
     }
 }
 
-pub struct Iter<'g, K: Key, V, S: Sort>(PrefixIter<'g, 'static, K::Write, V, S>);
+pub struct Iter<'g, K: Key, V, S: Sort> {
+    _value: PhantomData<V>,
+    iter: PrefixIter<'g, 'static, K::Write, (), S>,
+}
 
 impl<'g, K, V, S> Iter<'g, K, V, S>
 where
@@ -77,29 +83,29 @@ where
     S: Sort,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V)> {
-        self.0.lend().map(|(key, value)| {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
+        self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 // FIXME: borrow without guard
-                V::from_data(value)
+                V::borrow_from_raw(value)
             })
         })
     }
 }
 
-impl<K, V, S> Iterator for Iter<'_, K, V, S>
+impl<'g, K, V, S> Iterator for Iter<'g, K, V, S>
 where
     K: Key,
-    V: Value,
+    V: Value + 'g,
     S: crate::iter::Sort,
 {
-    type Item = (K, V);
+    type Item = (K, V::Borrow<'g>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.lend().map(|(key, value)| {
+        self.iter.lend().map(|(key, value)| {
             (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::from_data(value)
+                V::borrow_from_raw(value)
             })
         })
     }
@@ -108,7 +114,7 @@ where
 impl<K, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
         self.postorder().for_each(|edge, _| unsafe {
-            edge.deallocate(stat::Counter::FreeDrop);
+            edge.deallocate::<V>(stat::Counter::FreeDrop);
         })
     }
 }

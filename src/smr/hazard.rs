@@ -1,12 +1,12 @@
 use core::cell::RefCell;
 use core::fmt;
+use core::marker::PhantomData;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use thread_local::ThreadLocal;
 
 use crate::byte;
-use crate::raw::edge;
 use crate::raw::Edge;
 use crate::smr::membarrier;
 use crate::stat;
@@ -19,13 +19,15 @@ const RETIRED_COUNT: usize = 16;
 struct Cache<T>(T);
 
 pub(crate) struct Global<V: Value> {
+    _value: PhantomData<V>,
     hazards: ThreadLocal<Cache<AtomicU64>>,
-    edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge<V>>>>>>,
+    edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge<()>>>>>>,
 }
 
 impl<V: Value> Global<V> {
     pub(crate) fn pin(&self) -> Local<V> {
         Local {
+            _value: PhantomData,
             hazards: &self.hazards,
             hazard: &self.hazards.get_or_default().0,
             edges: self.edges.get_or_default().0.borrow_mut(),
@@ -36,6 +38,7 @@ impl<V: Value> Global<V> {
 impl<V: Value> Default for Global<V> {
     fn default() -> Self {
         Self {
+            _value: PhantomData,
             hazards: ThreadLocal::with_capacity(128),
             edges: ThreadLocal::with_capacity(128),
         }
@@ -48,14 +51,15 @@ impl<V: Value> Drop for Global<V> {
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe { edge.deallocate_unchecked(stat::Counter::FreeDrop) })
+            .for_each(|edge| unsafe { edge.deallocate_unchecked::<V>(stat::Counter::FreeDrop) })
     }
 }
 
 pub(crate) struct Local<'g, V: 'g> {
+    _value: PhantomData<V>,
     hazards: &'g ThreadLocal<Cache<AtomicU64>>,
     hazard: &'g AtomicU64,
-    edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge<V>>>>,
+    edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge<()>>>>,
 }
 
 impl<'g, V: Value> Local<'g, V> {
@@ -67,7 +71,7 @@ impl<'g, V: Value> Local<'g, V> {
         TraverseGuard(self)
     }
 
-    fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
+    fn retire(&mut self, edge: ribbit::Packed<Edge<()>>) {
         validate!(!edge.is_null());
 
         stat::increment(stat::Counter::Retire);
@@ -103,7 +107,7 @@ impl<'g, V: Value> Local<'g, V> {
                 return true;
             }
 
-            unsafe { edge.deallocate_unchecked(stat::Counter::FreeRetire) };
+            unsafe { edge.deallocate_unchecked::<V>(stat::Counter::FreeRetire) };
             false
         })
     }
@@ -130,7 +134,7 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
         byte::Array::new_masked(prefix)
     }
 
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<V>>) {
+    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<()>>) {
         self.0.retire(edge);
     }
 
@@ -204,9 +208,10 @@ where
             // NOTE: could technically unguard before retiring, since
             // we will not access `value` anymore, but then we'd want
             // to avoid dropping `self.inner`.
-            self.inner
-                .0
-                .retire(Edge::new_value(key, edge::Value::from_borrow(self.value)))
+            self.inner.0.retire(Edge::new_value(
+                key,
+                u64::from(V::borrow_into_raw(self.value)),
+            ))
         }
     }
 }

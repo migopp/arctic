@@ -16,6 +16,7 @@ use crate::raw::Op;
 use crate::sequential;
 use crate::smr;
 use crate::stat;
+use crate::value;
 use crate::Key;
 use crate::Value;
 
@@ -67,7 +68,7 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = edge::Value::from_value(value);
+        let value = value.into_raw();
         unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
     }
 
@@ -83,7 +84,7 @@ where
         mut exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
+        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
     {
         let mut map = self;
 
@@ -105,7 +106,7 @@ where
         exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
     where
-        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
+        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
     {
         self.compare_exchange_impl::<cursor::path::Discard, _>(key, exchange)
     }
@@ -117,7 +118,7 @@ where
         exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
+        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
     {
         self.compare_exchange_impl::<cursor::path::Retain<_, _>, _>(key, exchange)
             .unwrap()
@@ -134,11 +135,11 @@ where
         mut exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
-        H: cursor::path::History<'g, K::Read<'k>, V>,
-        F: FnMut(ribbit::Packed<Edge<V>>) -> ribbit::Packed<Edge<V>>,
+        H: cursor::path::History<'g, K::Read<'k>, ()>,
+        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, (), _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -168,7 +169,7 @@ where
 
     #[inline]
     pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = edge::Value::from_value(value);
+        let value = value.into_raw();
         let mut map = &mut *self;
 
         // Cursed workaround for:
@@ -186,7 +187,7 @@ where
     fn insert_optimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: ribbit::Packed<edge::Value<V>>,
+        value: value::Raw<V>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
         self.insert_impl::<cursor::path::Discard>(key, value)
     }
@@ -195,7 +196,7 @@ where
     fn insert_pessimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: ribbit::Packed<edge::Value<V>>,
+        value: value::Raw<V>,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::path::Retain<_, _>>(key, value)
@@ -206,13 +207,13 @@ where
     fn insert_impl<'k, H>(
         &mut self,
         key: K::Borrow<'k>,
-        value: ribbit::Packed<edge::Value<V>>,
+        value: value::Raw<V>,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
-        H: cursor::path::History<'g, K::Read<'k>, V>,
+        H: cursor::path::History<'g, K::Read<'k>, ()>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, (), _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
@@ -231,7 +232,7 @@ where
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) if op == Op::Edge(edge::Op::Insert) => {
+                Ok(_) if op == Op::Edge(crate::raw::edge::Op::Insert) => {
                     stat::increment(op);
                     return match old.as_value() {
                         Some(value) => {
@@ -254,7 +255,11 @@ where
                 Err(_) => {
                     // Does not go through SMR because `new` is still thread-local
                     if op.is_allocate() {
-                        unsafe { new.deallocate_unchecked(stat::Counter::FreeConflict) };
+                        if let Some(edge::Child::Node(node)) = new.child() {
+                            unsafe {
+                                node.deallocate_unchecked(stat::Counter::FreeConflict);
+                            }
+                        }
                     }
                 }
             }
@@ -262,7 +267,7 @@ where
     }
 
     pub fn all(&mut self) -> PrefixGuard<'g, '_, K, V> {
-        let cursor = cursor::Prefix::<K::Read<'_>, _, cursor::path::Discard>::new_root(
+        let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
             &mut self.smr,
             self.raw.root(),
         );
@@ -280,7 +285,7 @@ where
     ) -> Option<PrefixGuard<'g, '_, K, V>> {
         let prefix = prefix.into();
 
-        let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new_prefix(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
@@ -316,12 +321,12 @@ where
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_prefix(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_hybrid::<iter::Prefix, S>(Self::transmute_buffer(buffer), cursor, &(), limit)
+        Self::scan_hybrid::<iter::Prefix, S>(buffer, cursor, &(), limit)
     }
 
     pub fn prefix_pessimistic<'l, S: Sort>(
@@ -330,12 +335,12 @@ where
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_prefix(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
         )?;
-        Self::scan_pessimistic::<iter::Prefix, S>(Self::transmute_buffer(buffer), cursor, &())
+        Self::scan_pessimistic::<iter::Prefix, S>(buffer, cursor, &())
     }
 
     pub fn range_hybrid<'l, S: Sort>(
@@ -347,18 +352,13 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_range(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_range(
             &mut self.smr,
             self.raw.root(),
             min,
             max,
         )?;
-        Self::scan_hybrid::<iter::Range, S>(
-            Self::transmute_buffer(buffer),
-            cursor,
-            &(min, max),
-            limit,
-        )
+        Self::scan_hybrid::<iter::Range, S>(buffer, cursor, &(min, max), limit)
     }
 
     pub fn range_pessimistic<'l, S: Sort>(
@@ -369,40 +369,25 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let min = min.into();
         let max = max.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Hybrid<_, _>>::new_range(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_range(
             &mut self.smr,
             self.raw.root(),
             min,
             max,
         )?;
-        Self::scan_pessimistic::<iter::Range, S>(
-            Self::transmute_buffer(buffer),
-            cursor,
-            &(min, max),
-        )
-    }
-
-    // HACK: hide `Edge` type from public API
-    #[expect(clippy::needless_lifetimes)]
-    fn transmute_buffer<'l>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
-    ) -> &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)> {
-        const {
-            assert!(
-                core::mem::size_of::<ribbit::Packed<edge::Value<V>>>()
-                    == core::mem::size_of::<u64>()
-            );
-            assert!(
-                core::mem::align_of::<ribbit::Packed<edge::Value<V>>>()
-                    == core::mem::align_of::<u64>()
-            )
-        };
-        unsafe { core::mem::transmute(buffer) }
+        Self::scan_pessimistic::<iter::Range, S>(buffer, cursor, &(min, max))
     }
 
     fn scan_hybrid<'l, S, O>(
-        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
-        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        cursor: cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'l>,
+            (),
+            V,
+            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
+        >,
         arg: &S::Input<'l, K>,
         limit: usize,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
@@ -420,8 +405,15 @@ where
     }
 
     fn scan_optimistic<'l, S, O>(
-        buffer: &mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
-        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+        buffer: &mut Vec<(K::Write, u64)>,
+        cursor: &cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'l>,
+            (),
+            V,
+            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
+        >,
         arg: &S::Input<'l, K>,
         limit: usize,
     ) -> Result<(), ()>
@@ -429,13 +421,13 @@ where
         S: Scan,
         O: Sort,
     {
-        S::scan::<_, _, O, _>(cursor, arg, |key, value| buffer.push((key.clone(), value)));
+        S::scan::<_, _, _, O, _>(cursor, arg, |key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            S::scan::<_, _, O, _>(cursor, arg, |new_key, new_value| {
+            S::scan::<_, _, _, O, _>(cursor, arg, |new_key, new_value| {
                 let index = len;
                 len += 1;
 
@@ -482,13 +474,14 @@ where
     }
 
     fn scan_pessimistic<'l, S, O>(
-        buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
+        buffer: &'l mut Vec<(K::Write, u64)>,
         mut cursor: cursor::Prefix<
             'g,
             'l,
             K::Read<'l>,
+            (),
             V,
-            cursor::path::Hybrid<'g, K::Read<'l>, V>,
+            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
         >,
         arg: &S::Input<'l, K>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>>
@@ -497,7 +490,7 @@ where
         O: Sort,
     {
         Self::lock_prefix(&mut cursor)?;
-        S::scan::<_, _, O, _>(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
+        S::scan::<_, _, _, O, _>(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
         Self::unlock_prefix(&mut cursor);
 
         Some(LinearizableGuard {
@@ -511,8 +504,9 @@ where
             'g,
             '_,
             K::Read<'k>,
+            (),
             V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+            cursor::path::Hybrid<'g, K::Read<'k>, ()>,
         >,
     ) -> Option<()> {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
@@ -554,8 +548,9 @@ where
             'g,
             '_,
             K::Read<'k>,
+            (),
             V,
-            cursor::path::Hybrid<'g, K::Read<'k>, V>,
+            cursor::path::Hybrid<'g, K::Read<'k>, ()>,
         >,
     ) {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
@@ -592,7 +587,7 @@ where
 pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
     // FIXME: don't need to hold guard for trivial values
     guard: smr::TraverseGuard<'g, 'l, V>,
-    buffer: &'l mut Vec<(K::Write, ribbit::Packed<edge::Value<V>>)>,
+    buffer: &'l mut Vec<(K::Write, u64)>,
 }
 
 impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
@@ -607,7 +602,7 @@ impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
 
 pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
     guard: &'l smr::TraverseGuard<'g, 'l, V>,
-    iter: std::vec::Drain<'l, (K::Write, ribbit::Packed<edge::Value<V>>)>,
+    iter: std::vec::Drain<'l, (K::Write, u64)>,
 }
 
 impl<'g, 'l, K, V> Iterator for LinearizableDrain<'g, 'l, K, V>
@@ -628,7 +623,7 @@ where
 
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
     guard: smr::PrefixGuard<'g, 'l, V>,
-    root: &'g Atomic128<Edge<V>>,
+    root: &'g Atomic128<Edge<()>>,
     key: K::Write,
 }
 
@@ -656,7 +651,7 @@ where
 
 pub struct PrefixValueIter<'g, 'l, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::PrefixIter<'g, 'l, key::Ignore, V, S>,
+    iter: iter::PrefixIter<'g, 'l, key::Ignore, (), S>,
 }
 
 impl<'g, 'l, V, S> PrefixValueIter<'g, 'l, V, S>
@@ -680,13 +675,13 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.iter
             .lend()
-            .map(|(key::Ignore, value)| (unsafe { V::guard_borrow(self.guard, value) }))
+            .map(|(key::Ignore, value)| unsafe { V::guard_borrow(self.guard, value) })
     }
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::PrefixIter<'g, 'l, K::Write, V, S>,
+    iter: iter::PrefixIter<'g, 'l, K::Write, (), S>,
 }
 
 impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
@@ -759,7 +754,7 @@ where
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::RangeIter<'g, 'l, K, V, S>,
+    iter: iter::RangeIter<'g, 'l, K, (), S>,
 }
 
 impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>

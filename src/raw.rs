@@ -1,3 +1,4 @@
+pub(crate) mod cursor;
 pub(crate) mod edge;
 pub(crate) mod node;
 

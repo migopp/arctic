@@ -1,4 +1,5 @@
-use crate::raw::edge;
+use core::marker::PhantomData;
+
 use crate::smr;
 
 pub unsafe trait Value: Sized {
@@ -18,24 +19,26 @@ pub unsafe trait Value: Sized {
 
     unsafe fn guard_borrow<'g, 'l>(
         smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::Borrow<'l>;
 
     unsafe fn guard_owned<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::OwnedGuard<'g, 'l>;
 
     unsafe fn guard_shared<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::SharedGuard<'g, 'l>;
 
-    unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self;
+    unsafe fn from_raw(raw: u64) -> Self;
 
-    fn into_u64(self) -> u64;
+    fn into_raw(self) -> Raw<Self>;
 
-    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>;
+
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self>
     where
         Self: 'l;
 }
@@ -61,60 +64,78 @@ unsafe impl<T> Value for Box<T> {
     #[inline]
     unsafe fn guard_owned<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::OwnedGuard<'g, 'l> {
-        let borrow = (data.raw() as *const T).as_ref();
-        let borrow = if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        };
+        let borrow = Self::borrow_from_raw(raw);
         unsafe { smr.guard_owned(borrow) }
     }
 
     #[inline]
     unsafe fn guard_shared<'g, 'l>(
         smr: smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::SharedGuard<'g, 'l> {
-        let borrow = (data.raw() as *const T).as_ref();
-        let borrow = if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        };
+        let borrow = Self::borrow_from_raw(raw);
         smr.guard_shared(borrow)
-    }
-
-    #[inline]
-    unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self {
-        Box::from_raw(data.raw() as *mut T)
-    }
-
-    #[inline]
-    fn into_u64(self) -> u64 {
-        Box::into_raw(self) as u64
     }
 
     #[inline]
     unsafe fn guard_borrow<'g, 'l>(
         _smr: &'l smr::TraverseGuard<'g, 'l, Self>,
-        data: ribbit::Packed<edge::Value<Self>>,
+        raw: u64,
     ) -> Self::Borrow<'l> {
-        let borrow = (data.raw() as *const T).as_ref();
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            borrow.unwrap_unchecked()
+        Self::borrow_from_raw(raw)
+    }
+
+    #[inline]
+    unsafe fn from_raw(raw: u64) -> Self {
+        Box::from_raw(raw as *mut T)
+    }
+
+    #[inline]
+    fn into_raw(self) -> Raw<Self> {
+        Raw {
+            _value: PhantomData,
+            raw: Box::into_raw(self) as u64,
         }
     }
 
     #[inline]
-    fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self>
     where
         Self: 'l,
     {
-        borrow as *const T as u64
+        Raw {
+            _value: PhantomData,
+            raw: borrow as *const T as u64,
+        }
+    }
+
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+        let borrow = (raw as *const T).as_ref();
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+}
+
+pub(crate) struct Raw<V> {
+    _value: PhantomData<V>,
+    raw: u64,
+}
+
+impl<V> Copy for Raw<V> {}
+impl<V> Clone for Raw<V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<V> From<Raw<V>> for u64 {
+    fn from(raw: Raw<V>) -> Self {
+        raw.raw
     }
 }
 
@@ -192,36 +213,44 @@ macro_rules! impl_trivial {
                 type Borrow<'g> = Self;
 
                 #[inline]
-                unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Value<Self>>) -> Self {
-                    data.raw() as $ty
+                unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, raw: u64) -> Self {
+                    raw as $ty
                 }
 
                 #[inline]
-                unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, data: ribbit::Packed<edge::Value<Self>>) -> Self {
-                    data.raw() as $ty
+                unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, raw: u64) -> Self {
+                    raw as $ty
                 }
 
                 #[inline]
-                unsafe fn from_data(data: ribbit::Packed<edge::Value<Self>>) -> Self {
-                    data.raw() as $ty
+                unsafe fn from_raw(raw: u64) -> Self {
+                    raw as $ty
                 }
 
                 #[inline]
-                fn into_u64(self) -> u64 {
-                    self as u64
+                fn into_raw(self) -> Raw<Self> {
+                    Raw {
+                        _value: PhantomData,
+                        raw: self as u64,
+                    }
                 }
 
                 #[inline]
                 unsafe fn guard_borrow<'g, 'l>(
                     _smr: &smr::TraverseGuard<'g, 'l, Self>,
-                    data: ribbit::Packed<edge::Value<Self>>,
+                    raw: u64,
                 ) -> Self::Borrow<'l> {
-                    data.raw() as $ty
+                    raw as $ty
                 }
 
                 #[inline]
-                fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64 where Self: 'l {
-                    borrow as u64
+                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self> where Self: 'l {
+                    borrow.into_raw()
+                }
+
+                #[inline]
+                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+                    raw as $ty
                 }
             }
         )*

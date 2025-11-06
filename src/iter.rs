@@ -11,7 +11,6 @@ pub use sort::Sorted;
 pub use sort::Unsorted;
 
 use crate::cursor;
-use crate::raw::edge;
 use crate::Key;
 use crate::Value;
 
@@ -20,15 +19,22 @@ pub(crate) trait Scan {
     where
         K: Key;
 
-    fn scan<'g, 'l, K, V, S, F>(
-        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+    fn scan<'g, 'l, K, C, V, S, F>(
+        cursor: &cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'l>,
+            C,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'l>, C>,
+        >,
         input: &Self::Input<'l, K>,
         apply: F,
     ) where
         K: Key,
         V: Value,
         S: Sort,
-        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>);
+        F: FnMut(&K::Write, u64);
 }
 
 pub(crate) struct Prefix;
@@ -39,17 +45,27 @@ impl Scan for Prefix {
     where
         K: Key;
 
-    fn scan<'g, 'l, K, V, S, F>(
-        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+    fn scan<'g, 'l, K, C, V, S, F>(
+        cursor: &cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'l>,
+            C,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'l>, C>,
+        >,
         (): &(),
         apply: F,
     ) where
         K: Key,
         V: Value,
         S: Sort,
-        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>),
+        F: FnMut(&K::Write, u64),
     {
-        PrefixIter::<K::Write, _, S>::new(cursor).for_each(apply)
+        unsafe {
+            PrefixIter::<_, _, S>::new_unchecked(cursor.edge(), K::Write::from(cursor.prefix()))
+        }
+        .for_each(apply)
     }
 }
 
@@ -61,17 +77,32 @@ impl Scan for Range {
     where
         K: Key;
 
-    fn scan<'g, 'l, K, V, S, F>(
-        cursor: &cursor::Prefix<'g, 'l, K::Read<'l>, V, cursor::path::Hybrid<'g, K::Read<'l>, V>>,
+    fn scan<'g, 'l, K, C, V, S, F>(
+        cursor: &cursor::Prefix<
+            'g,
+            'l,
+            K::Read<'l>,
+            C,
+            V,
+            cursor::path::Hybrid<'g, K::Read<'l>, C>,
+        >,
         (min, max): &Self::Input<'l, K>,
         apply: F,
     ) where
         K: Key,
         V: Value,
         S: Sort,
-        F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>),
+        F: FnMut(&K::Write, u64),
     {
-        RangeIter::<K, V, S>::new(cursor, *min, *max).for_each(apply)
+        unsafe {
+            RangeIter::<K, _, S>::new_unchecked(
+                cursor.edge(),
+                K::Write::from(cursor.prefix()),
+                *min,
+                *max,
+            )
+        }
+        .for_each(apply)
     }
 }
 

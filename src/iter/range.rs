@@ -4,58 +4,25 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::cursor;
 use crate::iter::Sort;
 use crate::key::Read as _;
 use crate::key::Write as _;
 use crate::raw::edge;
 use crate::raw::Edge;
 use crate::Key;
-use crate::Value;
 
-pub(crate) enum RangeIter<'g, 'l, K: Key, V, S: Sort> {
-    Root {
-        key: K::Write,
-        next: Option<ribbit::Packed<edge::Value<V>>>,
-    },
-    Node(NodeIter<'g, 'l, K, V, S>),
+pub(crate) enum RangeIter<'g, 'l, K: Key, C, S: Sort> {
+    Root { key: K::Write, next: Option<u64> },
+    Node(NodeIter<'g, 'l, K, C, S>),
 }
 
-impl<'g, 'c, K, V, S> RangeIter<'g, 'c, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: Sort,
-{
-    pub(crate) fn new<'l>(
-        cursor: &'c cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, V>,
-        >,
-        min: K::Read<'l>,
-        max: K::Read<'l>,
-    ) -> Self {
-        unsafe {
-            Self::new_unchecked(
-                cursor.edge(),
-                <K::Write>::from(cursor.prefix()),
-                K::reborrow(min),
-                K::reborrow(max),
-            )
-        }
-    }
-}
-
-impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>
+impl<'g, 'l, K, C, S> RangeIter<'g, 'l, K, C, S>
 where
     K: Key,
     S: Sort,
 {
     pub(crate) unsafe fn new_unchecked(
-        root: &'g Atomic128<Edge<V>>,
+        root: &'g Atomic128<Edge<C>>,
         mut key: K::Write,
         mut min: K::Read<'l>,
         mut max: K::Read<'l>,
@@ -116,10 +83,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
-        self,
-        mut apply: F,
-    ) {
+    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(self, mut apply: F) {
         match self {
             RangeIter::Root { key, mut next } => {
                 crate::cold();
@@ -132,7 +96,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
+    pub(crate) fn lend(&mut self) -> Option<(&K::Write, u64)> {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -158,20 +122,20 @@ where
     S: Sort,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
+    fn lend(&mut self) -> Option<(&K::Write, u64)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    fn for_each<F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&K::Write, ribbit::Packed<edge::Value<V>>)>(
+    fn walk<const YIELD: bool, F: FnMut(&K::Write, u64)>(
         &mut self,
         mut apply: F,
-    ) -> Option<(&K::Write, ribbit::Packed<edge::Value<V>>)> {
+    ) -> Option<(&K::Write, u64)> {
         'vertical: loop {
             let (len, first, last, iter) = self.stack.last_mut()?;
 
