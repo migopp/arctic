@@ -1,5 +1,5 @@
 mod cursor;
-mod hazard;
+pub(crate) mod hazard;
 mod iter;
 mod value;
 

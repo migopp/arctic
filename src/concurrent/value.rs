@@ -100,14 +100,14 @@ unsafe impl<T> Value for Box<T> {
     }
 
     unsafe fn downgrade_guard<'g, 'l>(
-        smr: hazard::TraverseGuard<'g, 'l, Self>,
+        _smr: hazard::TraverseGuard<'g, 'l, Self>,
     ) -> Self::LinearizableGuard<'g, 'l> {
         todo!()
     }
 
     unsafe fn guard_linearizable<'g, 'l>(
-        smr: &Self::LinearizableGuard<'g, 'l>,
-        raw: u64,
+        _smr: &Self::LinearizableGuard<'g, 'l>,
+        _raw: u64,
     ) -> Self::Borrow<'l> {
         todo!()
     }

@@ -28,6 +28,7 @@ pub(super) trait Uint:
 
     fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
 
+    fn most_significant_u128(self) -> u128;
     fn most_significant_u64(self) -> u64;
     fn most_significant_u8(self) -> u8;
 
@@ -94,6 +95,18 @@ impl<U: Uint> key::Read for Buffer<U> {
         validate_eq!(len.bits() & 0b111, 0);
 
         byte::Array::from_u64_truncate(self.buffer.most_significant_u64(), len)
+    }
+
+    #[inline]
+    fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
+        crate::concurrent::hazard::prefix::Be::new_hazard(
+            self.buffer.most_significant_u128(),
+            if U::BYTES < 16 {
+                self.bits as usize
+            } else {
+                self.bits.min(120) as usize
+            },
+        )
     }
 
     #[inline]
@@ -216,7 +229,7 @@ impl<U: Uint> core::fmt::Debug for Buffer<U> {
 }
 
 macro_rules! impl_unsigned_int {
-    ($($ty:ty: $bits:expr, $into:expr, $from:expr),* $(,)?) => {
+    ($($ty:ty: $bits:expr, $into_u64:expr, $from_u64:expr, $into_u128:expr),* $(,)?) => {
         $(
             impl From<$ty> for Buffer<$ty> {
                 #[inline]
@@ -240,8 +253,13 @@ macro_rules! impl_unsigned_int {
                 }
 
                 #[inline]
+                fn most_significant_u128(self) -> u128 {
+                    $into_u128(self)
+                }
+
+                #[inline]
                 fn most_significant_u64(self) -> u64 {
-                    $into(self)
+                    $into_u64(self)
                 }
 
                 #[inline]
@@ -275,7 +293,7 @@ macro_rules! impl_unsigned_int {
 
                 #[inline]
                 fn from_most_significant_u64(value: u64) -> Self {
-                    $from(value)
+                    $from_u64(value)
                 }
 
                 #[inline]
@@ -288,25 +306,31 @@ macro_rules! impl_unsigned_int {
 }
 
 impl_unsigned_int!(
-    u16: 16, |into: u16| {
-        (into as u64) << 48
-    }, |from: u64| {
-        (from >> 48) as u16
+    u16: 16, |from: Self| {
+        (from as u64) << 48
+    }, |into: u64| {
+        (into >> 48) as Self
+    }, |from: Self| {
+        (from as u128) << 112
     },
 
-    u32: 32, |into: u32| {
-        (into as u64) << 32
-    }, |from: u64| {
-        (from >> 32) as u32
+    u32: 32, |from: Self| {
+        (from as u64) << 32
+    }, |into: u64| {
+        (into >> 32) as Self
+    }, |from: Self| {
+        (from as u128) << 96
     },
 
-    u64: 64, core::convert::identity, core::convert::identity,
+    u64: 64, core::convert::identity, core::convert::identity, |from: Self| {
+        (from as u128) << 64
+    },
 
     u128: 128, |into: u128| {
         (into >> 64) as u64
     }, |from: u64| {
         (from as u128) << 64
-    },
+    }, core::convert::identity,
 );
 
 #[cfg(test)]

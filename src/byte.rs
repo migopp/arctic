@@ -46,11 +46,6 @@ impl Array {
     }
 
     #[inline]
-    pub(crate) const fn truncate(self, len: Len) -> Self {
-        Self::from_u64_truncate(self.value(), len)
-    }
-
-    #[inline]
     pub(crate) const unsafe fn new_unchecked(value: u64) -> Self {
         validate!(Self::is_valid(value));
         Self(value)
@@ -64,12 +59,6 @@ impl Array {
     #[inline]
     pub(crate) const fn len(self) -> Len {
         Len(unsafe { u6::new_unchecked(self.0 as u8) })
-    }
-
-    #[inline]
-    pub(crate) fn is_overlapping(self, other: Self) -> bool {
-        let len = self.len().min(other.len());
-        self.equal_up_to(other, len)
     }
 
     #[inline]
@@ -234,10 +223,5 @@ impl Len {
     #[inline]
     const fn mask(self) -> u64 {
         !(u64::MAX >> self.bits())
-    }
-
-    #[inline]
-    fn min(self, other: Self) -> Self {
-        Self(self.0.min(other.0))
     }
 }

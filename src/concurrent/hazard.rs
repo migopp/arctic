@@ -79,17 +79,17 @@
 //! reclamation.
 
 mod membarrier;
-mod prefix;
+pub(crate) mod prefix;
 
 use core::cell::RefCell;
 use core::fmt;
 use core::marker::PhantomData;
-use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
+use ribbit::atomic::Atomic128;
+use ribbit::Pack as _;
 use thread_local::ThreadLocal;
 
-use crate::byte;
 use crate::concurrent::Value;
 use crate::raw::Edge;
 use crate::stat;
@@ -102,8 +102,8 @@ struct Cache<T>(T);
 
 pub(crate) struct Global<V: Value> {
     _value: PhantomData<V>,
-    hazards: ThreadLocal<Cache<AtomicU64>>,
-    edges: ThreadLocal<Cache<RefCell<Vec<ribbit::Packed<Edge<()>>>>>>,
+    hazards: ThreadLocal<Cache<Atomic128<prefix::Be>>>,
+    retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>>,
 }
 
 impl<V: Value> Global<V> {
@@ -111,8 +111,11 @@ impl<V: Value> Global<V> {
         Local {
             _value: PhantomData,
             hazards: &self.hazards,
-            hazard: &self.hazards.get_or_default().0,
-            edges: self.edges.get_or_default().0.borrow_mut(),
+            hazard: &self
+                .hazards
+                .get_or(|| Cache(Atomic128::from_packed(prefix::Be::HAZARD_NULL)))
+                .0,
+            retired: self.retired.get_or_default().0.borrow_mut(),
         }
     }
 }
@@ -122,54 +125,83 @@ impl<V: Value> Default for Global<V> {
         Self {
             _value: PhantomData,
             hazards: ThreadLocal::with_capacity(128),
-            edges: ThreadLocal::with_capacity(128),
+            retired: ThreadLocal::with_capacity(128),
         }
     }
 }
 
 impl<V: Value> Drop for Global<V> {
     fn drop(&mut self) {
-        self.edges
+        self.retired
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe {
-                edge.deallocate_unchecked(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop)
+            .for_each(|(prefix, raw)| {
+                unsafe { deallocate::<V>(*prefix, *raw) };
             })
     }
 }
 
 pub(crate) struct Local<'g, V: 'g> {
     _value: PhantomData<V>,
-    hazards: &'g ThreadLocal<Cache<AtomicU64>>,
-    hazard: &'g AtomicU64,
-    edges: std::cell::RefMut<'g, Vec<ribbit::Packed<Edge<()>>>>,
+    hazards: &'g ThreadLocal<Cache<Atomic128<prefix::Be>>>,
+    hazard: &'g Atomic128<prefix::Be>,
+    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
 }
 
 impl<'g, V: Value> Local<'g, V> {
     #[inline]
-    pub(crate) fn guard<'l>(&'l mut self, prefix: byte::Array) -> TraverseGuard<'g, 'l, V> {
-        self.hazard
-            .store(prefix.value() | MASK_VALID, Ordering::Relaxed);
+    pub(crate) fn guard<'l>(
+        &'l mut self,
+        prefix: ribbit::Packed<prefix::Be>,
+    ) -> TraverseGuard<'g, 'l, V> {
+        self.hazard.store_packed(
+            prefix.with_kind(prefix::Kind::Traversal.pack()),
+            Ordering::Relaxed,
+        );
         membarrier::fast();
         TraverseGuard(self)
     }
 
-    fn retire(&mut self, edge: ribbit::Packed<Edge<()>>) {
+    unsafe fn retire_edge<C>(&mut self, bits: usize, edge: ribbit::Packed<Edge<C>>) {
         validate!(!edge.is_null());
-
         stat::increment(stat::Counter::Retire);
 
-        self.edges.push(edge);
+        let prefix = self
+            .hazard
+            .load_packed(Ordering::Relaxed)
+            .truncate(bits)
+            .with_kind(if edge.meta().is_value() {
+                prefix::Kind::RETIRED_VALUE
+            } else {
+                prefix::Kind::RETIRED_NODE
+            });
 
-        if self.edges.len() >= RETIRED_COUNT {
+        self.retired.push((prefix, edge.into_raw()));
+
+        if self.retired.len() >= RETIRED_COUNT {
+            self.flush();
+        }
+    }
+
+    unsafe fn retire_value(&mut self, raw: u64) {
+        stat::increment(stat::Counter::Retire);
+
+        let prefix = self
+            .hazard
+            .load_packed(Ordering::Relaxed)
+            .with_kind(prefix::Kind::RETIRED_VALUE);
+
+        self.retired.push((prefix, raw));
+
+        if self.retired.len() >= RETIRED_COUNT {
             self.flush();
         }
     }
 
     #[cold]
     fn flush(&mut self) {
-        stat::max(stat::Max::RetireCache, self.edges.len() as u64);
+        stat::max(stat::Max::RetireCache, self.retired.len() as u64);
         stat::increment(stat::Counter::Flush);
 
         membarrier::slow();
@@ -177,33 +209,21 @@ impl<'g, V: Value> Local<'g, V> {
         let hazards = self
             .hazards
             .iter()
-            .map(|hazard| hazard.0.load(Ordering::Relaxed))
-            .filter(|hazard| hazard & MASK_VALID > 0)
-            .map(byte::Array::new_masked)
+            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+            .filter(|hazard| !hazard.kind().is_hazard_null())
             .collect::<Vec<_>>();
 
-        self.edges.retain(|edge| {
-            if hazards
-                .iter()
-                .any(|hazard| hazard.is_overlapping(edge.meta().key()))
-            {
+        self.retired.retain(|(prefix, raw)| {
+            if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
                 stat::increment(stat::Counter::HazardMatch);
                 return true;
             }
 
-            unsafe {
-                edge.deallocate_unchecked(
-                    |value| drop(V::from_raw(value)),
-                    stat::Counter::FreeRetire,
-                )
-            };
+            unsafe { deallocate::<V>(*prefix, *raw) };
             false
         })
     }
 }
-
-const MASK_VALID: u64 = 0b0100_0000;
-const _: () = assert!(MASK_VALID & byte::Array::MASK == 0);
 
 pub struct TraverseGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
 
@@ -212,19 +232,13 @@ impl<V: Value> Drop for TraverseGuard<'_, '_, V> {
     fn drop(&mut self) {
         self.0
             .hazard
-            .store(byte::Array::EMPTY.value(), Ordering::Relaxed);
+            .store_packed(prefix::Be::HAZARD_NULL, Ordering::Relaxed);
     }
 }
 
 impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
-    pub(crate) fn prefix(&self) -> byte::Array {
-        let prefix = self.0.hazard.load(Ordering::Relaxed);
-        validate!(prefix & MASK_VALID > 0);
-        byte::Array::new_masked(prefix)
-    }
-
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<()>>) {
-        self.0.retire(edge);
+    pub(crate) unsafe fn retire<C>(&mut self, bits: usize, edge: ribbit::Packed<Edge<C>>) {
+        self.0.retire_edge(bits, edge);
     }
 
     /// # SAFETY
@@ -232,21 +246,45 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     /// Caller must ensure that only one thread calls this for any given value.
     #[inline]
     pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, true, V> {
+        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+        self.0.hazard.store_packed(
+            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
+            Ordering::Relaxed,
+        );
+
         ValueGuard { inner: self, value }
     }
 
     #[inline]
     pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, false, V> {
+        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+        self.0.hazard.store_packed(
+            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
+            Ordering::Relaxed,
+        );
+
         ValueGuard { inner: self, value }
     }
 
     #[inline]
     pub(crate) fn guard_prefix(self) -> PrefixGuard<'g, 'l, V> {
+        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+        self.0.hazard.store_packed(
+            hazard.with_kind(prefix::Kind::HAZARD_PREFIX),
+            Ordering::Relaxed,
+        );
+
         PrefixGuard(self)
     }
 
     #[inline]
     pub(crate) fn guard_linearizable(self) -> LinearizableGuard<'g, 'l, V> {
+        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+        self.0.hazard.store_packed(
+            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
+            Ordering::Relaxed,
+        );
+
         LinearizableGuard(self)
     }
 }
@@ -301,20 +339,26 @@ where
     V: Value,
 {
     fn drop(&mut self) {
-        validate!(self.inner.0.hazard.load(Ordering::Relaxed) & MASK_VALID > 0);
-
         if OWNED {
-            let key = self.inner.0.hazard.load(Ordering::Relaxed);
-            validate!(key & MASK_VALID > 0);
-            let key = byte::Array::new_masked(key);
-
             // NOTE: could technically unguard before retiring, since
             // we will not access `value` anymore, but then we'd want
             // to avoid dropping `self.inner`.
-            self.inner.0.retire(Edge::new_value(
-                key,
-                u64::from(V::borrow_into_raw(self.value)),
-            ))
+            unsafe { self.inner.0.retire_value(V::borrow_into_raw(self.value)) }
+        }
+    }
+}
+
+unsafe fn deallocate<V: Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
+    if prefix.kind() == prefix::Kind::RETIRED_NODE {
+        unsafe {
+            crate::raw::edge::Node::<()>::new_unchecked(raw)
+                .deallocate_unchecked(stat::Counter::FreeRetire);
+        }
+    } else {
+        validate_eq!(prefix.kind(), prefix::Kind::RETIRED_VALUE);
+        unsafe {
+            stat::increment(stat::Counter::FreeRetire);
+            drop(V::from_raw(raw));
         }
     }
 }

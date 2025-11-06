@@ -84,12 +84,6 @@ impl<C> Edge<C> {
 }
 
 impl<C> EdgePacked<C> {
-    // FIXME: remove
-    #[inline]
-    pub(crate) fn erase(self) -> ribbit::Packed<Edge<()>> {
-        ribbit::Packed::<Edge<()>>::new(self.meta(), self.data())
-    }
-
     #[inline]
     pub(crate) fn is_null(self) -> bool {
         !self.meta().is_value() && self.data() == 0
@@ -107,6 +101,11 @@ impl<C> EdgePacked<C> {
     #[inline]
     pub(crate) fn as_value(self) -> Option<u64> {
         self.meta().is_value().then(|| self.data())
+    }
+
+    #[inline]
+    pub(crate) fn into_raw(self) -> u64 {
+        self.data()
     }
 
     #[inline]
@@ -298,6 +297,15 @@ impl<C> Node<C> {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
                 kind | ptr.addr().get() as u64,
             ))
+        }
+    }
+
+    pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
+        let node = unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(raw) };
+        if cfg!(feature = "validate") {
+            node.unwrap()
+        } else {
+            unsafe { node.unwrap_unchecked() }
         }
     }
 }

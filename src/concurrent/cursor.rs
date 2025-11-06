@@ -1,6 +1,5 @@
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
 use crate::concurrent::hazard;
 use crate::concurrent::Value;
 use crate::key;
@@ -31,7 +30,7 @@ where
         key: R,
     ) -> Self {
         Self {
-            guard: smr.guard(key.peek_all()),
+            guard: smr.guard(key.hazard()),
             raw: unsafe { raw::cursor::Point::new(root, key) },
         }
     }
@@ -43,12 +42,7 @@ where
 
     #[inline]
     pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<C>>) {
-        let prefix = self.guard.prefix();
-        let key = prefix.truncate(byte::Len::MAX.min_bits(self.raw.bits()));
-        unsafe {
-            self.guard
-                .retire(edge.with_meta(edge.meta().with_key(key)).erase())
-        }
+        unsafe { self.guard.retire(self.raw.bits(), edge) }
     }
 
     #[inline]
@@ -104,7 +98,7 @@ where
         R: key::Read,
         V: Value,
     {
-        let guard = smr.guard(key.peek_all());
+        let guard = smr.guard(key.hazard());
         let value = unsafe { crate::raw::cursor::Point::get(root, key)? };
         return Some(unsafe { V::guard_shared(guard, value) });
     }
@@ -128,7 +122,7 @@ where
         root: &'g Atomic128<Edge<C>>,
     ) -> Self {
         Self {
-            guard: smr.guard(R::default().peek_all()),
+            guard: smr.guard(hazard::prefix::Be::HAZARD_ROOT),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }
     }
@@ -138,7 +132,7 @@ where
         root: &'g Atomic128<Edge<C>>,
         prefix: R,
     ) -> Option<Self> {
-        let guard = smr.guard(prefix.peek_all());
+        let guard = smr.guard(prefix.hazard());
         Some(Self {
             guard,
             raw: unsafe { crate::raw::cursor::Prefix::new_prefix(root, prefix) }?,

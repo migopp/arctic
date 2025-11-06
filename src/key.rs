@@ -39,10 +39,8 @@ pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
 
     fn peek(&self, len: byte::Len) -> byte::Array;
 
-    #[inline]
-    fn peek_all(&self) -> byte::Array {
-        self.peek(byte::Len::MAX.min_bits(self.bits()))
-    }
+    // FIXME: move under concurrent module
+    fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be>;
 
     fn take(&mut self, len: byte::Len) -> byte::Array;
 

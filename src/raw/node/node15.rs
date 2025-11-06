@@ -29,6 +29,7 @@ impl Header {
 }
 
 impl Default for ribbit::Packed<Header> {
+    #[expect(private_interfaces)]
     fn default() -> Self {
         Header::DEFAULT
     }
