@@ -2,14 +2,14 @@ use ribbit::atomic::Atomic128;
 
 use crate::byte;
 use crate::concurrent::smr;
+use crate::concurrent::value;
+use crate::concurrent::Value;
 use crate::key;
 use crate::raw;
 pub(super) use crate::raw::cursor::path;
 use crate::raw::Edge;
 use crate::raw::Op;
 use crate::stat;
-use crate::value;
-use crate::Value;
 
 /// Tree traversal state.
 pub(super) struct Point<'g, 'l, R, C, V: Value, H> {

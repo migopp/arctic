@@ -21,10 +21,8 @@ pub mod key;
 mod raw;
 pub mod sequential;
 pub mod stat;
-mod value;
 
 pub use key::Key;
-pub use value::Value;
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]

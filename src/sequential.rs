@@ -9,7 +9,8 @@ use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
-use crate::Value;
+// FIXME: replace with sequential trait
+use crate::concurrent::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V: Value> {
@@ -114,7 +115,7 @@ where
 impl<K, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
         self.postorder().for_each(|edge, _| unsafe {
-            edge.deallocate::<V>(stat::Counter::FreeDrop);
+            edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);
         })
     }
 }

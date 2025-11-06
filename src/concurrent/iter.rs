@@ -1,7 +1,7 @@
 use crate::concurrent::cursor;
+use crate::concurrent::Value;
 use crate::iter::Sort;
 use crate::Key;
-use crate::Value;
 
 pub(crate) trait Scan {
     type Input<'l, K>

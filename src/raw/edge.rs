@@ -16,8 +16,6 @@ use crate::raw::node::Node15;
 use crate::raw::node::Node256;
 use crate::raw::node::Node3;
 use crate::stat;
-use crate::value;
-use crate::Value;
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
@@ -131,8 +129,8 @@ impl<C> EdgePacked<C> {
     }
 
     #[inline]
-    pub(crate) fn with_value<V: Value>(self, value: value::Raw<V>) -> Self {
-        self.with_data(u64::from(value))
+    pub(crate) fn with_value(self, value: u64) -> Self {
+        self.with_data(value)
     }
 
     #[inline]
@@ -141,21 +139,27 @@ impl<C> EdgePacked<C> {
     }
 
     #[inline]
-    pub(crate) unsafe fn deallocate<V: Value>(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate<F>(self, deallocate_value: F, counter: stat::Counter)
+    where
+        F: FnOnce(u64),
+    {
         if self.is_null() {
             return;
         }
 
-        unsafe { self.deallocate_unchecked::<V>(counter) }
+        unsafe { self.deallocate_unchecked(deallocate_value, counter) }
     }
 
     #[inline]
-    pub(crate) unsafe fn deallocate_unchecked<V: Value>(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate_unchecked<F>(self, deallocate_value: F, counter: stat::Counter)
+    where
+        F: FnOnce(u64),
+    {
         match self.child() {
             None if cfg!(feature = "validate") => unreachable!(),
             None => unsafe { core::hint::unreachable_unchecked() },
             Some(Child::Node(node)) => node.deallocate_unchecked(counter),
-            Some(Child::Value(value)) => drop(V::from_raw(value)),
+            Some(Child::Value(value)) => deallocate_value(value),
         }
     }
 }

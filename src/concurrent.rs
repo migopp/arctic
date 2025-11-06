@@ -1,6 +1,7 @@
 mod cursor;
 mod iter;
-pub(crate) mod smr;
+mod smr;
+mod value;
 
 use core::sync::atomic::Ordering;
 
@@ -16,10 +17,9 @@ use crate::raw::Edge;
 use crate::raw::Op;
 use crate::sequential;
 use crate::stat;
-use crate::value;
 use crate::Key;
-use crate::Value;
 use iter::Scan;
+pub(crate) use value::Value;
 
 pub struct Map<K, V: Value> {
     smr: smr::Global<V>,
@@ -69,7 +69,7 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = value.into_raw();
+        let value = u64::from(value.into_raw());
         unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
     }
 

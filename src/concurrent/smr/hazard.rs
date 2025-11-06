@@ -8,9 +8,9 @@ use thread_local::ThreadLocal;
 
 use crate::byte;
 use crate::concurrent::smr::membarrier;
+use crate::concurrent::Value;
 use crate::raw::Edge;
 use crate::stat;
-use crate::Value;
 
 const RETIRED_COUNT: usize = 16;
 
@@ -51,7 +51,9 @@ impl<V: Value> Drop for Global<V> {
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(RefCell::get_mut)
-            .for_each(|edge| unsafe { edge.deallocate_unchecked::<V>(stat::Counter::FreeDrop) })
+            .for_each(|edge| unsafe {
+                edge.deallocate_unchecked(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop)
+            })
     }
 }
 
@@ -107,7 +109,12 @@ impl<'g, V: Value> Local<'g, V> {
                 return true;
             }
 
-            unsafe { edge.deallocate_unchecked::<V>(stat::Counter::FreeRetire) };
+            unsafe {
+                edge.deallocate_unchecked(
+                    |value| drop(V::from_raw(value)),
+                    stat::Counter::FreeRetire,
+                )
+            };
             false
         })
     }
