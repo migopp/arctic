@@ -109,13 +109,10 @@ pub(crate) enum Counter {
     Op(Op),
     InsertPessimistic,
     Retire,
-    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     Flush,
     FreeConflict,
-    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     FreeRetire,
     FreeDrop,
-    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     HazardMatch,
 
     ScanInsert,
@@ -126,7 +123,6 @@ pub(crate) enum Counter {
     UnlockFrozen,
 }
 
-#[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
 pub(crate) enum Max {
     RetireCache,
 }
@@ -244,7 +240,6 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
 }
 
 #[inline]
-#[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
 pub(crate) fn max(_max: Max, _value: u64) {
     #[cfg(feature = "stat")]
     if RECORD.load(Ordering::Relaxed) {

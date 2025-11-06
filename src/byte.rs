@@ -67,7 +67,6 @@ impl Array {
     }
 
     #[inline]
-    #[cfg_attr(not(feature = "smr-hazard"), expect(dead_code))]
     pub(crate) fn is_overlapping(self, other: Self) -> bool {
         let len = self.len().min(other.len());
         self.equal_up_to(other, len)

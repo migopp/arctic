@@ -78,17 +78,8 @@
 //! all values with key prefixes underneath its key prefix from
 //! reclamation.
 
-#[cfg(feature = "smr-hazard")]
 mod membarrier;
 
-#[cfg(feature = "smr-hazard")]
 mod hazard;
 
-#[cfg(feature = "smr-hazard")]
 pub(crate) use hazard::{Global, LinearizableGuard, Local, PrefixGuard, TraverseGuard, ValueGuard};
-
-#[cfg(not(feature = "smr-hazard"))]
-mod no_op;
-
-#[cfg(not(feature = "smr-hazard"))]
-pub(crate) use no_op::{Global, Guard, Local};
