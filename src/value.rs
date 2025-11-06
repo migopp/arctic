@@ -10,19 +10,45 @@ pub trait Value {
     where
         Self: 'l;
 
+    type BorrowMut<'l>
+    where
+        Self: 'l;
+
     fn into_raw(self) -> u64;
 
+    /// # Safety
+    ///
+    /// Caller must guarantee that:
+    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
+    /// 2. There are no live borrows from [`Value::borrow_mut_raw`] during lifetime `'l`.
+    /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
     unsafe fn borrow_raw<'l>(raw: u64) -> Self::Borrow<'l>;
 
     /// # Safety
     ///
-    /// Caller must guarantee that `raw` was created by a previous [`Value::into_raw`] call.
+    /// Caller must guarantee that:
+    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
+    /// 2. There are no live borrows from [`Value::borrow_raw`] or [`Value::borrow_mut_raw`] during lifetime `'l`.
+    /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
+    unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l>;
+
+    /// # Safety
+    ///
+    /// Caller must guarantee that:
+    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
+    /// 2. `from_raw` is called exactly once for each [`Value::into_raw`] call.
+    /// 3. There are no live borrows from [`Value::borrow_raw`] when [`Value::from_raw`] is called.
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
 impl<T> Value for Box<T> {
     type Borrow<'l>
         = &'l T
+    where
+        Self: 'l;
+
+    type BorrowMut<'l>
+        = &'l mut T
     where
         Self: 'l;
 
@@ -34,6 +60,18 @@ impl<T> Value for Box<T> {
     #[inline]
     unsafe fn borrow_raw<'l>(raw: u64) -> Self::Borrow<'l> {
         let borrow = (raw as *const T).as_ref();
+
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+
+    #[inline]
+    unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l> {
+        let borrow = (*raw as *mut T).as_mut();
+
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
