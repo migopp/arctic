@@ -35,13 +35,9 @@ impl<C> Clone for Edge<C> {
         *self
     }
 }
-impl<C> Default for Edge<C> {
+impl<C> Default for EdgePacked<C> {
     fn default() -> Self {
-        Self {
-            meta: Meta::default(),
-            data: 0,
-            _compressed: PhantomData,
-        }
+        Edge::DEFAULT
     }
 }
 

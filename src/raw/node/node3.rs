@@ -15,12 +15,23 @@ pub(crate) type Node3<C> = super::Linear<3, Atomic64<Header>, C>;
 const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
 
-#[derive(Copy, Clone, Debug, Default, ribbit::Pack)]
+#[derive(Copy, Clone, Debug, ribbit::Pack)]
 #[ribbit(size = 32, debug)]
 pub(crate) struct Header {
     keys: u24,
     len: u4,
     frozen: bool,
+}
+
+impl Header {
+    const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(u24::new(0), u4::new(0), false);
+}
+
+impl Default for ribbit::Packed<Header> {
+    fn default() -> Self {
+        Header::DEFAULT
+    }
 }
 
 impl<C> linear::Header<C> for Atomic64<Header> {

@@ -17,7 +17,7 @@ const _: () = assert!(core::mem::align_of::<Node256<()>>() == 4096);
 
 impl<C> Default for Node256<C> {
     fn default() -> Self {
-        Self(core::array::from_fn(|_| Atomic128::new(Edge::default())))
+        Self(core::array::from_fn(|_| Atomic128::default()))
     }
 }
 
