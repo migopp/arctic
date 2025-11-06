@@ -3,23 +3,14 @@
 //! **indirect**, and must be encapsulated in a smart pointer type like
 //! [`Box`] or [`std::sync::Arc`].
 
-pub trait Inline: Copy {
-    fn into_raw(self) -> u64;
-
-    /// # Safety
-    ///
-    /// Caller must guarantee that `raw` was created by a previous [`Inline::into_raw`] call.
-    unsafe fn from_raw(raw: u64) -> Self;
-}
-
 pub unsafe trait Value {
     type Borrow<'l>
     where
         Self: 'l;
 
-    type BorrowMut<'l>
-    where
-        Self: 'l;
+    // type BorrowMut<'l>
+    // where
+    //     Self: 'l;
 
     fn into_raw(self) -> u64;
 
@@ -29,15 +20,16 @@ pub unsafe trait Value {
     /// 1. `raw` was created by a previous [`Value::into_raw`] call.
     /// 2. There are no live borrows from [`Value::borrow_mut_raw`] during lifetime `'l`.
     /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
-    unsafe fn borrow_raw<'l>(raw: u64) -> Self::Borrow<'l>;
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>;
 
-    /// # Safety
-    ///
-    /// Caller must guarantee that:
-    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
-    /// 2. There are no live borrows from [`Value::borrow_raw`] or [`Value::borrow_mut_raw`] during lifetime `'l`.
-    /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
-    unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l>;
+    // FIXME
+    // /// # Safety
+    // ///
+    // /// Caller must guarantee that:
+    // /// 1. `raw` was created by a previous [`Value::into_raw`] call.
+    // /// 2. There are no live borrows from [`Value::borrow_raw`] or [`Value::borrow_mut_raw`] during lifetime `'l`.
+    // /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
+    // unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l>;
 
     /// # Safety
     ///
@@ -48,46 +40,34 @@ pub unsafe trait Value {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-unsafe impl<T> Value for Box<T> {
+unsafe impl<T> Value for T
+where
+    T: crate::concurrent::Value,
+{
     type Borrow<'l>
-        = &'l T
+        = <T as crate::concurrent::Value>::Borrow<'l>
     where
         Self: 'l;
 
-    type BorrowMut<'l>
-        = &'l mut T
-    where
-        Self: 'l;
+    // FIXME
+    // type BorrowMut<'l>
+    // where
+    //     Self: 'l;
 
-    #[inline]
     fn into_raw(self) -> u64 {
-        Box::into_raw(self) as u64
+        <T as crate::concurrent::Value>::into_raw(self)
     }
 
-    #[inline]
-    unsafe fn borrow_raw<'l>(raw: u64) -> Self::Borrow<'l> {
-        let borrow = (raw as *const T).as_ref();
-
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+        <T as crate::concurrent::Value>::borrow_from_raw(raw)
     }
 
-    #[inline]
-    unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l> {
-        let borrow = (*raw as *mut T).as_mut();
+    // FIXME
+    // unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l> {
+    //     todo!()
+    // }
 
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
-    }
-
-    #[inline]
     unsafe fn from_raw(raw: u64) -> Self {
-        Box::from_raw(raw as *mut T)
+        <T as crate::concurrent::Value>::from_raw(raw)
     }
 }

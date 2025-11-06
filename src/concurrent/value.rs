@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use crate::concurrent::smr;
 
 pub unsafe trait Value: Sized {
@@ -48,11 +46,11 @@ pub unsafe trait Value: Sized {
 
     unsafe fn from_raw(raw: u64) -> Self;
 
-    fn into_raw(self) -> Raw<Self>;
+    fn into_raw(self) -> u64;
 
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>;
 
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self>
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l;
 }
@@ -113,22 +111,16 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    fn into_raw(self) -> Raw<Self> {
-        Raw {
-            _value: PhantomData,
-            raw: Box::into_raw(self) as u64,
-        }
+    fn into_raw(self) -> u64 {
+        Box::into_raw(self) as u64
     }
 
     #[inline]
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self>
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l,
     {
-        Raw {
-            _value: PhantomData,
-            raw: borrow as *const T as u64,
-        }
+        borrow as *const T as u64
     }
 
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
@@ -151,24 +143,6 @@ unsafe impl<T> Value for Box<T> {
         raw: u64,
     ) -> Self::Borrow<'l> {
         todo!()
-    }
-}
-
-pub(crate) struct Raw<V> {
-    _value: PhantomData<V>,
-    raw: u64,
-}
-
-impl<V> Copy for Raw<V> {}
-impl<V> Clone for Raw<V> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<V> From<Raw<V>> for u64 {
-    fn from(raw: Raw<V>) -> Self {
-        raw.raw
     }
 }
 
@@ -266,11 +240,8 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                fn into_raw(self) -> Raw<Self> {
-                    Raw {
-                        _value: PhantomData,
-                        raw: self as u64,
-                    }
+                fn into_raw(self) -> u64 {
+                    self as u64
                 }
 
                 #[inline]
@@ -282,8 +253,8 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> Raw<Self> where Self: 'l {
-                    borrow.into_raw()
+                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 where Self: 'l {
+                    borrow as u64
                 }
 
                 #[inline]

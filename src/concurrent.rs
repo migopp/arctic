@@ -19,7 +19,7 @@ use crate::sequential;
 use crate::stat;
 use crate::Key;
 use iter::Scan;
-pub(crate) use value::Value;
+pub use value::Value;
 
 pub struct Map<K, V: Value> {
     smr: smr::Global<V>,
@@ -188,7 +188,7 @@ where
     fn insert_optimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: value::Raw<V>,
+        value: u64,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
         self.insert_impl::<cursor::path::Discard>(key, value)
     }
@@ -197,7 +197,7 @@ where
     fn insert_pessimistic(
         &mut self,
         key: K::Borrow<'_>,
-        value: value::Raw<V>,
+        value: u64,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
         self.insert_impl::<cursor::path::Retain<_, _>>(key, value)
@@ -208,7 +208,7 @@ where
     fn insert_impl<'k, H>(
         &mut self,
         key: K::Borrow<'k>,
-        value: value::Raw<V>,
+        value: u64,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, K::Read<'k>, ()>,

@@ -2,7 +2,6 @@ use ribbit::atomic::Atomic128;
 
 use crate::byte;
 use crate::concurrent::smr;
-use crate::concurrent::value;
 use crate::concurrent::Value;
 use crate::key;
 use crate::raw;
@@ -65,9 +64,9 @@ where
     #[inline]
     pub(super) fn traverse_or_insert(
         &mut self,
-        value: value::Raw<V>,
+        value: u64,
     ) -> Result<(Op, ribbit::Packed<Edge<C>>, ribbit::Packed<Edge<C>>), ()> {
-        self.raw.traverse_or_insert(u64::from(value))
+        self.raw.traverse_or_insert(value)
     }
 
     #[cold]

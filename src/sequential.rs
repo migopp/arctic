@@ -11,8 +11,7 @@ use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
-// FIXME: replace with sequential trait
-use crate::concurrent::Value;
+use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V: Value> {
