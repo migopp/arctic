@@ -85,7 +85,7 @@ mod membarrier;
 mod hazard;
 
 #[cfg(feature = "smr-hazard")]
-pub(crate) use hazard::{Global, Local, PrefixGuard, TraverseGuard, ValueGuard};
+pub(crate) use hazard::{Global, LinearizableGuard, Local, PrefixGuard, TraverseGuard, ValueGuard};
 
 #[cfg(not(feature = "smr-hazard"))]
 mod no_op;

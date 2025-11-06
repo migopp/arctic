@@ -13,6 +13,11 @@ pub unsafe trait Value: Sized {
         Self: 'g + 'l,
         'g: 'l;
 
+    type LinearizableGuard<'g, 'l>: Sized
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
     type Borrow<'l>: Copy
     where
         Self: 'l;
@@ -31,6 +36,15 @@ pub unsafe trait Value: Sized {
         smr: smr::TraverseGuard<'g, 'l, Self>,
         raw: u64,
     ) -> Self::SharedGuard<'g, 'l>;
+
+    unsafe fn downgrade_guard<'g, 'l>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
+    ) -> Self::LinearizableGuard<'g, 'l>;
+
+    unsafe fn guard_linearizable<'g, 'l>(
+        smr: &Self::LinearizableGuard<'g, 'l>,
+        raw: u64,
+    ) -> Self::Borrow<'l>;
 
     unsafe fn from_raw(raw: u64) -> Self;
 
@@ -52,6 +66,12 @@ unsafe impl<T> Value for Box<T> {
 
     type SharedGuard<'g, 'l>
         = smr::ValueGuard<'g, 'l, false, Self>
+    where
+        Self: 'g + 'l,
+        'g: 'l;
+
+    type LinearizableGuard<'g, 'l>
+        = smr::LinearizableGuard<'g, 'l, Self>
     where
         Self: 'g + 'l,
         'g: 'l;
@@ -118,6 +138,19 @@ unsafe impl<T> Value for Box<T> {
         } else {
             unsafe { borrow.unwrap_unchecked() }
         }
+    }
+
+    unsafe fn downgrade_guard<'g, 'l>(
+        smr: smr::TraverseGuard<'g, 'l, Self>,
+    ) -> Self::LinearizableGuard<'g, 'l> {
+        todo!()
+    }
+
+    unsafe fn guard_linearizable<'g, 'l>(
+        smr: &Self::LinearizableGuard<'g, 'l>,
+        raw: u64,
+    ) -> Self::Borrow<'l> {
+        todo!()
     }
 }
 
@@ -210,7 +243,12 @@ macro_rules! impl_trivial {
                 where
                     'g: 'l;
 
-                type Borrow<'g> = Self;
+                type LinearizableGuard<'g, 'l>
+                    = ()
+                where
+                    'g: 'l;
+
+                type Borrow<'l> = Self;
 
                 #[inline]
                 unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, raw: u64) -> Self {
@@ -250,6 +288,18 @@ macro_rules! impl_trivial {
 
                 #[inline]
                 unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+                    raw as $ty
+                }
+
+                unsafe fn downgrade_guard<'g, 'l>(
+                    _smr: smr::TraverseGuard<'g, 'l, Self>,
+                ) -> Self::LinearizableGuard<'g, 'l> {
+                }
+
+                unsafe fn guard_linearizable<'g, 'l>(
+                    (): &(),
+                    raw: u64,
+                ) -> Self::Borrow<'l> {
                     raw as $ty
                 }
             }

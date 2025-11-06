@@ -397,7 +397,7 @@ where
     {
         match Self::scan_optimistic::<S, O>(buffer, &cursor, arg, limit) {
             Ok(()) => Some(LinearizableGuard {
-                guard: cursor.into_guard(),
+                guard: unsafe { V::downgrade_guard(cursor.into_guard()) },
                 buffer,
             }),
             Err(()) => Self::scan_pessimistic::<S, O>(buffer, cursor, arg),
@@ -494,7 +494,7 @@ where
         Self::unlock_prefix(&mut cursor);
 
         Some(LinearizableGuard {
-            guard: cursor.into_guard(),
+            guard: unsafe { V::downgrade_guard(cursor.into_guard()) },
             buffer,
         })
     }
@@ -584,15 +584,14 @@ where
     }
 }
 
-pub struct LinearizableGuard<'g, 'l, K: Key, V: Value> {
-    // FIXME: don't need to hold guard for trivial values
-    guard: smr::TraverseGuard<'g, 'l, V>,
+pub struct LinearizableGuard<'g: 'l, 'l, K: Key, V: Value + 'g> {
+    guard: V::LinearizableGuard<'g, 'l>,
     buffer: &'l mut Vec<(K::Write, u64)>,
 }
 
 impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
     #[inline]
-    pub fn drain(&mut self) -> LinearizableDrain<'g, '_, K, V> {
+    pub fn drain(&mut self) -> LinearizableDrain<'g, 'l, '_, K, V> {
         LinearizableDrain {
             guard: &self.guard,
             iter: self.buffer.drain(..),
@@ -600,22 +599,23 @@ impl<'g, 'l, K: Key, V: Value> LinearizableGuard<'g, 'l, K, V> {
     }
 }
 
-pub struct LinearizableDrain<'g, 'l, K: Key, V: Value> {
-    guard: &'l smr::TraverseGuard<'g, 'l, V>,
-    iter: std::vec::Drain<'l, (K::Write, u64)>,
+pub struct LinearizableDrain<'g: 'l, 'l, 'a, K: Key, V: Value + 'g> {
+    guard: &'a V::LinearizableGuard<'g, 'l>,
+    iter: std::vec::Drain<'a, (K::Write, u64)>,
 }
 
-impl<'g, 'l, K, V> Iterator for LinearizableDrain<'g, 'l, K, V>
+impl<'g, 'l, 'a, K, V> Iterator for LinearizableDrain<'g, 'l, 'a, K, V>
 where
     K: Key,
-    V: Value,
+    V: Value + 'g,
+    'g: 'l,
 {
     type Item = (K, V::Borrow<'l>);
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(key, value)| {
             // FIXME: take ownership of key directly
             (unsafe { K::from_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
+                V::guard_linearizable(self.guard, value)
             })
         })
     }

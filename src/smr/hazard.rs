@@ -155,11 +155,25 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     pub(crate) fn guard_prefix(self) -> PrefixGuard<'g, 'l, V> {
         PrefixGuard(self)
     }
+
+    #[inline]
+    pub(crate) fn guard_linearizable(self) -> LinearizableGuard<'g, 'l, V> {
+        LinearizableGuard(self)
+    }
 }
 
 pub struct PrefixGuard<'g, 'l, V: Value>(TraverseGuard<'g, 'l, V>);
 
 impl<'g, 'l, V: Value> core::ops::Deref for PrefixGuard<'g, 'l, V> {
+    type Target = TraverseGuard<'g, 'l, V>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub struct LinearizableGuard<'g, 'l, V: Value>(TraverseGuard<'g, 'l, V>);
+
+impl<'g, 'l, V: Value> core::ops::Deref for LinearizableGuard<'g, 'l, V> {
     type Target = TraverseGuard<'g, 'l, V>;
     fn deref(&self) -> &Self::Target {
         &self.0
