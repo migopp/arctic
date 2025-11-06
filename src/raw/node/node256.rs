@@ -69,9 +69,7 @@ impl<C> Node256<C> {
 
 impl<C> Debug for Node256<C> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Node256")
-            .field("edges", &edge::DebugSlice(&self.0))
-            .finish()
+        f.debug_struct("Node256").field("edges", &self.0).finish()
     }
 }
 

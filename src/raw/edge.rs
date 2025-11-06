@@ -370,17 +370,3 @@ impl<C> Debug for NodePacked<C> {
             .finish()
     }
 }
-
-pub(crate) struct DebugSlice<'g, C>(pub(crate) &'g [Atomic128<Edge<C>>]);
-
-impl<C> Debug for DebugSlice<'_, C> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list()
-            .entries(
-                self.0
-                    .iter()
-                    .map(|edge| edge.load_packed(Ordering::Relaxed)),
-            )
-            .finish()
-    }
-}

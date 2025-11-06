@@ -16,7 +16,7 @@ const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
 
 #[derive(Copy, Clone, Debug, Default, ribbit::Pack)]
-#[ribbit(size = 32)]
+#[ribbit(size = 32, debug)]
 pub(crate) struct Header {
     keys: u24,
     len: u4,

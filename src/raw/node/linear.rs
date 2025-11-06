@@ -146,7 +146,7 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
 
         f.debug_struct(name)
             .field("header", &self.header)
-            .field("edges", &edge::DebugSlice(&self.edges))
+            .field("edges", &self.edges)
             .finish()
     }
 }
