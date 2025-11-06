@@ -1,6 +1,6 @@
 //! This module contains the types defining the structure of the tree
 //! ([`crate::raw::edge`] and [`crate::raw::node`]) and (b) the core
-//! iteration (TODO) and traversal ([`crate::raw::cursor`]) logic.
+//! iteration ([`crate::raw::iter`]) and traversal ([`crate::raw::cursor`]) logic.
 //! It is "raw" with respect to safe memory reclamation ([`crate::smr`])
 //! and value types ([`crate::value`]): users of this module must (a) ensure
 //! that memory is not reclaimed while iterating or traversing the tree,
@@ -12,6 +12,7 @@
 
 pub(crate) mod cursor;
 pub(crate) mod edge;
+pub(crate) mod iter;
 pub(crate) mod node;
 
 pub(crate) use edge::Edge;

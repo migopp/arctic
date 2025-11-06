@@ -636,7 +636,9 @@ where
     pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
         PrefixIter {
             guard: &self.guard,
-            iter: unsafe { iter::PrefixIter::new_unchecked(self.root, self.key.clone()) },
+            iter: unsafe {
+                crate::raw::iter::PrefixIter::new_unchecked(self.root, self.key.clone())
+            },
         }
     }
 
@@ -644,14 +646,14 @@ where
     pub fn values<S: Sort>(&self) -> PrefixValueIter<'g, '_, V, S> {
         PrefixValueIter {
             guard: &self.guard,
-            iter: unsafe { iter::PrefixIter::new_unchecked(self.root, key::Ignore) },
+            iter: unsafe { crate::raw::iter::PrefixIter::new_unchecked(self.root, key::Ignore) },
         }
     }
 }
 
 pub struct PrefixValueIter<'g, 'l, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::PrefixIter<'g, 'l, key::Ignore, (), S>,
+    iter: crate::raw::iter::PrefixIter<'g, 'l, key::Ignore, (), S>,
 }
 
 impl<'g, 'l, V, S> PrefixValueIter<'g, 'l, V, S>
@@ -681,7 +683,7 @@ where
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::PrefixIter<'g, 'l, K::Write, (), S>,
+    iter: crate::raw::iter::PrefixIter<'g, 'l, K::Write, (), S>,
 }
 
 impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
@@ -741,7 +743,7 @@ where
         RangeIter {
             guard: &self.prefix.guard,
             iter: unsafe {
-                iter::RangeIter::new_unchecked(
+                crate::raw::iter::RangeIter::new_unchecked(
                     self.prefix.root,
                     self.prefix.key.clone(),
                     K::reborrow(self.min),
@@ -754,7 +756,7 @@ where
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
     guard: &'l smr::PrefixGuard<'g, 'l, V>,
-    iter: iter::RangeIter<'g, 'l, K, (), S>,
+    iter: crate::raw::iter::RangeIter<'g, 'l, K, (), S>,
 }
 
 impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>

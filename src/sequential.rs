@@ -3,9 +3,9 @@ use core::marker::PhantomData;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::PostorderIter;
-use crate::iter::PrefixIter;
 use crate::iter::Sort;
+use crate::raw::iter::PostorderIter;
+use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;

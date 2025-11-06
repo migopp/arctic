@@ -1,14 +1,6 @@
-pub(crate) mod postorder;
-mod prefix;
-mod range;
-mod sort;
-
-pub(crate) use postorder::PostorderIter;
-pub(crate) use prefix::PrefixIter;
-pub(crate) use range::RangeIter;
-pub use sort::Sort;
-pub use sort::Sorted;
-pub use sort::Unsorted;
+pub use crate::raw::iter::sort::Sort;
+pub use crate::raw::iter::sort::Sorted;
+pub use crate::raw::iter::sort::Unsorted;
 
 use crate::cursor;
 use crate::Key;
@@ -63,7 +55,10 @@ impl Scan for Prefix {
         F: FnMut(&K::Write, u64),
     {
         unsafe {
-            PrefixIter::<_, _, S>::new_unchecked(cursor.edge(), K::Write::from(cursor.prefix()))
+            crate::raw::iter::PrefixIter::<_, _, S>::new_unchecked(
+                cursor.edge(),
+                K::Write::from(cursor.prefix()),
+            )
         }
         .for_each(apply)
     }
@@ -95,7 +90,7 @@ impl Scan for Range {
         F: FnMut(&K::Write, u64),
     {
         unsafe {
-            RangeIter::<K, _, S>::new_unchecked(
+            crate::raw::iter::RangeIter::<K, _, S>::new_unchecked(
                 cursor.edge(),
                 K::Write::from(cursor.prefix()),
                 *min,
