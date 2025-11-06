@@ -165,16 +165,10 @@ impl<U: Uint> key::Read for Buffer<U> {
 }
 
 impl<U: Uint> key::Write for Buffer<U> {
-    type Len = usize;
-
     #[inline]
-    fn bits(&self) -> usize {
-        self.bits as usize
-    }
-
-    #[inline]
-    fn extend(&mut self, array: byte::Array) {
+    fn extend(&mut self, bits: usize, array: byte::Array) {
         validate!(self.bits + array.len().bits() <= U::BITS);
+        validate_eq!(bits, self.bits as usize);
 
         if array.len().bits() == 0 {
             return;
@@ -185,9 +179,10 @@ impl<U: Uint> key::Write for Buffer<U> {
     }
 
     #[inline]
-    unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
+    unsafe fn extend_nonempty_unchecked(&mut self, bits: usize, array: byte::Array) {
         validate!(self.bits + array.len().bits() <= U::BITS);
         validate!(self.bits >= 8);
+        validate_eq!(bits, self.bits as usize);
 
         if array.len().bits() == 0 {
             return;
@@ -198,8 +193,9 @@ impl<U: Uint> key::Write for Buffer<U> {
     }
 
     #[inline]
-    fn push(&mut self, byte: u8) {
+    fn push(&mut self, bits: usize, byte: u8) {
         validate!(self.bits <= U::BITS - 8);
+        validate_eq!(bits, self.bits as usize);
 
         self.buffer |= U::from_u8(byte).shr(self.bits);
         self.bits += 8;

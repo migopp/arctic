@@ -232,20 +232,15 @@ unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
 pub struct Writer(pub(super) Vec<u8>);
 
 impl key::Write for Writer {
-    type Len = usize;
-
     #[inline]
-    fn bits(&self) -> usize {
-        self.0.len() << 3
-    }
-
-    #[inline]
-    fn extend(&mut self, array: byte::Array) {
+    fn extend(&mut self, bits: usize, array: byte::Array) {
+        validate_eq!(bits, self.0.len() << 3);
         self.0.extend(array)
     }
 
     #[inline]
-    fn push(&mut self, byte: u8) {
+    fn push(&mut self, bits: usize, byte: u8) {
+        validate_eq!(bits, self.0.len() << 3);
         self.0.push(byte)
     }
 

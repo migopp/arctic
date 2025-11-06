@@ -15,7 +15,7 @@ pub(crate) enum PrefixIter<'g, 'l, W: key::Write, C: 'g, S: Sort> {
     },
     Node {
         key: W,
-        frontier: Vec<(W::Len, S::PrefixIter<'g, C>)>,
+        frontier: Vec<(usize, S::PrefixIter<'g, C>)>,
         _cursor: PhantomData<&'l ()>,
     },
 }
@@ -27,22 +27,34 @@ where
     S: Sort,
 {
     #[inline]
-    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, mut key: W) -> Self {
-        let edge = root.load_packed(Ordering::Acquire);
+    pub(crate) unsafe fn new_unchecked<R: key::Read>(
+        root: &'g Atomic128<Edge<C>>,
+        prefix: R,
+    ) -> Self
+    where
+        W: From<R>,
+    {
+        let bits = prefix.bits();
+        let mut writer = W::from(prefix);
 
-        key.extend(edge.meta().key());
+        let edge = root.load_packed(Ordering::Acquire);
+        let key = edge.meta().key();
+        writer.extend(bits, key);
 
         match edge.child() {
-            None => Self::Root { key, next: None },
+            None => Self::Root {
+                key: writer,
+                next: None,
+            },
             Some(edge::Child::Value(value)) => Self::Root {
-                key,
+                key: writer,
                 next: Some(value),
             },
             Some(edge::Child::Node(node)) => {
                 let node = unsafe { node.into_ref_unchecked() };
                 Self::Node {
-                    frontier: vec![(key.bits(), S::prefix(node))],
-                    key,
+                    frontier: vec![(bits + key.len().bits() as usize, S::prefix(node))],
+                    key: writer,
                     _cursor: PhantomData,
                 }
             }
@@ -80,7 +92,8 @@ where
         };
 
         'vertical: loop {
-            let (len, iter) = frontier.last_mut()?;
+            let (bits, iter) = frontier.last_mut()?;
+            let bits = *bits;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -96,11 +109,11 @@ where
 
                 let meta = edge.meta();
 
-                key.truncate(*len);
-                key.push(byte);
+                key.truncate(bits);
+                key.push(bits, byte);
                 unsafe {
                     // SAFETY: we pushed to `key` above
-                    key.extend_nonempty_unchecked(meta.key());
+                    key.extend_nonempty_unchecked(bits + 8, meta.key());
                 }
 
                 match child {
@@ -113,7 +126,9 @@ where
                     }
                     edge::Child::Node(node) => {
                         let node = unsafe { node.into_ref_unchecked() };
-                        frontier.push((key.bits(), unsafe { S::prefix(node) }));
+                        frontier.push((bits + 8 + meta.key().len().bits() as usize, unsafe {
+                            S::prefix(node)
+                        }));
                         continue 'vertical;
                     }
                 }

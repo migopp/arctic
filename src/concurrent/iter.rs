@@ -52,10 +52,7 @@ impl Scan for Prefix {
         F: FnMut(&K::Write, u64),
     {
         unsafe {
-            crate::raw::iter::PrefixIter::<_, _, S>::new_unchecked(
-                cursor.edge(),
-                K::Write::from(cursor.prefix()),
-            )
+            crate::raw::iter::PrefixIter::<_, _, S>::new_unchecked(cursor.edge(), cursor.prefix())
         }
         .for_each(apply)
     }
@@ -89,7 +86,7 @@ impl Scan for Range {
         unsafe {
             crate::raw::iter::RangeIter::<K, _, S>::new_unchecked(
                 cursor.edge(),
-                K::Write::from(cursor.prefix()),
+                cursor.prefix(),
                 *min,
                 *max,
             )

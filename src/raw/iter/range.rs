@@ -23,7 +23,7 @@ where
 {
     pub(crate) unsafe fn new_unchecked(
         root: &'g Atomic128<Edge<C>>,
-        mut key: K::Write,
+        prefix: K::Read<'l>,
         mut min: K::Read<'l>,
         mut max: K::Read<'l>,
     ) -> Self {
@@ -34,46 +34,54 @@ where
         }
 
         let edge = root.load_packed(Ordering::Acquire);
+        let bits = prefix.bits();
+        let key = edge.meta().key();
+        let mut writer = K::Write::from(prefix);
 
-        key.extend(edge.meta().key());
+        writer.extend(bits, edge.meta().key());
 
         match edge.child() {
-            None => Self::Root { key, next: None },
+            None => Self::Root {
+                key: writer,
+                next: None,
+            },
             Some(edge::Child::Value(value)) => {
-                let reader = K::Read::from(&key);
+                let reader = K::Read::from(&writer);
                 if reader < K::reborrow(min) || reader > K::reborrow(max) {
-                    return Self::Root { key, next: None };
+                    return Self::Root {
+                        key: writer,
+                        next: None,
+                    };
                 }
 
                 Self::Root {
-                    key,
+                    key: writer,
                     next: Some(value),
                 }
             }
             Some(edge::Child::Node(node)) => {
+                let bits = bits + key.len().bits() as usize;
                 let node = unsafe { node.into_ref_unchecked() };
 
-                let reader = K::Read::from(&key);
+                let reader = K::Read::from(&writer);
                 validate!(matches!(
-                    S::compare(reader, K::reborrow(min.slice(key.bits()))),
+                    S::compare(reader, K::reborrow(min.slice(bits))),
                     cmp::Ordering::Equal | cmp::Ordering::Greater
                 ));
                 validate!(matches!(
-                    S::compare(reader, K::reborrow(max.slice(key.bits()))),
+                    S::compare(reader, K::reborrow(max.slice(bits))),
                     cmp::Ordering::Equal | cmp::Ordering::Less
                 ));
 
-                let first =
-                    (reader == K::reborrow(min.slice(key.bits()))).then(|| min.get(key.bits()));
-                let last =
-                    (reader == K::reborrow(max.slice(key.bits()))).then(|| max.get(key.bits()));
+                let first = (reader == K::reborrow(min.slice(bits))).then(|| min.get(bits));
+                let last = (reader == K::reborrow(max.slice(bits))).then(|| max.get(bits));
 
                 let mut stack = Vec::with_capacity(7);
-                stack.push((key.bits(), first, last, S::range(node, first, last)));
+                stack.push((bits, first, last, S::range(node, first, last)));
 
                 Self::Node(NodeIter {
                     stack,
-                    key,
+                    key: writer,
                     min,
                     max,
                     _sort: PhantomData,
@@ -137,7 +145,8 @@ where
         mut apply: F,
     ) -> Option<(&K::Write, u64)> {
         'vertical: loop {
-            let (len, first, last, iter) = self.stack.last_mut()?;
+            let (bits, first, last, iter) = self.stack.last_mut()?;
+            let bits = *bits;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -151,12 +160,12 @@ where
                 };
 
                 let meta = edge.meta();
-                self.key.truncate(*len);
-                self.key.push(byte);
+                self.key.truncate(bits);
+                self.key.push(bits, byte);
 
                 unsafe {
                     // SAFETY: we just pushed `byte` onto `key`
-                    self.key.extend_nonempty_unchecked(meta.key());
+                    self.key.extend_nonempty_unchecked(bits + 8, meta.key());
                 }
 
                 let check_first = Some(byte) == *first;
@@ -174,9 +183,12 @@ where
                         }
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
-                            self.stack.push((self.key.bits(), None, None, unsafe {
-                                S::range(node, None, None)
-                            }));
+                            self.stack.push((
+                                bits + 8 + meta.key().len().bits() as usize,
+                                None,
+                                None,
+                                unsafe { S::range(node, None, None) },
+                            ));
                             continue 'vertical;
                         }
                     }
@@ -205,10 +217,10 @@ where
                         let first = if check_first {
                             match S::compare(
                                 K::Read::from(&self.key),
-                                K::reborrow(self.min.slice(self.key.bits())),
+                                K::reborrow(self.min.slice(bits)),
                             ) {
                                 cmp::Ordering::Less => continue 'horizontal,
-                                cmp::Ordering::Equal => Some(self.min.get(self.key.bits())),
+                                cmp::Ordering::Equal => Some(self.min.get(bits)),
                                 cmp::Ordering::Greater => None,
                             }
                         } else {
@@ -218,10 +230,10 @@ where
                         let last = if check_last {
                             match S::compare(
                                 K::Read::from(&self.key),
-                                K::reborrow(self.max.slice(self.key.bits())),
+                                K::reborrow(self.max.slice(bits)),
                             ) {
                                 cmp::Ordering::Less => None,
-                                cmp::Ordering::Equal => Some(self.max.get(self.key.bits())),
+                                cmp::Ordering::Equal => Some(self.max.get(bits)),
                                 cmp::Ordering::Greater => {
                                     self.stack.clear();
                                     return None;
@@ -232,9 +244,12 @@ where
                         };
 
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack.push((self.key.bits(), first, last, unsafe {
-                            S::range(node, first, last)
-                        }));
+                        self.stack.push((
+                            bits + 8 + meta.key().len().bits() as usize,
+                            first,
+                            last,
+                            unsafe { S::range(node, first, last) },
+                        ));
                         continue 'vertical;
                     }
                 }

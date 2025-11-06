@@ -10,7 +10,6 @@ use polonius_the_crab::polonius_return;
 use ribbit::atomic::Atomic128;
 
 use crate::iter::Sort;
-use crate::key;
 use crate::key::Read as _;
 use crate::raw::edge;
 use crate::raw::Edge;
@@ -69,7 +68,7 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
-        let value = u64::from(value.into_raw());
+        let value = value.into_raw();
         unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
     }
 
@@ -275,15 +274,15 @@ where
 
         PrefixGuard {
             root: cursor.edge(),
-            key: K::Write::from(K::Read::default()),
+            key: K::Read::default(),
             guard: cursor.into_guard().guard_prefix(),
         }
     }
 
-    pub fn prefix<'k>(
-        &mut self,
-        prefix: impl Into<K::Read<'k>>,
-    ) -> Option<PrefixGuard<'g, '_, K, V>> {
+    pub fn prefix<'l>(
+        &'l mut self,
+        prefix: impl Into<K::Read<'l>>,
+    ) -> Option<PrefixGuard<'g, 'l, K, V>> {
         let prefix = prefix.into();
 
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
@@ -294,7 +293,7 @@ where
 
         Some(PrefixGuard {
             root: cursor.edge(),
-            key: K::Write::from(cursor.prefix()),
+            key: K::reborrow(cursor.prefix()),
             guard: cursor.into_guard().guard_prefix(),
         })
     }
@@ -625,7 +624,7 @@ where
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<()>>,
-    key: K::Write,
+    key: K::Read<'l>,
 }
 
 impl<'g, 'l, K, V> PrefixGuard<'g, 'l, K, V>
@@ -637,48 +636,8 @@ where
     pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
         PrefixIter {
             guard: &self.guard,
-            iter: unsafe {
-                crate::raw::iter::PrefixIter::new_unchecked(self.root, self.key.clone())
-            },
+            iter: unsafe { crate::raw::iter::PrefixIter::new_unchecked(self.root, self.key) },
         }
-    }
-
-    #[inline]
-    pub fn values<S: Sort>(&self) -> PrefixValueIter<'g, '_, V, S> {
-        PrefixValueIter {
-            guard: &self.guard,
-            iter: unsafe { crate::raw::iter::PrefixIter::new_unchecked(self.root, key::Ignore) },
-        }
-    }
-}
-
-pub struct PrefixValueIter<'g, 'l, V: Value, S: crate::iter::Sort> {
-    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::PrefixIter<'g, 'l, key::Ignore, (), S>,
-}
-
-impl<'g, 'l, V, S> PrefixValueIter<'g, 'l, V, S>
-where
-    V: Value,
-    S: crate::iter::Sort,
-{
-    #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'l>)>(self, mut apply: F) {
-        self.iter
-            .for_each(|key::Ignore, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
-    }
-}
-
-impl<'g, 'l, V, S> Iterator for PrefixValueIter<'g, 'l, V, S>
-where
-    V: Value,
-    S: crate::iter::Sort,
-{
-    type Item = V::Borrow<'l>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .lend()
-            .map(|(key::Ignore, value)| unsafe { V::guard_borrow(self.guard, value) })
     }
 }
 
@@ -746,7 +705,7 @@ where
             iter: unsafe {
                 crate::raw::iter::RangeIter::new_unchecked(
                     self.prefix.root,
-                    self.prefix.key.clone(),
+                    K::reborrow(self.prefix.key),
                     K::reborrow(self.min),
                     K::reborrow(self.max),
                 )

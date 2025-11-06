@@ -70,7 +70,7 @@ impl<K: Key, V: Value> Map<K, V> {
     pub fn iter<S: Sort>(&self) -> Iter<'_, K, V, S> {
         Iter {
             _value: PhantomData,
-            iter: unsafe { PrefixIter::new_unchecked(&self.root, K::Write::default()) },
+            iter: unsafe { PrefixIter::new_unchecked(&self.root, K::Read::default()) },
         }
     }
 }

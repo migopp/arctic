@@ -13,7 +13,7 @@ pub trait Key: 'static {
     type Read<'k>: Read + From<Self::Borrow<'k>> + From<&'k Self::Write>;
 
     #[allow(private_bounds)]
-    type Write: Write<Len = usize> + for<'k> From<Self::Read<'k>>;
+    type Write: Write + for<'k> From<Self::Read<'k>>;
 
     /// HACK: work around invariant lifetime for generic associated traits
     /// https://users.rust-lang.org/t/expressing-the-covariance-of-gats/65664/4
@@ -51,39 +51,31 @@ pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
 }
 
 pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
-    type Len: Copy;
-
-    fn bits(&self) -> Self::Len;
-    fn extend(&mut self, array: byte::Array);
+    fn extend(&mut self, bits: usize, array: byte::Array);
 
     /// # SAFETY
     ///
     /// Caller must guarantee `self.bits() > 0`.
-    unsafe fn extend_nonempty_unchecked(&mut self, array: byte::Array) {
-        self.extend(array)
+    unsafe fn extend_nonempty_unchecked(&mut self, bits: usize, array: byte::Array) {
+        self.extend(bits, array)
     }
 
-    fn push(&mut self, byte: u8);
-    fn truncate(&mut self, bits: Self::Len);
+    fn push(&mut self, bits: usize, byte: u8);
+    fn truncate(&mut self, bits: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ignore;
 
 impl Write for Ignore {
-    type Len = ();
+    #[inline]
+    fn extend(&mut self, _bits: usize, _array: byte::Array) {}
 
     #[inline]
-    fn bits(&self) -> Self::Len {}
+    fn push(&mut self, _bits: usize, _byte: u8) {}
 
     #[inline]
-    fn extend(&mut self, _array: byte::Array) {}
-
-    #[inline]
-    fn push(&mut self, _byte: u8) {}
-
-    #[inline]
-    fn truncate(&mut self, (): Self::Len) {}
+    fn truncate(&mut self, _bits: usize) {}
 }
 
 macro_rules! impl_unsigned_int {
