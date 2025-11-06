@@ -12,7 +12,7 @@ use crate::value;
 use crate::Value;
 
 /// Tree traversal state.
-pub(crate) struct Point<'g, 'l, R, C, V: Value, H> {
+pub(super) struct Point<'g, 'l, R, C, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: smr::TraverseGuard<'g, 'l, V>,
 
@@ -26,7 +26,7 @@ where
     H: path::History<'g, R, C>,
 {
     #[inline]
-    pub(crate) fn new(
+    pub(super) fn new(
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         key: R,
@@ -38,12 +38,12 @@ where
     }
 
     #[inline]
-    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<C>> {
+    pub(super) fn edge(&self) -> &'g Atomic128<Edge<C>> {
         self.raw.edge()
     }
 
     #[inline]
-    pub(crate) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<C>>) {
+    pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<C>>) {
         let prefix = self.guard.prefix();
         let key = prefix.truncate(byte::Len::MAX.min_bits(self.raw.bits()));
         unsafe {
@@ -53,17 +53,17 @@ where
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
         self.guard
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<C>>, ()>> {
+    pub(super) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<C>>, ()>> {
         self.raw.traverse_exact()
     }
 
     #[inline]
-    pub(crate) fn traverse_or_insert(
+    pub(super) fn traverse_or_insert(
         &mut self,
         value: value::Raw<V>,
     ) -> Result<(Op, ribbit::Packed<Edge<C>>, ribbit::Packed<Edge<C>>), ()> {
@@ -71,7 +71,7 @@ where
     }
 
     #[cold]
-    pub(crate) fn freeze(&mut self) -> Result<(), H::PopError> {
+    pub(super) fn freeze(&mut self) -> Result<(), H::PopError> {
         if let Some(edge) = self.raw.freeze()? {
             unsafe {
                 self.retire(edge);
@@ -82,7 +82,7 @@ where
     }
 
     #[cold]
-    pub(crate) fn wait_for_scan(
+    pub(super) fn wait_for_scan(
         &self,
         counter: stat::Counter,
     ) -> Result<ribbit::Packed<Edge<C>>, ()> {
@@ -96,7 +96,7 @@ where
     V: Value,
 {
     #[inline]
-    pub(crate) fn get(
+    pub(super) fn get(
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         key: R,
@@ -111,7 +111,7 @@ where
     }
 }
 
-pub(crate) struct Prefix<'g, 'l, R, C, V: Value, H> {
+pub(super) struct Prefix<'g, 'l, R, C, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: smr::TraverseGuard<'g, 'l, V>,
 
@@ -124,14 +124,14 @@ where
     V: Value,
     H: path::History<'g, R, C>,
 {
-    pub(crate) fn new_root(smr: &'l mut smr::Local<'g, V>, root: &'g Atomic128<Edge<C>>) -> Self {
+    pub(super) fn new_root(smr: &'l mut smr::Local<'g, V>, root: &'g Atomic128<Edge<C>>) -> Self {
         Self {
             guard: smr.guard(R::default().peek_all()),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }
     }
 
-    pub(crate) fn new_prefix(
+    pub(super) fn new_prefix(
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         prefix: R,
@@ -143,7 +143,7 @@ where
         })
     }
 
-    pub(crate) fn new_range(
+    pub(super) fn new_range(
         smr: &'l mut smr::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         min: R,
@@ -153,24 +153,24 @@ where
         Self::new_prefix(smr, root, prefix)
     }
 
-    pub(crate) fn prefix(&self) -> R {
+    pub(super) fn prefix(&self) -> R {
         self.raw.prefix()
     }
 
-    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<C>> {
+    pub(super) fn edge(&self) -> &'g Atomic128<Edge<C>> {
         self.raw.edge()
     }
 
     #[inline]
-    pub(crate) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
         self.guard
     }
 
-    pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(super) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
         self.raw.traverse()
     }
 
-    pub(crate) fn wait_for_scan(
+    pub(super) fn wait_for_scan(
         &mut self,
         counter: stat::Counter,
     ) -> Result<ribbit::Packed<Edge<C>>, ()> {
@@ -180,7 +180,7 @@ where
 
 impl<'g, 'l, R: key::Read, C, V: Value> Prefix<'g, 'l, R, C, V, path::Hybrid<'g, R, C>> {
     #[cold]
-    pub(crate) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(super) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
         self.raw.freeze()
     }
 }
