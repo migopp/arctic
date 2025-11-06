@@ -79,6 +79,7 @@
 //! reclamation.
 
 mod membarrier;
+mod prefix;
 
 use core::cell::RefCell;
 use core::fmt;
