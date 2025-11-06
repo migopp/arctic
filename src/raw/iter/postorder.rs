@@ -14,7 +14,7 @@ pub(crate) struct PostorderIter<'g, C> {
 
 impl<'g, C> PostorderIter<'g, C> {
     #[inline]
-    pub(crate) unsafe fn new(root: &Atomic128<Edge<C>>) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<C>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
         // since this iterator doesn't keep track of the key state,
         // so we can use an arbitrary byte.

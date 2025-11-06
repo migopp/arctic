@@ -12,7 +12,7 @@ impl<'g, I, V> SortedIter<'g, I, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
-    pub(super) unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
+    pub(super) unsafe fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
     }
 }
@@ -85,7 +85,7 @@ impl<'g, I, V> UnsortedIter<'g, I, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee `keys` produces at most `edges.len()` keys.
-    pub(crate) unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
+    pub(crate) unsafe fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
         Self(Iter::new(keys, edges))
     }
 }
@@ -144,7 +144,7 @@ struct Iter<'g, I, V> {
 
 impl<'g, I, V> Iter<'g, I, V> {
     #[inline]
-    unsafe fn new(keys: I, edges: &[Atomic128<Edge<V>>]) -> Self {
+    fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
         Self {
             keys,
             edges: NonNull::from(edges).cast(),
