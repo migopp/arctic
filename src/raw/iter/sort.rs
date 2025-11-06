@@ -6,15 +6,11 @@ use crate::key;
 use crate::raw::node;
 use crate::raw::Edge;
 
-#[expect(private_bounds)]
-pub trait Sort: SortPrivate {}
-
-impl<T: SortPrivate> Sort for T {}
-
 pub struct Sorted;
+
 pub struct Unsorted;
 
-pub(crate) trait SortPrivate {
+pub(crate) trait Sort {
     type PrefixIter<'g, C>: Iterator<Item = (u8, &'g Atomic128<Edge<C>>)>
     where
         C: 'g;
@@ -34,7 +30,7 @@ pub(crate) trait SortPrivate {
     fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering;
 }
 
-impl SortPrivate for Sorted {
+impl Sort for Sorted {
     type PrefixIter<'g, V>
         = node::SortedIter<'g, V>
     where
@@ -65,7 +61,7 @@ impl SortPrivate for Sorted {
     }
 }
 
-impl SortPrivate for core::iter::Rev<Sorted> {
+impl Sort for core::iter::Rev<Sorted> {
     type PrefixIter<'g, V>
         = core::iter::Rev<node::SortedIter<'g, V>>
     where
@@ -97,7 +93,7 @@ impl SortPrivate for core::iter::Rev<Sorted> {
     }
 }
 
-impl SortPrivate for Unsorted {
+impl Sort for Unsorted {
     type PrefixIter<'g, V>
         = node::UnsortedIter<'g, V>
     where

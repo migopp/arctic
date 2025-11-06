@@ -1,10 +1,14 @@
-pub use crate::raw::iter::sort::Sort;
-pub use crate::raw::iter::sort::Sorted;
-pub use crate::raw::iter::sort::Unsorted;
-
 use crate::cursor;
 use crate::Key;
 use crate::Value;
+
+#[expect(private_bounds)]
+pub trait Sort: crate::raw::iter::Sort {}
+
+impl<T: crate::raw::iter::Sort> Sort for T {}
+
+pub use crate::raw::iter::sort::Sorted;
+pub use crate::raw::iter::sort::Unsorted;
 
 pub(crate) trait Scan {
     type Input<'l, K>
