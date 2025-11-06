@@ -20,7 +20,6 @@ pub mod iter;
 pub mod key;
 mod raw;
 pub mod sequential;
-mod smr;
 pub mod stat;
 mod value;
 

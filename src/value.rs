@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use crate::smr;
+use crate::concurrent::smr;
 
 pub unsafe trait Value: Sized {
     type OwnedGuard<'g, 'l>: Sized

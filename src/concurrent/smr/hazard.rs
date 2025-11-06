@@ -7,8 +7,8 @@ use core::sync::atomic::Ordering;
 use thread_local::ThreadLocal;
 
 use crate::byte;
+use crate::concurrent::smr::membarrier;
 use crate::raw::Edge;
-use crate::smr::membarrier;
 use crate::stat;
 use crate::Value;
 

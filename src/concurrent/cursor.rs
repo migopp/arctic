@@ -1,12 +1,12 @@
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
+use crate::concurrent::smr;
 use crate::key;
 use crate::raw;
-pub(crate) use crate::raw::cursor::path;
+pub(super) use crate::raw::cursor::path;
 use crate::raw::Edge;
 use crate::raw::Op;
-use crate::smr;
 use crate::stat;
 use crate::value;
 use crate::Value;

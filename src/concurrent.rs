@@ -1,5 +1,6 @@
 mod cursor;
 mod iter;
+pub(crate) mod smr;
 
 use core::sync::atomic::Ordering;
 
@@ -14,7 +15,6 @@ use crate::raw::edge;
 use crate::raw::Edge;
 use crate::raw::Op;
 use crate::sequential;
-use crate::smr;
 use crate::stat;
 use crate::value;
 use crate::Key;
