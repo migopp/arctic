@@ -1,6 +1,6 @@
 mod cursor;
+mod hazard;
 mod iter;
-mod smr;
 mod value;
 
 use core::sync::atomic::Ordering;
@@ -22,7 +22,7 @@ use iter::Scan;
 pub use value::Value;
 
 pub struct Map<K, V: Value> {
-    smr: smr::Global<V>,
+    smr: hazard::Global<V>,
     raw: sequential::Map<K, V>,
 }
 
@@ -31,7 +31,7 @@ unsafe impl<K, V: Value + Send + Sync> Sync for Map<K, V> {}
 impl<K, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            smr: smr::Global::default(),
+            smr: hazard::Global::default(),
             raw: sequential::Map::<K, V>::default(),
         }
     }
@@ -53,7 +53,7 @@ impl<K, V: Value> Map<K, V> {
 }
 
 pub struct MapRef<'g, K, V: Value> {
-    smr: smr::Local<'g, V>,
+    smr: hazard::Local<'g, V>,
     raw: &'g sequential::Map<K, V>,
 }
 
@@ -623,7 +623,7 @@ where
 }
 
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
-    guard: smr::PrefixGuard<'g, 'l, V>,
+    guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<()>>,
     key: K::Write,
 }
@@ -653,7 +653,7 @@ where
 }
 
 pub struct PrefixValueIter<'g, 'l, V: Value, S: crate::iter::Sort> {
-    guard: &'l smr::PrefixGuard<'g, 'l, V>,
+    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::PrefixIter<'g, 'l, key::Ignore, (), S>,
 }
 
@@ -683,7 +683,7 @@ where
 }
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    guard: &'l smr::PrefixGuard<'g, 'l, V>,
+    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::PrefixIter<'g, 'l, K::Write, (), S>,
 }
 
@@ -756,7 +756,7 @@ where
 }
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
-    guard: &'l smr::PrefixGuard<'g, 'l, V>,
+    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, 'l, K, (), S>,
 }
 

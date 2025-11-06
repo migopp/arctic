@@ -1,7 +1,7 @@
 use ribbit::atomic::Atomic128;
 
 use crate::byte;
-use crate::concurrent::smr;
+use crate::concurrent::hazard;
 use crate::concurrent::Value;
 use crate::key;
 use crate::raw;
@@ -13,7 +13,7 @@ use crate::stat;
 /// Tree traversal state.
 pub(super) struct Point<'g, 'l, R, C, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: smr::TraverseGuard<'g, 'l, V>,
+    guard: hazard::TraverseGuard<'g, 'l, V>,
 
     raw: crate::raw::cursor::Point<'g, R, C, H>,
 }
@@ -26,7 +26,7 @@ where
 {
     #[inline]
     pub(super) fn new(
-        smr: &'l mut smr::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         key: R,
     ) -> Self {
@@ -52,7 +52,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::TraverseGuard<'g, 'l, V> {
         self.guard
     }
 
@@ -96,7 +96,7 @@ where
 {
     #[inline]
     pub(super) fn get(
-        smr: &'l mut smr::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         key: R,
     ) -> Option<V::SharedGuard<'g, 'l>>
@@ -112,7 +112,7 @@ where
 
 pub(super) struct Prefix<'g, 'l, R, C, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: smr::TraverseGuard<'g, 'l, V>,
+    guard: hazard::TraverseGuard<'g, 'l, V>,
 
     raw: crate::raw::cursor::Prefix<'g, R, C, H>,
 }
@@ -123,7 +123,10 @@ where
     V: Value,
     H: path::History<'g, R, C>,
 {
-    pub(super) fn new_root(smr: &'l mut smr::Local<'g, V>, root: &'g Atomic128<Edge<C>>) -> Self {
+    pub(super) fn new_root(
+        smr: &'l mut hazard::Local<'g, V>,
+        root: &'g Atomic128<Edge<C>>,
+    ) -> Self {
         Self {
             guard: smr.guard(R::default().peek_all()),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
@@ -131,7 +134,7 @@ where
     }
 
     pub(super) fn new_prefix(
-        smr: &'l mut smr::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         prefix: R,
     ) -> Option<Self> {
@@ -143,7 +146,7 @@ where
     }
 
     pub(super) fn new_range(
-        smr: &'l mut smr::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
         min: R,
         max: R,
@@ -161,7 +164,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> smr::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::TraverseGuard<'g, 'l, V> {
         self.guard
     }
 
