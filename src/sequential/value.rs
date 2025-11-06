@@ -4,7 +4,7 @@
 //! [`Box`] or [`std::sync::Arc`].
 
 pub unsafe trait Value {
-    type Borrow<'l>
+    type Borrow<'l>: Copy
     where
         Self: 'l;
 
@@ -40,34 +40,55 @@ pub unsafe trait Value {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-unsafe impl<T> Value for T
-where
-    T: crate::concurrent::Value,
-{
+unsafe impl<T> Value for Box<T> {
     type Borrow<'l>
-        = <T as crate::concurrent::Value>::Borrow<'l>
+        = &'l T
     where
         Self: 'l;
 
-    // FIXME
-    // type BorrowMut<'l>
-    // where
-    //     Self: 'l;
+    #[inline]
+    unsafe fn from_raw(raw: u64) -> Self {
+        Box::from_raw(raw as *mut T)
+    }
 
+    #[inline]
     fn into_raw(self) -> u64 {
-        <T as crate::concurrent::Value>::into_raw(self)
+        Box::into_raw(self) as u64
     }
 
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
-        <T as crate::concurrent::Value>::borrow_from_raw(raw)
-    }
-
-    // FIXME
-    // unsafe fn borrow_mut_raw<'l>(raw: &mut u64) -> Self::BorrowMut<'l> {
-    //     todo!()
-    // }
-
-    unsafe fn from_raw(raw: u64) -> Self {
-        <T as crate::concurrent::Value>::from_raw(raw)
+        let borrow = (raw as *const T).as_ref();
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
     }
 }
+
+macro_rules! impl_trivial {
+    ($($ty:ty),*) => {
+        $(
+            unsafe impl Value for $ty {
+                type Borrow<'l> = Self;
+
+                #[inline]
+                unsafe fn from_raw(raw: u64) -> Self {
+                    raw as $ty
+                }
+
+                #[inline]
+                fn into_raw(self) -> u64 {
+                    self as u64
+                }
+
+                #[inline]
+                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+                    raw as $ty
+                }
+            }
+        )*
+    };
+}
+
+impl_trivial!(u64, u32);

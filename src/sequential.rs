@@ -11,7 +11,7 @@ use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
-use value::Value;
+pub(crate) use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K, V: Value> {

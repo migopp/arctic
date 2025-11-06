@@ -1,6 +1,7 @@
 use crate::concurrent::smr;
+use crate::sequential::Value as _;
 
-pub unsafe trait Value: Sized {
+pub unsafe trait Value: Sized + crate::sequential::Value {
     type OwnedGuard<'g, 'l>: Sized
     where
         Self: 'g + 'l,
@@ -15,10 +16,6 @@ pub unsafe trait Value: Sized {
     where
         Self: 'g + 'l,
         'g: 'l;
-
-    type Borrow<'l>: Copy
-    where
-        Self: 'l;
 
     unsafe fn guard_borrow<'g, 'l>(
         smr: &'l smr::TraverseGuard<'g, 'l, Self>,
@@ -44,12 +41,6 @@ pub unsafe trait Value: Sized {
         raw: u64,
     ) -> Self::Borrow<'l>;
 
-    unsafe fn from_raw(raw: u64) -> Self;
-
-    fn into_raw(self) -> u64;
-
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>;
-
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l;
@@ -73,11 +64,6 @@ unsafe impl<T> Value for Box<T> {
     where
         Self: 'g + 'l,
         'g: 'l;
-
-    type Borrow<'l>
-        = &'l T
-    where
-        Self: 'l;
 
     #[inline]
     unsafe fn guard_owned<'g, 'l>(
@@ -106,30 +92,11 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn from_raw(raw: u64) -> Self {
-        Box::from_raw(raw as *mut T)
-    }
-
-    #[inline]
-    fn into_raw(self) -> u64 {
-        Box::into_raw(self) as u64
-    }
-
-    #[inline]
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l,
     {
         borrow as *const T as u64
-    }
-
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
-        let borrow = (raw as *const T).as_ref();
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
     }
 
     unsafe fn downgrade_guard<'g, 'l>(
@@ -222,8 +189,6 @@ macro_rules! impl_trivial {
                 where
                     'g: 'l;
 
-                type Borrow<'l> = Self;
-
                 #[inline]
                 unsafe fn guard_owned<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, raw: u64) -> Self {
                     raw as $ty
@@ -232,16 +197,6 @@ macro_rules! impl_trivial {
                 #[inline]
                 unsafe fn guard_shared<'g, 'l>(_smr: smr::TraverseGuard<'g, 'l, Self>, raw: u64) -> Self {
                     raw as $ty
-                }
-
-                #[inline]
-                unsafe fn from_raw(raw: u64) -> Self {
-                    raw as $ty
-                }
-
-                #[inline]
-                fn into_raw(self) -> u64 {
-                    self as u64
                 }
 
                 #[inline]
@@ -255,11 +210,6 @@ macro_rules! impl_trivial {
                 #[inline]
                 fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 where Self: 'l {
                     borrow as u64
-                }
-
-                #[inline]
-                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
-                    raw as $ty
                 }
 
                 unsafe fn downgrade_guard<'g, 'l>(
