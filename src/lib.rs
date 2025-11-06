@@ -16,7 +16,6 @@ macro_rules! validate_eq {
 
 mod byte;
 pub mod concurrent;
-mod cursor;
 pub mod iter;
 pub mod key;
 mod raw;

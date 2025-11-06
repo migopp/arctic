@@ -1,12 +1,12 @@
+mod cursor;
+mod iter;
+
 use core::sync::atomic::Ordering;
 
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 use ribbit::atomic::Atomic128;
 
-use crate::cursor;
-use crate::iter;
-use crate::iter::Scan;
 use crate::iter::Sort;
 use crate::key;
 use crate::key::Read as _;
@@ -19,6 +19,7 @@ use crate::stat;
 use crate::value;
 use crate::Key;
 use crate::Value;
+use iter::Scan;
 
 pub struct Map<K, V: Value> {
     smr: smr::Global<V>,
