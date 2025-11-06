@@ -98,7 +98,10 @@ where
 
                 key.truncate(*len);
                 key.push(byte);
-                key.extend(meta.key());
+                unsafe {
+                    // SAFETY: we pushed to `key` above
+                    key.extend_nonempty_unchecked(meta.key());
+                }
 
                 match child {
                     edge::Child::Value(value) => {
