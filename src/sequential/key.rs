@@ -2,7 +2,6 @@ pub mod dynamic;
 pub mod fixed;
 
 use core::fmt;
-use core::marker::PhantomData;
 
 use crate::byte;
 
@@ -85,75 +84,6 @@ impl Write for Ignore {
 
     #[inline]
     fn truncate(&mut self, (): Self::Len) {}
-}
-
-#[derive(Copy, Clone, PartialOrd, PartialEq)]
-pub struct Fixed<K, U> {
-    key: K,
-    _uint: PhantomData<U>,
-}
-
-impl<K: Copy, U> Fixed<K, U> {
-    #[inline]
-    pub const fn new(key: K) -> Self {
-        Self {
-            key,
-            _uint: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub const fn key(self) -> K {
-        self.key
-    }
-}
-
-impl<K, U> Key for Fixed<K, U>
-where
-    K: 'static + Copy + From<U> + PartialOrd,
-    U: From<K> + fixed::Uint + From<fixed::Buffer<U>>,
-    fixed::Buffer<U>: From<U>,
-{
-    type Borrow<'k> = Self;
-    type Read<'k> = fixed::Buffer<U>;
-    type Write = fixed::Buffer<U>;
-
-    #[inline]
-    fn reborrow<'long, 'short>(reader: Self::Read<'long>) -> Self::Read<'short>
-    where
-        'long: 'short,
-    {
-        reader
-    }
-
-    #[inline]
-    fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
-        *self
-    }
-
-    #[inline]
-    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-        Self::from_writer_unchecked(*writer)
-    }
-
-    #[inline]
-    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-        Self {
-            key: K::from(U::from(writer)),
-            _uint: PhantomData,
-        }
-    }
-}
-
-impl<K, U> From<Fixed<K, U>> for fixed::Buffer<U>
-where
-    fixed::Buffer<U>: From<U>,
-    U: fixed::Uint + From<K>,
-{
-    #[inline]
-    fn from(fixed: Fixed<K, U>) -> Self {
-        Self::from(U::from(fixed.key))
-    }
 }
 
 macro_rules! impl_unsigned_int {

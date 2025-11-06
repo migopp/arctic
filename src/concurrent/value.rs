@@ -113,63 +113,6 @@ unsafe impl<T> Value for Box<T> {
     }
 }
 
-// #[derive(Copy, Clone)]
-// pub struct Inline<T>(pub T);
-//
-// unsafe impl<T> Value for Inline<T>
-// where
-//     T: Copy + From<u64> + Into<u64>,
-// {
-//     type SelectDrop = postorder::SelectNode;
-//
-//     type OwnedGuard<'g, 'l>
-//         = Self
-//     where
-//         Self: 'g + 'l,
-//         'g: 'l;
-//
-//     type SharedGuard<'g, 'l>
-//         = Self
-//     where
-//         Self: 'g + 'l,
-//         'g: 'l;
-//
-//     type Borrow<'l>
-//         = Self
-//     where
-//         Self: 'l;
-//
-//     type Target = Self;
-//
-//     type Clone = Self;
-//
-//     #[inline]
-//     unsafe fn from_u64(value: u64) -> Self {
-//         Inline(T::from(value))
-//     }
-//
-//     #[inline]
-//     fn into_u64(self) -> u64 {
-//         self.0.into()
-//     }
-//
-//     #[inline]
-//     unsafe fn borrow_from_u64<'g, 'l>(
-//         _smr: &hazard::TraverseGuard<'g, 'l, Self>,
-//         value: u64,
-//     ) -> Self::Borrow<'l> {
-//         Self(T::from(value))
-//     }
-//
-//     #[inline]
-//     fn borrow_into_u64<'l>(borrow: Self::Borrow<'l>) -> u64
-//     where
-//         Self: 'l,
-//     {
-//         borrow.0.into()
-//     }
-// }
-
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
