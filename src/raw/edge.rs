@@ -20,13 +20,13 @@ use crate::stat;
 #[derive(ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
 pub struct Edge<C> {
-    #[ribbit(size = 0)]
-    _compressed: PhantomData<C>,
-
     #[ribbit(size = 64)]
     pub(crate) meta: Meta,
 
     data: u64,
+
+    // FIXME: swap out edge type
+    _compressed: PhantomData<C>,
 }
 
 impl<C> Copy for Edge<C> {}
@@ -38,9 +38,9 @@ impl<C> Clone for Edge<C> {
 impl<C> Default for Edge<C> {
     fn default() -> Self {
         Self {
-            _compressed: PhantomData,
             meta: Meta::default(),
             data: 0,
+            _compressed: PhantomData,
         }
     }
 }
@@ -269,9 +269,6 @@ impl<C> Debug for Child<C> {
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
 pub struct Node<C> {
-    #[ribbit(size = 0)]
-    _compressed: PhantomData<C>,
-
     #[ribbit(size = 2)]
     kind: node::Kind,
 
@@ -279,6 +276,8 @@ pub struct Node<C> {
 
     #[ribbit(with(skip))]
     _placeholder: NonZeroU32,
+
+    _compressed: PhantomData<C>,
 }
 
 impl<C> Copy for Node<C> {}

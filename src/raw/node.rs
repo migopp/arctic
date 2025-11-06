@@ -174,11 +174,8 @@ impl<V> Debug for Ref<'_, V> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
 #[ribbit(size = 2, eq, debug)]
 pub(crate) enum Kind {
-    #[ribbit(size = 0)]
     Node3 = 0,
-    #[ribbit(size = 0)]
     Node15 = 1,
-    #[ribbit(size = 0)]
     Node256 = 2,
 }
 
