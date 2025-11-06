@@ -1,4 +1,6 @@
 mod value;
+// FIXME: hide from public API
+pub mod key;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -10,7 +12,7 @@ use crate::raw::iter::PostorderIter;
 use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
 use crate::stat;
-use crate::Key;
+pub use key::Key;
 pub(crate) use value::Value;
 
 #[repr(transparent)]

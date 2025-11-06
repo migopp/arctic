@@ -17,13 +17,13 @@ macro_rules! validate_eq {
 mod byte;
 pub mod concurrent;
 pub mod iter;
-pub mod key;
 mod raw;
 pub mod sequential;
 pub mod stat;
 
 pub use concurrent::Value;
-pub use key::Key;
+pub use sequential::key;
+pub use sequential::Key;
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
