@@ -42,7 +42,7 @@ pub(crate) trait ScanIter<'g, R, W, C, O>: Iterator<Item = (W, u64)> {
     fn for_each<F: FnMut(&W, u64)>(self, apply: F);
 }
 
-pub(crate) struct Prefix;
+pub struct Prefix;
 
 impl Scan for Prefix {
     type Iter<'g, R, W, C, O>
@@ -101,7 +101,7 @@ where
     }
 }
 
-pub(crate) struct Range;
+pub struct Range;
 
 impl Scan for Range {
     type Iter<'g, R, W, C, O>
