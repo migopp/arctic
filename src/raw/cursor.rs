@@ -313,18 +313,13 @@ where
         }
     }
 
-    pub(crate) unsafe fn new_prefix(root: &'g Atomic128<Edge<C>>, prefix: R) -> Option<Self> {
+    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<C>>, prefix: R) -> Option<Self> {
         let mut cursor = Self {
             prefix,
             cursor: Point::new(root, prefix),
         };
         cursor.traverse()?;
         Some(cursor)
-    }
-
-    pub(crate) unsafe fn new_range(root: &'g Atomic128<Edge<C>>, min: R, max: R) -> Option<Self> {
-        let prefix = min.prefix(&max);
-        Self::new_prefix(root, prefix)
     }
 
     pub(crate) fn prefix(&self) -> R {

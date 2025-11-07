@@ -117,6 +117,18 @@ where
     V: Value,
     H: path::History<'g, R, C>,
 {
+    pub(super) fn new(
+        smr: &'l mut hazard::Local<'g, V>,
+        root: &'g Atomic128<Edge<C>>,
+        prefix: R,
+    ) -> Option<Self> {
+        let guard = smr.guard(prefix.hazard());
+        Some(Self {
+            guard,
+            raw: unsafe { crate::raw::cursor::Prefix::new(root, prefix) }?,
+        })
+    }
+
     pub(super) fn new_root(
         smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic128<Edge<C>>,
@@ -125,28 +137,6 @@ where
             guard: smr.guard(hazard::prefix::Be::HAZARD_ROOT),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }
-    }
-
-    pub(super) fn new_prefix(
-        smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
-        prefix: R,
-    ) -> Option<Self> {
-        let guard = smr.guard(prefix.hazard());
-        Some(Self {
-            guard,
-            raw: unsafe { crate::raw::cursor::Prefix::new_prefix(root, prefix) }?,
-        })
-    }
-
-    pub(super) fn new_range(
-        smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
-        min: R,
-        max: R,
-    ) -> Option<Self> {
-        let prefix = min.prefix(&max);
-        Self::new_prefix(smr, root, prefix)
     }
 
     pub(super) fn prefix(&self) -> R {

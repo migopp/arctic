@@ -279,7 +279,7 @@ where
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<iter::Guard<'g, 'l, K, V, iter::Prefix>> {
         let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             prefix,
@@ -296,7 +296,7 @@ where
     ) -> Option<iter::Guard<'g, 'l, K, V, iter::Range>> {
         let min = min.into();
         let max = max.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             min.prefix(&max),
