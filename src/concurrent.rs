@@ -716,7 +716,7 @@ where
 
 pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
     guard: &'l hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, 'l, K, (), S>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, (), S>,
 }
 
 impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>

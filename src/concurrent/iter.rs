@@ -84,7 +84,7 @@ impl Scan for Range {
         F: FnMut(&K::Write, u64),
     {
         unsafe {
-            crate::raw::iter::RangeIter::<K, _, S>::new_unchecked(
+            crate::raw::iter::RangeIter::<_, _, _, S>::new_unchecked(
                 cursor.edge(),
                 cursor.prefix(),
                 *min,

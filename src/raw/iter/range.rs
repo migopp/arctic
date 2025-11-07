@@ -5,27 +5,27 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::iter::Sort;
-use crate::key::Read as _;
-use crate::key::Write as _;
+use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
-use crate::Key;
 
-pub(crate) enum RangeIter<'g, 'l, K: Key, C, S: Sort> {
-    Root { key: K::Write, next: Option<u64> },
-    Node(NodeIter<'g, 'l, K, C, S>),
+pub(crate) enum RangeIter<'g, R, W, C, S: Sort> {
+    Root { key: W, next: Option<u64> },
+    Node(NodeIter<'g, R, W, C, S>),
 }
 
-impl<'g, 'l, K, C, S> RangeIter<'g, 'l, K, C, S>
+impl<'g, R, W, C, S> RangeIter<'g, R, W, C, S>
 where
-    K: Key,
+    R: key::Read,
+    W: key::Write,
+    W: From<R>,
     S: Sort,
 {
     pub(crate) unsafe fn new_unchecked(
         root: &'g Atomic128<Edge<C>>,
-        prefix: K::Read<'l>,
-        mut min: K::Read<'l>,
-        mut max: K::Read<'l>,
+        prefix: R,
+        mut min: R,
+        mut max: R,
     ) -> Self {
         if S::REVERSE {
             core::mem::swap(&mut min, &mut max);
@@ -34,7 +34,7 @@ where
         let edge = root.load_packed(Ordering::Acquire);
         let bits = prefix.bits();
         let key = edge.meta().key();
-        let mut writer = K::Write::from(prefix);
+        let mut writer = W::from(prefix);
         writer.extend(bits, key);
 
         min.seek(prefix.bits());
@@ -97,7 +97,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&K::Write, u64)>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&W, u64)>(self, mut apply: F) {
         match self {
             RangeIter::Root { key, mut next } => {
                 crate::cold();
@@ -110,7 +110,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&K::Write, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         match self {
             RangeIter::Root { key, next } => {
                 crate::cold();
@@ -122,34 +122,32 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, 'l, K: Key, V: 'g, S: Sort> {
-    min: K::Read<'l>,
-    max: K::Read<'l>,
-    key: K::Write,
+pub(crate) struct NodeIter<'g, R, W, V: 'g, S: Sort> {
+    min: R,
+    max: R,
+    key: W,
     stack: Vec<(usize, Option<u8>, Option<u8>, S::RangeIter<'g, V>)>,
     _sort: PhantomData<S>,
 }
 
-impl<'g, 'k, K, V, S> NodeIter<'g, 'k, K, V, S>
+impl<'g, R, W, V, S> NodeIter<'g, R, W, V, S>
 where
-    K: Key,
+    R: key::Read,
+    W: key::Write,
     S: Sort,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&K::Write, u64)> {
+    fn lend(&mut self) -> Option<(&W, u64)> {
         self.walk::<true, _>(|_, _| ())
     }
 
     #[inline]
-    fn for_each<F: FnMut(&K::Write, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&K::Write, u64)>(
-        &mut self,
-        mut apply: F,
-    ) -> Option<(&K::Write, u64)> {
+    fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         'vertical: loop {
             let (bits, first, last, iter) = self.stack.last_mut()?;
             let bits = *bits;
