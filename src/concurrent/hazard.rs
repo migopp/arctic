@@ -87,7 +87,6 @@ use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::Pack as _;
 use thread_local::ThreadLocal;
 
 use crate::concurrent::Value;
@@ -155,10 +154,7 @@ impl<'g, V: Value> Local<'g, V> {
         &'l mut self,
         prefix: ribbit::Packed<prefix::Be>,
     ) -> TraverseGuard<'g, 'l, V> {
-        self.hazard.store_packed(
-            prefix.with_kind(prefix::Kind::Traversal.pack()),
-            Ordering::Relaxed,
-        );
+        self.hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast();
         TraverseGuard(self)
     }
@@ -170,12 +166,7 @@ impl<'g, V: Value> Local<'g, V> {
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
-            .truncate(bits)
-            .with_kind(if edge.meta().is_value() {
-                prefix::Kind::RETIRED_VALUE
-            } else {
-                prefix::Kind::RETIRED_NODE
-            });
+            .into_prefix(edge.meta().is_value(), Some(bits));
 
         self.retired.push((prefix, edge.into_raw()));
 
@@ -190,7 +181,7 @@ impl<'g, V: Value> Local<'g, V> {
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
-            .with_kind(prefix::Kind::RETIRED_VALUE);
+            .into_prefix(true, None);
 
         self.retired.push((prefix, raw));
 
@@ -210,7 +201,7 @@ impl<'g, V: Value> Local<'g, V> {
             .hazards
             .iter()
             .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-            .filter(|hazard| !hazard.kind().is_hazard_null())
+            .filter(|hazard| hazard.is_active())
             .collect::<Vec<_>>();
 
         self.retired.retain(|(prefix, raw)| {
@@ -248,7 +239,7 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, true, V> {
         let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
         self.0.hazard.store_packed(
-            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
+            hazard.with_overlap(false).with_node(false).with_value(true),
             Ordering::Relaxed,
         );
 
@@ -259,7 +250,7 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, false, V> {
         let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
         self.0.hazard.store_packed(
-            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
+            hazard.with_overlap(false).with_node(false).with_value(true),
             Ordering::Relaxed,
         );
 
@@ -269,10 +260,9 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     #[inline]
     pub(crate) fn guard_prefix(self) -> PrefixGuard<'g, 'l, V> {
         let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_kind(prefix::Kind::HAZARD_PREFIX),
-            Ordering::Relaxed,
-        );
+        self.0
+            .hazard
+            .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
 
         PrefixGuard(self)
     }
@@ -280,10 +270,9 @@ impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
     #[inline]
     pub(crate) fn guard_linearizable(self) -> LinearizableGuard<'g, 'l, V> {
         let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_kind(prefix::Kind::HAZARD_VALUE),
-            Ordering::Relaxed,
-        );
+        self.0
+            .hazard
+            .store_packed(hazard.with_node(false), Ordering::Relaxed);
 
         LinearizableGuard(self)
     }
@@ -349,13 +338,14 @@ where
 }
 
 unsafe fn deallocate<V: Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
-    if prefix.kind() == prefix::Kind::RETIRED_NODE {
+    validate!(prefix.value() ^ prefix.node());
+
+    if prefix.node() {
         unsafe {
             crate::raw::edge::Node::<()>::new_unchecked(raw)
                 .deallocate_unchecked(stat::Counter::FreeRetire);
         }
     } else {
-        validate_eq!(prefix.kind(), prefix::Kind::RETIRED_VALUE);
         unsafe {
             stat::increment(stat::Counter::FreeRetire);
             drop(V::from_raw(raw));
