@@ -15,6 +15,7 @@ pub(crate) use crate::raw::iter::Range;
 use crate::Key;
 
 pub(crate) trait Scan: raw::iter::Scan + Sized {
+    #[expect(private_interfaces)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
@@ -29,6 +30,7 @@ impl<T> Scan for T
 where
     T: raw::iter::Scan,
 {
+    #[expect(private_interfaces)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
@@ -46,12 +48,14 @@ where
     }
 }
 
+#[expect(private_bounds)]
 pub struct Guard<'g, 'l, K: Key, V: Value, S: Scan> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<()>>,
     input: S::Input<'l, K::Read<'l>>,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, K, V, S> Guard<'g, 'l, K, V, S>
 where
     K: Key,
@@ -59,6 +63,8 @@ where
     S: Scan,
 {
     #[inline]
+    #[expect(private_interfaces)]
+    #[expect(clippy::type_complexity)]
     pub fn iter<O>(
         &self,
     ) -> ScanIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
@@ -73,6 +79,8 @@ where
     }
 
     #[inline]
+    #[expect(private_interfaces)]
+    #[expect(clippy::type_complexity)]
     pub fn values<O>(
         &self,
     ) -> ValueIter<'g, 'l, '_, K::Read<'l>, V, O, S::Iter<'g, K::Read<'l>, key::Ignore, (), O>>
@@ -97,6 +105,7 @@ pub struct ScanIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
     _type: PhantomData<(K, O)>,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'guard, K, V, O, I> ScanIter<'g, 'l, 'guard, K, V, O, I>
 where
     K: Key,
@@ -151,6 +160,7 @@ pub struct ValueIter<'g, 'l, 'guard, R, V: Value, O, I> {
     _type: PhantomData<(R, O)>,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'guard, R, V, O, I> ValueIter<'g, 'l, 'guard, R, V, O, I>
 where
     V: Value,
