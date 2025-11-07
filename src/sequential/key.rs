@@ -1,5 +1,5 @@
 pub mod dynamic;
-pub mod fixed;
+pub mod integer;
 
 use core::fmt;
 
@@ -89,8 +89,8 @@ macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Read<'k> = fixed::Reader<$ty>;
-                type Write = fixed::Writer<$ty>;
+                type Read<'k> = integer::Reader<$ty>;
+                type Write = integer::Writer<$ty>;
                 type Borrow<'k> = Self;
 
                 #[inline]
