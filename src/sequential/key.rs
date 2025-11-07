@@ -5,7 +5,7 @@ use core::fmt;
 
 use crate::byte;
 
-pub trait Key: 'static {
+pub trait Key {
     #[allow(private_bounds)]
     type Borrow<'k>: Copy;
 
@@ -22,7 +22,7 @@ pub trait Key: 'static {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
-pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
+pub(crate) trait Read: Copy + fmt::Debug + Default {
     fn bits(&self) -> usize;
 
     #[inline]
