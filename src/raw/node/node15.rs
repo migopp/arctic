@@ -16,7 +16,7 @@ const _: () = assert!(core::mem::size_of::<Node15<()>>() == 256);
 const _: () = assert!(core::mem::align_of::<Node15<()>>() == 64);
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
-#[ribbit(size = 128, debug)]
+#[ribbit(size = 128, packed(rename = "HeaderPacked"), debug)]
 pub(crate) struct Header {
     keys: u120,
     len: u4,
@@ -28,8 +28,7 @@ impl Header {
         ribbit::Packed::<Self>::new(u120::new(0), u4::new(0), false);
 }
 
-impl Default for ribbit::Packed<Header> {
-    #[expect(private_interfaces)]
+impl Default for HeaderPacked {
     fn default() -> Self {
         Header::DEFAULT
     }
