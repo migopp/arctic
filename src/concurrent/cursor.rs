@@ -100,7 +100,7 @@ where
     {
         let guard = smr.guard(key.hazard());
         let value = unsafe { crate::raw::cursor::Point::get(root, key)? };
-        return Some(unsafe { V::guard_shared(guard, value) });
+        Some(unsafe { V::guard_shared(guard, value) })
     }
 }
 
