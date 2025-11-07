@@ -51,18 +51,13 @@ pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
 
     fn len_from_bits(bits: usize) -> Self::Len;
 
-    fn extend(&mut self, len: &mut Self::Len, array: byte::Array);
-
-    /// # SAFETY
+    /// Write bytes starting at `start` with bytes from `edge`
     ///
-    /// Caller must guarantee `self.bits() > 0`.
-    unsafe fn extend_nonempty_unchecked(&mut self, len: &mut Self::Len, array: byte::Array) {
-        self.extend(len, array)
-    }
+    /// Caller must ensure `start` is equal to the current length of this writer
+    fn write(&mut self, start: Self::Len, edge: byte::Array) -> Self::Len;
 
-    fn push(&mut self, len: &mut Self::Len, byte: u8);
-
-    fn truncate(&mut self, len: Self::Len);
+    /// Replace bytes starting at `start` with bytes from `node` and `edge`
+    fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len;
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,13 +70,10 @@ impl Write for Ignore {
     fn len_from_bits(_bits: usize) -> Self::Len {}
 
     #[inline]
-    fn extend(&mut self, (): &mut (), _array: byte::Array) {}
+    fn write(&mut self, (): Self::Len, _edge: byte::Array) -> Self::Len {}
 
     #[inline]
-    fn push(&mut self, (): &mut (), _byte: u8) {}
-
-    #[inline]
-    fn truncate(&mut self, (): ()) {}
+    fn replace(&mut self, _start: Self::Len, _node: u8, _edge: byte::Array) {}
 }
 
 impl<R> From<R> for Ignore

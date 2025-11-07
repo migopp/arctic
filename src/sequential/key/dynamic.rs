@@ -241,22 +241,18 @@ impl key::Write for Writer {
     }
 
     #[inline]
-    fn extend(&mut self, bits: &mut usize, array: byte::Array) {
-        validate_eq!(*bits, self.0.len() << 3);
-        self.0.extend(array);
-        *bits = self.0.len() << 3;
+    fn write(&mut self, bits: Self::Len, edge: byte::Array) -> Self::Len {
+        validate_eq!(bits, self.0.len() << 3);
+        self.0.extend(edge);
+        self.0.len() << 3
     }
 
-    #[inline]
-    fn push(&mut self, bits: &mut usize, byte: u8) {
-        validate_eq!(*bits, self.0.len() << 3);
-        self.0.push(byte);
-        *bits = self.0.len() << 3;
-    }
-
-    #[inline]
-    fn truncate(&mut self, bits: usize) {
-        self.0.truncate(bits >> 3);
+    fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len {
+        validate!(start <= (self.0.len() << 3));
+        self.0.truncate(start >> 3);
+        self.0.push(node);
+        self.0.extend(edge);
+        self.0.len() << 3
     }
 }
 

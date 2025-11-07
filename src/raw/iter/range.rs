@@ -54,8 +54,7 @@ where
         ));
 
         let mut writer = W::from(prefix);
-        let mut bits = W::len_from_bits(bits);
-        writer.extend(&mut bits, key);
+        let bits = writer.write(W::len_from_bits(bits), key);
 
         match edge.child() {
             None => Self::Root {
@@ -147,7 +146,7 @@ where
     fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         'vertical: loop {
             let (bits, first, last, iter) = self.stack.last_mut()?;
-            let mut bits = *bits;
+            let bits = *bits;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -161,13 +160,7 @@ where
                 };
 
                 let key = edge.meta().key();
-                self.key.truncate(bits);
-                self.key.push(&mut bits, byte);
-
-                unsafe {
-                    // SAFETY: we just pushed `byte` onto `key`
-                    self.key.extend_nonempty_unchecked(&mut bits, key);
-                }
+                let bits = self.key.replace(bits, byte, key);
 
                 let check_first = Some(byte) == *first;
                 let check_last = Some(byte) == *last;

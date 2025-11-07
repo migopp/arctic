@@ -31,12 +31,12 @@ where
     where
         W: From<R>,
     {
-        let mut bits = W::len_from_bits(prefix.bits());
+        let bits = prefix.bits();
         let mut writer = W::from(prefix);
 
         let edge = root.load_packed(Ordering::Acquire);
         let key = edge.meta().key();
-        writer.extend(&mut bits, key);
+        let bits = writer.write(W::len_from_bits(bits), key);
 
         match edge.child() {
             None => Self::Root {
@@ -85,7 +85,7 @@ where
 
         'vertical: loop {
             let (bits, iter) = frontier.last_mut()?;
-            let mut bits = *bits;
+            let bits = *bits;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -100,13 +100,7 @@ where
                 };
 
                 let meta = edge.meta();
-
-                key.truncate(bits);
-                key.push(&mut bits, byte);
-                unsafe {
-                    // SAFETY: we pushed to `key` above
-                    key.extend_nonempty_unchecked(&mut bits, meta.key());
-                }
+                let bits = key.replace(bits, byte, meta.key());
 
                 match child {
                     edge::Child::Value(value) => {

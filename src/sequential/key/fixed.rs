@@ -188,43 +188,23 @@ impl<U: Uint> key::Write for Writer<U> {
     }
 
     #[inline]
-    fn extend(&mut self, bits: &mut usize, array: byte::Array) {
-        validate!(*bits + array.len().bits() as usize <= U::BITS as usize);
+    fn write(&mut self, bits: Self::Len, array: byte::Array) -> Self::Len {
+        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
 
         if array.len().bits() == 0 {
-            return;
+            return bits;
         }
 
-        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> *bits;
-        *bits += array.len().bits() as usize;
+        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
+        bits + array.len().bits() as usize
     }
 
-    #[inline]
-    unsafe fn extend_nonempty_unchecked(&mut self, bits: &mut usize, array: byte::Array) {
-        validate!(*bits + array.len().bits() as usize <= U::BITS as usize);
-        validate!(*bits >= 8);
+    fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len {
+        self.0 = self.0.most_significant(start as u8)
+            | (U::from_u8(node) >> start)
+            | (U::from_most_significant_u64(edge.value()) >> (8 + start));
 
-        if array.len().bits() == 0 {
-            return;
-        }
-
-        self.0 |= U::from_most_significant_u64(array.value()) >> *bits;
-        *bits += array.len().bits() as usize;
-    }
-
-    #[inline]
-    fn push(&mut self, bits: &mut usize, byte: u8) {
-        validate!(*bits <= U::BITS as usize - 8);
-
-        self.0 |= U::from_u8(byte).shr(*bits);
-        *bits += 8;
-    }
-
-    #[inline]
-    fn truncate(&mut self, bits: usize) {
-        validate!(bits <= U::BITS as usize);
-
-        self.0 = self.0.most_significant(bits as u8);
+        start + 8 + edge.len().bits() as usize
     }
 }
 
