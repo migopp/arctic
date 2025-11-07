@@ -15,7 +15,9 @@ use crate::Key;
 
 /// Provide safe memory reclamation and strongly-typed values over
 /// scan iterators in [`crate::raw::iter`].
-pub(super) trait Scan: raw::iter::Scan + Sized {
+pub trait Scan: raw::iter::Scan + Sized {
+    #[expect(private_interfaces)]
+    #[expect(private_bounds)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
@@ -30,6 +32,8 @@ impl<T> Scan for T
 where
     T: raw::iter::Scan,
 {
+    #[expect(private_interfaces)]
+    #[expect(private_bounds)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
@@ -48,14 +52,12 @@ where
 }
 
 /// Guard all nodes and values below this prefix from memory reclamation.
-#[expect(private_bounds)]
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value, S: Scan> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<()>>,
     input: S::Input<'l, K::Read<'l>>,
 }
 
-#[expect(private_bounds)]
 impl<'g, 'l, K, V, S> PrefixGuard<'g, 'l, K, V, S>
 where
     K: Key,
@@ -63,7 +65,6 @@ where
     S: Scan,
 {
     #[inline]
-    #[expect(private_interfaces)]
     #[expect(clippy::type_complexity)]
     pub fn entries<O>(
         &self,
@@ -79,7 +80,6 @@ where
     }
 
     #[inline]
-    #[expect(private_interfaces)]
     #[expect(clippy::type_complexity)]
     pub fn values<O>(
         &self,
@@ -106,7 +106,6 @@ pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
     _type: PhantomData<(K, O)>,
 }
 
-#[expect(private_bounds)]
 impl<'g, 'l, 'guard, K, V, O, I> EntryIter<'g, 'l, 'guard, K, V, O, I>
 where
     K: Key,
@@ -162,7 +161,6 @@ pub struct ValueIter<'g, 'l, 'guard, R, V: Value, O, I> {
     _type: PhantomData<(R, O)>,
 }
 
-#[expect(private_bounds)]
 impl<'g, 'l, 'guard, R, V, O, I> ValueIter<'g, 'l, 'guard, R, V, O, I>
 where
     V: Value,

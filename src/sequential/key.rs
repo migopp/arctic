@@ -24,7 +24,7 @@ pub trait Key {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
-pub(crate) trait Read: Copy + fmt::Debug + Default {
+pub trait Read: Copy + fmt::Debug + Default {
     fn bits(&self) -> usize;
 
     #[inline]
@@ -48,7 +48,7 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
     fn prefix(&self, other: &Self) -> Self;
 }
 
-pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
+pub trait Write: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
 
     fn len_from_bits(bits: usize) -> Self::Len;

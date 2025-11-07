@@ -13,13 +13,13 @@ use crate::key;
 use crate::raw::Edge;
 
 /// Abstraction over prefix and range iteration
-pub(crate) trait Scan {
+pub trait Scan {
     type Iter<'g, R, W, C, O>: ScanIter<'g, R, W, C, O>
     where
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order;
+        O: crate::iter::Order;
 
     type Input<'l, R>: Copy
     where
@@ -33,10 +33,10 @@ pub(crate) trait Scan {
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order;
+        O: crate::iter::Order;
 }
 
-pub(crate) trait ScanIter<'g, R, W, C, O>: Iterator<Item = (W, u64)> {
+pub trait ScanIter<'g, R, W, C, O>: Iterator<Item = (W, u64)> {
     fn lend(&mut self) -> Option<(&W, u64)>;
 
     fn for_each<F: FnMut(&W, u64)>(self, apply: F);
@@ -51,7 +51,7 @@ impl Scan for Prefix {
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order;
+        O: crate::iter::Order;
 
     type Input<'l, R>
         = R
@@ -67,7 +67,7 @@ impl Scan for Prefix {
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order,
+        O: crate::iter::Order,
     {
         Self::Iter::new_unchecked(root, prefix)
     }
@@ -77,7 +77,7 @@ impl<'g, R, W, C, O> ScanIter<'g, R, W, C, O> for PrefixIter<'g, W, C, O>
 where
     R: key::Read,
     W: key::Write + From<R>,
-    O: Order,
+    O: crate::iter::Order,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -93,7 +93,7 @@ where
 impl<'g, W, C, O> Iterator for PrefixIter<'g, W, C, O>
 where
     W: key::Write,
-    O: Order,
+    O: crate::iter::Order,
 {
     type Item = (W, u64);
     fn next(&mut self) -> Option<Self::Item> {
@@ -110,7 +110,7 @@ impl Scan for Range {
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order;
+        O: crate::iter::Order;
 
     type Input<'l, R>
         = (R, R, R)
@@ -126,7 +126,7 @@ impl Scan for Range {
         R: key::Read,
         W: key::Write + From<R>,
         C: 'g,
-        O: Order,
+        O: crate::iter::Order,
     {
         Self::Iter::new_unchecked(root, prefix, min, max)
     }
@@ -136,7 +136,7 @@ impl<'g, R, W, C, O> ScanIter<'g, R, W, C, O> for RangeIter<'g, R, W, C, O>
 where
     R: key::Read,
     W: key::Write + From<R>,
-    O: Order,
+    O: crate::iter::Order,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -153,7 +153,7 @@ impl<'g, R, W, C, O> Iterator for RangeIter<'g, R, W, C, O>
 where
     R: key::Read,
     W: key::Write + From<R>,
-    O: Order,
+    O: crate::iter::Order,
 {
     type Item = (W, u64);
     fn next(&mut self) -> Option<Self::Item> {

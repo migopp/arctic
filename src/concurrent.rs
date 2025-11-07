@@ -265,7 +265,6 @@ where
         }
     }
 
-    #[expect(private_interfaces)]
     pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, K, V, iter::Prefix> {
         let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
             &mut self.smr,
@@ -275,7 +274,6 @@ where
         iter::Prefix::guard(cursor, K::Read::default())
     }
 
-    #[expect(private_interfaces)]
     pub fn prefix<'l>(
         &'l mut self,
         prefix: impl Into<K::Read<'l>>,
@@ -291,7 +289,6 @@ where
     }
 
     // FIXME: support `Option` for min, max
-    #[expect(private_interfaces)]
     pub fn range<'l>(
         &'l mut self,
         min: impl Into<K::Read<'l>>,
