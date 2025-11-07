@@ -10,7 +10,7 @@ pub trait Key: 'static {
     type Borrow<'k>: Copy;
 
     #[allow(private_bounds)]
-    type Read<'k>: Read + From<Self::Borrow<'k>> + From<&'k Self::Write>;
+    type Read<'k>: Read + From<Self::Borrow<'k>>;
 
     #[allow(private_bounds)]
     type Write: Write + for<'k> From<Self::Read<'k>>;
@@ -43,10 +43,12 @@ pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
 
     fn take(&mut self, len: byte::Len) -> byte::Array;
 
-    fn get(&self, bit: usize) -> u8;
     fn slice(&self, bit: usize) -> Self;
 
     fn next(&mut self) -> Option<u8>;
+
+    fn seek(&mut self, bits: usize);
+
     fn prefix(&self, other: &Self) -> Self;
 }
 

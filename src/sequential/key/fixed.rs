@@ -40,7 +40,6 @@ pub(super) trait Uint:
     fn shl_at_most_56(self, bits: u8) -> Self;
     fn unbounded_shr(self, bits: u8) -> Self;
     fn leading_zeros(self) -> u8;
-    fn rotate_left(self, bits: u8) -> Self;
 
     fn from_most_significant_u64(value: u64) -> Self;
     fn from_u8(value: u8) -> Self;
@@ -136,6 +135,19 @@ impl<U: Uint> key::Read for Buffer<U> {
         Some(byte)
     }
 
+    fn seek(&mut self, bits: usize) {
+        validate!(self.bits() >= bits);
+
+        if self.bits as usize == bits {
+            self.buffer = U::default();
+            self.bits = 0;
+        } else {
+            let bits = bits as u8;
+            self.buffer = self.buffer.shl_at_most_56(bits);
+            self.bits -= bits;
+        }
+    }
+
     fn prefix(&self, other: &Self) -> Self {
         let max = self.bits.min(other.bits);
         let bits = (self.buffer ^ other.buffer).leading_zeros().min(max) & !0b111;
@@ -143,13 +155,6 @@ impl<U: Uint> key::Read for Buffer<U> {
             buffer: self.buffer.most_significant(bits),
             bits,
         }
-    }
-
-    #[inline]
-    fn get(&self, bit: usize) -> u8 {
-        validate!(bit <= U::BITS as usize - 8);
-
-        self.buffer.rotate_left(bit as u8).most_significant_u8()
     }
 
     #[inline]
@@ -209,12 +214,6 @@ impl<U: Uint> key::Write for Buffer<U> {
         let bits = bits as u8;
         self.buffer = self.buffer.most_significant(bits);
         self.bits = bits;
-    }
-}
-
-impl<U: Copy> From<&'_ Buffer<U>> for Buffer<U> {
-    fn from(buffer: &'_ Buffer<U>) -> Self {
-        *buffer
     }
 }
 
@@ -280,11 +279,6 @@ macro_rules! impl_unsigned_int {
                 #[inline]
                 fn leading_zeros(self) -> u8 {
                     <$ty>::leading_zeros(self) as u8
-                }
-
-                #[inline]
-                fn rotate_left(self, bits: u8) -> Self {
-                    <$ty>::rotate_left(self, bits as u32)
                 }
 
                 #[inline]

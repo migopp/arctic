@@ -15,7 +15,7 @@ use crate::key;
 /// Bit 08-16: Least significant byte
 /// Bit 06-08: Zero
 /// Bit 00-06: Length in bits
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Array(u64);
 
 impl Array {

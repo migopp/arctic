@@ -27,9 +27,7 @@ where
         mut min: K::Read<'l>,
         mut max: K::Read<'l>,
     ) -> Self {
-        validate!(min <= max);
-
-        if matches!(S::compare(min, max), cmp::Ordering::Greater) {
+        if S::REVERSE {
             core::mem::swap(&mut min, &mut max);
         }
 
@@ -37,47 +35,55 @@ where
         let bits = prefix.bits();
         let key = edge.meta().key();
         let mut writer = K::Write::from(prefix);
+        writer.extend(bits, key);
 
-        writer.extend(bits, edge.meta().key());
+        min.seek(prefix.bits());
+        let min_len = key.len().min_bits(min.bits());
+        let min_prefix = min.take(min_len);
+
+        max.seek(prefix.bits());
+        let max_len = key.len().min_bits(max.bits());
+        let max_prefix = max.take(max_len);
+
+        validate!(matches!(
+            order::<S>(key.cmp(&min_prefix)),
+            cmp::Ordering::Equal | cmp::Ordering::Greater
+        ));
+
+        validate!(matches!(
+            order::<S>(key.cmp(&max_prefix)),
+            cmp::Ordering::Equal | cmp::Ordering::Less
+        ));
 
         match edge.child() {
             None => Self::Root {
                 key: writer,
                 next: None,
             },
-            Some(edge::Child::Value(value)) => {
-                let reader = K::Read::from(&writer);
-                if reader < K::reborrow(min) || reader > K::reborrow(max) {
-                    return Self::Root {
-                        key: writer,
-                        next: None,
-                    };
-                }
-
-                Self::Root {
-                    key: writer,
-                    next: Some(value),
-                }
-            }
+            Some(edge::Child::Value(value)) => Self::Root {
+                key: writer,
+                next: Some(value),
+            },
             Some(edge::Child::Node(node)) => {
-                let bits = bits + key.len().bits() as usize;
                 let node = unsafe { node.into_ref_unchecked() };
 
-                let reader = K::Read::from(&writer);
-                validate!(matches!(
-                    S::compare(reader, K::reborrow(min.slice(bits))),
-                    cmp::Ordering::Equal | cmp::Ordering::Greater
-                ));
-                validate!(matches!(
-                    S::compare(reader, K::reborrow(max.slice(bits))),
-                    cmp::Ordering::Equal | cmp::Ordering::Less
-                ));
+                let first = match key == min_prefix {
+                    false => None,
+                    true => min.next(),
+                };
 
-                let first = (reader == K::reborrow(min.slice(bits))).then(|| min.get(bits));
-                let last = (reader == K::reborrow(max.slice(bits))).then(|| max.get(bits));
+                let last = match key == max_prefix {
+                    false => None,
+                    true => max.next(),
+                };
 
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, first, last, S::range(node, first, last)));
+                stack.push((
+                    bits + key.len().bits() as usize,
+                    first,
+                    last,
+                    S::range(node, first, last),
+                ));
 
                 Self::Node(NodeIter {
                     stack,
@@ -159,13 +165,13 @@ where
                     continue 'horizontal;
                 };
 
-                let meta = edge.meta();
+                let key = edge.meta().key();
                 self.key.truncate(bits);
                 self.key.push(bits, byte);
 
                 unsafe {
                     // SAFETY: we just pushed `byte` onto `key`
-                    self.key.extend_nonempty_unchecked(bits + 8, meta.key());
+                    self.key.extend_nonempty_unchecked(bits + 8, key);
                 }
 
                 let check_first = Some(byte) == *first;
@@ -184,7 +190,7 @@ where
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
                             self.stack.push((
-                                bits + 8 + meta.key().len().bits() as usize,
+                                bits + 8 + key.len().bits() as usize,
                                 None,
                                 None,
                                 unsafe { S::range(node, None, None) },
@@ -196,17 +202,33 @@ where
 
                 crate::cold();
 
-                match child {
-                    edge::Child::Value(value) => {
-                        if check_first && K::Read::from(&self.key) < K::reborrow(self.min) {
-                            continue 'horizontal;
-                        }
+                let first = if check_first {
+                    let min_prefix = self.min.take(key.len().min_bits(self.min.bits()));
+                    match order::<S>(key.cmp(&min_prefix)) {
+                        cmp::Ordering::Less => continue 'horizontal,
+                        cmp::Ordering::Equal => self.min.next(),
+                        cmp::Ordering::Greater => None,
+                    }
+                } else {
+                    None
+                };
 
-                        if check_last && K::Read::from(&self.key) > K::reborrow(self.max) {
+                let last = if check_last {
+                    let max_prefix = self.max.take(key.len().min_bits(self.max.bits()));
+                    match order::<S>(key.cmp(&max_prefix)) {
+                        cmp::Ordering::Less => None,
+                        cmp::Ordering::Equal => self.max.next(),
+                        cmp::Ordering::Greater => {
                             self.stack.clear();
                             return None;
                         }
+                    }
+                } else {
+                    None
+                };
 
+                match child {
+                    edge::Child::Value(value) => {
                         if YIELD {
                             return Some((&self.key, value));
                         } else {
@@ -214,38 +236,9 @@ where
                         }
                     }
                     edge::Child::Node(node) => {
-                        let first = if check_first {
-                            match S::compare(
-                                K::Read::from(&self.key),
-                                K::reborrow(self.min.slice(bits)),
-                            ) {
-                                cmp::Ordering::Less => continue 'horizontal,
-                                cmp::Ordering::Equal => Some(self.min.get(bits)),
-                                cmp::Ordering::Greater => None,
-                            }
-                        } else {
-                            None
-                        };
-
-                        let last = if check_last {
-                            match S::compare(
-                                K::Read::from(&self.key),
-                                K::reborrow(self.max.slice(bits)),
-                            ) {
-                                cmp::Ordering::Less => None,
-                                cmp::Ordering::Equal => Some(self.max.get(bits)),
-                                cmp::Ordering::Greater => {
-                                    self.stack.clear();
-                                    return None;
-                                }
-                            }
-                        } else {
-                            None
-                        };
-
                         let node = unsafe { node.into_ref_unchecked() };
                         self.stack.push((
-                            bits + 8 + meta.key().len().bits() as usize,
+                            bits + 8 + key.len().bits() as usize,
                             first,
                             last,
                             unsafe { S::range(node, first, last) },
@@ -255,5 +248,12 @@ where
                 }
             }
         }
+    }
+}
+
+const fn order<S: Sort>(order: cmp::Ordering) -> cmp::Ordering {
+    match S::REVERSE {
+        false => order,
+        true => order.reverse(),
     }
 }

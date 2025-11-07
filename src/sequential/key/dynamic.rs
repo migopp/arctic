@@ -135,6 +135,15 @@ impl key::Read for Reader<'_> {
         }
     }
 
+    fn seek(&mut self, bits: usize) {
+        validate!(self.bits() >= bits);
+
+        match self {
+            Self::Large(large) => *self = Self::from(&large[bits >> 3..]),
+            Self::Small(small) => small.seek(bits),
+        }
+    }
+
     fn prefix(&self, other: &Self) -> Self {
         if let (Self::Large(left), Self::Large(right)) = (self, other) {
             let index = core::iter::zip(*left, *right)
@@ -146,14 +155,6 @@ impl key::Read for Reader<'_> {
         let left = self.to_small();
         let right = other.to_small();
         Self::Small(left.prefix(&right))
-    }
-
-    #[inline]
-    fn get(&self, bit: usize) -> u8 {
-        match self {
-            Reader::Large(large) => large[bit >> 3],
-            Reader::Small(small) => small.get(bit),
-        }
     }
 
     #[inline]
@@ -262,12 +263,6 @@ impl<'k> From<Reader<'k>> for Writer {
             Reader::Large(large) => large.to_vec(),
             Reader::Small(small) => small.with_bytes(|small| small.to_vec()),
         })
-    }
-}
-
-impl<'k> From<&'k Writer> for Reader<'k> {
-    fn from(writer: &'k Writer) -> Self {
-        Reader::from(writer.0.as_slice())
     }
 }
 

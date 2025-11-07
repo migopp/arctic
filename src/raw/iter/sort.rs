@@ -1,8 +1,5 @@
-use core::cmp;
-
 use ribbit::atomic::Atomic128;
 
-use crate::key;
 use crate::raw::node;
 use crate::raw::Edge;
 
@@ -11,6 +8,8 @@ pub struct Sorted;
 pub struct Unsorted;
 
 pub(crate) trait Sort {
+    const REVERSE: bool = false;
+
     type PrefixIter<'g, C>: Iterator<Item = (u8, &'g Atomic128<Edge<C>>)>
     where
         C: 'g;
@@ -26,8 +25,6 @@ pub(crate) trait Sort {
         min: Option<u8>,
         max: Option<u8>,
     ) -> Self::RangeIter<'g, V>;
-
-    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering;
 }
 
 impl Sort for Sorted {
@@ -54,14 +51,11 @@ impl Sort for Sorted {
     ) -> Self::PrefixIter<'g, V> {
         node.iter_range(min, max)
     }
-
-    #[inline]
-    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
-        left.cmp(&right)
-    }
 }
 
 impl Sort for core::iter::Rev<Sorted> {
+    const REVERSE: bool = true;
+
     type PrefixIter<'g, V>
         = core::iter::Rev<node::SortedIter<'g, V>>
     where
@@ -85,11 +79,6 @@ impl Sort for core::iter::Rev<Sorted> {
     ) -> Self::RangeIter<'g, V> {
         validate!(min.zip(max).map(|(min, max)| min >= max).unwrap_or(true));
         node.iter_range(max, min).rev()
-    }
-
-    #[inline]
-    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
-        right.cmp(&left)
     }
 }
 
@@ -116,10 +105,5 @@ impl Sort for Unsorted {
         max: Option<u8>,
     ) -> Self::RangeIter<'g, V> {
         node.iter_range(min, max)
-    }
-
-    #[inline]
-    fn compare<R: key::Read>(left: R, right: R) -> cmp::Ordering {
-        left.cmp(&right)
     }
 }
