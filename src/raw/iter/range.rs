@@ -9,7 +9,7 @@ use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum RangeIter<'g, R, W, C, O: Order> {
+pub(crate) enum RangeIter<'g, R, W: key::Write, C, O: Order> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, O>),
 }
@@ -34,14 +34,12 @@ where
         let edge = root.load_packed(Ordering::Acquire);
         let bits = prefix.bits();
         let key = edge.meta().key();
-        let mut writer = W::from(prefix);
-        writer.extend(bits, key);
 
-        min.seek(prefix.bits());
+        min.seek(bits);
         let min_len = key.len().min_bits(min.bits());
         let min_prefix = min.take(min_len);
 
-        max.seek(prefix.bits());
+        max.seek(bits);
         let max_len = key.len().min_bits(max.bits());
         let max_prefix = max.take(max_len);
 
@@ -54,6 +52,10 @@ where
             order::<O>(key.cmp(&max_prefix)),
             cmp::Ordering::Equal | cmp::Ordering::Less
         ));
+
+        let mut writer = W::from(prefix);
+        let mut bits = W::len_from_bits(bits);
+        writer.extend(&mut bits, key);
 
         match edge.child() {
             None => Self::Root {
@@ -78,12 +80,7 @@ where
                 };
 
                 let mut stack = Vec::with_capacity(7);
-                stack.push((
-                    bits + key.len().bits() as usize,
-                    first,
-                    last,
-                    O::range(node, first, last),
-                ));
+                stack.push((bits, first, last, O::range(node, first, last)));
 
                 Self::Node(NodeIter {
                     stack,
@@ -122,11 +119,11 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W, C: 'g, O: Order> {
+pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, O: Order> {
     min: R,
     max: R,
     key: W,
-    stack: Vec<(usize, Option<u8>, Option<u8>, O::RangeIter<'g, C>)>,
+    stack: Vec<(W::Len, Option<u8>, Option<u8>, O::RangeIter<'g, C>)>,
     _sort: PhantomData<O>,
 }
 
@@ -150,7 +147,7 @@ where
     fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         'vertical: loop {
             let (bits, first, last, iter) = self.stack.last_mut()?;
-            let bits = *bits;
+            let mut bits = *bits;
 
             'horizontal: loop {
                 let Some((byte, edge)) = iter.next() else {
@@ -165,11 +162,11 @@ where
 
                 let key = edge.meta().key();
                 self.key.truncate(bits);
-                self.key.push(bits, byte);
+                self.key.push(&mut bits, byte);
 
                 unsafe {
                     // SAFETY: we just pushed `byte` onto `key`
-                    self.key.extend_nonempty_unchecked(bits + 8, key);
+                    self.key.extend_nonempty_unchecked(&mut bits, key);
                 }
 
                 let check_first = Some(byte) == *first;
@@ -187,12 +184,8 @@ where
                         }
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
-                            self.stack.push((
-                                bits + 8 + key.len().bits() as usize,
-                                None,
-                                None,
-                                unsafe { O::range(node, None, None) },
-                            ));
+                            self.stack
+                                .push((bits, None, None, unsafe { O::range(node, None, None) }));
                             continue 'vertical;
                         }
                     }
@@ -235,12 +228,8 @@ where
                     }
                     edge::Child::Node(node) => {
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack.push((
-                            bits + 8 + key.len().bits() as usize,
-                            first,
-                            last,
-                            unsafe { O::range(node, first, last) },
-                        ));
+                        self.stack
+                            .push((bits, first, last, unsafe { O::range(node, first, last) }));
                         continue 'vertical;
                     }
                 }

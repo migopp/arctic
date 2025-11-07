@@ -47,31 +47,41 @@ pub(crate) trait Read: Copy + fmt::Debug + Default + Ord {
 }
 
 pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
-    fn extend(&mut self, bits: usize, array: byte::Array);
+    type Len: Copy;
+
+    fn len_from_bits(bits: usize) -> Self::Len;
+
+    fn extend(&mut self, len: &mut Self::Len, array: byte::Array);
 
     /// # SAFETY
     ///
     /// Caller must guarantee `self.bits() > 0`.
-    unsafe fn extend_nonempty_unchecked(&mut self, bits: usize, array: byte::Array) {
-        self.extend(bits, array)
+    unsafe fn extend_nonempty_unchecked(&mut self, len: &mut Self::Len, array: byte::Array) {
+        self.extend(len, array)
     }
 
-    fn push(&mut self, bits: usize, byte: u8);
-    fn truncate(&mut self, bits: usize);
+    fn push(&mut self, len: &mut Self::Len, byte: u8);
+
+    fn truncate(&mut self, len: Self::Len);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ignore;
 
 impl Write for Ignore {
-    #[inline]
-    fn extend(&mut self, _bits: usize, _array: byte::Array) {}
+    type Len = ();
 
     #[inline]
-    fn push(&mut self, _bits: usize, _byte: u8) {}
+    fn len_from_bits(_bits: usize) -> Self::Len {}
 
     #[inline]
-    fn truncate(&mut self, _bits: usize) {}
+    fn extend(&mut self, (): &mut (), _array: byte::Array) {}
+
+    #[inline]
+    fn push(&mut self, (): &mut (), _byte: u8) {}
+
+    #[inline]
+    fn truncate(&mut self, (): ()) {}
 }
 
 impl<R> From<R> for Ignore

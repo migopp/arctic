@@ -180,34 +180,44 @@ impl<U> Writer<U> {
 }
 
 impl<U: Uint> key::Write for Writer<U> {
+    type Len = usize;
+
     #[inline]
-    fn extend(&mut self, bits: usize, array: byte::Array) {
-        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
+    fn len_from_bits(bits: usize) -> Self::Len {
+        bits
+    }
+
+    #[inline]
+    fn extend(&mut self, bits: &mut usize, array: byte::Array) {
+        validate!(*bits + array.len().bits() as usize <= U::BITS as usize);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
+        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> *bits;
+        *bits += array.len().bits() as usize;
     }
 
     #[inline]
-    unsafe fn extend_nonempty_unchecked(&mut self, bits: usize, array: byte::Array) {
-        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
-        validate!(bits >= 8);
+    unsafe fn extend_nonempty_unchecked(&mut self, bits: &mut usize, array: byte::Array) {
+        validate!(*bits + array.len().bits() as usize <= U::BITS as usize);
+        validate!(*bits >= 8);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.0 |= U::from_most_significant_u64(array.value()) >> bits;
+        self.0 |= U::from_most_significant_u64(array.value()) >> *bits;
+        *bits += array.len().bits() as usize;
     }
 
     #[inline]
-    fn push(&mut self, bits: usize, byte: u8) {
-        validate!(bits <= U::BITS as usize - 8);
+    fn push(&mut self, bits: &mut usize, byte: u8) {
+        validate!(*bits <= U::BITS as usize - 8);
 
-        self.0 |= U::from_u8(byte).shr(bits);
+        self.0 |= U::from_u8(byte).shr(*bits);
+        *bits += 8;
     }
 
     #[inline]
