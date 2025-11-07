@@ -9,7 +9,7 @@ use crate::key::fixed;
 pub enum Reader<'k> {
     // INVARIANT: `len > 8`
     Large(&'k [u8]),
-    Small(fixed::Buffer<u64>),
+    Small(fixed::Reader<u64>),
 }
 
 impl<'k> From<&'k [u8]> for Reader<'k> {
@@ -21,7 +21,7 @@ impl<'k> From<&'k [u8]> for Reader<'k> {
                 let mut buffer = [0u8; 8];
                 buffer[..len].copy_from_slice(key);
                 Self::Small(unsafe {
-                    fixed::Buffer::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
+                    fixed::Reader::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
                 })
             }
         }
@@ -45,7 +45,7 @@ impl<'k> From<&'k str> for Reader<'k> {
 impl Default for Reader<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(fixed::Buffer::default())
+        Self::Small(fixed::Reader::default())
     }
 }
 
@@ -108,7 +108,7 @@ impl key::Read for Reader<'_> {
                 .to_be()
                     << (64 - after);
 
-                *self = Self::Small(unsafe { fixed::Buffer::new_unchecked(buffer, after as u8) });
+                *self = Self::Small(unsafe { fixed::Reader::new_unchecked(buffer, after as u8) });
                 array
             }
             Reader::Small(small) => small.take(len),
@@ -167,13 +167,13 @@ impl key::Read for Reader<'_> {
 }
 
 impl Reader<'_> {
-    fn to_small(self) -> fixed::Buffer<u64> {
+    fn to_small(self) -> fixed::Reader<u64> {
         match self {
             Reader::Small(small) => small,
             Reader::Large(large) => {
                 // SAFETY: `large.len() > 8`
                 let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                unsafe { fixed::Buffer::new_unchecked(buffer, 64) }
+                unsafe { fixed::Reader::new_unchecked(buffer, 64) }
             }
         }
     }

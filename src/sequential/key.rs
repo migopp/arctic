@@ -87,7 +87,7 @@ macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(
             impl Key for $ty {
-                type Read<'k> = fixed::Buffer<$ty>;
+                type Read<'k> = fixed::Reader<$ty>;
                 type Write = fixed::Writer<$ty>;
                 type Borrow<'k> = Self;
 

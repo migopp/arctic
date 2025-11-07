@@ -46,13 +46,13 @@ pub(super) trait Uint:
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Buffer<U> {
+pub struct Reader<U> {
     buffer: U,
     bits: u8,
 }
 
 #[expect(private_bounds)]
-impl<U: Uint> Buffer<U> {
+impl<U: Uint> Reader<U> {
     #[inline]
     pub fn new_masked(buffer: U, bits: u8) -> Self {
         unsafe {
@@ -76,7 +76,7 @@ impl<U: Uint> Buffer<U> {
     }
 }
 
-impl<U: Uint> key::Read for Buffer<U> {
+impl<U: Uint> key::Read for Reader<U> {
     #[inline]
     fn bits(&self) -> usize {
         self.bits as usize
@@ -163,7 +163,7 @@ impl<U: Uint> key::Read for Buffer<U> {
     }
 }
 
-impl<U: Uint> core::fmt::Debug for Buffer<U> {
+impl<U: Uint> core::fmt::Debug for Reader<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
     }
@@ -225,8 +225,8 @@ impl<U: Uint> core::fmt::Debug for Writer<U> {
     }
 }
 
-impl<U> From<Buffer<U>> for Writer<U> {
-    fn from(reader: Buffer<U>) -> Self {
+impl<U> From<Reader<U>> for Writer<U> {
+    fn from(reader: Reader<U>) -> Self {
         Self(reader.buffer)
     }
 }
@@ -234,7 +234,7 @@ impl<U> From<Buffer<U>> for Writer<U> {
 macro_rules! impl_unsigned_int {
     ($($ty:ty: $bits:expr, $into_u64:expr, $from_u64:expr, $into_u128:expr),* $(,)?) => {
         $(
-            impl From<$ty> for Buffer<$ty> {
+            impl From<$ty> for Reader<$ty> {
                 #[inline]
                 fn from(value: $ty) -> Self {
                     Self {
