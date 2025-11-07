@@ -8,16 +8,14 @@ use crate::concurrent::Value;
 use crate::iter::Order;
 use crate::key;
 use crate::raw;
+pub(super) use crate::raw::iter::Prefix;
+pub(super) use crate::raw::iter::Range;
 use crate::raw::Edge;
-
-pub(crate) use crate::raw::iter::Prefix;
-pub(crate) use crate::raw::iter::Range;
 use crate::Key;
 
 /// Provide safe memory reclamation and strongly-typed values over
 /// scan iterators in [`crate::raw::iter`].
-pub(crate) trait Scan: raw::iter::Scan + Sized {
-    #[expect(private_interfaces)]
+pub(super) trait Scan: raw::iter::Scan + Sized {
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
@@ -32,7 +30,6 @@ impl<T> Scan for T
 where
     T: raw::iter::Scan,
 {
-    #[expect(private_interfaces)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,

@@ -9,7 +9,7 @@ use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum RangeIter<'g, R, W: key::Write, C, O: Order> {
+pub enum RangeIter<'g, R, W: key::Write, C, O: Order> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, O>),
 }
