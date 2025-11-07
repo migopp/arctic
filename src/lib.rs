@@ -75,7 +75,7 @@ mod tests {
         map.insert(key, 2u32);
         let range = map.range(1u64, 1u64).unwrap();
         assert_eq!(
-            range.iter::<crate::iter::Sorted>().collect::<Vec<_>>(),
+            range.entries::<crate::iter::Sorted>().collect::<Vec<_>>(),
             vec![(1, 2)]
         );
     }
@@ -106,7 +106,7 @@ mod tests {
         let mut map = map.pin();
         let range = map.range(256u64, 511u64).unwrap();
         assert_eq!(
-            range.iter::<crate::iter::Sorted>().collect::<Vec<_>>(),
+            range.entries::<crate::iter::Sorted>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))
@@ -178,7 +178,7 @@ mod tests {
 
         assert_eq!(
             range
-                .iter::<core::iter::Rev<crate::iter::Sorted>>()
+                .entries::<core::iter::Rev<crate::iter::Sorted>>()
                 .collect::<Vec<_>>(),
             vec![(4, 4), (3, 3), (2, 2)]
         );
@@ -256,7 +256,7 @@ mod tests {
             .prefix(K::Read::from(first.borrow()).prefix(&K::Read::from(last.borrow())))
             .unwrap();
         prefix
-            .iter::<core::iter::Rev<crate::iter::Sorted>>()
+            .entries::<core::iter::Rev<crate::iter::Sorted>>()
             .zip(keys.iter().rev())
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -267,7 +267,7 @@ mod tests {
         // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow(), last.borrow()).unwrap();
         range
-            .iter::<crate::iter::Sorted>()
+            .entries::<crate::iter::Sorted>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

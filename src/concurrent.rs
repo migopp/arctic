@@ -266,7 +266,7 @@ where
     }
 
     #[expect(private_interfaces)]
-    pub fn all(&mut self) -> iter::Guard<'g, '_, K, V, iter::Prefix> {
+    pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, K, V, iter::Prefix> {
         let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
             &mut self.smr,
             self.raw.root(),
@@ -279,7 +279,7 @@ where
     pub fn prefix<'l>(
         &'l mut self,
         prefix: impl Into<K::Read<'l>>,
-    ) -> Option<iter::Guard<'g, 'l, K, V, iter::Prefix>> {
+    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, iter::Prefix>> {
         let prefix = prefix.into();
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
             &mut self.smr,
@@ -296,7 +296,7 @@ where
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> Option<iter::Guard<'g, 'l, K, V, iter::Range>> {
+    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, iter::Range>> {
         let min = min.into();
         let max = max.into();
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
@@ -387,7 +387,7 @@ where
 
     fn scan_optimistic<'l, S, O>(
         buffer: &mut Vec<(K::Write, u64)>,
-        guard: &iter::Guard<'g, 'l, K, V, S>,
+        guard: &iter::PrefixGuard<'g, 'l, K, V, S>,
         limit: usize,
     ) -> Result<(), ()>
     where
@@ -395,14 +395,14 @@ where
         O: Order,
     {
         guard
-            .iter::<O>()
+            .entries::<O>()
             .for_each_raw(|key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            guard.iter::<O>().for_each_raw(|new_key, new_value| {
+            guard.entries::<O>().for_each_raw(|new_key, new_value| {
                 let index = len;
                 len += 1;
 

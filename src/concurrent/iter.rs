@@ -14,12 +14,14 @@ pub(crate) use crate::raw::iter::Prefix;
 pub(crate) use crate::raw::iter::Range;
 use crate::Key;
 
+/// Provide safe memory reclamation and strongly-typed values over
+/// scan iterators in [`crate::raw::iter`].
 pub(crate) trait Scan: raw::iter::Scan + Sized {
     #[expect(private_interfaces)]
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
-    ) -> Guard<'g, 'l, K, V, Self>
+    ) -> PrefixGuard<'g, 'l, K, V, Self>
     where
         K: Key,
         V: Value,
@@ -34,13 +36,13 @@ where
     fn guard<'g, 'l, K, V, H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
         input: Self::Input<'l, K::Read<'l>>,
-    ) -> Guard<'g, 'l, K, V, Self>
+    ) -> PrefixGuard<'g, 'l, K, V, Self>
     where
         K: Key,
         V: Value,
         H: cursor::path::History<'g, K::Read<'l>, ()>,
     {
-        Guard {
+        PrefixGuard {
             root: cursor.edge(),
             guard: cursor.into_guard().guard_prefix(),
             input,
@@ -48,15 +50,16 @@ where
     }
 }
 
+/// Guard all nodes and values below this prefix from memory reclamation.
 #[expect(private_bounds)]
-pub struct Guard<'g, 'l, K: Key, V: Value, S: Scan> {
+pub struct PrefixGuard<'g, 'l, K: Key, V: Value, S: Scan> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<()>>,
     input: S::Input<'l, K::Read<'l>>,
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, K, V, S> Guard<'g, 'l, K, V, S>
+impl<'g, 'l, K, V, S> PrefixGuard<'g, 'l, K, V, S>
 where
     K: Key,
     V: Value,
@@ -65,13 +68,13 @@ where
     #[inline]
     #[expect(private_interfaces)]
     #[expect(clippy::type_complexity)]
-    pub fn iter<O>(
+    pub fn entries<O>(
         &self,
-    ) -> ScanIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
+    ) -> EntryIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
     where
         O: Order,
     {
-        ScanIter {
+        EntryIter {
             guard: &self.guard,
             iter: unsafe { S::new_unchecked(self.root, self.input) },
             _type: PhantomData,
@@ -99,14 +102,15 @@ where
     }
 }
 
-pub struct ScanIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
+/// Iterator over keys and values
+pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
     iter: I,
     _type: PhantomData<(K, O)>,
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, 'guard, K, V, O, I> ScanIter<'g, 'l, 'guard, K, V, O, I>
+impl<'g, 'l, 'guard, K, V, O, I> EntryIter<'g, 'l, 'guard, K, V, O, I>
 where
     K: Key,
     V: Value,
@@ -136,7 +140,7 @@ where
     }
 }
 
-impl<'g, 'l, 'guard, K, V, O, I> Iterator for ScanIter<'g, 'l, 'guard, K, V, O, I>
+impl<'g, 'l, 'guard, K, V, O, I> Iterator for EntryIter<'g, 'l, 'guard, K, V, O, I>
 where
     K: Key,
     V: Value,
@@ -154,6 +158,7 @@ where
     }
 }
 
+/// Iterator over values only
 pub struct ValueIter<'g, 'l, 'guard, R, V: Value, O, I> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
     iter: I,
