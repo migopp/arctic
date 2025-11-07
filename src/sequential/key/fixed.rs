@@ -14,7 +14,7 @@ pub(super) trait Uint:
     + Eq
     + core::ops::Shl<u8, Output = Self>
     + core::ops::ShlAssign<u8>
-    + core::ops::Shr<u8, Output = Self>
+    + core::ops::Shr<usize, Output = Self>
     + core::ops::BitXor<Output = Self>
     + core::ops::BitOr<Output = Self>
     + core::ops::BitOrAssign
@@ -73,12 +73,6 @@ impl<U: Uint> Buffer<U> {
     pub(super) fn with_bytes<F: FnOnce(&[u8]) -> T, T>(&self, with: F) -> T {
         self.buffer
             .with_be_bytes(|bytes| with(&bytes[..self.bytes()]))
-    }
-
-    #[inline]
-    pub(super) fn into_value_unchecked(self) -> U {
-        validate_eq!(self.bits, U::BITS);
-        self.buffer
     }
 }
 
@@ -169,57 +163,71 @@ impl<U: Uint> key::Read for Buffer<U> {
     }
 }
 
-impl<U: Uint> key::Write for Buffer<U> {
+impl<U: Uint> core::fmt::Debug for Buffer<U> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Writer<U>(U);
+
+impl<U> Writer<U> {
+    pub(super) fn into_key_unchecked(self) -> U {
+        self.0
+    }
+}
+
+impl<U: Uint> key::Write for Writer<U> {
     #[inline]
     fn extend(&mut self, bits: usize, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= U::BITS);
-        validate_eq!(bits, self.bits as usize);
+        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.buffer |= U::from_most_significant_u64(array.value() & !0xFF) >> self.bits;
-        self.bits += array.len().bits();
+        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
     }
 
     #[inline]
     unsafe fn extend_nonempty_unchecked(&mut self, bits: usize, array: byte::Array) {
-        validate!(self.bits + array.len().bits() <= U::BITS);
-        validate!(self.bits >= 8);
-        validate_eq!(bits, self.bits as usize);
+        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
+        validate!(bits >= 8);
 
         if array.len().bits() == 0 {
             return;
         }
 
-        self.buffer |= U::from_most_significant_u64(array.value()) >> self.bits;
-        self.bits += array.len().bits();
+        self.0 |= U::from_most_significant_u64(array.value()) >> bits;
     }
 
     #[inline]
     fn push(&mut self, bits: usize, byte: u8) {
-        validate!(self.bits <= U::BITS - 8);
-        validate_eq!(bits, self.bits as usize);
+        validate!(bits <= U::BITS as usize - 8);
 
-        self.buffer |= U::from_u8(byte).shr(self.bits);
-        self.bits += 8;
+        self.0 |= U::from_u8(byte).shr(bits);
     }
 
     #[inline]
     fn truncate(&mut self, bits: usize) {
-        validate!(self.bits as usize >= bits);
         validate!(bits <= U::BITS as usize);
 
-        let bits = bits as u8;
-        self.buffer = self.buffer.most_significant(bits);
-        self.bits = bits;
+        self.0 = self.0.most_significant(bits as u8);
     }
 }
 
-impl<U: Uint> core::fmt::Debug for Buffer<U> {
+impl<U: Uint> core::fmt::Debug for Writer<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
+        self.0
+            .with_be_bytes(|bytes| f.debug_list().entries(bytes).finish())
+    }
+}
+
+impl<U> From<Buffer<U>> for Writer<U> {
+    fn from(reader: Buffer<U>) -> Self {
+        Self(reader.buffer)
     }
 }
 

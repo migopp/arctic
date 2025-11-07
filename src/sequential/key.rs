@@ -88,7 +88,7 @@ macro_rules! impl_unsigned_int {
         $(
             impl Key for $ty {
                 type Read<'k> = fixed::Buffer<$ty>;
-                type Write = fixed::Buffer<$ty>;
+                type Write = fixed::Writer<$ty>;
                 type Borrow<'k> = Self;
 
                 #[inline]
@@ -98,12 +98,12 @@ macro_rules! impl_unsigned_int {
 
                 #[inline]
                 unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-                    writer.into_value_unchecked()
+                    writer.into_key_unchecked()
                 }
 
                 #[inline]
                 unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-                    writer.into_value_unchecked()
+                    writer.into_key_unchecked()
                 }
             }
         )*
