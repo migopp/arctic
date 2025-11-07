@@ -1,4 +1,3 @@
-use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -8,7 +7,7 @@ use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum PrefixIter<'g, 'l, W: key::Write, C: 'g, S: Sort> {
+pub(crate) enum PrefixIter<'g, W: key::Write, C: 'g, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,
@@ -16,14 +15,12 @@ pub(crate) enum PrefixIter<'g, 'l, W: key::Write, C: 'g, S: Sort> {
     Node {
         key: W,
         frontier: Vec<(usize, S::PrefixIter<'g, C>)>,
-        _cursor: PhantomData<&'l ()>,
     },
 }
 
-impl<'g, 'l, W, C, S> PrefixIter<'g, 'l, W, C, S>
+impl<'g, W, C, S> PrefixIter<'g, W, C, S>
 where
     W: key::Write,
-    C: 'g,
     S: Sort,
 {
     #[inline]
@@ -55,7 +52,6 @@ where
                 Self::Node {
                     frontier: vec![(bits + key.len().bits() as usize, S::prefix(node))],
                     key: writer,
-                    _cursor: PhantomData,
                 }
             }
         }
@@ -84,11 +80,7 @@ where
                     return None;
                 }
             }
-            Self::Node {
-                key,
-                frontier,
-                _cursor,
-            } => (key, frontier),
+            Self::Node { key, frontier } => (key, frontier),
         };
 
         'vertical: loop {

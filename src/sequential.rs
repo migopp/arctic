@@ -77,7 +77,7 @@ impl<K: Key, V: Value> Map<K, V> {
 
 pub struct Iter<'g, K: Key, V, S: Sort> {
     _value: PhantomData<V>,
-    iter: PrefixIter<'g, 'static, K::Write, (), S>,
+    iter: PrefixIter<'g, K::Write, (), S>,
 }
 
 impl<'g, K, V, S> Iter<'g, K, V, S>

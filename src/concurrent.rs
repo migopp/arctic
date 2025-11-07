@@ -643,7 +643,7 @@ where
 
 pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
     guard: &'l hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::PrefixIter<'g, 'l, K::Write, (), S>,
+    iter: crate::raw::iter::PrefixIter<'g, K::Write, (), S>,
 }
 
 impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>

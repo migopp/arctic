@@ -122,15 +122,15 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W, V: 'g, S: Sort> {
+pub(crate) struct NodeIter<'g, R, W, C: 'g, S: Sort> {
     min: R,
     max: R,
     key: W,
-    stack: Vec<(usize, Option<u8>, Option<u8>, S::RangeIter<'g, V>)>,
+    stack: Vec<(usize, Option<u8>, Option<u8>, S::RangeIter<'g, C>)>,
     _sort: PhantomData<S>,
 }
 
-impl<'g, R, W, V, S> NodeIter<'g, R, W, V, S>
+impl<'g, R, W, C, S> NodeIter<'g, R, W, C, S>
 where
     R: key::Read,
     W: key::Write,
