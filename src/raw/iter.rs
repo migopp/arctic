@@ -13,14 +13,64 @@ use crate::key;
 use crate::raw::Edge;
 
 /// Abstraction over prefix and range iteration
-pub(crate) trait ScanIter<'g, R, W, C, S> {
-    type Input;
+pub(crate) trait Scan {
+    type Iter<'g, R, W, C, S>: ScanIter<'g, R, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort;
 
-    unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, input: Self::Input) -> Self;
+    type Input<'l, R>: Copy
+    where
+        R: Copy;
 
+    unsafe fn new_unchecked<'g, 'l, R, W, C, S>(
+        root: &'g Atomic128<Edge<C>>,
+        input: Self::Input<'l, R>,
+    ) -> Self::Iter<'g, R, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort;
+}
+
+pub(crate) trait ScanIter<'g, R, W, C, S>: Iterator<Item = (W, u64)> {
     fn lend(&mut self) -> Option<(&W, u64)>;
 
     fn for_each<F: FnMut(&W, u64)>(self, apply: F);
+}
+
+pub(crate) struct Prefix;
+
+impl Scan for Prefix {
+    type Iter<'g, R, W, C, S>
+        = PrefixIter<'g, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort;
+
+    type Input<'l, R>
+        = R
+    where
+        R: Copy;
+
+    #[inline]
+    unsafe fn new_unchecked<'g, 'l, R, W, C, S>(
+        root: &'g Atomic128<Edge<C>>,
+        prefix: Self::Input<'l, R>,
+    ) -> Self::Iter<'g, R, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort,
+    {
+        Self::Iter::new_unchecked(root, prefix)
+    }
 }
 
 impl<'g, R, W, C, S> ScanIter<'g, R, W, C, S> for PrefixIter<'g, W, C, S>
@@ -29,13 +79,6 @@ where
     W: key::Write + From<R>,
     S: Sort,
 {
-    type Input = ();
-
-    #[inline]
-    unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, (): ()) -> Self {
-        Self::new_unchecked(root, prefix)
-    }
-
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
         Self::lend(self)
@@ -44,6 +87,48 @@ where
     #[inline]
     fn for_each<F: FnMut(&W, u64)>(self, apply: F) {
         Self::for_each(self, apply)
+    }
+}
+
+impl<'g, W, C, S> Iterator for PrefixIter<'g, W, C, S>
+where
+    W: key::Write,
+    S: Sort,
+{
+    type Item = (W, u64);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lend().map(|(key, value)| (key.clone(), value))
+    }
+}
+
+pub(crate) struct Range;
+
+impl Scan for Range {
+    type Iter<'g, R, W, C, S>
+        = RangeIter<'g, R, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort;
+
+    type Input<'l, R>
+        = (R, R, R)
+    where
+        R: Copy;
+
+    #[inline]
+    unsafe fn new_unchecked<'g, 'l, R, W, C, S>(
+        root: &'g Atomic128<Edge<C>>,
+        (prefix, min, max): Self::Input<'l, R>,
+    ) -> Self::Iter<'g, R, W, C, S>
+    where
+        R: key::Read,
+        W: key::Write + From<R>,
+        C: 'g,
+        S: Sort,
+    {
+        Self::Iter::new_unchecked(root, prefix, min, max)
     }
 }
 
@@ -53,13 +138,6 @@ where
     W: key::Write + From<R>,
     S: Sort,
 {
-    type Input = (R, R);
-
-    #[inline]
-    unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, (min, max): (R, R)) -> Self {
-        Self::new_unchecked(root, prefix, min, max)
-    }
-
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
         Self::lend(self)
@@ -68,5 +146,17 @@ where
     #[inline]
     fn for_each<F: FnMut(&W, u64)>(self, apply: F) {
         Self::for_each(self, apply)
+    }
+}
+
+impl<'g, R, W, C, S> Iterator for RangeIter<'g, R, W, C, S>
+where
+    R: key::Read,
+    W: key::Write + From<R>,
+    S: Sort,
+{
+    type Item = (W, u64);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lend().map(|(key, value)| (key.clone(), value))
     }
 }

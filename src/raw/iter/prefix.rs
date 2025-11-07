@@ -7,7 +7,7 @@ use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum PrefixIter<'g, W: key::Write, C: 'g, S: Sort> {
+pub(crate) enum PrefixIter<'g, W, C: 'g, S: Sort> {
     Root {
         key: W,
         next: Option<u64>,

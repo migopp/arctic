@@ -278,7 +278,7 @@ mod tests {
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
         let mut range = pin
-            .range_hybrid::<crate::iter::Sorted>(
+            .range_optimistic::<crate::iter::Sorted>(
                 &mut buffer,
                 usize::MAX,
                 first.borrow(),

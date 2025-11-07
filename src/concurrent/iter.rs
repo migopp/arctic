@@ -1,96 +1,185 @@
+use core::marker::PhantomData;
+
+use ribbit::atomic::Atomic128;
+
 use crate::concurrent::cursor;
+use crate::concurrent::hazard;
 use crate::concurrent::Value;
 use crate::iter::Sort;
+use crate::key;
+use crate::raw;
+use crate::raw::Edge;
+
+pub(crate) use crate::raw::iter::Prefix;
+pub(crate) use crate::raw::iter::Range;
 use crate::Key;
 
-pub(crate) trait Scan {
-    type Input<'l, K>
+pub(crate) trait Scan: raw::iter::Scan + Sized {
+    fn guard<'g, 'l, K, V, H>(
+        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
+        input: Self::Input<'l, K::Read<'l>>,
+    ) -> Guard<'g, 'l, K, V, Self>
     where
-        K: Key;
-
-    fn scan<'g, 'l, K, C, V, S, F>(
-        cursor: &cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            C,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, C>,
-        >,
-        input: &Self::Input<'l, K>,
-        apply: F,
-    ) where
         K: Key,
         V: Value,
-        S: Sort,
-        F: FnMut(&K::Write, u64);
+        H: cursor::path::History<'g, K::Read<'l>, ()>;
 }
 
-pub(crate) struct Prefix;
-
-impl Scan for Prefix {
-    type Input<'l, K>
-        = ()
+impl<T> Scan for T
+where
+    T: raw::iter::Scan,
+{
+    fn guard<'g, 'l, K, V, H>(
+        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
+        input: Self::Input<'l, K::Read<'l>>,
+    ) -> Guard<'g, 'l, K, V, Self>
     where
-        K: Key;
-
-    fn scan<'g, 'l, K, C, V, S, F>(
-        cursor: &cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            C,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, C>,
-        >,
-        (): &(),
-        apply: F,
-    ) where
         K: Key,
         V: Value,
-        S: Sort,
-        F: FnMut(&K::Write, u64),
+        H: cursor::path::History<'g, K::Read<'l>, ()>,
     {
-        unsafe {
-            crate::raw::iter::PrefixIter::<_, _, S>::new_unchecked(cursor.edge(), cursor.prefix())
+        Guard {
+            root: cursor.edge(),
+            guard: cursor.into_guard().guard_prefix(),
+            input,
         }
-        .for_each(apply)
     }
 }
 
-pub(crate) struct Range;
+pub struct Guard<'g, 'l, K: Key, V: Value, S: Scan> {
+    guard: hazard::PrefixGuard<'g, 'l, V>,
+    root: &'g Atomic128<Edge<()>>,
+    input: S::Input<'l, K::Read<'l>>,
+}
 
-impl Scan for Range {
-    type Input<'l, K>
-        = (K::Read<'l>, K::Read<'l>)
+impl<'g, 'l, K, V, S> Guard<'g, 'l, K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Scan,
+{
+    #[inline]
+    pub fn iter<O>(
+        &self,
+    ) -> ScanIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
     where
-        K: Key;
-
-    fn scan<'g, 'l, K, C, V, S, F>(
-        cursor: &cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            C,
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, C>,
-        >,
-        (min, max): &Self::Input<'l, K>,
-        apply: F,
-    ) where
-        K: Key,
-        V: Value,
-        S: Sort,
-        F: FnMut(&K::Write, u64),
+        O: Sort,
     {
-        unsafe {
-            crate::raw::iter::RangeIter::<_, _, _, S>::new_unchecked(
-                cursor.edge(),
-                cursor.prefix(),
-                *min,
-                *max,
-            )
+        ScanIter {
+            guard: &self.guard,
+            iter: unsafe { S::new_unchecked(self.root, self.input) },
+            _type: PhantomData,
         }
-        .for_each(apply)
+    }
+
+    #[inline]
+    pub fn values<O>(
+        &self,
+    ) -> ValueIter<'g, 'l, '_, K::Read<'l>, V, O, S::Iter<'g, K::Read<'l>, key::Ignore, (), O>>
+    where
+        O: Sort,
+    {
+        ValueIter {
+            guard: &self.guard,
+            iter: unsafe { S::new_unchecked(self.root, self.input) },
+            _type: PhantomData,
+        }
+    }
+
+    pub(crate) fn guard_value(self) -> V::LinearizableGuard<'g, 'l> {
+        unsafe { V::downgrade_guard(self.guard) }
+    }
+}
+
+pub struct ScanIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
+    guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
+    iter: I,
+    _type: PhantomData<(K, O)>,
+}
+
+impl<'g, 'l, 'guard, K, V, O, I> ScanIter<'g, 'l, 'guard, K, V, O, I>
+where
+    K: Key,
+    V: Value,
+    I: raw::iter::ScanIter<'g, K::Read<'l>, K::Write, (), O>,
+{
+    #[inline]
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+        self.iter.lend().map(|(key, value)| {
+            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
+                V::guard_borrow(self.guard, value)
+            })
+        })
+    }
+
+    #[inline]
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'guard>)>(self, mut apply: F) {
+        raw::iter::ScanIter::for_each(self.iter, |key, value| {
+            apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
+                V::guard_borrow(self.guard, value)
+            })
+        })
+    }
+
+    #[inline]
+    pub fn for_each_raw<F: FnMut(&K::Write, u64)>(self, apply: F) {
+        raw::iter::ScanIter::for_each(self.iter, apply)
+    }
+}
+
+impl<'g, 'l, 'guard, K, V, O, I> Iterator for ScanIter<'g, 'l, 'guard, K, V, O, I>
+where
+    K: Key,
+    V: Value,
+    I: raw::iter::ScanIter<'g, K::Read<'l>, K::Write, (), O>,
+{
+    type Item = (K, V::Borrow<'guard>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.lend().map(|(key, value)| {
+            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
+                V::guard_borrow(self.guard, value)
+            })
+        })
+    }
+}
+
+pub struct ValueIter<'g, 'l, 'guard, R, V: Value, O, I> {
+    guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
+    iter: I,
+    _type: PhantomData<(R, O)>,
+}
+
+impl<'g, 'l, 'guard, R, V, O, I> ValueIter<'g, 'l, 'guard, R, V, O, I>
+where
+    V: Value,
+    I: raw::iter::ScanIter<'g, R, key::Ignore, (), O>,
+{
+    #[inline]
+    pub fn lend(&mut self) -> Option<V::Borrow<'guard>> {
+        self.iter
+            .lend()
+            .map(|(key::Ignore, value)| unsafe { V::guard_borrow(self.guard, value) })
+    }
+
+    #[inline]
+    pub fn for_each<F: FnMut(V::Borrow<'guard>)>(self, mut apply: F) {
+        raw::iter::ScanIter::for_each(self.iter, |key::Ignore, value| {
+            apply(unsafe { V::guard_borrow(self.guard, value) })
+        })
+    }
+}
+
+impl<'g, 'l, 'guard, R, V, O, I> Iterator for ValueIter<'g, 'l, 'guard, R, V, O, I>
+where
+    V: Value,
+    I: raw::iter::ScanIter<'g, R, key::Ignore, (), O>,
+{
+    type Item = V::Borrow<'guard>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lend()
     }
 }

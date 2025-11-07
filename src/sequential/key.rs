@@ -80,6 +80,15 @@ impl Write for Ignore {
     fn truncate(&mut self, _bits: usize) {}
 }
 
+impl<R> From<R> for Ignore
+where
+    R: Read,
+{
+    fn from(_: R) -> Self {
+        Self
+    }
+}
+
 macro_rules! impl_unsigned_int {
     ($($ty:ty),* $(,)?) => {
         $(

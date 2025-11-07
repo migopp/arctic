@@ -17,10 +17,10 @@ pub unsafe trait Value: Sized + crate::sequential::Value {
         Self: 'g + 'l,
         'g: 'l;
 
-    unsafe fn guard_borrow<'g, 'l>(
-        smr: &'l hazard::TraverseGuard<'g, 'l, Self>,
+    unsafe fn guard_borrow<'g, 'l, 'smr>(
+        smr: &'smr hazard::TraverseGuard<'g, 'l, Self>,
         raw: u64,
-    ) -> Self::Borrow<'l>;
+    ) -> Self::Borrow<'smr>;
 
     unsafe fn guard_owned<'g, 'l>(
         smr: hazard::TraverseGuard<'g, 'l, Self>,
@@ -33,7 +33,7 @@ pub unsafe trait Value: Sized + crate::sequential::Value {
     ) -> Self::SharedGuard<'g, 'l>;
 
     unsafe fn downgrade_guard<'g, 'l>(
-        smr: hazard::TraverseGuard<'g, 'l, Self>,
+        smr: hazard::PrefixGuard<'g, 'l, Self>,
     ) -> Self::LinearizableGuard<'g, 'l>;
 
     unsafe fn guard_linearizable<'g, 'l>(
@@ -84,8 +84,8 @@ unsafe impl<T> Value for Box<T> {
     }
 
     #[inline]
-    unsafe fn guard_borrow<'g, 'l>(
-        _smr: &'l hazard::TraverseGuard<'g, 'l, Self>,
+    unsafe fn guard_borrow<'g, 'l, 'smr>(
+        _smr: &'smr hazard::TraverseGuard<'g, 'l, Self>,
         raw: u64,
     ) -> Self::Borrow<'l> {
         Self::borrow_from_raw(raw)
@@ -100,7 +100,7 @@ unsafe impl<T> Value for Box<T> {
     }
 
     unsafe fn downgrade_guard<'g, 'l>(
-        _smr: hazard::TraverseGuard<'g, 'l, Self>,
+        _smr: hazard::PrefixGuard<'g, 'l, Self>,
     ) -> Self::LinearizableGuard<'g, 'l> {
         todo!()
     }
@@ -143,10 +143,10 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn guard_borrow<'g, 'l>(
-                    _smr: &hazard::TraverseGuard<'g, 'l, Self>,
+                unsafe fn guard_borrow<'g, 'l, 'smr>(
+                    _smr: &'smr hazard::TraverseGuard<'g, 'l, Self>,
                     raw: u64,
-                ) -> Self::Borrow<'l> {
+                ) -> Self::Borrow<'smr> {
                     raw as $ty
                 }
 
@@ -156,7 +156,7 @@ macro_rules! impl_trivial {
                 }
 
                 unsafe fn downgrade_guard<'g, 'l>(
-                    _smr: hazard::TraverseGuard<'g, 'l, Self>,
+                    _smr: hazard::PrefixGuard<'g, 'l, Self>,
                 ) -> Self::LinearizableGuard<'g, 'l> {
                 }
 

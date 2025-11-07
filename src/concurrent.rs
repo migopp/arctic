@@ -7,7 +7,6 @@ use core::sync::atomic::Ordering;
 
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
-use ribbit::atomic::Atomic128;
 
 use crate::iter::Sort;
 use crate::key::Read as _;
@@ -266,36 +265,27 @@ where
         }
     }
 
-    pub fn all(&mut self) -> PrefixGuard<'g, '_, K, V> {
+    pub fn all(&mut self) -> iter::Guard<'g, '_, K, V, iter::Prefix> {
         let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
             &mut self.smr,
             self.raw.root(),
         );
 
-        PrefixGuard {
-            root: cursor.edge(),
-            key: K::Read::default(),
-            guard: cursor.into_guard().guard_prefix(),
-        }
+        iter::Prefix::guard(cursor, K::Read::default())
     }
 
     pub fn prefix<'l>(
         &'l mut self,
         prefix: impl Into<K::Read<'l>>,
-    ) -> Option<PrefixGuard<'g, 'l, K, V>> {
+    ) -> Option<iter::Guard<'g, 'l, K, V, iter::Prefix>> {
         let prefix = prefix.into();
-
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
             &mut self.smr,
             self.raw.root(),
             prefix,
         )?;
-
-        Some(PrefixGuard {
-            root: cursor.edge(),
-            key: K::reborrow(cursor.prefix()),
-            guard: cursor.into_guard().guard_prefix(),
-        })
+        let prefix = cursor.prefix();
+        Some(iter::Prefix::guard(cursor, prefix))
     }
 
     // FIXME: support `Option` for min, max
@@ -303,131 +293,113 @@ where
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> Option<RangeGuard<'g, 'l, K, V>> {
+    ) -> Option<iter::Guard<'g, 'l, K, V, iter::Range>> {
         let min = min.into();
         let max = max.into();
-        let prefix = self.prefix(min.prefix(&max))?;
-        Some(RangeGuard {
-            prefix,
-            min: K::reborrow(min),
-            max: K::reborrow(max),
-        })
+        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new_prefix(
+            &mut self.smr,
+            self.raw.root(),
+            min.prefix(&max),
+        )?;
+        let prefix = cursor.prefix();
+        Some(iter::Range::guard(cursor, (prefix, min, max)))
     }
 
-    pub fn prefix_hybrid<'l, S: Sort>(
+    pub fn prefix_optimistic<'l, S: Sort>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_prefix(
-            &mut self.smr,
-            self.raw.root(),
-            prefix,
-        )?;
-        Self::scan_hybrid::<iter::Prefix, S>(buffer, cursor, &(), limit)
-    }
-
-    pub fn prefix_pessimistic<'l, S: Sort>(
-        &'l mut self,
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        prefix: impl Into<K::Read<'l>>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_prefix(
-            &mut self.smr,
-            self.raw.root(),
-            prefix,
-        )?;
-        Self::scan_pessimistic::<iter::Prefix, S>(buffer, cursor, &())
-    }
-
-    pub fn range_hybrid<'l, S: Sort>(
-        &'l mut self,
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        limit: usize,
-        min: impl Into<K::Read<'l>>,
-        max: impl Into<K::Read<'l>>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        let min = min.into();
-        let max = max.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_range(
-            &mut self.smr,
-            self.raw.root(),
-            min,
-            max,
-        )?;
-        Self::scan_hybrid::<iter::Range, S>(buffer, cursor, &(min, max), limit)
-    }
-
-    pub fn range_pessimistic<'l, S: Sort>(
-        &'l mut self,
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        min: impl Into<K::Read<'l>>,
-        max: impl Into<K::Read<'l>>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
-        let min = min.into();
-        let max = max.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_range(
-            &mut self.smr,
-            self.raw.root(),
-            min,
-            max,
-        )?;
-        Self::scan_pessimistic::<iter::Range, S>(buffer, cursor, &(min, max))
-    }
-
-    fn scan_hybrid<'l, S, O>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        cursor: cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            (),
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
-        >,
-        arg: &S::Input<'l, K>,
-        limit: usize,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>>
-    where
-        S: Scan,
-        O: Sort,
-    {
-        match Self::scan_optimistic::<S, O>(buffer, &cursor, arg, limit) {
+        let guard = self.prefix(prefix)?;
+        match Self::scan_optimistic::<iter::Prefix, S>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
-                guard: unsafe { V::downgrade_guard(cursor.into_guard()) },
+                guard: guard.guard_value(),
                 buffer,
             }),
-            Err(()) => Self::scan_pessimistic::<S, O>(buffer, cursor, arg),
+            Err(()) => todo!(),
         }
     }
 
+    // pub fn prefix_pessimistic<'l, S: Sort>(
+    //     &'l mut self,
+    //     buffer: &'l mut Vec<(K::Write, u64)>,
+    //     prefix: impl Into<K::Read<'l>>,
+    // ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+    //     let guard = self.prefix(prefix)?;
+    //     Self::scan_pessimistic::<iter::Prefix, S>(buffer, guard)
+    // }
+
+    pub fn range_optimistic<'l, S: Sort>(
+        &'l mut self,
+        buffer: &'l mut Vec<(K::Write, u64)>,
+        limit: usize,
+        min: impl Into<K::Read<'l>>,
+        max: impl Into<K::Read<'l>>,
+    ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+        let guard = self.range(min, max)?;
+        match Self::scan_optimistic::<iter::Range, S>(buffer, &guard, limit) {
+            Ok(()) => Some(LinearizableGuard {
+                guard: guard.guard_value(),
+                buffer,
+            }),
+            Err(()) => todo!(),
+        }
+    }
+
+    // pub fn range_pessimistic<'l, S: Sort>(
+    //     &'l mut self,
+    //     buffer: &'l mut Vec<(K::Write, u64)>,
+    //     min: impl Into<K::Read<'l>>,
+    //     max: impl Into<K::Read<'l>>,
+    // ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
+    //     let min = min.into();
+    //     let max = max.into();
+    //     let cursor = cursor::Prefix::<_, (), _, cursor::path::Hybrid<_, _>>::new_range(
+    //         &mut self.smr,
+    //         self.raw.root(),
+    //         min,
+    //         max,
+    //     )?;
+    //     Self::scan_pessimistic::<iter::Range, S>(buffer, cursor, &(min, max))
+    // }
+
+    // fn scan_hybrid<'l, S, O>(
+    //     buffer: &'l mut Vec<(K::Write, u64)>,
+    //     guard: iter::Guard<'g, 'l, K::Read<'l>, (), V, S>,
+    //     limit: usize,
+    // ) -> Option<LinearizableGuard<'g, 'l, K, V>>
+    // where
+    //     S: Scan,
+    //     O: Sort,
+    // {
+    //     match Self::scan_optimistic::<S, O>(buffer, &guard, limit) {
+    //         Ok(()) => Some(LinearizableGuard {
+    //             guard: guard.guard_value(),
+    //             buffer,
+    //         }),
+    //         Err(()) => Self::scan_pessimistic::<S, O>(buffer, guard),
+    //     }
+    // }
+
     fn scan_optimistic<'l, S, O>(
         buffer: &mut Vec<(K::Write, u64)>,
-        cursor: &cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            (),
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
-        >,
-        arg: &S::Input<'l, K>,
+        guard: &iter::Guard<'g, 'l, K, V, S>,
         limit: usize,
     ) -> Result<(), ()>
     where
         S: Scan,
         O: Sort,
     {
-        S::scan::<_, _, _, O, _>(cursor, arg, |key, value| buffer.push((key.clone(), value)));
+        guard
+            .iter::<O>()
+            .for_each_raw(|key, value| buffer.push((key.clone(), value)));
 
         for retry in 0..=limit {
             let mut dirty = false;
             let mut len = 0;
 
-            S::scan::<_, _, _, O, _>(cursor, arg, |new_key, new_value| {
+            guard.iter::<O>().for_each_raw(|new_key, new_value| {
                 let index = len;
                 len += 1;
 
@@ -473,31 +445,24 @@ where
         Err(())
     }
 
-    fn scan_pessimistic<'l, S, O>(
-        buffer: &'l mut Vec<(K::Write, u64)>,
-        mut cursor: cursor::Prefix<
-            'g,
-            'l,
-            K::Read<'l>,
-            (),
-            V,
-            cursor::path::Hybrid<'g, K::Read<'l>, ()>,
-        >,
-        arg: &S::Input<'l, K>,
-    ) -> Option<LinearizableGuard<'g, 'l, K, V>>
-    where
-        S: Scan,
-        O: Sort,
-    {
-        Self::lock_prefix(&mut cursor)?;
-        S::scan::<_, _, _, O, _>(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
-        Self::unlock_prefix(&mut cursor);
-
-        Some(LinearizableGuard {
-            guard: unsafe { V::downgrade_guard(cursor.into_guard()) },
-            buffer,
-        })
-    }
+    // fn scan_pessimistic<'l, S, O>(
+    //     buffer: &'l mut Vec<(K::Write, u64)>,
+    //     guard: iter::Guard<'g, 'l, K::Read<'l>, (), V, S>,
+    // ) -> Option<LinearizableGuard<'g, 'l, K, V>>
+    // where
+    //     S: Scan,
+    //     O: Sort,
+    // {
+    //     Self::lock_prefix(&mut cursor)?;
+    //
+    //     S::scan::<_, _, _, O, _>(&cursor, arg, |key, value| buffer.push((key.clone(), value)));
+    //     Self::unlock_prefix(&mut cursor);
+    //
+    //     Some(LinearizableGuard {
+    //         guard: unsafe { V::downgrade_guard(cursor.into_guard()) },
+    //         buffer,
+    //     })
+    // }
 
     fn lock_prefix<'k>(
         cursor: &mut cursor::Prefix<
@@ -616,147 +581,6 @@ where
             // FIXME: take ownership of key directly
             (unsafe { K::from_writer_unchecked(key) }, unsafe {
                 V::guard_linearizable(self.guard, value)
-            })
-        })
-    }
-}
-
-pub struct PrefixGuard<'g, 'l, K: Key, V: Value> {
-    guard: hazard::PrefixGuard<'g, 'l, V>,
-    root: &'g Atomic128<Edge<()>>,
-    key: K::Read<'l>,
-}
-
-impl<'g, 'l, K, V> PrefixGuard<'g, 'l, K, V>
-where
-    K: Key,
-    V: Value,
-{
-    #[inline]
-    pub fn iter<S: Sort>(&self) -> PrefixIter<'g, '_, K, V, S> {
-        PrefixIter {
-            guard: &self.guard,
-            iter: unsafe { crate::raw::iter::PrefixIter::new_unchecked(self.root, self.key) },
-        }
-    }
-}
-
-pub struct PrefixIter<'g, 'l, K: Key, V: Value, S: crate::iter::Sort> {
-    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::PrefixIter<'g, K::Write, (), S>,
-}
-
-impl<'g, 'l, K, V, S> PrefixIter<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: crate::iter::Sort,
-{
-    #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
-            })
-        })
-    }
-
-    #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
-        self.iter.for_each(|key, value| {
-            apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
-            })
-        })
-    }
-}
-
-impl<'g, 'l, K, V, S> Iterator for PrefixIter<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: crate::iter::Sort,
-{
-    type Item = (K, V::Borrow<'l>);
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::guard_borrow(self.guard, value)
-            })
-        })
-    }
-}
-
-pub struct RangeGuard<'g, 'l, K: Key, V: Value> {
-    prefix: PrefixGuard<'g, 'l, K, V>,
-    min: K::Read<'l>,
-    max: K::Read<'l>,
-}
-
-impl<'g, 'l, K, V> RangeGuard<'g, 'l, K, V>
-where
-    K: Key,
-    V: Value,
-{
-    #[inline]
-    pub fn iter<S: Sort>(&self) -> RangeIter<'g, '_, K, V, S> {
-        RangeIter {
-            guard: &self.prefix.guard,
-            iter: unsafe {
-                crate::raw::iter::RangeIter::new_unchecked(
-                    self.prefix.root,
-                    K::reborrow(self.prefix.key),
-                    K::reborrow(self.min),
-                    K::reborrow(self.max),
-                )
-            },
-        }
-    }
-}
-
-pub struct RangeIter<'g, 'l, K: Key, V: Value, S: Sort> {
-    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, (), S>,
-}
-
-impl<'g, 'l, K, V, S> RangeIter<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: Sort,
-{
-    #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
-            })
-        })
-    }
-
-    #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
-        self.iter.for_each(|key, value| {
-            apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
-            })
-        })
-    }
-}
-
-impl<'g, 'l, K, V, S> Iterator for RangeIter<'g, 'l, K, V, S>
-where
-    K: Key,
-    V: Value,
-    S: Sort,
-{
-    type Item = (K, V::Borrow<'l>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::guard_borrow(self.guard, value)
             })
         })
     }
