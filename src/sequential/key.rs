@@ -19,6 +19,8 @@ pub trait Key {
 
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
+    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self;
+
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
@@ -99,6 +101,11 @@ macro_rules! impl_unsigned_int {
                 }
 
                 #[inline]
+                fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+                    borrow
+                }
+
+                #[inline]
                 unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
                     writer.into_key_unchecked()
                 }
@@ -122,6 +129,11 @@ impl Key for Vec<u8> {
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
+    }
+
+    #[inline]
+    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+        Vec::from(borrow)
     }
 
     #[inline]
@@ -157,6 +169,11 @@ impl Key for String {
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
         self
+    }
+
+    #[inline]
+    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+        String::from(borrow)
     }
 
     #[inline]
