@@ -48,10 +48,10 @@ impl<K, V: Value> Map<K, V> {
 }
 
 impl<K: Key, V: Value> Map<K, V> {
-    #[expect(unused_variables)]
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<u64> {
-        todo!()
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+        unsafe { raw::cursor::Point::get(&self.root, K::Read::from(key)) }
+            .map(|value| unsafe { V::borrow_from_raw(value) })
     }
 
     #[expect(unused_variables)]
