@@ -1,7 +1,7 @@
 #[expect(private_bounds)]
-pub trait Sort: crate::raw::iter::Sort {}
+pub trait Order: crate::raw::iter::Order {}
 
-impl<T: crate::raw::iter::Sort> Sort for T {}
+impl<T: crate::raw::iter::Order> Order for T {}
 
 pub use crate::raw::iter::sort::Sorted;
 pub use crate::raw::iter::sort::Unsorted;

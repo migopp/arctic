@@ -4,22 +4,22 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::Sort;
+use crate::iter::Order;
 use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum RangeIter<'g, R, W, C, S: Sort> {
+pub(crate) enum RangeIter<'g, R, W, C, O: Order> {
     Root { key: W, next: Option<u64> },
-    Node(NodeIter<'g, R, W, C, S>),
+    Node(NodeIter<'g, R, W, C, O>),
 }
 
-impl<'g, R, W, C, S> RangeIter<'g, R, W, C, S>
+impl<'g, R, W, C, O> RangeIter<'g, R, W, C, O>
 where
     R: key::Read,
     W: key::Write,
     W: From<R>,
-    S: Sort,
+    O: Order,
 {
     pub(crate) unsafe fn new_unchecked(
         root: &'g Atomic128<Edge<C>>,
@@ -27,7 +27,7 @@ where
         mut min: R,
         mut max: R,
     ) -> Self {
-        if S::REVERSE {
+        if O::REVERSE {
             core::mem::swap(&mut min, &mut max);
         }
 
@@ -46,12 +46,12 @@ where
         let max_prefix = max.take(max_len);
 
         validate!(matches!(
-            order::<S>(key.cmp(&min_prefix)),
+            order::<O>(key.cmp(&min_prefix)),
             cmp::Ordering::Equal | cmp::Ordering::Greater
         ));
 
         validate!(matches!(
-            order::<S>(key.cmp(&max_prefix)),
+            order::<O>(key.cmp(&max_prefix)),
             cmp::Ordering::Equal | cmp::Ordering::Less
         ));
 
@@ -82,7 +82,7 @@ where
                     bits + key.len().bits() as usize,
                     first,
                     last,
-                    S::range(node, first, last),
+                    O::range(node, first, last),
                 ));
 
                 Self::Node(NodeIter {
@@ -122,19 +122,19 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W, C: 'g, S: Sort> {
+pub(crate) struct NodeIter<'g, R, W, C: 'g, O: Order> {
     min: R,
     max: R,
     key: W,
-    stack: Vec<(usize, Option<u8>, Option<u8>, S::RangeIter<'g, C>)>,
-    _sort: PhantomData<S>,
+    stack: Vec<(usize, Option<u8>, Option<u8>, O::RangeIter<'g, C>)>,
+    _sort: PhantomData<O>,
 }
 
-impl<'g, R, W, C, S> NodeIter<'g, R, W, C, S>
+impl<'g, R, W, C, O> NodeIter<'g, R, W, C, O>
 where
     R: key::Read,
     W: key::Write,
-    S: Sort,
+    O: Order,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -191,7 +191,7 @@ where
                                 bits + 8 + key.len().bits() as usize,
                                 None,
                                 None,
-                                unsafe { S::range(node, None, None) },
+                                unsafe { O::range(node, None, None) },
                             ));
                             continue 'vertical;
                         }
@@ -202,7 +202,7 @@ where
 
                 let first = if check_first {
                     let min_prefix = self.min.take(key.len().min_bits(self.min.bits()));
-                    match order::<S>(key.cmp(&min_prefix)) {
+                    match order::<O>(key.cmp(&min_prefix)) {
                         cmp::Ordering::Less => continue 'horizontal,
                         cmp::Ordering::Equal => self.min.next(),
                         cmp::Ordering::Greater => None,
@@ -213,7 +213,7 @@ where
 
                 let last = if check_last {
                     let max_prefix = self.max.take(key.len().min_bits(self.max.bits()));
-                    match order::<S>(key.cmp(&max_prefix)) {
+                    match order::<O>(key.cmp(&max_prefix)) {
                         cmp::Ordering::Less => None,
                         cmp::Ordering::Equal => self.max.next(),
                         cmp::Ordering::Greater => {
@@ -239,7 +239,7 @@ where
                             bits + 8 + key.len().bits() as usize,
                             first,
                             last,
-                            unsafe { S::range(node, first, last) },
+                            unsafe { O::range(node, first, last) },
                         ));
                         continue 'vertical;
                     }
@@ -249,8 +249,8 @@ where
     }
 }
 
-const fn order<S: Sort>(order: cmp::Ordering) -> cmp::Ordering {
-    match S::REVERSE {
+const fn order<O: Order>(order: cmp::Ordering) -> cmp::Ordering {
+    match O::REVERSE {
         false => order,
         true => order.reverse(),
     }

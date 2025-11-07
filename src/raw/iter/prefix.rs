@@ -2,26 +2,26 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::Sort;
+use crate::iter::Order;
 use crate::key;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) enum PrefixIter<'g, W, C: 'g, S: Sort> {
+pub(crate) enum PrefixIter<'g, W, C: 'g, O: Order> {
     Root {
         key: W,
         next: Option<u64>,
     },
     Node {
         key: W,
-        frontier: Vec<(usize, S::PrefixIter<'g, C>)>,
+        frontier: Vec<(usize, O::PrefixIter<'g, C>)>,
     },
 }
 
-impl<'g, W, C, S> PrefixIter<'g, W, C, S>
+impl<'g, W, C, O> PrefixIter<'g, W, C, O>
 where
     W: key::Write,
-    S: Sort,
+    O: Order,
 {
     #[inline]
     pub(crate) unsafe fn new_unchecked<R: key::Read>(
@@ -50,7 +50,7 @@ where
             Some(edge::Child::Node(node)) => {
                 let node = unsafe { node.into_ref_unchecked() };
                 Self::Node {
-                    frontier: vec![(bits + key.len().bits() as usize, S::prefix(node))],
+                    frontier: vec![(bits + key.len().bits() as usize, O::prefix(node))],
                     key: writer,
                 }
             }
@@ -119,7 +119,7 @@ where
                     edge::Child::Node(node) => {
                         let node = unsafe { node.into_ref_unchecked() };
                         frontier.push((bits + 8 + meta.key().len().bits() as usize, unsafe {
-                            S::prefix(node)
+                            O::prefix(node)
                         }));
                         continue 'vertical;
                     }

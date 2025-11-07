@@ -8,7 +8,7 @@ use core::sync::atomic::Ordering;
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 
-use crate::iter::Sort;
+use crate::iter::Order;
 use crate::key::Read as _;
 use crate::raw::edge;
 use crate::raw::Edge;
@@ -305,14 +305,14 @@ where
         Some(iter::Range::guard(cursor, (prefix, min, max)))
     }
 
-    pub fn prefix_optimistic<'l, S: Sort>(
+    pub fn prefix_optimistic<'l, O: Order>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.prefix(prefix)?;
-        match Self::scan_optimistic::<iter::Prefix, S>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<iter::Prefix, O>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -330,7 +330,7 @@ where
     //     Self::scan_pessimistic::<iter::Prefix, S>(buffer, guard)
     // }
 
-    pub fn range_optimistic<'l, S: Sort>(
+    pub fn range_optimistic<'l, O: Order>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
@@ -338,7 +338,7 @@ where
         max: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.range(min, max)?;
-        match Self::scan_optimistic::<iter::Range, S>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<iter::Range, O>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -389,7 +389,7 @@ where
     ) -> Result<(), ()>
     where
         S: Scan,
-        O: Sort,
+        O: Order,
     {
         guard
             .iter::<O>()

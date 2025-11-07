@@ -7,7 +7,7 @@ pub struct Sorted;
 
 pub struct Unsorted;
 
-pub(crate) trait Sort {
+pub(crate) trait Order {
     const REVERSE: bool = false;
 
     type PrefixIter<'g, C>: Iterator<Item = (u8, &'g Atomic128<Edge<C>>)>
@@ -27,7 +27,7 @@ pub(crate) trait Sort {
     ) -> Self::RangeIter<'g, V>;
 }
 
-impl Sort for Sorted {
+impl Order for Sorted {
     type PrefixIter<'g, V>
         = node::SortedIter<'g, V>
     where
@@ -53,7 +53,7 @@ impl Sort for Sorted {
     }
 }
 
-impl Sort for core::iter::Rev<Sorted> {
+impl Order for core::iter::Rev<Sorted> {
     const REVERSE: bool = true;
 
     type PrefixIter<'g, V>
@@ -82,7 +82,7 @@ impl Sort for core::iter::Rev<Sorted> {
     }
 }
 
-impl Sort for Unsorted {
+impl Order for Unsorted {
     type PrefixIter<'g, V>
         = node::UnsortedIter<'g, V>
     where

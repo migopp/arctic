@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::Sort;
+use crate::iter::Order;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::PrefixIter;
 use crate::raw::Edge;
@@ -67,7 +67,7 @@ impl<K: Key, V: Value> Map<K, V> {
         todo!()
     }
 
-    pub fn iter<S: Sort>(&self) -> Iter<'_, K, V, S> {
+    pub fn iter<O: Order>(&self) -> Iter<'_, K, V, O> {
         Iter {
             _value: PhantomData,
             iter: unsafe { PrefixIter::new_unchecked(&self.root, K::Read::default()) },
@@ -75,16 +75,16 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 }
 
-pub struct Iter<'g, K: Key, V, S: Sort> {
+pub struct Iter<'g, K: Key, V, O: Order> {
     _value: PhantomData<V>,
-    iter: PrefixIter<'g, K::Write, (), S>,
+    iter: PrefixIter<'g, K::Write, (), O>,
 }
 
-impl<'g, K, V, S> Iter<'g, K, V, S>
+impl<'g, K, V, O> Iter<'g, K, V, O>
 where
     K: Key,
     V: Value,
-    S: Sort,
+    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
@@ -97,11 +97,11 @@ where
     }
 }
 
-impl<'g, K, V, S> Iterator for Iter<'g, K, V, S>
+impl<'g, K, V, O> Iterator for Iter<'g, K, V, O>
 where
     K: Key,
     V: Value + 'g,
-    S: crate::iter::Sort,
+    O: crate::iter::Order,
 {
     type Item = (K, V::Borrow<'g>);
 

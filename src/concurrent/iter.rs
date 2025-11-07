@@ -5,7 +5,7 @@ use ribbit::atomic::Atomic128;
 use crate::concurrent::cursor;
 use crate::concurrent::hazard;
 use crate::concurrent::Value;
-use crate::iter::Sort;
+use crate::iter::Order;
 use crate::key;
 use crate::raw;
 use crate::raw::Edge;
@@ -63,7 +63,7 @@ where
         &self,
     ) -> ScanIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
     where
-        O: Sort,
+        O: Order,
     {
         ScanIter {
             guard: &self.guard,
@@ -77,7 +77,7 @@ where
         &self,
     ) -> ValueIter<'g, 'l, '_, K::Read<'l>, V, O, S::Iter<'g, K::Read<'l>, key::Ignore, (), O>>
     where
-        O: Sort,
+        O: Order,
     {
         ValueIter {
             guard: &self.guard,
