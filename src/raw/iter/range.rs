@@ -1,4 +1,3 @@
-use core::cmp;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
@@ -10,7 +9,7 @@ use crate::raw;
 use crate::raw::edge;
 use crate::raw::iter::High as _;
 use crate::raw::iter::Low as _;
-use crate::raw::node::High;
+use crate::raw::node::High as _;
 use crate::raw::node::Low as _;
 use crate::raw::Edge;
 
@@ -88,7 +87,7 @@ where
 
                 let node = unsafe { node.into_ref_unchecked() };
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, first, last, O::iter(node, first, last)));
+                stack.push((bits, node.iter(first, last)));
 
                 Self::Node(NodeIter {
                     min,
@@ -134,9 +133,12 @@ pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Ran
     key: W,
     stack: Vec<(
         W::Len,
-        <B::Low as raw::iter::Low<R>>::Bound,
-        <B::High as raw::iter::High<R>>::Bound,
-        O::RangeIter<'g, C>,
+        raw::node::SortedIter<
+            'g,
+            <B::Low as crate::raw::iter::Low<R>>::Bound,
+            <B::High as crate::raw::iter::High<R>>::Bound,
+            C,
+        >,
     )>,
     _read: PhantomData<R>,
     _sort: PhantomData<O>,
@@ -162,7 +164,7 @@ where
     #[inline]
     fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
         'vertical: loop {
-            let (bits, first, last, iter) = self.stack.last_mut()?;
+            let (bits, iter) = self.stack.last_mut()?;
             let bits = *bits;
 
             'horizontal: loop {
@@ -179,8 +181,8 @@ where
                 let key = edge.meta().key();
                 let bits = self.key.replace(bits, byte, key);
 
-                let check_first = first.is(byte);
-                let check_last = last.is(byte);
+                let check_first = iter.lower().is(byte);
+                let check_last = iter.upper().is(byte);
 
                 if !check_first && !check_last {
                     match child {
@@ -196,8 +198,7 @@ where
                             let node = unsafe { node.into_ref_unchecked() };
                             let first = Default::default();
                             let last = Default::default();
-                            self.stack
-                                .push((bits, first, last, unsafe { O::iter(node, first, last) }));
+                            self.stack.push((bits, node.iter(first, last)));
                             continue 'vertical;
                         }
                     }
@@ -243,19 +244,11 @@ where
                         };
 
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack
-                            .push((bits, first, last, unsafe { O::iter(node, first, last) }));
+                        self.stack.push((bits, node.iter(first, last)));
                         continue 'vertical;
                     }
                 }
             }
         }
-    }
-}
-
-const fn order<O: Order>(order: cmp::Ordering) -> cmp::Ordering {
-    match O::REVERSE {
-        false => order,
-        true => order.reverse(),
     }
 }

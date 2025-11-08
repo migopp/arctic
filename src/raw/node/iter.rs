@@ -5,19 +5,34 @@ use ribbit::atomic::Atomic128;
 
 use crate::raw::Edge;
 
-#[repr(transparent)]
-pub(crate) struct SortedIter<'g, I, V>(Iter<'g, I, V>);
+pub(crate) struct SortedIter<'g, L, U, I, V> {
+    lower: L,
+    upper: U,
+    iter: Iter<'g, I, V>,
+}
 
-impl<'g, I, V> SortedIter<'g, I, V> {
+impl<'g, L, U, I, V> SortedIter<'g, L, U, I, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
-    pub(super) unsafe fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
-        Self(Iter::new(keys, edges))
+    pub(super) unsafe fn new(lower: L, upper: U, keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
+        Self {
+            lower,
+            upper,
+            iter: Iter::new(keys, edges),
+        }
+    }
+
+    pub(crate) fn lower(&self) -> &L {
+        &self.lower
+    }
+
+    pub(crate) fn upper(&self) -> &U {
+        &self.upper
     }
 }
 
-impl<'g, I, V> Iterator for SortedIter<'g, I, V>
+impl<'g, L, U, I, V> Iterator for SortedIter<'g, L, U, I, V>
 where
     I: Iterator<Item = (u8, u8)>,
 {
@@ -25,48 +40,48 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.0.keys.next()?;
+        let (key, index) = self.iter.keys.next()?;
 
         #[cfg(feature = "validate")]
         validate!(
-            (index as u16) < self.0.len,
+            (index as u16) < self.iter.len,
             "index is {} but len is {}",
             index,
-            self.0.len,
+            self.iter.len,
         );
 
-        let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.iter.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.keys.size_hint()
+        self.iter.keys.size_hint()
     }
 }
 
-impl<'g, I, V> DoubleEndedIterator for SortedIter<'g, I, V>
+impl<'g, L, U, I, V> DoubleEndedIterator for SortedIter<'g, L, U, I, V>
 where
     I: DoubleEndedIterator<Item = (u8, u8)>,
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.0.keys.next_back()?;
+        let (key, index) = self.iter.keys.next_back()?;
 
         #[cfg(feature = "validate")]
         validate!(
-            (index as u16) < self.0.len,
+            (index as u16) < self.iter.len,
             "index is {} but len is {}",
             index,
-            self.0.len,
+            self.iter.len,
         );
 
-        let edge = unsafe { self.0.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.iter.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
 }
 
-impl<'g, I, V> ExactSizeIterator for SortedIter<'g, I, V>
+impl<'g, L, U, I, V> ExactSizeIterator for SortedIter<'g, L, U, I, V>
 where
     I: ExactSizeIterator<Item = (u8, u8)>,
 {

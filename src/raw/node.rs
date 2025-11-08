@@ -80,7 +80,9 @@ impl<'g, C> Clone for Ref<'g, C> {
 
 impl<'g, C> Ref<'g, C> {
     #[inline]
-    pub(crate) fn iter_sorted(&self) -> SortedIter<'g, C> {
+    pub(crate) fn iter_sorted(
+        &self,
+    ) -> SortedIter<'g, crate::iter::Unbound, crate::iter::Unbound, C> {
         self.iter(crate::iter::Unbound, crate::iter::Unbound)
     }
 
@@ -99,23 +101,23 @@ impl<'g, C> Ref<'g, C> {
     }
 
     #[inline]
-    pub(crate) fn iter<L: Low, H: High>(&self, low: L, high: H) -> SortedIter<'g, C> {
+    pub(crate) fn iter<L: Low, U: High>(&self, lower: L, upper: U) -> SortedIter<'g, L, U, C> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (
-                SortedKeyIter::from_linear(node.keys(low, high)),
+                SortedKeyIter::from_linear(node.keys(lower, upper)),
                 node.edges(),
             ),
             Ref::Node15(node) => (
-                SortedKeyIter::from_linear(node.keys(low, high)),
+                SortedKeyIter::from_linear(node.keys(lower, upper)),
                 node.edges(),
             ),
             Ref::Node256(node) => (
-                SortedKeyIter::from_node_256(node.keys(low, high)),
+                SortedKeyIter::from_node_256(node.keys(lower, upper)),
                 node.edges(),
             ),
         };
 
-        unsafe { SortedIter::new(keys, edges) }
+        unsafe { SortedIter::new(lower, upper, keys, edges) }
     }
 }
 
@@ -181,7 +183,7 @@ impl Kind {
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }
 
-pub(crate) type SortedIter<'g, V> = iter::SortedIter<'g, SortedKeyIter, V>;
+pub(crate) type SortedIter<'g, L, U, V> = iter::SortedIter<'g, L, U, SortedKeyIter, V>;
 
 pub(crate) type UnsortedIter<'g, V> = iter::UnsortedIter<'g, UnsortedKeyIter, V>;
 
