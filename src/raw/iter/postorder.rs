@@ -2,7 +2,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
 
-use crate::iter::Or;
 use crate::iter::Unbound;
 use crate::raw::edge;
 use crate::raw::node;

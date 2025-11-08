@@ -177,7 +177,7 @@ pub(crate) trait Header<C>: Default {
     fn keys_unsorted(&self) -> KeyIter;
 }
 
-pub(super) union KeyIter {
+pub(crate) union KeyIter {
     node_3: RawIter<3>,
     node_15: NonNull<RawIter<15>>,
     raw: usize,

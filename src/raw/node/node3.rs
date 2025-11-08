@@ -4,7 +4,6 @@ use ribbit::atomic::Atomic64;
 use ribbit::u24;
 use ribbit::u4;
 
-use crate::iter::Or;
 use crate::raw::node;
 use crate::raw::node::linear;
 
