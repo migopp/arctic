@@ -5,6 +5,7 @@ use crate::concurrent::hazard;
 use crate::concurrent::Value;
 use crate::iter::Order;
 use crate::key;
+use crate::key::Read as _;
 use crate::raw;
 use crate::raw::Edge;
 use crate::Key;
@@ -21,6 +22,7 @@ impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
+    R: crate::raw::iter::Range<K::Read<'l>>,
 {
     pub(super) fn new<H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
@@ -31,9 +33,11 @@ where
         V: Value,
         H: cursor::path::History<'g, K::Read<'l>, ()>,
     {
+        let prefix = cursor.prefix();
+        let range = range.skip(prefix.bits());
         PrefixGuard {
             root: cursor.edge(),
-            prefix: cursor.prefix(),
+            prefix,
             guard: cursor.into_guard().guard_prefix(),
             range,
         }

@@ -48,14 +48,13 @@ where
             return Self::default();
         };
 
-        let bits = prefix.bits();
-        let range = range.skip(bits);
-        let mut lower = range.low();
-        let mut upper = range.high();
-
         let key = edge.meta().key();
+        let bits = prefix.bits();
         let mut writer = W::from(prefix);
         let bits = writer.write(W::len_from_bits(bits), key);
+
+        let mut lower = range.low();
+        let mut upper = range.high();
 
         match child {
             edge::Child::Value(value) if lower.check_value(key) && upper.check_value(key) => {
