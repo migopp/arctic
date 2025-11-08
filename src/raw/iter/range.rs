@@ -43,10 +43,6 @@ where
     O: Order,
 {
     pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, range: B) -> Self {
-        // if O::REVERSE {
-        //     core::mem::swap(&mut min, &mut max);
-        // }
-
         let edge = root.load_packed(Ordering::Acquire);
 
         let Some(child) = edge.child() else {
@@ -55,25 +51,15 @@ where
 
         let bits = prefix.bits();
         let range = range.skip(bits);
-        let mut min = range.low();
-        let mut max = range.high();
-
-        // validate!(matches!(
-        //     order::<O>(key.cmp(&min_prefix)),
-        //     cmp::Ordering::Equal | cmp::Ordering::Greater
-        // ));
-        //
-        // validate!(matches!(
-        //     order::<O>(key.cmp(&max_prefix)),
-        //     cmp::Ordering::Equal | cmp::Ordering::Less
-        // ));
+        let mut lower = range.low();
+        let mut upper = range.high();
 
         let key = edge.meta().key();
         let mut writer = W::from(prefix);
         let bits = writer.write(W::len_from_bits(bits), key);
 
         match child {
-            edge::Child::Value(value) if min.check_value(key) && max.check_value(key) => {
+            edge::Child::Value(value) if lower.check_value(key) && upper.check_value(key) => {
                 Self::Root {
                     key: writer,
                     next: Some(value),
@@ -81,21 +67,22 @@ where
             }
             edge::Child::Value(_) => Self::default(),
             edge::Child::Node(node) => {
-                let Some((first, last)) = min.check_node(key).zip(max.check_node(key)) else {
+                let Some((lower_byte, upper_byte)) =
+                    lower.check_node(key).zip(upper.check_node(key))
+                else {
                     return Self::default();
                 };
 
                 let node = unsafe { node.into_ref_unchecked() };
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, node.iter(first, last)));
+                stack.push((bits, node.iter(lower_byte, upper_byte)));
 
                 Self::Node(NodeIter {
-                    min,
-                    max,
+                    lower,
+                    upper,
                     stack,
                     key: writer,
-                    _read: PhantomData,
-                    _sort: PhantomData,
+                    _order: PhantomData,
                 })
             }
         }
@@ -128,8 +115,8 @@ where
 }
 
 pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O: Order> {
-    min: B::Low,
-    max: B::High,
+    lower: B::Low,
+    upper: B::High,
     key: W,
     stack: Vec<(
         W::Len,
@@ -140,8 +127,7 @@ pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Ran
             C,
         >,
     )>,
-    _read: PhantomData<R>,
-    _sort: PhantomData<O>,
+    _order: PhantomData<O>,
 }
 
 impl<'g, R, W, C, B, O> NodeIter<'g, R, W, C, B, O>
@@ -168,7 +154,11 @@ where
             let bits = *bits;
 
             'horizontal: loop {
-                let Some((byte, edge)) = iter.next() else {
+                let Some((byte, edge)) = (if O::REVERSE {
+                    iter.next_back()
+                } else {
+                    iter.next()
+                }) else {
                     self.stack.pop();
                     continue 'vertical;
                 };
@@ -181,10 +171,10 @@ where
                 let key = edge.meta().key();
                 let bits = self.key.replace(bits, byte, key);
 
-                let check_first = iter.lower().is(byte);
-                let check_last = iter.upper().is(byte);
+                let check_lower = iter.lower().is(byte);
+                let check_upper = iter.upper().is(byte);
 
-                if !check_first && !check_last {
+                if !check_lower && !check_upper {
                     match child {
                         edge::Child::Value(value) => {
                             if YIELD {
@@ -208,13 +198,22 @@ where
 
                 match child {
                     edge::Child::Value(value) => {
-                        if check_first && !self.min.check_value(key) {
-                            continue 'horizontal;
+                        if check_lower && !self.lower.check_value(key) {
+                            if O::REVERSE {
+                                self.stack.clear();
+                                return None;
+                            } else {
+                                continue 'horizontal;
+                            }
                         }
 
-                        if check_last && !self.max.check_value(key) {
-                            self.stack.clear();
-                            return None;
+                        if check_upper && !self.upper.check_value(key) {
+                            if O::REVERSE {
+                                continue 'horizontal;
+                            } else {
+                                self.stack.clear();
+                                return None;
+                            }
                         }
 
                         if YIELD {
@@ -224,27 +223,36 @@ where
                         }
                     }
                     edge::Child::Node(node) => {
-                        let first = if check_first {
-                            let Some(first) = self.min.check_node(key) else {
-                                continue 'horizontal;
+                        let lower = if check_lower {
+                            let Some(lower) = self.lower.check_node(key) else {
+                                if O::REVERSE {
+                                    self.stack.clear();
+                                    return None;
+                                } else {
+                                    continue 'horizontal;
+                                }
                             };
-                            first
+                            lower
                         } else {
                             Default::default()
                         };
 
-                        let last = if check_last {
-                            let Some(last) = self.max.check_node(key) else {
-                                self.stack.clear();
-                                return None;
+                        let upper = if check_upper {
+                            let Some(upper) = self.upper.check_node(key) else {
+                                if O::REVERSE {
+                                    continue 'horizontal;
+                                } else {
+                                    self.stack.clear();
+                                    return None;
+                                }
                             };
-                            last
+                            upper
                         } else {
                             Default::default()
                         };
 
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack.push((bits, node.iter(first, last)));
+                        self.stack.push((bits, node.iter(lower, upper)));
                         continue 'vertical;
                     }
                 }
