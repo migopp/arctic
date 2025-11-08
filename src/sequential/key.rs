@@ -15,6 +15,8 @@ pub trait Key {
     #[allow(private_bounds)]
     type Write: Write + for<'k> From<Self::Read<'k>>;
 
+    type Edge;
+
     unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
 
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
@@ -95,6 +97,8 @@ macro_rules! impl_unsigned_int {
                 type Write = integer::Writer<$ty>;
                 type Borrow<'k> = Self;
 
+                type Edge = byte::Array;
+
                 #[inline]
                 fn borrow(&self) -> Self {
                     *self
@@ -125,6 +129,8 @@ impl Key for Vec<u8> {
     type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k [u8];
+
+    type Edge = byte::Array;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -165,6 +171,8 @@ impl Key for String {
     type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k str;
+
+    type Edge = byte::Array;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {

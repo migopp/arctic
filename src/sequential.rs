@@ -21,33 +21,31 @@ pub use key::Key;
 pub(crate) use value::Value;
 
 #[repr(transparent)]
-pub struct Map<K, V: Value> {
-    root: Atomic128<Edge<()>>,
+pub struct Map<K: Key, V: Value> {
+    root: Atomic128<Edge<K::Edge>>,
     _not_sync: PhantomData<Cell<()>>,
-    _type: PhantomData<(K, V)>,
+    _value: PhantomData<V>,
 }
 
-impl<K, V: Value> Default for Map<K, V> {
+impl<K: Key, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             root: Atomic128::default(),
             _not_sync: PhantomData,
-            _type: PhantomData,
+            _value: PhantomData,
         }
     }
 }
 
-impl<K, V: Value> Map<K, V> {
-    pub(crate) fn root(&self) -> &Atomic128<Edge<()>> {
+impl<K: Key, V: Value> Map<K, V> {
+    pub(crate) fn root(&self) -> &Atomic128<Edge<K::Edge>> {
         &self.root
     }
 
-    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, ()> {
+    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, K::Edge> {
         unsafe { PostorderIter::new(&self.root) }
     }
-}
 
-impl<K: Key, V: Value> Map<K, V> {
     #[inline]
     pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
         unsafe { raw::cursor::Point::get(&self.root, K::Read::from(key)) }
@@ -89,7 +87,7 @@ impl<K: Key, V: Value> Map<K, V> {
                 byte::MatchSplit::Partial { start, middle, end } => {
                     key.take(start.len());
                     let byte = key.next().unwrap();
-                    Edge::new_node::<raw::node::Node3<()>, _>(
+                    Edge::new_node::<raw::node::Node3<_>, _>(
                         start,
                         [
                             (byte, Self::insert_help(key, value)),
@@ -104,11 +102,11 @@ impl<K: Key, V: Value> Map<K, V> {
         }
     }
 
-    fn insert_help(mut key: K::Read<'_>, value: u64) -> ribbit::Packed<Edge<()>> {
+    fn insert_help(mut key: K::Read<'_>, value: u64) -> ribbit::Packed<Edge<K::Edge>> {
         if key.bits() > byte::Len::MAX.bits() as usize {
             let prefix = key.take(byte::Len::MAX);
             let byte = key.next().unwrap();
-            Edge::new_node::<raw::node::Node3<()>, _>(
+            Edge::new_node::<raw::node::Node3<_>, _>(
                 prefix,
                 [(byte, Self::insert_help(key, value))],
             )
@@ -140,7 +138,7 @@ impl<K: Key, V: Value> Map<K, V> {
 
 pub struct Iter<'g, K: Key, V, O: Order> {
     _value: PhantomData<V>,
-    iter: RangeIter<'g, K::Read<'g>, K::Write, (), core::ops::RangeFull, O>,
+    iter: RangeIter<'g, K::Read<'g>, K::Write, K::Edge, core::ops::RangeFull, O>,
 }
 
 impl<'g, K, V, O> Iter<'g, K, V, O>
@@ -178,7 +176,7 @@ where
     }
 }
 
-impl<K, V: Value> Drop for Map<K, V> {
+impl<K: Key, V: Value> Drop for Map<K, V> {
     fn drop(&mut self) {
         self.postorder().for_each(|edge, _| unsafe {
             edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);

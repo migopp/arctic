@@ -13,7 +13,7 @@ use crate::Key;
 /// Guard all nodes and values below this prefix from memory reclamation.
 pub struct PrefixGuard<'g, 'l, K: Key, V: Value, R> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
-    root: &'g Atomic128<Edge<()>>,
+    root: &'g Atomic128<Edge<K::Edge>>,
     prefix: K::Read<'l>,
     range: R,
 }
@@ -25,13 +25,13 @@ where
     R: crate::raw::iter::Range<K::Read<'l>>,
 {
     pub(super) fn new<H>(
-        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
+        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, K::Edge, V, H>,
         range: R,
     ) -> PrefixGuard<'g, 'l, K, V, R>
     where
         K: Key,
         V: Value,
-        H: cursor::path::History<'g, K::Read<'l>, ()>,
+        H: cursor::path::History<'g, K::Read<'l>, K::Edge>,
     {
         let prefix = cursor.prefix();
         let range = range.skip(prefix.bits());
@@ -84,7 +84,7 @@ where
 /// Iterator over keys and values
 pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, (), R, O>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, K::Edge, R, O>,
 }
 
 impl<'g, 'l, 'guard, K, V, R, O> EntryIter<'g, 'l, 'guard, K, V, R, O>
@@ -140,7 +140,7 @@ where
 /// Iterator over values only
 pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore, (), R, O>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore, K::Edge, R, O>,
 }
 
 impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>

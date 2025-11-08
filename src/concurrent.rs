@@ -20,14 +20,14 @@ use crate::stat;
 use crate::Key;
 pub use value::Value;
 
-pub struct Map<K, V: Value> {
+pub struct Map<K: Key, V: Value> {
     smr: hazard::Global<V>,
     raw: sequential::Map<K, V>,
 }
 
-unsafe impl<K, V: Value + Send + Sync> Sync for Map<K, V> {}
+unsafe impl<K: Key, V: Value + Send + Sync> Sync for Map<K, V> {}
 
-impl<K, V: Value> Default for Map<K, V> {
+impl<K: Key, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             smr: hazard::Global::default(),
@@ -36,7 +36,7 @@ impl<K, V: Value> Default for Map<K, V> {
     }
 }
 
-impl<K, V: Value> Map<K, V> {
+impl<K: Key, V: Value> Map<K, V> {
     #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
@@ -51,7 +51,7 @@ impl<K, V: Value> Map<K, V> {
     }
 }
 
-pub struct MapRef<'g, K, V: Value> {
+pub struct MapRef<'g, K: Key, V: Value> {
     smr: hazard::Local<'g, V>,
     raw: &'g sequential::Map<K, V>,
 }
@@ -84,7 +84,7 @@ where
         mut exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
+        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
     {
         let mut map = self;
 
@@ -106,7 +106,7 @@ where
         exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
     where
-        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
+        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
     {
         self.compare_exchange_impl::<cursor::path::Discard, _>(key, exchange)
     }
@@ -118,7 +118,7 @@ where
         exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
+        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
     {
         self.compare_exchange_impl::<cursor::path::Retain<_, _>, _>(key, exchange)
             .unwrap()
@@ -135,11 +135,11 @@ where
         mut exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
-        H: cursor::path::History<'g, K::Read<'k>, ()>,
-        F: FnMut(ribbit::Packed<Edge<()>>) -> ribbit::Packed<Edge<()>>,
+        H: cursor::path::History<'g, K::Read<'k>, K::Edge>,
+        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, (), _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let old = match cursor.traverse_exact() {
@@ -210,10 +210,10 @@ where
         value: u64,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
-        H: cursor::path::History<'g, K::Read<'k>, ()>,
+        H: cursor::path::History<'g, K::Read<'k>, K::Edge>,
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, (), _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = cursor::Point::<_, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let (op, old, new) = match cursor.traverse_or_insert(value) {
@@ -267,7 +267,7 @@ where
     }
 
     pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, K, V, RangeFull> {
-        let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
+        let cursor = cursor::Prefix::<_, _, _, cursor::path::Discard>::new_root(
             &mut self.smr,
             self.raw.root(),
         );
@@ -280,7 +280,7 @@ where
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<iter::PrefixGuard<'g, 'l, K, V, RangeFull>> {
         let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
+        let cursor = cursor::Prefix::<_, _, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             prefix,
@@ -296,7 +296,7 @@ where
     ) -> Option<iter::PrefixGuard<'g, 'l, K, V, RangeInclusive<K::Read<'l>>>> {
         let min = min.into();
         let max = max.into();
-        let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
+        let cursor = cursor::Prefix::<_, _, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             min.prefix(&max),
@@ -468,9 +468,9 @@ where
             'g,
             '_,
             K::Read<'k>,
-            (),
+            K::Edge,
             V,
-            cursor::path::Hybrid<'g, K::Read<'k>, ()>,
+            cursor::path::Hybrid<'g, K::Read<'k>, K::Edge>,
         >,
     ) -> Option<()> {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);
@@ -512,9 +512,9 @@ where
             'g,
             '_,
             K::Read<'k>,
-            (),
+            K::Edge,
             V,
-            cursor::path::Hybrid<'g, K::Read<'k>, ()>,
+            cursor::path::Hybrid<'g, K::Read<'k>, K::Edge>,
         >,
     ) {
         let mut edge = cursor.edge().load_packed(Ordering::Relaxed);

@@ -16,7 +16,7 @@ use crate::key;
 /// Bit 06-08: Zero
 /// Bit 00-06: Length in bits
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Array(u64);
+pub struct Array(u64);
 
 impl Array {
     pub(crate) const EMPTY: Self = Array(0);
