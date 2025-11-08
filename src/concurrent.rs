@@ -285,7 +285,6 @@ where
             self.raw.root(),
             prefix,
         )?;
-        let prefix = cursor.prefix();
         Some(iter::PrefixGuard::new(cursor, ..))
     }
 

@@ -88,8 +88,10 @@ impl<'g, C> Ref<'g, C> {
         upper: U,
     ) -> NodeIter<'g, L, U, C> {
         let (keys, edges) = match self {
-            Ref::Node3(node) => {
-                let keys = if O::SORTED {
+            Self::Node3(node) => {
+                let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
+                    KeyIter::from_linear(node.keys_sorted())
+                } else if O::SORTED {
                     KeyIter::from_linear(node.keys_range(lower, upper))
                 } else {
                     KeyIter::from_linear(node.keys_unsorted())
@@ -97,8 +99,10 @@ impl<'g, C> Ref<'g, C> {
 
                 (keys, node.edges())
             }
-            Ref::Node15(node) => {
-                let keys = if O::SORTED {
+            Self::Node15(node) => {
+                let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
+                    KeyIter::from_linear(node.keys_sorted())
+                } else if O::SORTED {
                     KeyIter::from_linear(node.keys_range(lower, upper))
                 } else {
                     KeyIter::from_linear(node.keys_unsorted())
@@ -106,7 +110,7 @@ impl<'g, C> Ref<'g, C> {
 
                 (keys, node.edges())
             }
-            Ref::Node256(node) => (
+            Self::Node256(node) => (
                 KeyIter::from_node_256(node.keys(lower, upper)),
                 node.edges(),
             ),
@@ -120,9 +124,9 @@ impl<'g, C> Ref<'g, C> {
     #[inline]
     pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<C>>> {
         match self {
-            Ref::Node3(node) => node.get(key),
-            Ref::Node15(node) => node.get(key),
-            Ref::Node256(node) => node.get(key),
+            Self::Node3(node) => node.get(key),
+            Self::Node15(node) => node.get(key),
+            Self::Node256(node) => node.get(key),
         }
     }
 
@@ -141,9 +145,9 @@ impl<'g, C> Ref<'g, C> {
         parent: ribbit::Packed<edge::Meta>,
     ) -> (Op, ribbit::Packed<Edge<C>>) {
         match self {
-            Ref::Node3(node) => node.replace(parent),
-            Ref::Node15(node) => node.replace(parent),
-            Ref::Node256(node) => node.replace(parent),
+            Self::Node3(node) => node.replace(parent),
+            Self::Node15(node) => node.replace(parent),
+            Self::Node256(node) => node.replace(parent),
         }
     }
 }
@@ -151,9 +155,9 @@ impl<'g, C> Ref<'g, C> {
 impl<V> Debug for Ref<'_, V> {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Ref::Node3(node) => node.fmt(fmt),
-            Ref::Node15(node) => node.fmt(fmt),
-            Ref::Node256(node) => node.fmt(fmt),
+            Self::Node3(node) => node.fmt(fmt),
+            Self::Node15(node) => node.fmt(fmt),
+            Self::Node256(node) => node.fmt(fmt),
         }
     }
 }

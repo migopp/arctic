@@ -51,7 +51,6 @@ where
     R: crate::raw::iter::Range<K::Read<'l>>,
 {
     #[inline]
-    #[expect(clippy::type_complexity)]
     pub fn entries<O>(&self) -> EntryIter<'g, 'l, '_, K, V, R, O>
     where
         O: Order,
@@ -65,7 +64,6 @@ where
     }
 
     #[inline]
-    #[expect(clippy::type_complexity)]
     pub fn values<O>(&self) -> ValueIter<'g, 'l, '_, K, V, R, O>
     where
         O: Order,
