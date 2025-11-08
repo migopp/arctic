@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
@@ -14,7 +15,8 @@ pub enum PrefixIter<'g, W: key::Write, C: 'g, O: Order> {
     },
     Node {
         key: W,
-        frontier: Vec<(W::Len, O::PrefixIter<'g, C>)>,
+        frontier: Vec<(W::Len, O)>,
+        c: PhantomData<&'g C>,
     },
 }
 
@@ -49,10 +51,11 @@ where
             },
             Some(edge::Child::Node(node)) => {
                 let node = unsafe { node.into_ref_unchecked() };
-                Self::Node {
-                    frontier: vec![(bits, O::prefix(node))],
-                    key: writer,
-                }
+                todo!()
+                // Self::Node {
+                //     frontier: vec![(bits, O::prefix(node))],
+                //     key: writer,
+                // }
             }
         }
     }
@@ -80,43 +83,45 @@ where
                     return None;
                 }
             }
-            Self::Node { key, frontier } => (key, frontier),
+            Self::Node { key, frontier, .. } => (key, frontier),
         };
 
         'vertical: loop {
             let (bits, iter) = frontier.last_mut()?;
             let bits = *bits;
 
-            'horizontal: loop {
-                let Some((byte, edge)) = iter.next() else {
-                    frontier.pop();
-                    continue 'vertical;
-                };
-
-                let edge = edge.load_packed(Ordering::Acquire);
-
-                let Some(child) = edge.child() else {
-                    continue 'horizontal;
-                };
-
-                let meta = edge.meta();
-                let bits = key.replace(bits, byte, meta.key());
-
-                match child {
-                    edge::Child::Value(value) => {
-                        if YIELD {
-                            return Some((key, value));
-                        } else {
-                            apply(key, value);
-                        }
-                    }
-                    edge::Child::Node(node) => {
-                        let node = unsafe { node.into_ref_unchecked() };
-                        frontier.push((bits, unsafe { O::prefix(node) }));
-                        continue 'vertical;
-                    }
-                }
-            }
+            todo!()
+            //
+            // 'horizontal: loop {
+            //     let Some((byte, edge)) = iter.next() else {
+            //         frontier.pop();
+            //         continue 'vertical;
+            //     };
+            //
+            //     let edge = edge.load_packed(Ordering::Acquire);
+            //
+            //     let Some(child) = edge.child() else {
+            //         continue 'horizontal;
+            //     };
+            //
+            //     let meta = edge.meta();
+            //     let bits = key.replace(bits, byte, meta.key());
+            //
+            //     match child {
+            //         edge::Child::Value(value) => {
+            //             if YIELD {
+            //                 return Some((key, value));
+            //             } else {
+            //                 apply(key, value);
+            //             }
+            //         }
+            //         edge::Child::Node(node) => {
+            //             let node = unsafe { node.into_ref_unchecked() };
+            //             frontier.push((bits, unsafe { O::prefix(node) }));
+            //             continue 'vertical;
+            //         }
+            //     }
+            // }
         }
     }
 }

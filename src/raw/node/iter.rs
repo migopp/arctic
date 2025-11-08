@@ -1,25 +1,47 @@
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
 use ribbit::atomic::Atomic128;
 
+use crate::raw::node::linear;
+use crate::raw::node::node256;
 use crate::raw::Edge;
 
-pub(crate) struct SortedIter<'g, L, U, I, V> {
+pub(crate) struct NodeIter<'g, L, U, V> {
     lower: L,
     upper: U,
-    iter: Iter<'g, I, V>,
+
+    keys: KeyIter,
+    edges: NonNull<Atomic128<Edge<V>>>,
+
+    #[cfg(feature = "validate")]
+    len: u16,
+
+    _slice: PhantomData<&'g [Atomic128<Edge<V>>]>,
 }
 
-impl<'g, L, U, I, V> SortedIter<'g, L, U, I, V> {
+impl<'g, L, U, V> NodeIter<'g, L, U, V> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
-    pub(super) unsafe fn new(lower: L, upper: U, keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
+    pub(crate) unsafe fn new(
+        lower: L,
+        upper: U,
+        keys: KeyIter,
+        edges: &'g [Atomic128<Edge<V>>],
+    ) -> Self {
         Self {
             lower,
             upper,
-            iter: Iter::new(keys, edges),
+
+            keys,
+            edges: NonNull::from(edges).cast(),
+
+            #[cfg(feature = "validate")]
+            len: edges.len() as u16,
+
+            _slice: PhantomData,
         }
     }
 
@@ -32,59 +54,50 @@ impl<'g, L, U, I, V> SortedIter<'g, L, U, I, V> {
     }
 }
 
-impl<'g, L, U, I, V> Iterator for SortedIter<'g, L, U, I, V>
-where
-    I: Iterator<Item = (u8, u8)>,
-{
+impl<'g, L, U, V> Iterator for NodeIter<'g, L, U, V> {
     type Item = (u8, &'g Atomic128<Edge<V>>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.iter.keys.next()?;
+        let (key, index) = self.keys.next()?;
 
         #[cfg(feature = "validate")]
         validate!(
-            (index as u16) < self.iter.len,
+            (index as u16) < self.len,
             "index is {} but len is {}",
             index,
-            self.iter.len,
+            self.len,
         );
 
-        let edge = unsafe { self.iter.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.keys.size_hint()
+        self.keys.size_hint()
     }
 }
 
-impl<'g, L, U, I, V> DoubleEndedIterator for SortedIter<'g, L, U, I, V>
-where
-    I: DoubleEndedIterator<Item = (u8, u8)>,
-{
+impl<'g, L, U, V> DoubleEndedIterator for NodeIter<'g, L, U, V> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.iter.keys.next_back()?;
+        let (key, index) = self.keys.next_back()?;
 
         #[cfg(feature = "validate")]
         validate!(
-            (index as u16) < self.iter.len,
+            (index as u16) < self.len,
             "index is {} but len is {}",
             index,
-            self.iter.len,
+            self.len,
         );
 
-        let edge = unsafe { self.iter.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.edges.add(index as usize).as_ref() };
         Some((key, edge))
     }
 }
 
-impl<'g, L, U, I, V> ExactSizeIterator for SortedIter<'g, L, U, I, V>
-where
-    I: ExactSizeIterator<Item = (u8, u8)>,
-{
+impl<'g, L, U, V> ExactSizeIterator for NodeIter<'g, L, U, V> {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();
@@ -93,82 +106,81 @@ where
     }
 }
 
-#[repr(transparent)]
-pub(crate) struct UnsortedIter<'g, I, V>(Iter<'g, I, V>);
+pub(crate) union KeyIter {
+    linear: ManuallyDrop<linear::KeyIter>,
+    node_256: node256::KeyIter,
+    raw: usize,
+}
 
-impl<'g, I, V> UnsortedIter<'g, I, V> {
-    /// # SAFETY
-    ///
-    /// Caller must guarantee `keys` produces at most `edges.len()` keys.
-    pub(crate) unsafe fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
-        Self(Iter::new(keys, edges))
+impl KeyIter {
+    const MASK_TAG: usize = 1usize.rotate_right(1);
+
+    pub(crate) const ROOT: Self = Self {
+        linear: ManuallyDrop::new(linear::KeyIter::ROOT),
+    };
+
+    #[inline]
+    pub(super) fn from_linear(iter: linear::KeyIter) -> Self {
+        let iter = Self {
+            linear: ManuallyDrop::new(iter),
+        };
+        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, 0);
+        iter
+    }
+
+    #[inline]
+    pub(super) fn from_node_256(iter: node256::KeyIter) -> Self {
+        let iter = Self { node_256: iter };
+        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, Self::MASK_TAG);
+        iter
+    }
+
+    fn is_node_256(&self) -> bool {
+        (unsafe { self.raw } & Self::MASK_TAG) > 0
     }
 }
 
-impl<'g, I, V> Iterator for UnsortedIter<'g, I, V>
-where
-    I: Iterator<Item = u8>,
-{
-    type Item = (u8, &'g Atomic128<Edge<V>>);
+impl Iterator for KeyIter {
+    type Item = (u8, u8);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let key = self.0.keys.next()?;
-
-        #[cfg(feature = "validate")]
-        {
-            validate!(self.0.len > 0);
-            self.0.len -= 1;
+        if self.is_node_256() {
+            unsafe { &mut self.node_256 }.next().map(|key| (key, key))
+        } else {
+            unsafe { &mut self.linear }.next()
         }
-
-        let edge = unsafe {
-            let edge = self.0.edges.as_ref();
-            self.0.edges = self.0.edges.add(1);
-            edge
-        };
-        Some((key, edge))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.keys.size_hint()
+        if self.is_node_256() {
+            unsafe { &self.node_256 }.size_hint()
+        } else {
+            unsafe { &self.linear }.size_hint()
+        }
     }
 }
 
-impl<'g, I, V> ExactSizeIterator for UnsortedIter<'g, I, V>
-where
-    I: ExactSizeIterator<Item = u8>,
-{
+impl DoubleEndedIterator for KeyIter {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.is_node_256() {
+            unsafe { &mut self.node_256 }
+                .next_back()
+                .map(|key| (key, key))
+        } else {
+            unsafe { &mut self.linear }.next_back()
+        }
+    }
+}
+
+impl ExactSizeIterator for KeyIter {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();
         validate_eq!(upper, Some(lower));
         lower
-    }
-}
-
-struct Iter<'g, I, V> {
-    keys: I,
-    edges: NonNull<Atomic128<Edge<V>>>,
-
-    #[cfg(feature = "validate")]
-    len: u16,
-
-    _slice: PhantomData<&'g [Atomic128<Edge<V>>]>,
-}
-
-impl<'g, I, V> Iter<'g, I, V> {
-    #[inline]
-    fn new(keys: I, edges: &'g [Atomic128<Edge<V>>]) -> Self {
-        Self {
-            keys,
-            edges: NonNull::from(edges).cast(),
-
-            #[cfg(feature = "validate")]
-            len: edges.len() as u16,
-
-            _slice: PhantomData,
-        }
     }
 }
 

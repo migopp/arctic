@@ -120,7 +120,7 @@ pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Ran
     key: W,
     stack: Vec<(
         W::Len,
-        raw::node::SortedIter<
+        raw::node::NodeIter<
             'g,
             <B::Low as crate::raw::iter::Low<R>>::Bound,
             <B::High as crate::raw::iter::High<R>>::Bound,

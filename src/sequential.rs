@@ -15,6 +15,7 @@ use crate::raw;
 use crate::raw::edge;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::PrefixIter;
+use crate::raw::iter::RangeIter;
 use crate::raw::Edge;
 use crate::stat;
 pub use key::Key;
@@ -133,14 +134,14 @@ impl<K: Key, V: Value> Map<K, V> {
     pub fn iter<O: Order>(&self) -> Iter<'_, K, V, O> {
         Iter {
             _value: PhantomData,
-            iter: unsafe { PrefixIter::new_unchecked(&self.root, K::Read::default()) },
+            iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
         }
     }
 }
 
 pub struct Iter<'g, K: Key, V, O: Order> {
     _value: PhantomData<V>,
-    iter: PrefixIter<'g, K::Write, (), O>,
+    iter: RangeIter<'g, K::Read<'g>, K::Write, (), core::ops::RangeFull, O>,
 }
 
 impl<'g, K, V, O> Iter<'g, K, V, O>

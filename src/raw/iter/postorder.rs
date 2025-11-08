@@ -3,9 +3,9 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::iter::Or;
+use crate::iter::Unbound;
 use crate::raw::edge;
 use crate::raw::node;
-use crate::raw::node::UnsortedIter;
 use crate::raw::Edge;
 
 pub(crate) struct PostorderIter<'g, C> {
@@ -18,10 +18,14 @@ impl<'g, C> PostorderIter<'g, C> {
         // HACK: we're masquerading as a node here--this is okay
         // since this iterator doesn't keep track of the key state,
         // so we can use an arbitrary byte.
-        let iter = Or::L(Or::L([0u8; 4].into_iter().take(1)));
         Self {
             stack: vec![RepeatIter::new(unsafe {
-                UnsortedIter::new(iter, core::slice::from_ref(root))
+                node::NodeIter::new(
+                    Unbound,
+                    Unbound,
+                    node::KeyIter::ROOT,
+                    core::slice::from_ref(root),
+                )
             })],
         }
     }
@@ -65,12 +69,12 @@ impl<'g, C> PostorderIter<'g, C> {
 struct RepeatIter<'g, C> {
     first: bool,
     edge: ribbit::Packed<Edge<C>>,
-    iter: node::UnsortedIter<'g, C>,
+    iter: node::NodeIter<'g, Unbound, Unbound, C>,
 }
 
 impl<'g, C> RepeatIter<'g, C> {
     #[inline]
-    fn new(iter: node::UnsortedIter<'g, C>) -> Self {
+    fn new(iter: node::NodeIter<'g, Unbound, Unbound, C>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,

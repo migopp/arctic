@@ -13,6 +13,7 @@ use ribbit::atomic::Atomic128;
 pub(crate) use sort::Order;
 
 use crate::byte;
+use crate::iter::Unbound;
 use crate::key;
 use crate::raw;
 use crate::raw::Edge;
@@ -261,5 +262,45 @@ where
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => None,
         }
+    }
+}
+
+impl<R> Range_<R> for core::ops::RangeFull {
+    type Low = Unbound;
+    type High = Unbound;
+
+    #[inline]
+    fn skip(self, _bits: usize) -> Self {
+        self
+    }
+
+    #[inline]
+    fn low(&self) -> Self::Low {
+        Unbound
+    }
+
+    #[inline]
+    fn high(&self) -> Self::High {
+        Unbound
+    }
+}
+
+impl<R> Low<R> for Unbound {
+    type Bound = Unbound;
+    fn check_value(&mut self, _edge: byte::Array) -> bool {
+        true
+    }
+    fn check_node(&mut self, _edge: byte::Array) -> Option<Self::Bound> {
+        Some(Unbound)
+    }
+}
+
+impl<R> High<R> for Unbound {
+    type Bound = Unbound;
+    fn check_value(&mut self, _edge: byte::Array) -> bool {
+        true
+    }
+    fn check_node(&mut self, _edge: byte::Array) -> Option<Self::Bound> {
+        Some(Unbound)
     }
 }

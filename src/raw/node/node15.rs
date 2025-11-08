@@ -97,72 +97,66 @@ impl<C> linear::Header<C> for Atomic128<Header> {
     }
 
     #[cold]
-    fn keys<L: crate::raw::node::Low, H: crate::raw::node::High>(
+    fn keys_unsorted(&self) -> linear::KeyIter {
+        let header = self.load_packed(Ordering::Relaxed);
+        let keys = header.value.to_le_bytes();
+        let len = header.len().value();
+        let indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
+    }
+
+    fn keys_sorted(&self) -> linear::KeyIter {
+        let header = self.load_packed(Ordering::Relaxed);
+        let keys = header.value.to_le_bytes();
+        let len = header.len().value();
+        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes[..len as usize].sort_unstable();
+        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
+    }
+
+    fn keys_range<L: crate::raw::node::Low, H: crate::raw::node::High>(
         &self,
         low: L,
         high: H,
-    ) -> linear::SortedKeyIter {
-        if L::UNBOUND && H::UNBOUND {
-            let header = self.load_packed(Ordering::Relaxed);
-            let keys = header.value.to_le_bytes();
-            let len = header.len().value();
-            let mut indexes: [(u8, u8); 15] =
-                core::array::from_fn(|index| (keys[index], index as u8));
-            indexes[..len as usize].sort_unstable();
-            linear::SortedKeyIter::new_15(linear::RawKeyIter::new(indexes, len))
-        } else {
-            let header = self.load_packed(Ordering::Relaxed);
-
-            // https://stackoverflow.com/a/28383095
-            // https://talkchess.com/viewtopic.php?t=78804
-            let (keys, len) = unsafe {
-                use core::arch::x86_64::_mm_and_si128;
-                use core::arch::x86_64::_mm_cmpeq_epi8;
-                use core::arch::x86_64::_mm_max_epu8;
-                use core::arch::x86_64::_mm_min_epu8;
-                use core::arch::x86_64::_mm_set1_epi8;
-
-                let keys = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(header.value);
-                let len = header.len().value() as usize;
-
-                let mask_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
-                    (1u128 << (len << 3)) - 1,
-                );
-
-                let min = low.get();
-                let max = high.get();
-
-                let min = _mm_set1_epi8(min as i8);
-                let max = _mm_set1_epi8(max as i8);
-                let mask_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
-
-                let mask_valid = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(
-                    _mm_and_si128(mask_len, mask_range),
-                );
-                let len = (mask_valid.count_ones() >> 3) as u8;
-
-                (header.value & mask_valid | !mask_valid, len)
-            };
-
-            // TODO: SIMD sorting network?
-            let keys = keys.to_le_bytes();
-            let mut indexes: [(u8, u8); 15] =
-                core::array::from_fn(|index| (keys[index], index as u8));
-            indexes.sort_unstable();
-            linear::SortedKeyIter::new_15(linear::RawKeyIter::new(indexes, len))
-        }
-    }
-
-    #[cold]
-    fn keys_unsorted(&self) -> linear::UnsortedKeyIter {
+    ) -> linear::KeyIter {
         let header = self.load_packed(Ordering::Relaxed);
-        Or::R(
-            header
-                .value
-                .to_le_bytes()
-                .into_iter()
-                .take(header.len().value() as usize),
-        )
+
+        // https://stackoverflow.com/a/28383095
+        // https://talkchess.com/viewtopic.php?t=78804
+        let (keys, len) = unsafe {
+            use core::arch::x86_64::_mm_and_si128;
+            use core::arch::x86_64::_mm_cmpeq_epi8;
+            use core::arch::x86_64::_mm_max_epu8;
+            use core::arch::x86_64::_mm_min_epu8;
+            use core::arch::x86_64::_mm_set1_epi8;
+
+            let keys = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(header.value);
+            let len = header.len().value() as usize;
+
+            let mask_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
+                (1u128 << (len << 3)) - 1,
+            );
+
+            let min = low.get();
+            let max = high.get();
+
+            let min = _mm_set1_epi8(min as i8);
+            let max = _mm_set1_epi8(max as i8);
+            let mask_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
+
+            let mask_valid = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(
+                _mm_and_si128(mask_len, mask_range),
+            );
+            let len = (mask_valid.count_ones() >> 3) as u8;
+
+            (header.value & mask_valid | !mask_valid, len)
+        };
+
+        // TODO: SIMD sorting network?
+        let keys = keys.to_le_bytes();
+        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        indexes.sort_unstable();
+        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
     }
 }
 

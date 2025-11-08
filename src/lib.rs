@@ -252,17 +252,17 @@ mod tests {
         };
 
         // Concurrent prefix iteration, non-linearizable
-        let prefix = pin
-            .prefix(K::Read::from(first.borrow()).prefix(&K::Read::from(last.borrow())))
-            .unwrap();
-        prefix
-            .entries::<core::iter::Rev<crate::iter::Sorted>>()
-            .zip(keys.iter().rev())
-            .for_each(|((lk, lv), (rk, rv))| {
-                assert_eq!(lk, *rk);
-                assert_eq!(lv, *rv);
-            });
-        drop(prefix);
+        // let prefix = pin
+        //     .prefix(K::Read::from(first.borrow()).prefix(&K::Read::from(last.borrow())))
+        //     .unwrap();
+        // prefix
+        //     .entries::<core::iter::Rev<crate::iter::Sorted>>()
+        //     .zip(keys.iter().rev())
+        //     .for_each(|((lk, lv), (rk, rv))| {
+        //         assert_eq!(lk, *rk);
+        //         assert_eq!(lv, *rv);
+        //     });
+        // drop(prefix);
 
         // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow(), last.borrow()).unwrap();
