@@ -1,22 +1,26 @@
 mod postorder;
 mod range;
-pub(crate) mod sort;
 
 use core::cmp;
 use core::ops::RangeInclusive;
 
 pub(crate) use postorder::PostorderIter;
 pub(crate) use range::RangeIter;
-use ribbit::atomic::Atomic128;
-pub(crate) use sort::Order;
 
 use crate::byte;
-use crate::iter::Unbound;
 use crate::key;
 use crate::raw;
-use crate::raw::Edge;
 
-pub(crate) trait Range_<R>: Clone {
+#[derive(Copy, Clone)]
+pub(crate) struct Include<T>(pub(crate) T);
+
+#[derive(Copy, Clone)]
+pub(crate) struct Exclude<T>(pub(crate) T);
+
+#[derive(Copy, Clone, Default)]
+pub(crate) struct Unbound;
+
+pub(crate) trait Range<R>: Clone {
     type Low: Low<R>;
     type High: High<R>;
 
@@ -26,9 +30,9 @@ pub(crate) trait Range_<R>: Clone {
     fn high(&self) -> Self::High;
 }
 
-impl<R: key::Read> Range_<R> for RangeInclusive<R> {
-    type Low = crate::iter::Include<R>;
-    type High = crate::iter::Include<R>;
+impl<R: key::Read> Range<R> for RangeInclusive<R> {
+    type Low = Include<R>;
+    type High = Include<R>;
 
     #[inline]
     fn skip(self, bits: usize) -> Self {
@@ -40,11 +44,11 @@ impl<R: key::Read> Range_<R> for RangeInclusive<R> {
     }
 
     fn low(&self) -> Self::Low {
-        crate::iter::Include(*self.start())
+        Include(*self.start())
     }
 
     fn high(&self) -> Self::High {
-        crate::iter::Include(*self.end())
+        Include(*self.end())
     }
 }
 
@@ -64,7 +68,7 @@ pub(crate) trait High<R> {
     fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound>;
 }
 
-impl<R: key::Read> Low<R> for crate::iter::Include<R> {
+impl<R: key::Read> Low<R> for Include<R> {
     type Bound = Option<u8>;
 
     #[inline]
@@ -87,7 +91,7 @@ impl<R: key::Read> Low<R> for crate::iter::Include<R> {
     }
 }
 
-impl<R> High<R> for crate::iter::Include<R>
+impl<R> High<R> for Include<R>
 where
     R: key::Read,
 {
@@ -112,7 +116,7 @@ where
     }
 }
 
-impl<R> Range_<R> for core::ops::RangeFull {
+impl<R> Range<R> for core::ops::RangeFull {
     type Low = Unbound;
     type High = Unbound;
 

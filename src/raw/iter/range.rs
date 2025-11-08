@@ -13,7 +13,7 @@ use crate::raw::node::High as _;
 use crate::raw::node::Low as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range_<R>, O> {
+pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range<R>, O> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, B, O>),
 }
@@ -23,7 +23,7 @@ where
     R: key::Read,
     W: key::Write,
     W: From<R>,
-    B: crate::raw::iter::Range_<R>,
+    B: crate::raw::iter::Range<R>,
 {
     fn default() -> Self {
         Self::Root {
@@ -38,7 +38,7 @@ where
     R: key::Read,
     W: key::Write,
     W: From<R>,
-    B: crate::raw::iter::Range_<R>,
+    B: crate::raw::iter::Range<R>,
     O: Order,
 {
     pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, range: B) -> Self {
@@ -113,7 +113,7 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O> {
+pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range<R>, O> {
     lower: B::Low,
     upper: B::High,
     key: W,
@@ -133,7 +133,7 @@ impl<'g, R, W, C, B, O> NodeIter<'g, R, W, C, B, O>
 where
     R: key::Read,
     W: key::Write,
-    B: crate::raw::iter::Range_<R>,
+    B: crate::raw::iter::Range<R>,
     O: Order,
 {
     #[inline]

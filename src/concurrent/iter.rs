@@ -44,7 +44,7 @@ impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range_<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'l>>,
 {
     #[inline]
     #[expect(clippy::type_complexity)]
@@ -80,7 +80,7 @@ where
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range_<K::Read<'l>>, O> {
+pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, (), R, O>,
 }
@@ -89,7 +89,7 @@ impl<'g, 'l, 'guard, K, V, R, O> EntryIter<'g, 'l, 'guard, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range_<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'l>>,
     O: Order,
 {
     #[inline]
@@ -120,7 +120,7 @@ impl<'g, 'l, 'guard, K, V, R, O> Iterator for EntryIter<'g, 'l, 'guard, K, V, R,
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range_<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'l>>,
     O: Order,
 {
     type Item = (K, V::Borrow<'guard>);
@@ -136,7 +136,7 @@ where
 }
 
 /// Iterator over values only
-pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range_<K::Read<'l>>, O> {
+pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore, (), R, O>,
 }
@@ -145,7 +145,7 @@ impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range_<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'l>>,
     O: Order,
 {
     #[inline]
@@ -166,7 +166,7 @@ impl<'g, 'l, 'guard, K, V, R, O> Iterator for ValueIter<'g, 'l, 'guard, K, V, R,
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range_<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'l>>,
     O: Order,
 {
     type Item = V::Borrow<'guard>;

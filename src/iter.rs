@@ -1,12 +1,23 @@
-#[expect(private_bounds)]
-pub trait Order: crate::raw::iter::Order {}
+pub struct Sorted;
 
-impl<T: crate::raw::iter::Order> Order for T {}
+pub struct Unsorted;
 
-pub use crate::raw::iter::sort::Sorted;
-pub use crate::raw::iter::sort::Unsorted;
+pub trait Order {
+    const REVERSE: bool;
+    const SORTED: bool;
+}
 
-pub struct Include<T>(pub(crate) T);
-pub struct Exclude<T>(pub(crate) T);
-#[derive(Copy, Clone, Default)]
-pub struct Unbound;
+impl Order for Sorted {
+    const REVERSE: bool = false;
+    const SORTED: bool = true;
+}
+
+impl Order for core::iter::Rev<Sorted> {
+    const REVERSE: bool = true;
+    const SORTED: bool = true;
+}
+
+impl Order for Unsorted {
+    const REVERSE: bool = false;
+    const SORTED: bool = false;
+}

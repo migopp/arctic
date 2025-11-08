@@ -4,6 +4,7 @@ use core::ptr::NonNull;
 
 use ribbit::atomic::Atomic128;
 
+use crate::raw::iter::Unbound;
 use crate::raw::node::linear;
 use crate::raw::node::node256;
 use crate::raw::Edge;
@@ -196,7 +197,7 @@ pub(crate) trait High: Copy + Default {
     fn is(self, byte: u8) -> bool;
 }
 
-impl Low for crate::iter::Unbound {
+impl Low for Unbound {
     const UNBOUND: bool = true;
     #[inline]
     fn get(self) -> u8 {
@@ -208,7 +209,7 @@ impl Low for crate::iter::Unbound {
     }
 }
 
-impl High for crate::iter::Unbound {
+impl High for Unbound {
     const UNBOUND: bool = true;
     #[inline]
     fn get(self) -> u8 {

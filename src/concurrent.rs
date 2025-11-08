@@ -388,7 +388,7 @@ where
         limit: usize,
     ) -> Result<(), ()>
     where
-        R: crate::raw::iter::Range_<K::Read<'l>>,
+        R: crate::raw::iter::Range<K::Read<'l>>,
         O: Order,
     {
         guard
