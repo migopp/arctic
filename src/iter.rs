@@ -6,6 +6,10 @@ impl<T: crate::raw::iter::Order> Order for T {}
 pub use crate::raw::iter::sort::Sorted;
 pub use crate::raw::iter::sort::Unsorted;
 
+pub struct Include<T>(pub(crate) T);
+pub struct Exclude<T>(pub(crate) T);
+pub struct Unbound;
+
 #[derive(Clone, Debug)]
 pub(crate) enum Or<L, R> {
     L(L),

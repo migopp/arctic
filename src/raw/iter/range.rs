@@ -7,41 +7,43 @@ use ribbit::atomic::Atomic128;
 use crate::iter::Order;
 use crate::key;
 use crate::raw::edge;
+use crate::raw::iter::Bound as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R, W: key::Write, C, O: Order> {
+pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range_<R>, O: Order> {
     Root { key: W, next: Option<u64> },
-    Node(NodeIter<'g, R, W, C, O>),
+    Node(NodeIter<'g, R, W, C, B, O>),
 }
 
-impl<'g, R, W, C, O> RangeIter<'g, R, W, C, O>
+impl<'g, R, W, C, B, O> RangeIter<'g, R, W, C, B, O>
 where
     R: key::Read,
     W: key::Write,
     W: From<R>,
+    B: crate::raw::iter::Range_<R>,
     O: Order,
 {
-    pub(crate) unsafe fn new_unchecked(
-        root: &'g Atomic128<Edge<C>>,
-        prefix: R,
-        mut min: R,
-        mut max: R,
-    ) -> Self {
-        if O::REVERSE {
-            core::mem::swap(&mut min, &mut max);
-        }
+    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, range: B) -> Self {
+        // if O::REVERSE {
+        //     core::mem::swap(&mut min, &mut max);
+        // }
 
         let edge = root.load_packed(Ordering::Acquire);
         let bits = prefix.bits();
         let key = edge.meta().key();
 
+        let mut min = range.min();
         min.seek(bits);
-        let min_len = key.len().min_bits(min.bits());
-        let min_prefix = min.take(min_len);
+        let Some(min_prefix) = min.take_min(key.len()) else {
+            return Self::Root {
+                key: W::default(),
+                next: None,
+            };
+        };
 
+        let mut max = range.max();
         max.seek(bits);
-        let max_len = key.len().min_bits(max.bits());
-        let max_prefix = max.take(max_len);
+        let max_prefix = max.take_max(key.len());
 
         validate!(matches!(
             order::<O>(key.cmp(&min_prefix)),
@@ -70,22 +72,23 @@ where
 
                 let first = match key == min_prefix {
                     false => None,
-                    true => min.next(),
+                    true => min.next_min(),
                 };
 
                 let last = match key == max_prefix {
                     false => None,
-                    true => max.next(),
+                    true => max.next_max(),
                 };
 
                 let mut stack = Vec::with_capacity(7);
                 stack.push((bits, first, last, O::range(node, first, last)));
 
                 Self::Node(NodeIter {
-                    stack,
-                    key: writer,
                     min,
                     max,
+                    stack,
+                    key: writer,
+                    _read: PhantomData,
                     _sort: PhantomData,
                 })
             }
@@ -118,18 +121,20 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, O: Order> {
-    min: R,
-    max: R,
+pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O: Order> {
+    min: B::Min,
+    max: B::Max,
     key: W,
     stack: Vec<(W::Len, Option<u8>, Option<u8>, O::RangeIter<'g, C>)>,
+    _read: PhantomData<R>,
     _sort: PhantomData<O>,
 }
 
-impl<'g, R, W, C, O> NodeIter<'g, R, W, C, O>
+impl<'g, R, W, C, B, O> NodeIter<'g, R, W, C, B, O>
 where
     R: key::Read,
     W: key::Write,
+    B: crate::raw::iter::Range_<R>,
     O: Order,
 {
     #[inline]
@@ -187,10 +192,13 @@ where
                 crate::cold();
 
                 let first = if check_first {
-                    let min_prefix = self.min.take(key.len().min_bits(self.min.bits()));
+                    let Some(min_prefix) = self.min.take_min(key.len()) else {
+                        continue 'horizontal;
+                    };
+
                     match order::<O>(key.cmp(&min_prefix)) {
                         cmp::Ordering::Less => continue 'horizontal,
-                        cmp::Ordering::Equal => self.min.next(),
+                        cmp::Ordering::Equal => self.min.next_min(),
                         cmp::Ordering::Greater => None,
                     }
                 } else {
@@ -198,10 +206,11 @@ where
                 };
 
                 let last = if check_last {
-                    let max_prefix = self.max.take(key.len().min_bits(self.max.bits()));
+                    let max_prefix = self.max.take_max(key.len());
+
                     match order::<O>(key.cmp(&max_prefix)) {
                         cmp::Ordering::Less => None,
-                        cmp::Ordering::Equal => self.max.next(),
+                        cmp::Ordering::Equal => self.max.next_max(),
                         cmp::Ordering::Greater => {
                             self.stack.clear();
                             return None;
