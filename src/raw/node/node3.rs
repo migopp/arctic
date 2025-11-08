@@ -95,7 +95,7 @@ impl<C> linear::Header<C> for Atomic64<Header> {
         }
     }
 
-    fn keys_range<L: crate::raw::node::Low, H: crate::raw::node::High>(
+    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
         &self,
         low: L,
         high: H,

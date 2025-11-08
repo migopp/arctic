@@ -185,19 +185,19 @@ impl ExactSizeIterator for KeyIter {
     }
 }
 
-pub(crate) trait Low: Copy + Default {
+pub(crate) trait Lower: Copy + Default {
     const UNBOUND: bool;
     fn get(self) -> u8;
     fn is(self, byte: u8) -> bool;
 }
 
-pub(crate) trait High: Copy + Default {
+pub(crate) trait Upper: Copy + Default {
     const UNBOUND: bool;
     fn get(self) -> u8;
     fn is(self, byte: u8) -> bool;
 }
 
-impl Low for Unbound {
+impl Lower for Unbound {
     const UNBOUND: bool = true;
     #[inline]
     fn get(self) -> u8 {
@@ -205,11 +205,11 @@ impl Low for Unbound {
     }
     #[inline]
     fn is(self, _byte: u8) -> bool {
-        true
+        false
     }
 }
 
-impl High for Unbound {
+impl Upper for Unbound {
     const UNBOUND: bool = true;
     #[inline]
     fn get(self) -> u8 {
@@ -217,11 +217,11 @@ impl High for Unbound {
     }
     #[inline]
     fn is(self, _byte: u8) -> bool {
-        true
+        false
     }
 }
 
-impl Low for Option<u8> {
+impl Lower for Option<u8> {
     const UNBOUND: bool = false;
     #[inline]
     fn get(self) -> u8 {
@@ -233,7 +233,7 @@ impl Low for Option<u8> {
     }
 }
 
-impl High for Option<u8> {
+impl Upper for Option<u8> {
     const UNBOUND: bool = false;
     #[inline]
     fn get(self) -> u8 {

@@ -57,7 +57,11 @@ impl<C> Node<C> for Node256<C> {
 
 impl<C> Node256<C> {
     #[inline]
-    pub(crate) fn keys<L: node::iter::Low, H: node::iter::High>(&self, low: L, high: H) -> KeyIter {
+    pub(crate) fn keys<L: node::iter::Lower, H: node::iter::Upper>(
+        &self,
+        low: L,
+        high: H,
+    ) -> KeyIter {
         KeyIter::new(low, high)
     }
 }
@@ -86,7 +90,7 @@ enum Discriminant {
 
 impl KeyIter {
     #[inline]
-    fn new<L: node::iter::Low, H: node::iter::High>(low: L, high: H) -> Self {
+    fn new<L: node::iter::Lower, H: node::iter::Upper>(low: L, high: H) -> Self {
         Self {
             head: low.get() as u16,
             tail: high.get() as u16 + 1,

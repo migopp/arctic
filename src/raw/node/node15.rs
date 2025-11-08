@@ -113,7 +113,7 @@ impl<C> linear::Header<C> for Atomic128<Header> {
         linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
     }
 
-    fn keys_range<L: crate::raw::node::Low, H: crate::raw::node::High>(
+    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
         &self,
         low: L,
         high: H,

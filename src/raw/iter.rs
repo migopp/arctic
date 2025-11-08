@@ -21,18 +21,18 @@ pub(crate) struct Exclude<T>(pub(crate) T);
 pub(crate) struct Unbound;
 
 pub(crate) trait Range<R>: Clone {
-    type Low: Low<R>;
-    type High: High<R>;
+    type Lower: Lower<R>;
+    type Upper: Upper<R>;
 
     fn skip(self, bits: usize) -> Self;
 
-    fn low(&self) -> Self::Low;
-    fn high(&self) -> Self::High;
+    fn lower(&self) -> Self::Lower;
+    fn upper(&self) -> Self::Upper;
 }
 
 impl<R: key::Read> Range<R> for RangeInclusive<R> {
-    type Low = Include<R>;
-    type High = Include<R>;
+    type Lower = Include<R>;
+    type Upper = Include<R>;
 
     #[inline]
     fn skip(self, bits: usize) -> Self {
@@ -43,32 +43,32 @@ impl<R: key::Read> Range<R> for RangeInclusive<R> {
         low..=high
     }
 
-    fn low(&self) -> Self::Low {
+    fn lower(&self) -> Self::Lower {
         Include(*self.start())
     }
 
-    fn high(&self) -> Self::High {
+    fn upper(&self) -> Self::Upper {
         Include(*self.end())
     }
 }
 
-pub(crate) trait Low<R> {
-    type Bound: raw::node::Low;
+pub(crate) trait Lower<R> {
+    type Bound: raw::node::Lower;
 
     fn check_value(&mut self, edge: byte::Array) -> bool;
 
     fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound>;
 }
 
-pub(crate) trait High<R> {
-    type Bound: raw::node::High;
+pub(crate) trait Upper<R> {
+    type Bound: raw::node::Upper;
 
     fn check_value(&mut self, edge: byte::Array) -> bool;
 
     fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound>;
 }
 
-impl<R: key::Read> Low<R> for Include<R> {
+impl<R: key::Read> Lower<R> for Include<R> {
     type Bound = Option<u8>;
 
     #[inline]
@@ -91,10 +91,7 @@ impl<R: key::Read> Low<R> for Include<R> {
     }
 }
 
-impl<R> High<R> for Include<R>
-where
-    R: key::Read,
-{
+impl<R: key::Read> Upper<R> for Include<R> {
     type Bound = Option<u8>;
 
     fn check_value(&mut self, edge: byte::Array) -> bool {
@@ -117,8 +114,8 @@ where
 }
 
 impl<R> Range<R> for core::ops::RangeFull {
-    type Low = Unbound;
-    type High = Unbound;
+    type Lower = Unbound;
+    type Upper = Unbound;
 
     #[inline]
     fn skip(self, _bits: usize) -> Self {
@@ -126,31 +123,39 @@ impl<R> Range<R> for core::ops::RangeFull {
     }
 
     #[inline]
-    fn low(&self) -> Self::Low {
+    fn lower(&self) -> Self::Lower {
         Unbound
     }
 
     #[inline]
-    fn high(&self) -> Self::High {
+    fn upper(&self) -> Self::Upper {
         Unbound
     }
 }
 
-impl<R> Low<R> for Unbound {
+impl<R> Lower<R> for Unbound {
     type Bound = Unbound;
+
+    #[inline]
     fn check_value(&mut self, _edge: byte::Array) -> bool {
         true
     }
+
+    #[inline]
     fn check_node(&mut self, _edge: byte::Array) -> Option<Self::Bound> {
         Some(Unbound)
     }
 }
 
-impl<R> High<R> for Unbound {
+impl<R> Upper<R> for Unbound {
     type Bound = Unbound;
+
+    #[inline]
     fn check_value(&mut self, _edge: byte::Array) -> bool {
         true
     }
+
+    #[inline]
     fn check_node(&mut self, _edge: byte::Array) -> Option<Self::Bound> {
         Some(Unbound)
     }

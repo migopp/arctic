@@ -7,13 +7,13 @@ use crate::iter::Order;
 use crate::key;
 use crate::raw;
 use crate::raw::edge;
-use crate::raw::iter::High as _;
-use crate::raw::iter::Low as _;
-use crate::raw::node::High as _;
-use crate::raw::node::Low as _;
+use crate::raw::iter::Lower as _;
+use crate::raw::iter::Upper as _;
+use crate::raw::node::Lower as _;
+use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range<R>, O> {
+pub enum RangeIter<'g, R, W: key::Write, C, B: raw::iter::Range<R>, O> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, B, O>),
 }
@@ -23,7 +23,7 @@ where
     R: key::Read,
     W: key::Write,
     W: From<R>,
-    B: crate::raw::iter::Range<R>,
+    B: raw::iter::Range<R>,
 {
     fn default() -> Self {
         Self::Root {
@@ -38,7 +38,7 @@ where
     R: key::Read,
     W: key::Write,
     W: From<R>,
-    B: crate::raw::iter::Range<R>,
+    B: raw::iter::Range<R>,
     O: Order,
 {
     pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, range: B) -> Self {
@@ -53,8 +53,8 @@ where
         let mut writer = W::from(prefix);
         let bits = writer.write(W::len_from_bits(bits), key);
 
-        let mut lower = range.low();
-        let mut upper = range.high();
+        let mut lower = range.lower();
+        let mut upper = range.upper();
 
         match child {
             edge::Child::Value(value) if lower.check_value(key) && upper.check_value(key) => {
@@ -112,16 +112,16 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range<R>, O> {
-    lower: B::Low,
-    upper: B::High,
+pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: raw::iter::Range<R>, O> {
+    lower: B::Lower,
+    upper: B::Upper,
     key: W,
     stack: Vec<(
         W::Len,
         raw::node::NodeIter<
             'g,
-            <B::Low as crate::raw::iter::Low<R>>::Bound,
-            <B::High as crate::raw::iter::High<R>>::Bound,
+            <B::Lower as raw::iter::Lower<R>>::Bound,
+            <B::Upper as raw::iter::Upper<R>>::Bound,
             C,
         >,
     )>,
@@ -132,7 +132,7 @@ impl<'g, R, W, C, B, O> NodeIter<'g, R, W, C, B, O>
 where
     R: key::Read,
     W: key::Write,
-    B: crate::raw::iter::Range<R>,
+    B: raw::iter::Range<R>,
     O: Order,
 {
     #[inline]
@@ -184,9 +184,9 @@ where
                         }
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
-                            let first = Default::default();
-                            let last = Default::default();
-                            self.stack.push((bits, node.iter::<O, _, _>(first, last)));
+                            let lower = Default::default();
+                            let upper = Default::default();
+                            self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
                             continue 'vertical;
                         }
                     }

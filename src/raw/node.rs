@@ -6,10 +6,10 @@ mod node15;
 mod node256;
 mod node3;
 
-pub(crate) use iter::High;
 pub(crate) use iter::KeyIter;
-pub(crate) use iter::Low;
+pub(crate) use iter::Lower;
 pub(crate) use iter::NodeIter;
+pub(crate) use iter::Upper;
 use linear::Linear;
 pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
@@ -82,7 +82,7 @@ impl<'g, C> Clone for Ref<'g, C> {
 
 impl<'g, C> Ref<'g, C> {
     #[inline]
-    pub(crate) fn iter<O: crate::iter::Order, L: Low, U: High>(
+    pub(crate) fn iter<O: crate::iter::Order, L: Lower, U: Upper>(
         &self,
         lower: L,
         upper: U,

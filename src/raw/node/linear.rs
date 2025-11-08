@@ -117,7 +117,7 @@ where
 impl<const LEN: usize, H: Header<V>, V> Linear<LEN, H, V> {
     // FIXME
     #[inline]
-    pub(crate) fn keys_range<L: crate::raw::node::Low, G: crate::raw::node::High>(
+    pub(crate) fn keys_range<L: crate::raw::node::Lower, G: crate::raw::node::Upper>(
         &self,
         low: L,
         high: G,
@@ -166,7 +166,7 @@ pub(crate) trait Header<C>: Default {
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
-    fn keys_range<L: crate::raw::node::Low, H: crate::raw::node::High>(
+    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
         &self,
         low: L,
         high: H,
