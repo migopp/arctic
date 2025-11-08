@@ -116,14 +116,14 @@ where
 }
 
 impl<const LEN: usize, H: Header<V>, V> Linear<LEN, H, V> {
+    // FIXME
     #[inline]
-    pub(crate) fn keys_sorted(&self) -> SortedKeyIter {
-        self.header.keys_sorted()
-    }
-
-    #[inline]
-    pub(crate) fn keys_range(&self, min: u8, max: u8) -> SortedKeyIter {
-        self.header.keys_range(min, max)
+    pub(crate) fn keys<L: crate::raw::node::Low, G: crate::raw::node::High>(
+        &self,
+        low: L,
+        high: G,
+    ) -> SortedKeyIter {
+        self.header.keys(low, high)
     }
 
     #[inline]
@@ -162,8 +162,11 @@ pub(crate) trait Header<C>: Default {
     fn get(&self, key: u8) -> Option<u8>;
     fn get_or_reserve(&self, key: u8) -> Option<u8>;
 
-    fn keys_sorted(&self) -> SortedKeyIter;
-    fn keys_range(&self, min: u8, max: u8) -> SortedKeyIter;
+    fn keys<L: crate::raw::node::Low, H: crate::raw::node::High>(
+        &self,
+        low: L,
+        high: H,
+    ) -> SortedKeyIter;
     fn keys_unsorted(&self) -> UnsortedKeyIter;
 }
 

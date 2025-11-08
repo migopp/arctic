@@ -97,33 +97,39 @@ impl<C> linear::Header<C> for Atomic64<Header> {
     }
 
     #[inline]
-    fn keys_range(&self, min: u8, max: u8) -> linear::SortedKeyIter {
-        let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value() as usize;
-        let keys = header.value.to_le_bytes();
-        let mut valid = 0;
+    fn keys<L: crate::raw::node::Low, H: crate::raw::node::High>(
+        &self,
+        low: L,
+        high: H,
+    ) -> linear::SortedKeyIter {
+        if L::UNBOUND && H::UNBOUND {
+            let header = self.load_packed(Ordering::Relaxed);
+            let len = header.len().value();
+            let keys = header.value.to_le_bytes();
+            let mut indexes: [(u8, u8); 3] =
+                core::array::from_fn(|index| (keys[index], index as u8));
+            indexes[..len as usize].sort_unstable();
+            linear::SortedKeyIter::new_3(linear::RawKeyIter::new(indexes, len))
+        } else {
+            let header = self.load_packed(Ordering::Relaxed);
+            let len = header.len().value() as usize;
+            let keys = header.value.to_le_bytes();
+            let mut valid = 0;
+            let low = low.get();
+            let high = high.get();
 
-        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
-            if index < len && (min..=max).contains(&keys[index]) {
-                valid += 1;
-                (keys[index], index as u8)
-            } else {
-                (255, 3)
-            }
-        });
+            let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
+                if index < len && (low..=high).contains(&keys[index]) {
+                    valid += 1;
+                    (keys[index], index as u8)
+                } else {
+                    (255, 3)
+                }
+            });
 
-        indexes.sort_unstable();
-        linear::SortedKeyIter::new_3(linear::RawKeyIter::new(indexes, valid))
-    }
-
-    #[inline]
-    fn keys_sorted(&self) -> linear::SortedKeyIter {
-        let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value();
-        let keys = header.value.to_le_bytes();
-        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
-        indexes[..len as usize].sort_unstable();
-        linear::SortedKeyIter::new_3(linear::RawKeyIter::new(indexes, len))
+            indexes.sort_unstable();
+            linear::SortedKeyIter::new_3(linear::RawKeyIter::new(indexes, valid))
+        }
     }
 
     #[inline]

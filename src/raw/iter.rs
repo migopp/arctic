@@ -3,6 +3,7 @@ mod prefix;
 mod range;
 pub(crate) mod sort;
 
+use core::cmp;
 use core::ops::RangeInclusive;
 
 pub(crate) use postorder::PostorderIter;
@@ -13,6 +14,7 @@ pub(crate) use sort::Order;
 
 use crate::byte;
 use crate::key;
+use crate::raw;
 use crate::raw::Edge;
 
 /// Abstraction over prefix and range iteration
@@ -167,110 +169,97 @@ where
 }
 
 pub(crate) trait Range_<R> {
-    type Min: Bound<R>;
-    type Max: Bound<R>;
+    type Low: Low<R>;
+    type High: High<R>;
 
-    fn min(&self) -> Self::Min;
-    fn max(&self) -> Self::Max;
+    fn skip(self, bits: usize) -> Self;
+
+    fn low(&self) -> Self::Low;
+    fn high(&self) -> Self::High;
 }
 
 impl<R: key::Read> Range_<R> for RangeInclusive<R> {
-    type Min = crate::iter::Include<R>;
-    type Max = crate::iter::Include<R>;
+    type Low = crate::iter::Include<R>;
+    type High = crate::iter::Include<R>;
 
-    fn min(&self) -> Self::Min {
+    #[inline]
+    fn skip(self, bits: usize) -> Self {
+        let mut low = *self.start();
+        let mut high = *self.end();
+        low.seek(bits);
+        high.seek(bits);
+        low..=high
+    }
+
+    fn low(&self) -> Self::Low {
         crate::iter::Include(*self.start())
     }
 
-    fn max(&self) -> Self::Max {
+    fn high(&self) -> Self::High {
         crate::iter::Include(*self.end())
     }
 }
 
-pub(crate) trait Bound<R> {
-    fn seek(&mut self, bits: usize);
+pub(crate) trait Low<R> {
+    type Bound: raw::node::Low;
 
-    fn take_min(&mut self, len: byte::Len) -> Option<byte::Array>;
-    fn take_max(&mut self, len: byte::Len) -> byte::Array;
+    fn check_value(&mut self, edge: byte::Array) -> bool;
 
-    fn next_min(&mut self) -> Option<u8>;
-    fn next_max(&mut self) -> Option<u8>;
+    fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound>;
 }
 
-impl<R> Bound<R> for crate::iter::Include<R>
-where
-    R: key::Read,
-{
-    #[inline]
-    fn seek(&mut self, bits: usize) {
-        self.0.seek(bits);
-    }
+pub(crate) trait High<R> {
+    type Bound: raw::node::High;
 
-    #[inline]
-    fn take_min(&mut self, len: byte::Len) -> Option<byte::Array> {
-        Some(self.0.take(len.min_bits(self.0.bits())))
-    }
+    fn check_value(&mut self, edge: byte::Array) -> bool;
 
-    #[inline]
-    fn take_max(&mut self, len: byte::Len) -> byte::Array {
-        self.0.take(len.min_bits(self.0.bits()))
-    }
-
-    #[inline]
-    fn next_min(&mut self) -> Option<u8> {
-        self.0.next()
-    }
-
-    #[inline]
-    fn next_max(&mut self) -> Option<u8> {
-        self.0.next()
-    }
+    fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound>;
 }
 
-impl<R> Bound<R> for crate::iter::Exclude<R>
-where
-    R: key::Read,
-{
-    fn seek(&mut self, bits: usize) {
-        self.0.seek(bits);
+impl<R: key::Read> Low<R> for crate::iter::Include<R> {
+    type Bound = Option<u8>;
+
+    #[inline]
+    fn check_value(&mut self, edge: byte::Array) -> bool {
+        if self.0.bits() < edge.len().bits() as usize {
+            return false;
+        }
+
+        let len = edge.len().min_bits(self.0.bits());
+        self.0.take(len) >= edge
     }
 
-    fn take_min(&mut self, len: byte::Len) -> Option<byte::Array> {
-        todo!()
-    }
-
-    fn take_max(&mut self, len: byte::Len) -> byte::Array {
-        todo!()
-    }
-
-    fn next_min(&mut self) -> Option<u8> {
-        todo!()
-    }
-
-    fn next_max(&mut self) -> Option<u8> {
-        todo!()
+    fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound> {
+        let len = edge.len().min_bits(self.0.bits());
+        match edge.cmp(&self.0.take(len)) {
+            cmp::Ordering::Less => None,
+            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Greater => Some(Default::default()),
+        }
     }
 }
 
-impl<R> Bound<R> for crate::iter::Unbound
+impl<R> High<R> for crate::iter::Include<R>
 where
     R: key::Read,
 {
-    fn seek(&mut self, _bits: usize) {}
+    type Bound = Option<u8>;
 
-    fn take_min(&mut self, len: byte::Len) -> Option<byte::Array> {
-        todo!()
+    fn check_value(&mut self, edge: byte::Array) -> bool {
+        if self.0.bits() > edge.len().bits() as usize {
+            return false;
+        }
+
+        let len = edge.len().min_bits(self.0.bits());
+        self.0.take(len) <= edge
     }
 
-    fn take_max(&mut self, len: byte::Len) -> byte::Array {
-        todo!()
-    }
-
-    fn next_min(&mut self) -> Option<u8> {
-        todo!()
-    }
-
-    fn next_max(&mut self) -> Option<u8> {
-        todo!()
+    fn check_node(&mut self, edge: byte::Array) -> Option<Self::Bound> {
+        let len = edge.len().min_bits(self.0.bits());
+        match edge.cmp(&self.0.take(len)) {
+            cmp::Ordering::Less => Some(Default::default()),
+            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Greater => None,
+        }
     }
 }

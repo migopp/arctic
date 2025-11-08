@@ -20,11 +20,11 @@ pub(crate) trait Order {
 
     unsafe fn prefix<'g, V>(node: node::Ref<'g, V>) -> Self::PrefixIter<'g, V>;
 
-    unsafe fn range<'g, V>(
-        node: node::Ref<'g, V>,
-        min: Option<u8>,
-        max: Option<u8>,
-    ) -> Self::RangeIter<'g, V>;
+    unsafe fn iter<'g, C, L: crate::raw::node::Low, H: crate::raw::node::High>(
+        node: node::Ref<'g, C>,
+        min: L,
+        max: H,
+    ) -> Self::RangeIter<'g, C>;
 }
 
 impl Order for Sorted {
@@ -43,13 +43,12 @@ impl Order for Sorted {
         node.iter_sorted()
     }
 
-    #[inline]
-    unsafe fn range<'g, V>(
-        node: node::Ref<'g, V>,
-        min: Option<u8>,
-        max: Option<u8>,
-    ) -> Self::PrefixIter<'g, V> {
-        node.iter_range(min, max)
+    unsafe fn iter<'g, C, L: crate::raw::node::Low, H: crate::raw::node::High>(
+        node: node::Ref<'g, C>,
+        min: L,
+        max: H,
+    ) -> Self::RangeIter<'g, C> {
+        node.iter(min, max)
     }
 }
 
@@ -71,14 +70,12 @@ impl Order for core::iter::Rev<Sorted> {
         node.iter_sorted().rev()
     }
 
-    #[inline]
-    unsafe fn range<'g, V>(
-        node: node::Ref<'g, V>,
-        min: Option<u8>,
-        max: Option<u8>,
-    ) -> Self::RangeIter<'g, V> {
-        validate!(min.zip(max).map(|(min, max)| min >= max).unwrap_or(true));
-        node.iter_range(max, min).rev()
+    unsafe fn iter<'g, C, L: crate::raw::node::Low, H: crate::raw::node::High>(
+        _node: node::Ref<'g, C>,
+        _min: L,
+        _max: H,
+    ) -> Self::RangeIter<'g, C> {
+        todo!()
     }
 }
 
@@ -98,12 +95,11 @@ impl Order for Unsorted {
         node.iter_unsorted()
     }
 
-    #[inline]
-    unsafe fn range<'g, V>(
-        node: node::Ref<'g, V>,
-        min: Option<u8>,
-        max: Option<u8>,
-    ) -> Self::RangeIter<'g, V> {
-        node.iter_range(min, max)
+    unsafe fn iter<'g, C, L: crate::raw::node::Low, H: crate::raw::node::High>(
+        node: node::Ref<'g, C>,
+        min: L,
+        max: H,
+    ) -> Self::RangeIter<'g, C> {
+        node.iter(min, max)
     }
 }

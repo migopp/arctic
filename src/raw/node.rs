@@ -81,16 +81,7 @@ impl<'g, C> Clone for Ref<'g, C> {
 impl<'g, C> Ref<'g, C> {
     #[inline]
     pub(crate) fn iter_sorted(&self) -> SortedIter<'g, C> {
-        let (keys, edges) = match self {
-            Ref::Node3(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
-            Ref::Node15(node) => (SortedKeyIter::from_linear(node.keys_sorted()), node.edges()),
-            Ref::Node256(node) => (
-                SortedKeyIter::from_node_256(node.keys_sorted()),
-                node.edges(),
-            ),
-        };
-
-        unsafe { SortedIter::new(keys, edges) }
+        self.iter(crate::iter::Unbound, crate::iter::Unbound)
     }
 
     #[inline]
@@ -98,29 +89,28 @@ impl<'g, C> Ref<'g, C> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (Or::L(node.keys_unsorted()), node.edges()),
             Ref::Node15(node) => (Or::L(node.keys_unsorted()), node.edges()),
-            Ref::Node256(node) => (Or::R(node.keys_sorted()), node.edges()),
+            Ref::Node256(node) => (
+                Or::R(node.keys(crate::iter::Unbound, crate::iter::Unbound)),
+                node.edges(),
+            ),
         };
 
         unsafe { UnsortedIter::new(keys, edges) }
     }
 
     #[inline]
-    pub(crate) fn iter_range(&self, min: Option<u8>, max: Option<u8>) -> SortedIter<'g, C> {
-        if min.is_none() && max.is_none() {
-            return self.iter_sorted();
-        }
-
+    pub(crate) fn iter<L: Low, H: High>(&self, low: L, high: H) -> SortedIter<'g, C> {
         let (keys, edges) = match self {
             Ref::Node3(node) => (
-                SortedKeyIter::from_linear(node.keys_range(min.unwrap_or(0), max.unwrap_or(255))),
+                SortedKeyIter::from_linear(node.keys(low, high)),
                 node.edges(),
             ),
             Ref::Node15(node) => (
-                SortedKeyIter::from_linear(node.keys_range(min.unwrap_or(0), max.unwrap_or(255))),
+                SortedKeyIter::from_linear(node.keys(low, high)),
                 node.edges(),
             ),
             Ref::Node256(node) => (
-                SortedKeyIter::from_node_256(node.keys_range(min, max)),
+                SortedKeyIter::from_node_256(node.keys(low, high)),
                 node.edges(),
             ),
         };
@@ -196,6 +186,9 @@ pub(crate) type SortedIter<'g, V> = iter::SortedIter<'g, SortedKeyIter, V>;
 pub(crate) type UnsortedIter<'g, V> = iter::UnsortedIter<'g, UnsortedKeyIter, V>;
 
 pub(crate) type UnsortedKeyIter = Or<linear::UnsortedKeyIter, node256::KeyIter>;
+
+pub(crate) use iter::High;
+pub(crate) use iter::Low;
 
 pub(crate) union SortedKeyIter {
     linear: ManuallyDrop<linear::SortedKeyIter>,

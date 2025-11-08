@@ -8,6 +8,7 @@ pub use crate::raw::iter::sort::Unsorted;
 
 pub struct Include<T>(pub(crate) T);
 pub struct Exclude<T>(pub(crate) T);
+#[derive(Copy, Clone, Default)]
 pub struct Unbound;
 
 #[derive(Clone, Debug)]

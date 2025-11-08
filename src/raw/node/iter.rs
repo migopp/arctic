@@ -156,3 +156,63 @@ impl<'g, I, V> Iter<'g, I, V> {
         }
     }
 }
+
+pub(crate) trait Low: Copy + Default {
+    const UNBOUND: bool;
+    fn get(self) -> u8;
+    fn is(self, byte: u8) -> bool;
+}
+
+pub(crate) trait High: Copy + Default {
+    const UNBOUND: bool;
+    fn get(self) -> u8;
+    fn is(self, byte: u8) -> bool;
+}
+
+impl Low for crate::iter::Unbound {
+    const UNBOUND: bool = true;
+    #[inline]
+    fn get(self) -> u8 {
+        0
+    }
+    #[inline]
+    fn is(self, _byte: u8) -> bool {
+        true
+    }
+}
+
+impl High for crate::iter::Unbound {
+    const UNBOUND: bool = true;
+    #[inline]
+    fn get(self) -> u8 {
+        255
+    }
+    #[inline]
+    fn is(self, _byte: u8) -> bool {
+        true
+    }
+}
+
+impl Low for Option<u8> {
+    const UNBOUND: bool = false;
+    #[inline]
+    fn get(self) -> u8 {
+        self.unwrap_or(0)
+    }
+    #[inline]
+    fn is(self, byte: u8) -> bool {
+        self == Some(byte)
+    }
+}
+
+impl High for Option<u8> {
+    const UNBOUND: bool = false;
+    #[inline]
+    fn get(self) -> u8 {
+        self.unwrap_or(255)
+    }
+    #[inline]
+    fn is(self, byte: u8) -> bool {
+        self == Some(byte)
+    }
+}

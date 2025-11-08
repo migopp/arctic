@@ -6,13 +6,33 @@ use ribbit::atomic::Atomic128;
 
 use crate::iter::Order;
 use crate::key;
+use crate::raw;
 use crate::raw::edge;
-use crate::raw::iter::Bound as _;
+use crate::raw::iter::High as _;
+use crate::raw::iter::Low as _;
+use crate::raw::node::High;
+use crate::raw::node::Low as _;
 use crate::raw::Edge;
 
 pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range_<R>, O: Order> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, B, O>),
+}
+
+impl<'g, R, W, C, B, O> Default for RangeIter<'g, R, W, C, B, O>
+where
+    R: key::Read,
+    W: key::Write,
+    W: From<R>,
+    B: crate::raw::iter::Range_<R>,
+    O: Order,
+{
+    fn default() -> Self {
+        Self::Root {
+            key: W::default(),
+            next: None,
+        }
+    }
 }
 
 impl<'g, R, W, C, B, O> RangeIter<'g, R, W, C, B, O>
@@ -29,59 +49,46 @@ where
         // }
 
         let edge = root.load_packed(Ordering::Acquire);
-        let bits = prefix.bits();
-        let key = edge.meta().key();
 
-        let mut min = range.min();
-        min.seek(bits);
-        let Some(min_prefix) = min.take_min(key.len()) else {
-            return Self::Root {
-                key: W::default(),
-                next: None,
-            };
+        let Some(child) = edge.child() else {
+            return Self::default();
         };
 
-        let mut max = range.max();
-        max.seek(bits);
-        let max_prefix = max.take_max(key.len());
+        let bits = prefix.bits();
+        let range = range.skip(bits);
+        let mut min = range.low();
+        let mut max = range.high();
 
-        validate!(matches!(
-            order::<O>(key.cmp(&min_prefix)),
-            cmp::Ordering::Equal | cmp::Ordering::Greater
-        ));
+        // validate!(matches!(
+        //     order::<O>(key.cmp(&min_prefix)),
+        //     cmp::Ordering::Equal | cmp::Ordering::Greater
+        // ));
+        //
+        // validate!(matches!(
+        //     order::<O>(key.cmp(&max_prefix)),
+        //     cmp::Ordering::Equal | cmp::Ordering::Less
+        // ));
 
-        validate!(matches!(
-            order::<O>(key.cmp(&max_prefix)),
-            cmp::Ordering::Equal | cmp::Ordering::Less
-        ));
-
+        let key = edge.meta().key();
         let mut writer = W::from(prefix);
         let bits = writer.write(W::len_from_bits(bits), key);
 
-        match edge.child() {
-            None => Self::Root {
-                key: writer,
-                next: None,
-            },
-            Some(edge::Child::Value(value)) => Self::Root {
-                key: writer,
-                next: Some(value),
-            },
-            Some(edge::Child::Node(node)) => {
+        match child {
+            edge::Child::Value(value) if min.check_value(key) && max.check_value(key) => {
+                Self::Root {
+                    key: writer,
+                    next: Some(value),
+                }
+            }
+            edge::Child::Value(_) => Self::default(),
+            edge::Child::Node(node) => {
+                let Some((first, last)) = min.check_node(key).zip(max.check_node(key)) else {
+                    return Self::default();
+                };
+
                 let node = unsafe { node.into_ref_unchecked() };
-
-                let first = match key == min_prefix {
-                    false => None,
-                    true => min.next_min(),
-                };
-
-                let last = match key == max_prefix {
-                    false => None,
-                    true => max.next_max(),
-                };
-
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, first, last, O::range(node, first, last)));
+                stack.push((bits, first, last, O::iter(node, first, last)));
 
                 Self::Node(NodeIter {
                     min,
@@ -122,10 +129,15 @@ where
 }
 
 pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O: Order> {
-    min: B::Min,
-    max: B::Max,
+    min: B::Low,
+    max: B::High,
     key: W,
-    stack: Vec<(W::Len, Option<u8>, Option<u8>, O::RangeIter<'g, C>)>,
+    stack: Vec<(
+        W::Len,
+        <B::Low as raw::iter::Low<R>>::Bound,
+        <B::High as raw::iter::High<R>>::Bound,
+        O::RangeIter<'g, C>,
+    )>,
     _read: PhantomData<R>,
     _sort: PhantomData<O>,
 }
@@ -167,8 +179,8 @@ where
                 let key = edge.meta().key();
                 let bits = self.key.replace(bits, byte, key);
 
-                let check_first = Some(byte) == *first;
-                let check_last = Some(byte) == *last;
+                let check_first = first.is(byte);
+                let check_last = last.is(byte);
 
                 if !check_first && !check_last {
                     match child {
@@ -182,8 +194,10 @@ where
                         }
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
+                            let first = Default::default();
+                            let last = Default::default();
                             self.stack
-                                .push((bits, None, None, unsafe { O::range(node, None, None) }));
+                                .push((bits, first, last, unsafe { O::iter(node, first, last) }));
                             continue 'vertical;
                         }
                     }
@@ -191,37 +205,17 @@ where
 
                 crate::cold();
 
-                let first = if check_first {
-                    let Some(min_prefix) = self.min.take_min(key.len()) else {
-                        continue 'horizontal;
-                    };
+                match child {
+                    edge::Child::Value(value) => {
+                        if check_first && !self.min.check_value(key) {
+                            continue 'horizontal;
+                        }
 
-                    match order::<O>(key.cmp(&min_prefix)) {
-                        cmp::Ordering::Less => continue 'horizontal,
-                        cmp::Ordering::Equal => self.min.next_min(),
-                        cmp::Ordering::Greater => None,
-                    }
-                } else {
-                    None
-                };
-
-                let last = if check_last {
-                    let max_prefix = self.max.take_max(key.len());
-
-                    match order::<O>(key.cmp(&max_prefix)) {
-                        cmp::Ordering::Less => None,
-                        cmp::Ordering::Equal => self.max.next_max(),
-                        cmp::Ordering::Greater => {
+                        if check_last && !self.max.check_value(key) {
                             self.stack.clear();
                             return None;
                         }
-                    }
-                } else {
-                    None
-                };
 
-                match child {
-                    edge::Child::Value(value) => {
                         if YIELD {
                             return Some((&self.key, value));
                         } else {
@@ -229,9 +223,28 @@ where
                         }
                     }
                     edge::Child::Node(node) => {
+                        let first = if check_first {
+                            let Some(first) = self.min.check_node(key) else {
+                                continue 'horizontal;
+                            };
+                            first
+                        } else {
+                            Default::default()
+                        };
+
+                        let last = if check_last {
+                            let Some(last) = self.max.check_node(key) else {
+                                self.stack.clear();
+                                return None;
+                            };
+                            last
+                        } else {
+                            Default::default()
+                        };
+
                         let node = unsafe { node.into_ref_unchecked() };
                         self.stack
-                            .push((bits, first, last, unsafe { O::range(node, first, last) }));
+                            .push((bits, first, last, unsafe { O::iter(node, first, last) }));
                         continue 'vertical;
                     }
                 }
