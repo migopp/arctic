@@ -3,6 +3,8 @@ pub(crate) mod hazard;
 mod iter;
 mod value;
 
+use core::ops::RangeFull;
+use core::ops::RangeInclusive;
 use core::sync::atomic::Ordering;
 
 use polonius_the_crab::polonius;
@@ -16,7 +18,6 @@ use crate::raw::Op;
 use crate::sequential;
 use crate::stat;
 use crate::Key;
-use iter::Scan;
 pub use value::Value;
 
 pub struct Map<K, V: Value> {
@@ -265,19 +266,19 @@ where
         }
     }
 
-    pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, K, V, iter::Prefix> {
+    pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, K, V, RangeFull> {
         let cursor = cursor::Prefix::<K::Read<'_>, (), _, cursor::path::Discard>::new_root(
             &mut self.smr,
             self.raw.root(),
         );
 
-        iter::Prefix::guard(cursor, K::Read::default())
+        iter::PrefixGuard::new(cursor, ..)
     }
 
     pub fn prefix<'l>(
         &'l mut self,
         prefix: impl Into<K::Read<'l>>,
-    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, iter::Prefix>> {
+    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, RangeFull>> {
         let prefix = prefix.into();
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
             &mut self.smr,
@@ -285,7 +286,7 @@ where
             prefix,
         )?;
         let prefix = cursor.prefix();
-        Some(iter::Prefix::guard(cursor, prefix))
+        Some(iter::PrefixGuard::new(cursor, ..))
     }
 
     // FIXME: support `Option` for min, max
@@ -293,7 +294,7 @@ where
         &'l mut self,
         min: impl Into<K::Read<'l>>,
         max: impl Into<K::Read<'l>>,
-    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, iter::Range>> {
+    ) -> Option<iter::PrefixGuard<'g, 'l, K, V, RangeInclusive<K::Read<'l>>>> {
         let min = min.into();
         let max = max.into();
         let cursor = cursor::Prefix::<_, (), _, cursor::path::Discard>::new(
@@ -301,8 +302,7 @@ where
             self.raw.root(),
             min.prefix(&max),
         )?;
-        let prefix = cursor.prefix();
-        Some(iter::Range::guard(cursor, (prefix, min, max)))
+        Some(iter::PrefixGuard::new(cursor, min..=max))
     }
 
     pub fn prefix_optimistic<'l, O: Order>(
@@ -312,7 +312,7 @@ where
         prefix: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.prefix(prefix)?;
-        match Self::scan_optimistic::<iter::Prefix, O>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<_, O>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -338,7 +338,7 @@ where
         max: impl Into<K::Read<'l>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.range(min, max)?;
-        match Self::scan_optimistic::<iter::Range, O>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<_, O>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -382,13 +382,13 @@ where
     //     }
     // }
 
-    fn scan_optimistic<'l, S, O>(
+    fn scan_optimistic<'l, R, O>(
         buffer: &mut Vec<(K::Write, u64)>,
-        guard: &iter::PrefixGuard<'g, 'l, K, V, S>,
+        guard: &iter::PrefixGuard<'g, 'l, K, V, R>,
         limit: usize,
     ) -> Result<(), ()>
     where
-        S: Scan,
+        R: crate::raw::iter::Range_<K::Read<'l>>,
         O: Order,
     {
         guard

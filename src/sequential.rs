@@ -14,7 +14,6 @@ use crate::iter::Order;
 use crate::raw;
 use crate::raw::edge;
 use crate::raw::iter::PostorderIter;
-use crate::raw::iter::PrefixIter;
 use crate::raw::iter::RangeIter;
 use crate::raw::Edge;
 use crate::stat;

@@ -13,7 +13,7 @@ use crate::raw::node::High as _;
 use crate::raw::node::Low as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range_<R>, O: Order> {
+pub enum RangeIter<'g, R, W: key::Write, C, B: crate::raw::iter::Range_<R>, O> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, C, B, O>),
 }
@@ -24,7 +24,6 @@ where
     W: key::Write,
     W: From<R>,
     B: crate::raw::iter::Range_<R>,
-    O: Order,
 {
     fn default() -> Self {
         Self::Root {
@@ -114,7 +113,7 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O: Order> {
+pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: crate::raw::iter::Range_<R>, O> {
     lower: B::Low,
     upper: B::High,
     key: W,

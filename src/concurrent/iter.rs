@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use ribbit::atomic::Atomic128;
 
 use crate::concurrent::cursor;
@@ -8,36 +6,26 @@ use crate::concurrent::Value;
 use crate::iter::Order;
 use crate::key;
 use crate::raw;
-pub(super) use crate::raw::iter::Prefix;
-pub(super) use crate::raw::iter::Range;
 use crate::raw::Edge;
 use crate::Key;
 
-/// Provide safe memory reclamation and strongly-typed values over
-/// scan iterators in [`crate::raw::iter`].
-pub trait Scan: raw::iter::Scan + Sized {
-    #[expect(private_interfaces)]
-    #[expect(private_bounds)]
-    fn guard<'g, 'l, K, V, H>(
-        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
-        input: Self::Input<'l, K::Read<'l>>,
-    ) -> PrefixGuard<'g, 'l, K, V, Self>
-    where
-        K: Key,
-        V: Value,
-        H: cursor::path::History<'g, K::Read<'l>, ()>;
+/// Guard all nodes and values below this prefix from memory reclamation.
+pub struct PrefixGuard<'g, 'l, K: Key, V: Value, R> {
+    guard: hazard::PrefixGuard<'g, 'l, V>,
+    root: &'g Atomic128<Edge<()>>,
+    prefix: K::Read<'l>,
+    range: R,
 }
 
-impl<T> Scan for T
+impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
 where
-    T: raw::iter::Scan,
+    K: Key,
+    V: Value,
 {
-    #[expect(private_interfaces)]
-    #[expect(private_bounds)]
-    fn guard<'g, 'l, K, V, H>(
+    pub(super) fn new<H>(
         cursor: cursor::Prefix<'g, 'l, K::Read<'l>, (), V, H>,
-        input: Self::Input<'l, K::Read<'l>>,
-    ) -> PrefixGuard<'g, 'l, K, V, Self>
+        range: R,
+    ) -> PrefixGuard<'g, 'l, K, V, R>
     where
         K: Key,
         V: Value,
@@ -45,52 +33,44 @@ where
     {
         PrefixGuard {
             root: cursor.edge(),
+            prefix: cursor.prefix(),
             guard: cursor.into_guard().guard_prefix(),
-            input,
+            range,
         }
     }
 }
 
-/// Guard all nodes and values below this prefix from memory reclamation.
-pub struct PrefixGuard<'g, 'l, K: Key, V: Value, S: Scan> {
-    guard: hazard::PrefixGuard<'g, 'l, V>,
-    root: &'g Atomic128<Edge<()>>,
-    input: S::Input<'l, K::Read<'l>>,
-}
-
-impl<'g, 'l, K, V, S> PrefixGuard<'g, 'l, K, V, S>
+impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
-    S: Scan,
+    R: crate::raw::iter::Range_<K::Read<'l>>,
 {
     #[inline]
     #[expect(clippy::type_complexity)]
-    pub fn entries<O>(
-        &self,
-    ) -> EntryIter<'g, 'l, '_, K, V, O, S::Iter<'g, K::Read<'l>, K::Write, (), O>>
+    pub fn entries<O>(&self) -> EntryIter<'g, 'l, '_, K, V, R, O>
     where
         O: Order,
     {
         EntryIter {
             guard: &self.guard,
-            iter: unsafe { S::new_unchecked(self.root, self.input) },
-            _type: PhantomData,
+            iter: unsafe {
+                raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
+            },
         }
     }
 
     #[inline]
     #[expect(clippy::type_complexity)]
-    pub fn values<O>(
-        &self,
-    ) -> ValueIter<'g, 'l, '_, K::Read<'l>, V, O, S::Iter<'g, K::Read<'l>, key::Ignore, (), O>>
+    pub fn values<O>(&self) -> ValueIter<'g, 'l, '_, K, V, R, O>
     where
         O: Order,
     {
         ValueIter {
             guard: &self.guard,
-            iter: unsafe { S::new_unchecked(self.root, self.input) },
-            _type: PhantomData,
+            iter: unsafe {
+                raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
+            },
         }
     }
 
@@ -100,17 +80,17 @@ where
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, O, I> {
+pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range_<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: I,
-    _type: PhantomData<(K, O)>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, (), R, O>,
 }
 
-impl<'g, 'l, 'guard, K, V, O, I> EntryIter<'g, 'l, 'guard, K, V, O, I>
+impl<'g, 'l, 'guard, K, V, R, O> EntryIter<'g, 'l, 'guard, K, V, R, O>
 where
     K: Key,
     V: Value,
-    I: raw::iter::ScanIter<'g, K::Read<'l>, K::Write, (), O>,
+    R: crate::raw::iter::Range_<K::Read<'l>>,
+    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
@@ -123,7 +103,7 @@ where
 
     #[inline]
     pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'guard>)>(self, mut apply: F) {
-        raw::iter::ScanIter::for_each(self.iter, |key, value| {
+        self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
             })
@@ -132,15 +112,16 @@ where
 
     #[inline]
     pub fn for_each_raw<F: FnMut(&K::Write, u64)>(self, apply: F) {
-        raw::iter::ScanIter::for_each(self.iter, apply)
+        self.iter.for_each(apply)
     }
 }
 
-impl<'g, 'l, 'guard, K, V, O, I> Iterator for EntryIter<'g, 'l, 'guard, K, V, O, I>
+impl<'g, 'l, 'guard, K, V, R, O> Iterator for EntryIter<'g, 'l, 'guard, K, V, R, O>
 where
     K: Key,
     V: Value,
-    I: raw::iter::ScanIter<'g, K::Read<'l>, K::Write, (), O>,
+    R: crate::raw::iter::Range_<K::Read<'l>>,
+    O: Order,
 {
     type Item = (K, V::Borrow<'guard>);
 
@@ -155,16 +136,17 @@ where
 }
 
 /// Iterator over values only
-pub struct ValueIter<'g, 'l, 'guard, R, V: Value, O, I> {
+pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range_<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: I,
-    _type: PhantomData<(R, O)>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore, (), R, O>,
 }
 
-impl<'g, 'l, 'guard, R, V, O, I> ValueIter<'g, 'l, 'guard, R, V, O, I>
+impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>
 where
+    K: Key,
     V: Value,
-    I: raw::iter::ScanIter<'g, R, key::Ignore, (), O>,
+    R: crate::raw::iter::Range_<K::Read<'l>>,
+    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<V::Borrow<'guard>> {
@@ -175,16 +157,17 @@ where
 
     #[inline]
     pub fn for_each<F: FnMut(V::Borrow<'guard>)>(self, mut apply: F) {
-        raw::iter::ScanIter::for_each(self.iter, |key::Ignore, value| {
-            apply(unsafe { V::guard_borrow(self.guard, value) })
-        })
+        self.iter
+            .for_each(|key::Ignore, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
     }
 }
 
-impl<'g, 'l, 'guard, R, V, O, I> Iterator for ValueIter<'g, 'l, 'guard, R, V, O, I>
+impl<'g, 'l, 'guard, K, V, R, O> Iterator for ValueIter<'g, 'l, 'guard, K, V, R, O>
 where
+    K: Key,
     V: Value,
-    I: raw::iter::ScanIter<'g, R, key::Ignore, (), O>,
+    R: crate::raw::iter::Range_<K::Read<'l>>,
+    O: Order,
 {
     type Item = V::Borrow<'guard>;
 
