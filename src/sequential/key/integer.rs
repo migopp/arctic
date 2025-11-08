@@ -202,7 +202,7 @@ impl<U: Uint> key::Write for Writer<U> {
     fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len {
         self.0 = self.0.most_significant(start as u8)
             | (U::from_u8(node) >> start)
-            | (U::from_most_significant_u64(edge.value()) >> (8 + start));
+            | (U::from_most_significant_u64(edge.value()).unbounded_shr(8 + start as u8));
 
         start + 8 + edge.len().bits() as usize
     }
