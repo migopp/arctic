@@ -7,6 +7,8 @@ use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::Edge;
 
+use super::sort::Unsorted;
+
 pub(crate) struct PostorderIter<'g, C> {
     stack: Vec<RepeatIter<'g, C>>,
 }
@@ -53,7 +55,9 @@ impl<'g, C> PostorderIter<'g, C> {
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
                             let node = unsafe { node.into_ref_unchecked() };
-                            self.stack.push(RepeatIter::new(node.iter_unsorted()));
+                            self.stack.push(RepeatIter::new(
+                                node.iter::<Unsorted, _, _>(Unbound, Unbound),
+                            ));
                             continue 'vertical;
                         }
                     }

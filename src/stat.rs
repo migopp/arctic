@@ -2,6 +2,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 use crate::concurrent::Value;
+use crate::iter::Unbound;
+use crate::iter::Unsorted;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::Op;
@@ -42,7 +44,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                 };
 
                 let children = node
-                    .iter_unsorted()
+                    .iter::<Unsorted, _, _>(Unbound, Unbound)
                     .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
                     .count();
 

@@ -75,7 +75,7 @@ where
 
                 let node = unsafe { node.into_ref_unchecked() };
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, node.iter(lower_byte, upper_byte)));
+                stack.push((bits, node.iter::<O, _, _>(lower_byte, upper_byte)));
 
                 Self::Node(NodeIter {
                     lower,
@@ -188,7 +188,7 @@ where
                             let node = unsafe { node.into_ref_unchecked() };
                             let first = Default::default();
                             let last = Default::default();
-                            self.stack.push((bits, node.iter(first, last)));
+                            self.stack.push((bits, node.iter::<O, _, _>(first, last)));
                             continue 'vertical;
                         }
                     }
@@ -252,7 +252,7 @@ where
                         };
 
                         let node = unsafe { node.into_ref_unchecked() };
-                        self.stack.push((bits, node.iter(lower, upper)));
+                        self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
                         continue 'vertical;
                     }
                 }

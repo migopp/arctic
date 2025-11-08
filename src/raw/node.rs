@@ -16,7 +16,6 @@ pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
 use ribbit::atomic::Atomic128;
 
-use crate::iter::Unbound;
 use crate::raw::edge;
 use crate::raw::Edge;
 
@@ -83,16 +82,30 @@ impl<'g, C> Clone for Ref<'g, C> {
 
 impl<'g, C> Ref<'g, C> {
     #[inline]
-    pub(crate) fn iter<L: Low, U: High>(&self, lower: L, upper: U) -> NodeIter<'g, L, U, C> {
+    pub(crate) fn iter<O: crate::iter::Order, L: Low, U: High>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> NodeIter<'g, L, U, C> {
         let (keys, edges) = match self {
-            Ref::Node3(node) => (
-                KeyIter::from_linear(node.keys_range(lower, upper)),
-                node.edges(),
-            ),
-            Ref::Node15(node) => (
-                KeyIter::from_linear(node.keys_range(lower, upper)),
-                node.edges(),
-            ),
+            Ref::Node3(node) => {
+                let keys = if O::SORTED {
+                    KeyIter::from_linear(node.keys_range(lower, upper))
+                } else {
+                    KeyIter::from_linear(node.keys_unsorted())
+                };
+
+                (keys, node.edges())
+            }
+            Ref::Node15(node) => {
+                let keys = if O::SORTED {
+                    KeyIter::from_linear(node.keys_range(lower, upper))
+                } else {
+                    KeyIter::from_linear(node.keys_unsorted())
+                };
+
+                (keys, node.edges())
+            }
             Ref::Node256(node) => (
                 KeyIter::from_node_256(node.keys(lower, upper)),
                 node.edges(),
@@ -100,19 +113,6 @@ impl<'g, C> Ref<'g, C> {
         };
 
         unsafe { NodeIter::new(lower, upper, keys, edges) }
-    }
-    #[inline]
-    pub(crate) fn iter_unsorted(&self) -> NodeIter<'g, Unbound, Unbound, C> {
-        let (keys, edges) = match self {
-            Ref::Node3(node) => (KeyIter::from_linear(node.keys_unsorted()), node.edges()),
-            Ref::Node15(node) => (KeyIter::from_linear(node.keys_unsorted()), node.edges()),
-            Ref::Node256(node) => (
-                KeyIter::from_node_256(node.keys(Unbound, Unbound)),
-                node.edges(),
-            ),
-        };
-
-        unsafe { NodeIter::new(Unbound, Unbound, keys, edges) }
     }
 }
 
