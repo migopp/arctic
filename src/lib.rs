@@ -21,8 +21,9 @@ pub mod sequential;
 pub mod stat;
 
 pub use concurrent::Value;
-pub use sequential::key;
-pub use sequential::Key;
+// FIXME: hide
+pub use raw::key;
+pub use raw::Key;
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
