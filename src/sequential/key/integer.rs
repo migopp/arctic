@@ -3,8 +3,8 @@ use core::fmt;
 use crate::byte;
 use crate::key;
 use crate::key::Read as _;
-use crate::raw;
 use crate::raw::edge;
+use crate::raw::edge::Meta as _;
 
 pub(super) trait Uint:
     'static
@@ -79,7 +79,7 @@ impl<U: Uint> Reader<U> {
 }
 
 impl<U: Uint> key::Read for Reader<U> {
-    type Edge = raw::edge::Be;
+    type Edge = edge::Be;
 
     #[inline]
     fn bits(&self) -> usize {
@@ -167,19 +167,49 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     fn read_all(&mut self) -> ribbit::Packed<Self::Edge> {
-        todo!()
+        let bits = 56.min(self.bits());
+        validate_eq!(bits & 0b111, 0);
+        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
+        self.buffer = self.buffer.shl_at_most_56(bits as u8);
+        self.bits -= bits as u8;
+        meta
     }
 
     fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
-        todo!()
+        let bits = edge::Be::bits(meta).min(self.bits as usize);
+        validate_eq!(bits & 0b111, 0);
+
+        let read = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
+        self.buffer = self.buffer.shl_at_most_56(bits as u8);
+        self.bits -= bits as u8;
+        edge::Be::equal(read, meta).then_some(bits)
     }
 
     fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge> {
-        todo!()
+        let bits = edge::Be::bits(meta).min(self.bits as usize);
+        validate_eq!(bits & 0b111, 0);
+
+        if bits == 0 {
+            return edge::Be::DEFAULT;
+        }
+
+        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
+        self.buffer = self.buffer.shl_at_most_56(bits as u8);
+        self.bits -= bits as u8;
+        meta
     }
 
     fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
-        todo!()
+        let bits = edge::Be::bits(meta).min(self.bits as usize);
+        let read = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
+
+        if !edge::Be::equal(read, meta) {
+            return None;
+        }
+
+        self.buffer = self.buffer.shl_at_most_56(bits as u8);
+        self.bits -= bits as u8;
+        Some(bits)
     }
 }
 
@@ -200,7 +230,7 @@ impl<U> Writer<U> {
 }
 
 impl<U: Uint> key::Write for Writer<U> {
-    type Edge = raw::edge::Be;
+    type Edge = edge::Be;
     type Len = usize;
 
     #[inline]
@@ -209,16 +239,15 @@ impl<U: Uint> key::Write for Writer<U> {
     }
 
     #[inline]
-    fn write(&mut self, bits: Self::Len, array: ribbit::Packed<Self::Edge>) -> Self::Len {
-        todo!()
+    fn write(&mut self, bits: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
+        validate!(bits + edge::Be::bits(edge) <= U::BITS as usize);
 
-        // validate!(bits + array as usize <= U::BITS as usize);
-        //
-        // if edge::Meta::bits(array) == 0 {
-        //     return bits;
-        // }
-        // self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
-        // bits + array.len().bits() as usize
+        if edge::Be::bits(edge) == 0 {
+            return bits;
+        }
+
+        self.0 |= U::from_most_significant_u64(edge.raw() & !0xFF) >> bits;
+        bits + edge::Be::bits(edge)
     }
 
     fn replace(
@@ -227,13 +256,11 @@ impl<U: Uint> key::Write for Writer<U> {
         node: u8,
         edge: ribbit::Packed<Self::Edge>,
     ) -> Self::Len {
-        todo!()
+        self.0 = self.0.most_significant(start as u8)
+            | (U::from_u8(node) >> start)
+            | (U::from_most_significant_u64(edge.raw()).unbounded_shr(8 + start as u8));
 
-        // self.0 = self.0.most_significant(start as u8)
-        //     | (U::from_u8(node) >> start)
-        //     | (U::from_most_significant_u64(edge.value()).unbounded_shr(8 + start as u8));
-        //
-        // start + 8 + edge.len().bits() as usize
+        start + 8 + edge::Be::bits(edge)
     }
 }
 
