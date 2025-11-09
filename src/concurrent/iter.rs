@@ -2,36 +2,36 @@ use ribbit::atomic::Atomic128;
 
 use crate::concurrent::cursor;
 use crate::concurrent::hazard;
+use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::iter::Order;
-use crate::key;
-use crate::key::Read as _;
 use crate::raw;
+use crate::raw::key;
+use crate::raw::key::Read as _;
 use crate::raw::Edge;
-use crate::Key;
 
 /// Guard all nodes and values below this prefix from memory reclamation.
-pub struct PrefixGuard<'g, 'l, K: Key, V: Value, R> {
+pub struct PrefixGuard<'g, 'l, 'k, K: Key, V: Value, R> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic128<Edge<K::Edge>>,
-    prefix: K::Read<'l>,
+    prefix: K::Read<'k>,
     range: R,
 }
 
-impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
+impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
 {
     pub(super) fn new<H>(
-        cursor: cursor::Prefix<'g, 'l, K::Read<'l>, K::Edge, V, H>,
+        cursor: cursor::Prefix<'g, 'l, 'k, K, V, H>,
         range: R,
-    ) -> PrefixGuard<'g, 'l, K, V, R>
+    ) -> PrefixGuard<'g, 'l, 'k, K, V, R>
     where
         K: Key,
         V: Value,
-        H: cursor::path::History<'g, K::Read<'l>, K::Edge>,
+        H: cursor::path::History<'g, 'k, K>,
     {
         let prefix = cursor.prefix();
         let range = range.suffix(prefix.bits());
@@ -44,14 +44,14 @@ where
     }
 }
 
-impl<'g, 'l, K, V, R> PrefixGuard<'g, 'l, K, V, R>
+impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
 {
     #[inline]
-    pub fn entries<O>(&self) -> EntryIter<'g, 'l, '_, K, V, R, O>
+    pub fn entries<O>(&self) -> EntryIter<'g, '_, 'k, K, V, R, O>
     where
         O: Order,
     {
@@ -64,7 +64,7 @@ where
     }
 
     #[inline]
-    pub fn values<O>(&self) -> ValueIter<'g, 'l, '_, K, V, R, O>
+    pub fn values<O>(&self) -> ValueIter<'g, '_, 'k, K, V, R, O>
     where
         O: Order,
     {
@@ -82,20 +82,20 @@ where
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
-    guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, K::Write, K::Edge, R, O>,
+pub struct EntryIter<'g, 'l, 'k, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
+    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, K::Write, K::Edge, R, O>,
 }
 
-impl<'g, 'l, 'guard, K, V, R, O> EntryIter<'g, 'l, 'guard, K, V, R, O>
+impl<'g, 'l, 'k, K, V, R, O> EntryIter<'g, 'l, 'k, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'guard>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -104,7 +104,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'guard>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -118,14 +118,14 @@ where
     }
 }
 
-impl<'g, 'l, 'guard, K, V, R, O> Iterator for EntryIter<'g, 'l, 'guard, K, V, R, O>
+impl<'g, 'l, 'k, K, V, R, O> Iterator for EntryIter<'g, 'l, 'k, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = (K, V::Borrow<'guard>);
+    type Item = (K, V::Borrow<'l>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {

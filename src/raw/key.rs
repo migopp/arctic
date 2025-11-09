@@ -37,9 +37,6 @@ pub trait Read: Copy + fmt::Debug + Default {
         self.bits() >> 3
     }
 
-    // FIXME: move under concurrent module
-    fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be>;
-
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
     fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge>;
@@ -249,8 +246,8 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 
 #[cfg(test)]
 mod tests {
-    use crate::key::Read as _;
-    use crate::Key;
+    use crate::raw::key::Read as _;
+    use crate::raw::Key;
 
     pub(super) fn take_all<'k, K: Key>(array: &[u8], key: impl Into<K::Borrow<'k>>, lens: &[u8]) {
         todo!()

@@ -1,11 +1,11 @@
 use core::fmt;
 
-use crate::key;
-use crate::key::Read as _;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
+use crate::raw::key;
+use crate::raw::key::Read as _;
 
-pub(super) trait Uint:
+pub(crate) trait Uint:
     'static
     + Sized
     + Copy
@@ -48,7 +48,7 @@ pub(super) trait Uint:
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Reader<U> {
-    buffer: U,
+    pub(crate) buffer: U,
     bits: u8,
 }
 
@@ -85,41 +85,6 @@ impl<U: Uint> key::Read for Reader<U> {
         self.bits as usize
     }
 
-    // #[inline]
-    // fn peek(&self, len: byte::Len) -> byte::Array {
-    //     validate!(len.bits() as usize <= self.bits());
-    //     validate_eq!(len.bits() & 0b111, 0);
-    //
-    //     byte::Array::from_u64_truncate(self.buffer.most_significant_u64(), len)
-    // }
-
-    #[inline]
-    fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
-        crate::concurrent::hazard::prefix::Be::new_hazard(
-            self.buffer.most_significant_u128(),
-            if U::BYTES < 16 {
-                self.bits as usize
-            } else {
-                self.bits.min(120) as usize
-            },
-        )
-    }
-
-    // #[inline]
-    // fn take(&mut self, len: byte::Len) -> byte::Array {
-    //     validate!(len.bits() as usize <= self.bits());
-    //     validate_eq!(len.bits() & 0b111, 0);
-    //
-    //     if len.bits() == 0 {
-    //         return byte::Array::EMPTY;
-    //     }
-    //
-    //     let array = self.peek(len);
-    //     self.buffer = self.buffer.shl_at_most_56(len.bits());
-    //     self.bits -= len.bits();
-    //     array
-    // }
-
     #[inline]
     fn next(&mut self) -> Option<u8> {
         if self.bits == 0 {
@@ -130,6 +95,26 @@ impl<U: Uint> key::Read for Reader<U> {
         self.buffer <<= 8;
         self.bits = self.bits.saturating_sub(8);
         Some(byte)
+    }
+
+    #[inline]
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
+        let len = edge::Be::min_len(len, self.bits as usize);
+        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), len);
+        self.buffer = self.buffer.shl_at_most_56(len.value());
+        self.bits -= len.value();
+        meta
+    }
+
+    #[inline]
+    fn prefix(self, bits: usize) -> Self {
+        validate!(bits <= U::BITS as usize);
+
+        let bits = bits as u8;
+        Self {
+            buffer: self.buffer.most_significant(bits),
+            bits,
+        }
     }
 
     fn suffix(self, bits: usize) -> Self {
@@ -148,26 +133,6 @@ impl<U: Uint> key::Read for Reader<U> {
             buffer: self.buffer.most_significant(bits),
             bits,
         }
-    }
-
-    #[inline]
-    fn prefix(self, bits: usize) -> Self {
-        validate!(bits <= U::BITS as usize);
-
-        let bits = bits as u8;
-        Self {
-            buffer: self.buffer.most_significant(bits),
-            bits,
-        }
-    }
-
-    #[inline]
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
-        let len = edge::Be::min_len(len, self.bits as usize);
-        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), len);
-        self.buffer = self.buffer.shl_at_most_56(len.value());
-        self.bits -= len.value();
-        meta
     }
 }
 
@@ -340,7 +305,7 @@ impl_unsigned_int!(
 
 #[cfg(test)]
 mod tests {
-    use crate::key::tests::take_all;
+    use crate::raw::key::tests::take_all;
 
     #[test]
     fn smoke() {

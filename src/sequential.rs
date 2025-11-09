@@ -10,8 +10,8 @@ use crate::raw;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
 use crate::raw::Edge;
+use crate::raw::Key;
 use crate::stat;
-use crate::Key;
 pub(crate) use value::Value;
 
 #[repr(transparent)]
@@ -42,7 +42,7 @@ impl<K: Key, V: Value> Map<K, V> {
 
     #[inline]
     pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
-        unsafe { raw::cursor::Point::get(&self.root, K::Read::from(key)) }
+        unsafe { raw::cursor::Point::<K, _>::get(&self.root, K::Read::from(key)) }
             .map(|value| unsafe { V::borrow_from_raw(value) })
     }
 

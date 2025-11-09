@@ -16,14 +16,12 @@ macro_rules! validate_eq {
 
 pub mod concurrent;
 pub mod iter;
-mod raw;
+pub mod raw;
 pub mod sequential;
 pub mod stat;
 
+pub use concurrent::Key;
 pub use concurrent::Value;
-// FIXME: hide
-pub use raw::key;
-pub use raw::Key;
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
@@ -33,7 +31,7 @@ pub(crate) fn cold() {}
 #[cfg(test)]
 mod tests {
     use crate::concurrent::Map;
-    use crate::key::Read as _;
+    use crate::raw::key::Read as _;
     use crate::sequential;
 
     // https://users.rust-lang.org/t/testing-if-a-type-is-implementing-an-auto-trait/90871/6

@@ -4,11 +4,11 @@ use core::sync::atomic::Ordering;
 use ribbit::atomic::Atomic128;
 
 use crate::iter::Order;
-use crate::key;
 use crate::raw;
 use crate::raw::edge;
 use crate::raw::iter::Lower as _;
 use crate::raw::iter::Upper as _;
+use crate::raw::key;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;

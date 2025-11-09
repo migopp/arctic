@@ -1,9 +1,9 @@
 use core::cmp;
 use core::fmt;
 
-use crate::key;
-use crate::key::integer;
 use crate::raw::edge;
+use crate::raw::key;
+use crate::raw::key::integer;
 
 #[derive(Copy, Clone)]
 pub enum Reader<'k> {
@@ -69,22 +69,6 @@ impl key::Read for Reader<'_> {
     //         Reader::Small(small) => small.peek(len),
     //     }
     // }
-
-    #[inline]
-    fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
-        match self {
-            Reader::Large(large) => {
-                let mut buffer = [0u8; 16];
-                let len = large.len().min(15);
-                buffer[..len].copy_from_slice(&large[..len]);
-                crate::concurrent::hazard::prefix::Be::new_hazard(
-                    u128::from_be_bytes(buffer),
-                    len << 3,
-                )
-            }
-            Reader::Small(small) => small.hazard(),
-        }
-    }
 
     // #[inline]
     // fn take(&mut self, len: byte::Len) -> byte::Array {
@@ -277,7 +261,7 @@ impl<'k> From<Reader<'k>> for Writer {
 
 #[cfg(test)]
 mod tests {
-    use crate::key::tests::take_all;
+    use crate::raw::key::tests::take_all;
 
     #[test]
     fn smoke() {

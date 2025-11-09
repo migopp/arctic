@@ -7,9 +7,9 @@ use core::ops::RangeInclusive;
 pub(crate) use postorder::PostorderIter;
 pub(crate) use range::RangeIter;
 
-use crate::key;
 use crate::raw;
 use crate::raw::edge::Meta as _;
+use crate::raw::key;
 
 #[derive(Copy, Clone)]
 pub(crate) struct Include<T>(pub(crate) T);
