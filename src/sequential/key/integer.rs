@@ -1,6 +1,5 @@
 use core::fmt;
 
-use crate::byte;
 use crate::key;
 use crate::key::Read as _;
 use crate::raw::edge;
@@ -133,16 +132,12 @@ impl<U: Uint> key::Read for Reader<U> {
         Some(byte)
     }
 
-    fn seek(&mut self, bits: usize) {
+    fn suffix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
 
-        if self.bits as usize == bits {
-            self.buffer = U::default();
-            self.bits = 0;
-        } else {
-            let bits = bits as u8;
-            self.buffer = self.buffer.shl_at_most_56(bits);
-            self.bits -= bits;
+        Self {
+            buffer: self.buffer.shl_at_most_56(bits as u8),
+            bits: self.bits - bits as u8,
         }
     }
 
@@ -166,50 +161,13 @@ impl<U: Uint> key::Read for Reader<U> {
         }
     }
 
-    fn read_all(&mut self) -> ribbit::Packed<Self::Edge> {
-        let bits = 56.min(self.bits());
-        validate_eq!(bits & 0b111, 0);
-        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
-        self.buffer = self.buffer.shl_at_most_56(bits as u8);
-        self.bits -= bits as u8;
+    #[inline]
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
+        let len = edge::Be::min_len(len, self.bits as usize);
+        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), len);
+        self.buffer = self.buffer.shl_at_most_56(len.value());
+        self.bits -= len.value();
         meta
-    }
-
-    fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
-        let bits = edge::Be::bits(meta).min(self.bits as usize);
-        validate_eq!(bits & 0b111, 0);
-
-        let read = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
-        self.buffer = self.buffer.shl_at_most_56(bits as u8);
-        self.bits -= bits as u8;
-        edge::Be::equal(read, meta).then_some(bits)
-    }
-
-    fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge> {
-        let bits = edge::Be::bits(meta).min(self.bits as usize);
-        validate_eq!(bits & 0b111, 0);
-
-        if bits == 0 {
-            return edge::Be::DEFAULT;
-        }
-
-        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
-        self.buffer = self.buffer.shl_at_most_56(bits as u8);
-        self.bits -= bits as u8;
-        meta
-    }
-
-    fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
-        let bits = edge::Be::bits(meta).min(self.bits as usize);
-        let read = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), bits);
-
-        if !edge::Be::equal(read, meta) {
-            return None;
-        }
-
-        self.buffer = self.buffer.shl_at_most_56(bits as u8);
-        self.bits -= bits as u8;
-        Some(bits)
     }
 }
 
@@ -240,16 +198,19 @@ impl<U: Uint> key::Write for Writer<U> {
 
     #[inline]
     fn write(&mut self, bits: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
-        validate!(bits + edge::Be::bits(edge) <= U::BITS as usize);
+        let bits_edge = Self::Edge::len_to_bits(Self::Edge::len(edge));
 
-        if edge::Be::bits(edge) == 0 {
+        validate!(bits + bits_edge <= U::BITS as usize);
+
+        if bits_edge == 0 {
             return bits;
         }
 
         self.0 |= U::from_most_significant_u64(edge.raw() & !0xFF) >> bits;
-        bits + edge::Be::bits(edge)
+        bits + bits_edge
     }
 
+    #[inline]
     fn replace(
         &mut self,
         start: Self::Len,
@@ -260,7 +221,7 @@ impl<U: Uint> key::Write for Writer<U> {
             | (U::from_u8(node) >> start)
             | (U::from_most_significant_u64(edge.raw()).unbounded_shr(8 + start as u8));
 
-        start + 8 + edge::Be::bits(edge)
+        start + 8 + Self::Edge::len_to_bits(Self::Edge::len(edge))
     }
 }
 

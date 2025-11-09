@@ -10,7 +10,6 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::u56;
 use ribbit::u6;
 use ribbit::OptionExt as _;
 
@@ -171,7 +170,13 @@ where
 pub(crate) trait Meta: ribbit::Pack {
     const DEFAULT: ribbit::Packed<Self>;
 
-    fn bits(meta: ribbit::Packed<Self>) -> usize;
+    const MAX_LEN: Self::Len;
+
+    type Len: Copy + Eq;
+
+    fn len(meta: ribbit::Packed<Self>) -> Self::Len;
+    fn len_to_bits(len: Self::Len) -> usize;
+
     fn equal(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> bool;
     fn cmp(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> core::cmp::Ordering;
 
@@ -184,7 +189,7 @@ pub(crate) trait Meta: ribbit::Pack {
     fn expand(
         old: ribbit::Packed<Self>,
         new: ribbit::Packed<Self>,
-    ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), usize>;
+    ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), ()>;
 
     fn compress(
         parent: ribbit::Packed<Self>,

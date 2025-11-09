@@ -24,7 +24,7 @@ pub(crate) trait Range<R: key::Read>: Clone {
     type Lower: Lower<R>;
     type Upper: Upper<R>;
 
-    fn skip(self, bits: usize) -> Self;
+    fn suffix(self, bits: usize) -> Self;
 
     fn lower(&self) -> Self::Lower;
     fn upper(&self) -> Self::Upper;
@@ -35,12 +35,10 @@ impl<R: key::Read> Range<R> for RangeInclusive<R> {
     type Upper = Include<R>;
 
     #[inline]
-    fn skip(self, bits: usize) -> Self {
-        let mut low = *self.start();
-        let mut high = *self.end();
-        low.seek(bits);
-        high.seek(bits);
-        low..=high
+    fn suffix(self, bits: usize) -> Self {
+        let lower = *self.start();
+        let upper = *self.end();
+        lower.suffix(bits)..=upper.suffix(bits)
     }
 
     fn lower(&self) -> Self::Lower {
@@ -73,18 +71,20 @@ impl<R: key::Read> Lower<R> for Include<R> {
 
     #[inline]
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        if self.0.bits() < R::Edge::bits(edge) {
+        let len = R::Edge::len(edge);
+
+        if self.0.bits() < R::Edge::len_to_bits(len) {
             return false;
         }
 
-        match R::Edge::cmp(self.0.read_inexact(edge), edge) {
+        match R::Edge::cmp(self.0.read(len), edge) {
             cmp::Ordering::Less => false,
             cmp::Ordering::Equal | cmp::Ordering::Greater => true,
         }
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        match R::Edge::cmp(self.0.read_inexact(edge), edge) {
+        match R::Edge::cmp(self.0.read(R::Edge::len(edge)), edge) {
             cmp::Ordering::Less => None,
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => Some(Default::default()),
@@ -96,18 +96,20 @@ impl<R: key::Read> Upper<R> for Include<R> {
     type Bound = Option<u8>;
 
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        if self.0.bits() > R::Edge::bits(edge) {
+        let len = R::Edge::len(edge);
+
+        if self.0.bits() > R::Edge::len_to_bits(len) {
             return false;
         }
 
-        match R::Edge::cmp(self.0.read_inexact(edge), edge) {
+        match R::Edge::cmp(self.0.read(len), edge) {
             cmp::Ordering::Less | cmp::Ordering::Equal => true,
             cmp::Ordering::Greater => false,
         }
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        match R::Edge::cmp(self.0.read_inexact(edge), edge) {
+        match R::Edge::cmp(self.0.read(R::Edge::len(edge)), edge) {
             cmp::Ordering::Less => Some(Default::default()),
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => None,
@@ -120,7 +122,7 @@ impl<R: key::Read> Range<R> for core::ops::RangeFull {
     type Upper = Unbound;
 
     #[inline]
-    fn skip(self, _bits: usize) -> Self {
+    fn suffix(self, _bits: usize) -> Self {
         self
     }
 

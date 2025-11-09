@@ -60,7 +60,11 @@ where
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key;
-            let bits = self.key.read_exact(meta)?;
+            let len = M::len(meta);
+
+            if !M::equal(self.key.read(len), meta) {
+                return None;
+            }
 
             // Fast path: traversal
             if let Some(node) = edge.as_node() {
@@ -74,7 +78,7 @@ where
                 let byte = self.key.next()?;
                 let node = unsafe { node.into_ref_unchecked() };
                 let next = node.get(byte)?;
-                self.push(save, bits, node, next);
+                self.push(save, len, node, next);
                 continue;
             }
 
@@ -103,10 +107,11 @@ where
             let old_meta = old.meta();
             let mut save = self.key;
 
-            let key = self.key.read_inexact(old_meta);
+            let old_len = M::len(old_meta);
+            let key = self.key.read(old_len);
 
             // Fast path: traverse
-            if M::equal(old_meta, key) {
+            if M::equal(key, old_meta) {
                 if let Some(node) = old.as_node() {
                     if node.scan() {
                         self.wait_for_scan(stat::Counter::ScanInsert)?;
@@ -116,7 +121,7 @@ where
                     let byte = self.key.next().unwrap();
                     let node = unsafe { node.into_ref_unchecked() };
                     if let Some(next) = node.get_or_reserve(byte) {
-                        self.push(save, M::bits(key), node, next);
+                        self.push(save, old_len, node, next);
                         continue;
                     }
                 }
@@ -138,7 +143,7 @@ where
                     }
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
-                        let meta = save.read_all();
+                        let meta = save.read(M::MAX_LEN);
                         if save.bits() == 0 {
                             (Op::Edge(edge::Op::Insert), Edge::new_value(meta, value))
                         } else {
@@ -229,12 +234,12 @@ where
     }
 
     #[inline]
-    fn push(&mut self, key: R, bits: usize, node: node::Ref<'g, M>, edge: &'g Atomic128<Edge<M>>) {
+    fn push(&mut self, key: R, len: M::Len, node: node::Ref<'g, M>, edge: &'g Atomic128<Edge<M>>) {
         // 1 extra byte for node
-        self.bits += 8 + bits;
+        self.bits += 8 + M::len_to_bits(len);
         self.history.push(path::Segment {
             key,
-            bits,
+            len,
             edge: core::mem::replace(&mut self.edge, edge),
             node,
         })
@@ -243,7 +248,7 @@ where
     #[cold]
     fn pop(&mut self) -> Result<node::Ref<'g, M>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.bits -= segment.bits + 8;
+        self.bits -= M::len_to_bits(segment.len) + 8;
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(segment.node)
@@ -264,7 +269,9 @@ where
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-            let _ = cursor.key.read_exact(meta)?;
+            if !M::equal(cursor.key.read(M::len(meta)), meta) {
+                return None;
+            }
 
             match edge.child()? {
                 edge::Child::Node(node) => {
@@ -318,21 +325,28 @@ where
             let meta = edge.meta();
             let save = self.cursor.key;
 
-            match self.cursor.key.read_prefix(meta)? {
-                bits if bits == M::bits(meta) => {
-                    if let Some(node) = edge.as_node() {
-                        let node = unsafe { node.into_ref_unchecked() };
-                        let Some(byte) = self.cursor.key.next() else {
-                            break (save, edge);
-                        };
-                        let next = node.get(byte)?;
-                        self.cursor.push(save, bits, node, next);
-                        continue;
-                    }
-                }
-                _ => (),
+            let len = M::len(meta);
+            let key = self.cursor.key.read(len);
+
+            // Mismatch
+            if !M::equal(key, meta) {
+                return None;
             }
 
+            // Full match
+            if M::len(key) == len {
+                if let Some(node) = edge.as_node() {
+                    let node = unsafe { node.into_ref_unchecked() };
+                    let Some(byte) = self.cursor.key.next() else {
+                        break (save, edge);
+                    };
+                    let next = node.get(byte)?;
+                    self.cursor.push(save, len, node, next);
+                    continue;
+                }
+            }
+
+            // Partial match or fallthrough
             if edge.is_null() {
                 return None;
             } else {

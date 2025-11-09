@@ -28,7 +28,10 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
             return;
         };
 
-        compression.record((<K::Edge as edge::Meta>::bits(edge.meta()) << 3) as u64);
+        let meta = edge.meta();
+        let len = <K::Edge as edge::Meta>::len(meta);
+        let bits = <K::Edge as edge::Meta>::len_to_bits(len);
+        compression.record((bits >> 3) as u64);
 
         match child {
             edge::Child::Value(_) => {

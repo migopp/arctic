@@ -34,7 +34,7 @@ where
         H: cursor::path::History<'g, K::Read<'l>, K::Edge>,
     {
         let prefix = cursor.prefix();
-        let range = range.skip(prefix.bits());
+        let range = range.suffix(prefix.bits());
         PrefixGuard {
             root: cursor.edge(),
             prefix,

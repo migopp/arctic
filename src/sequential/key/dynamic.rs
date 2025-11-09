@@ -138,12 +138,12 @@ impl key::Read for Reader<'_> {
         }
     }
 
-    fn seek(&mut self, bits: usize) {
+    fn suffix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
 
         match self {
-            Self::Large(large) => *self = Self::from(&large[bits >> 3..]),
-            Self::Small(small) => small.seek(bits),
+            Self::Large(large) => Self::from(&large[bits >> 3..]),
+            Self::Small(small) => Self::Small(small.suffix(bits)),
         }
     }
 
@@ -168,19 +168,7 @@ impl key::Read for Reader<'_> {
         }
     }
 
-    fn read_all(&mut self) -> ribbit::Packed<Self::Edge> {
-        todo!()
-    }
-
-    fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
-        todo!()
-    }
-
-    fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge> {
-        todo!()
-    }
-
-    fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
         todo!()
     }
 }

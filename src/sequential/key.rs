@@ -37,32 +37,18 @@ pub trait Read: Copy + fmt::Debug + Default {
         self.bits() >> 3
     }
 
-    // fn peek(&self, len: byte::Len) -> byte::Array;
-
     // FIXME: move under concurrent module
     fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be>;
-
-    // fn take(&mut self, len: byte::Len) -> byte::Array;
 
     fn slice(&self, bit: usize) -> Self;
 
     fn next(&mut self) -> Option<u8>;
 
-    fn seek(&mut self, bits: usize);
+    fn suffix(self, bits: usize) -> Self;
 
     fn prefix(&self, other: &Self) -> Self;
 
-    /// Read as many bytes as possible
-    fn read_all(&mut self) -> ribbit::Packed<Self::Edge>;
-
-    /// Read as many bytes as `meta` contains and check for equality
-    fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize>;
-
-    /// Read as many bytes as `meta` contains
-    fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge>;
-
-    /// Read longest matching prefix of `meta`, or `None` if we diverge
-    fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize>;
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge>;
 }
 
 pub trait Write: Clone + fmt::Debug + Default + Ord {
