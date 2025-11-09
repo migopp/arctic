@@ -5,28 +5,30 @@ use crate::concurrent::Value;
 use crate::key;
 use crate::raw;
 pub(super) use crate::raw::cursor::path;
+use crate::raw::edge;
 use crate::raw::Edge;
 use crate::raw::Op;
 use crate::stat;
 
 /// Tree traversal state.
-pub(super) struct Point<'g, 'l, R, C, V: Value, H> {
+pub(super) struct Point<'g, 'l, R, M, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: hazard::TraverseGuard<'g, 'l, V>,
 
-    raw: crate::raw::cursor::Point<'g, R, C, H>,
+    raw: crate::raw::cursor::Point<'g, R, M, H>,
 }
 
-impl<'g, 'l, R, C, V, H> Point<'g, 'l, R, C, V, H>
+impl<'g, 'l, R, M, V, H> Point<'g, 'l, R, M, V, H>
 where
-    R: key::Read,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
     V: Value,
-    H: path::History<'g, R, C>,
+    H: path::History<'g, R, M>,
 {
     #[inline]
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
+        root: &'g Atomic128<Edge<M>>,
         key: R,
     ) -> Self {
         Self {
@@ -36,12 +38,12 @@ where
     }
 
     #[inline]
-    pub(super) fn edge(&self) -> &'g Atomic128<Edge<C>> {
+    pub(super) fn edge(&self) -> &'g Atomic128<Edge<M>> {
         self.raw.edge()
     }
 
     #[inline]
-    pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<C>>) {
+    pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<M>>) {
         unsafe { self.guard.retire(self.raw.bits(), edge) }
     }
 
@@ -51,7 +53,7 @@ where
     }
 
     #[inline]
-    pub(super) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<C>>, ()>> {
+    pub(super) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<M>>, ()>> {
         self.raw.traverse_exact()
     }
 
@@ -59,7 +61,7 @@ where
     pub(super) fn traverse_or_insert(
         &mut self,
         value: u64,
-    ) -> Result<(Op, ribbit::Packed<Edge<C>>, ribbit::Packed<Edge<C>>), ()> {
+    ) -> Result<(Op, ribbit::Packed<Edge<M>>, ribbit::Packed<Edge<M>>), ()> {
         self.raw.traverse_or_insert(value)
     }
 
@@ -78,20 +80,21 @@ where
     pub(super) fn wait_for_scan(
         &self,
         counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<C>>, ()> {
+    ) -> Result<ribbit::Packed<Edge<M>>, ()> {
         self.raw.wait_for_scan(counter)
     }
 }
 
-impl<'g, 'l, R, C, V> Point<'g, 'l, R, C, V, path::Discard>
+impl<'g, 'l, R, M, V> Point<'g, 'l, R, M, V, path::Discard>
 where
-    R: key::Read,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
     V: Value,
 {
     #[inline]
     pub(super) fn get(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
+        root: &'g Atomic128<Edge<M>>,
         key: R,
     ) -> Option<V::SharedGuard<'g, 'l>>
     where
@@ -111,15 +114,16 @@ pub(super) struct Prefix<'g, 'l, R, C, V: Value, H> {
     raw: crate::raw::cursor::Prefix<'g, R, C, H>,
 }
 
-impl<'g, 'l, R, C, V, H> Prefix<'g, 'l, R, C, V, H>
+impl<'g, 'l, R, M, V, H> Prefix<'g, 'l, R, M, V, H>
 where
-    R: key::Read,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
     V: Value,
-    H: path::History<'g, R, C>,
+    H: path::History<'g, R, M>,
 {
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
+        root: &'g Atomic128<Edge<M>>,
         prefix: R,
     ) -> Option<Self> {
         let guard = smr.guard(prefix.hazard());
@@ -131,7 +135,7 @@ where
 
     pub(super) fn new_root(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<C>>,
+        root: &'g Atomic128<Edge<M>>,
     ) -> Self {
         Self {
             guard: smr.guard(hazard::prefix::Be::HAZARD_ROOT),
@@ -143,7 +147,7 @@ where
         self.raw.prefix()
     }
 
-    pub(super) fn edge(&self) -> &'g Atomic128<Edge<C>> {
+    pub(super) fn edge(&self) -> &'g Atomic128<Edge<M>> {
         self.raw.edge()
     }
 
@@ -152,21 +156,26 @@ where
         self.guard
     }
 
-    pub(super) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(super) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<M>>> {
         self.raw.traverse()
     }
 
     pub(super) fn wait_for_scan(
         &mut self,
         counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<C>>, ()> {
+    ) -> Result<ribbit::Packed<Edge<M>>, ()> {
         self.raw.wait_for_scan(counter)
     }
 }
 
-impl<'g, 'l, R: key::Read, C, V: Value> Prefix<'g, 'l, R, C, V, path::Hybrid<'g, R, C>> {
+impl<'g, 'l, R, M, V> Prefix<'g, 'l, R, M, V, path::Hybrid<'g, R, M>>
+where
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
+    V: Value,
+{
     #[cold]
-    pub(super) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(super) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<M>>> {
         self.raw.freeze()
     }
 }

@@ -140,7 +140,7 @@ where
 /// Iterator over values only
 pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore, K::Edge, R, O>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore<K::Edge>, K::Edge, R, O>,
 }
 
 impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>
@@ -154,13 +154,13 @@ where
     pub fn lend(&mut self) -> Option<V::Borrow<'guard>> {
         self.iter
             .lend()
-            .map(|(key::Ignore, value)| unsafe { V::guard_borrow(self.guard, value) })
+            .map(|(_, value)| unsafe { V::guard_borrow(self.guard, value) })
     }
 
     #[inline]
     pub fn for_each<F: FnMut(V::Borrow<'guard>)>(self, mut apply: F) {
         self.iter
-            .for_each(|key::Ignore, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
+            .for_each(|_, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
     }
 }
 

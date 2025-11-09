@@ -61,53 +61,53 @@ impl Array {
         Len(unsafe { u6::new_unchecked(self.0 as u8) })
     }
 
-    #[inline]
-    pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<MatchPrefix> {
-        let len = self.len().min_bits(key.bits());
-        let key = key.take(len);
-        if self == key {
-            Some(MatchPrefix::Full(len))
-        } else if self.equal_up_to(key, len) {
-            Some(MatchPrefix::Partial)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<Len> {
-        let len = self.len().min_bits(key.bits());
-        (key.take(len) == self).then_some(len)
-    }
-
-    #[inline]
-    pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> MatchSplit {
-        let len = self.len().min_bits(key.bits());
-        let key = key.take(len);
-
-        if key == self {
-            return MatchSplit::Full(len);
-        }
-
-        let len_prefix = unsafe {
-            Len::from_bits_unchecked(
-                key.0
-                    .bitxor(self.0)
-                    .bitor(1u64.rotate_right(1) >> len.bits())
-                    .leading_zeros() as u8
-                    & !0b111u8,
-            )
-        };
-
-        let len_middle = len_prefix.bits() + 8;
-        MatchSplit::Partial {
-            start: Self::from_u64_truncate(self.0, len_prefix),
-            middle: self.0.rotate_left(len_middle as u32) as u8,
-            end: Self::from_u64_truncate(self.0 << len_middle, unsafe {
-                Len::from_bits_unchecked(self.len().bits() - len_middle)
-            }),
-        }
-    }
+    // #[inline]
+    // pub(crate) fn match_prefix<K: key::Read>(self, key: &mut K) -> Option<MatchPrefix> {
+    //     let len = self.len().min_bits(key.bits());
+    //     let key = key.take(len);
+    //     if self == key {
+    //         Some(MatchPrefix::Full(len))
+    //     } else if self.equal_up_to(key, len) {
+    //         Some(MatchPrefix::Partial)
+    //     } else {
+    //         None
+    //     }
+    // }
+    //
+    // #[inline]
+    // pub(crate) fn match_exact<K: key::Read>(self, key: &mut K) -> Option<Len> {
+    //     let len = self.len().min_bits(key.bits());
+    //     (key.take(len) == self).then_some(len)
+    // }
+    //
+    // #[inline]
+    // pub(crate) fn match_split<K: key::Read>(self, key: &mut K) -> MatchSplit {
+    //     let len = self.len().min_bits(key.bits());
+    //     let key = key.take(len);
+    //
+    //     if key == self {
+    //         return MatchSplit::Full(len);
+    //     }
+    //
+    //     let len_prefix = unsafe {
+    //         Len::from_bits_unchecked(
+    //             key.0
+    //                 .bitxor(self.0)
+    //                 .bitor(1u64.rotate_right(1) >> len.bits())
+    //                 .leading_zeros() as u8
+    //                 & !0b111u8,
+    //         )
+    //     };
+    //
+    //     let len_middle = len_prefix.bits() + 8;
+    //     MatchSplit::Partial {
+    //         start: Self::from_u64_truncate(self.0, len_prefix),
+    //         middle: self.0.rotate_left(len_middle as u32) as u8,
+    //         end: Self::from_u64_truncate(self.0 << len_middle, unsafe {
+    //             Len::from_bits_unchecked(self.len().bits() - len_middle)
+    //         }),
+    //     }
+    // }
 
     pub(crate) fn compress(self, byte: u8, child: Self) -> Option<Self> {
         let parent_bits = self.len().bits();

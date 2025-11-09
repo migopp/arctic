@@ -2,7 +2,6 @@ use core::convert::Infallible;
 
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
 use crate::raw::node;
 use crate::raw::Edge;
 
@@ -15,7 +14,7 @@ pub(crate) struct Segment<'g, R, C> {
     pub(super) edge: &'g Atomic128<Edge<C>>,
 
     /// Number of bytes matched along `edge`
-    pub(super) len: byte::Len,
+    pub(super) bits: usize,
 
     /// Node underneath `edge`
     pub(super) node: node::Ref<'g, C>,

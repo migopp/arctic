@@ -4,6 +4,7 @@ use ribbit::atomic::Atomic128;
 use ribbit::u120;
 use ribbit::u4;
 
+use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::linear;
 use crate::raw::node::Node256;
@@ -33,12 +34,15 @@ impl Default for HeaderPacked {
     }
 }
 
-impl<C> linear::Header<C> for Atomic128<Header> {
+impl<M> linear::Header<M> for Atomic128<Header>
+where
+    M: edge::Meta,
+{
     const KIND: node::Kind = node::Kind::Node15;
     const GROW: usize = 15;
 
-    type Grow = Node256<C>;
-    type Shrink = Node3<C>;
+    type Grow = Node256<M>;
+    type Shrink = Node3<M>;
 
     fn freeze(&self) -> usize {
         let mut old = self.load_packed(Ordering::Relaxed);

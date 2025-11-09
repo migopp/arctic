@@ -19,22 +19,25 @@ use ribbit::atomic::Atomic128;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub(crate) trait Node<C>: Default {
+pub(crate) trait Node<M>: Default
+where
+    M: edge::Meta,
+{
     const KIND: Kind;
     const GROW: usize;
 
-    type Grow: Node<C>;
-    type Shrink: Node<C>;
+    type Grow: Node<M>;
+    type Shrink: Node<M>;
 
-    fn edges(&self) -> &[Atomic128<Edge<C>>];
+    fn edges(&self) -> &[Atomic128<Edge<M>>];
 
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<C>>>;
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<M>>>;
 
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<C>>>;
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<M>>>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<C>>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<M>>>;
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<C>>);
+    fn replace(&self, parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>);
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -67,26 +70,23 @@ impl Op {
     }
 }
 
-pub(crate) enum Ref<'g, C> {
-    Node3(&'g Node3<C>),
-    Node15(&'g Node15<C>),
-    Node256(&'g Node256<C>),
+#[derive(Copy, Clone)]
+pub(crate) enum Ref<'g, M> {
+    Node3(&'g Node3<M>),
+    Node15(&'g Node15<M>),
+    Node256(&'g Node256<M>),
 }
 
-impl<'g, C> Copy for Ref<'g, C> {}
-impl<'g, C> Clone for Ref<'g, C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<'g, C> Ref<'g, C> {
+impl<'g, M> Ref<'g, M>
+where
+    M: edge::Meta,
+{
     #[inline]
     pub(crate) fn iter<O: crate::iter::Order, L: Lower, U: Upper>(
         &self,
         lower: L,
         upper: U,
-    ) -> NodeIter<'g, L, U, C> {
+    ) -> NodeIter<'g, L, U, M> {
         let (keys, edges) = match self {
             Self::Node3(node) => {
                 let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
@@ -120,9 +120,12 @@ impl<'g, C> Ref<'g, C> {
     }
 }
 
-impl<'g, C> Ref<'g, C> {
+impl<'g, M> Ref<'g, M>
+where
+    M: edge::Meta,
+{
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<C>>> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<M>>> {
         match self {
             Self::Node3(node) => node.get(key),
             Self::Node15(node) => node.get(key),
@@ -131,7 +134,7 @@ impl<'g, C> Ref<'g, C> {
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<C>>> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<M>>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),
@@ -140,10 +143,7 @@ impl<'g, C> Ref<'g, C> {
     }
 
     #[cold]
-    pub(crate) fn replace(
-        &self,
-        parent: ribbit::Packed<edge::Meta>,
-    ) -> (Op, ribbit::Packed<Edge<C>>) {
+    pub(crate) fn replace(&self, parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
         match self {
             Self::Node3(node) => node.replace(parent),
             Self::Node15(node) => node.replace(parent),
@@ -152,7 +152,11 @@ impl<'g, C> Ref<'g, C> {
     }
 }
 
-impl<V> Debug for Ref<'_, V> {
+impl<M> Debug for Ref<'_, M>
+where
+    M: edge::Meta,
+    M::Packed: Debug,
+{
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Node3(node) => node.fmt(fmt),

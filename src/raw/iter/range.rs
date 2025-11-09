@@ -13,16 +13,17 @@ use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R, W: key::Write, C, B: raw::iter::Range<R>, O> {
+pub enum RangeIter<'g, R: key::Read, W: key::Write, M, B: raw::iter::Range<R>, O> {
     Root { key: W, next: Option<u64> },
-    Node(NodeIter<'g, R, W, C, B, O>),
+    Node(NodeIter<'g, R, W, M, B, O>),
 }
 
-impl<'g, R, W, C, B, O> Default for RangeIter<'g, R, W, C, B, O>
+impl<'g, R, W, M, B, O> Default for RangeIter<'g, R, W, M, B, O>
 where
-    R: key::Read,
-    W: key::Write,
+    R: key::Read<Edge = M>,
+    W: key::Write<Edge = M>,
     W: From<R>,
+    M: edge::Meta,
     B: raw::iter::Range<R>,
 {
     fn default() -> Self {
@@ -33,22 +34,23 @@ where
     }
 }
 
-impl<'g, R, W, C, B, O> RangeIter<'g, R, W, C, B, O>
+impl<'g, R, W, M, B, O> RangeIter<'g, R, W, M, B, O>
 where
-    R: key::Read,
-    W: key::Write,
+    R: key::Read<Edge = M>,
+    W: key::Write<Edge = M>,
     W: From<R>,
+    M: edge::Meta,
     B: raw::iter::Range<R>,
     O: Order,
 {
-    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<C>>, prefix: R, range: B) -> Self {
+    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<M>>, prefix: R, range: B) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
 
         let Some(child) = edge.child() else {
             return Self::default();
         };
 
-        let key = edge.meta().key();
+        let key = edge.meta();
         let bits = prefix.bits();
         let mut writer = W::from(prefix);
         let bits = writer.write(W::len_from_bits(bits), key);
@@ -112,7 +114,7 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: raw::iter::Range<R>, O> {
+pub(crate) struct NodeIter<'g, R: key::Read, W: key::Write, M: 'g, B: raw::iter::Range<R>, O> {
     lower: B::Lower,
     upper: B::Upper,
     key: W,
@@ -122,16 +124,17 @@ pub(crate) struct NodeIter<'g, R, W: key::Write, C: 'g, B: raw::iter::Range<R>, 
             'g,
             <B::Lower as raw::iter::Lower<R>>::Bound,
             <B::Upper as raw::iter::Upper<R>>::Bound,
-            C,
+            M,
         >,
     )>,
     _order: PhantomData<O>,
 }
 
-impl<'g, R, W, C, B, O> NodeIter<'g, R, W, C, B, O>
+impl<'g, R, W, M, B, O> NodeIter<'g, R, W, M, B, O>
 where
-    R: key::Read,
-    W: key::Write,
+    R: key::Read<Edge = M>,
+    W: key::Write<Edge = M>,
+    M: edge::Meta,
     B: raw::iter::Range<R>,
     O: Order,
 {
@@ -166,7 +169,7 @@ where
                     continue 'horizontal;
                 };
 
-                let key = edge.meta().key();
+                let key = edge.meta();
                 let bits = self.key.replace(bits, byte, key);
 
                 let check_lower = iter.lower().is(byte);

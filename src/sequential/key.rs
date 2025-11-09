@@ -2,20 +2,21 @@ pub mod dynamic;
 pub mod integer;
 
 use core::fmt;
+use core::marker::PhantomData;
 
-use crate::byte;
+use crate::raw::edge;
 
 pub trait Key {
     #[allow(private_bounds)]
     type Borrow<'k>: Copy;
 
     #[allow(private_bounds)]
-    type Read<'k>: Read + From<Self::Borrow<'k>>;
+    type Read<'k>: Read<Edge = Self::Edge> + From<Self::Borrow<'k>>;
 
     #[allow(private_bounds)]
-    type Write: Write + for<'k> From<Self::Read<'k>>;
+    type Write: Write<Edge = Self::Edge> + for<'k> From<Self::Read<'k>>;
 
-    type Edge;
+    type Edge: edge::Meta;
 
     unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
 
@@ -27,6 +28,8 @@ pub trait Key {
 }
 
 pub trait Read: Copy + fmt::Debug + Default {
+    type Edge: edge::Meta;
+
     fn bits(&self) -> usize;
 
     #[inline]
@@ -34,12 +37,12 @@ pub trait Read: Copy + fmt::Debug + Default {
         self.bits() >> 3
     }
 
-    fn peek(&self, len: byte::Len) -> byte::Array;
+    // fn peek(&self, len: byte::Len) -> byte::Array;
 
     // FIXME: move under concurrent module
     fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be>;
 
-    fn take(&mut self, len: byte::Len) -> byte::Array;
+    // fn take(&mut self, len: byte::Len) -> byte::Array;
 
     fn slice(&self, bit: usize) -> Self;
 
@@ -48,44 +51,93 @@ pub trait Read: Copy + fmt::Debug + Default {
     fn seek(&mut self, bits: usize);
 
     fn prefix(&self, other: &Self) -> Self;
+
+    /// Read as many bytes as possible
+    fn read_all(&mut self) -> ribbit::Packed<Self::Edge>;
+
+    /// Read as many bytes as `meta` contains and check for equality
+    fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize>;
+
+    /// Read as many bytes as `meta` contains
+    fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge>;
+
+    /// Read longest matching prefix of `meta`, or `None` if we diverge
+    fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize>;
 }
 
 pub trait Write: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
+    type Edge: edge::Meta;
 
     fn len_from_bits(bits: usize) -> Self::Len;
 
     /// Write bytes starting at `start` with bytes from `edge`
     ///
     /// Caller must ensure `start` is equal to the current length of this writer
-    fn write(&mut self, start: Self::Len, edge: byte::Array) -> Self::Len;
+    fn write(&mut self, start: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len;
 
     /// Replace bytes starting at `start` with bytes from `node` and `edge`
-    fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len;
+    fn replace(
+        &mut self,
+        start: Self::Len,
+        node: u8,
+        edge: ribbit::Packed<Self::Edge>,
+    ) -> Self::Len;
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Ignore;
+#[derive(Clone)]
+pub struct Ignore<M>(PhantomData<M>);
 
-impl Write for Ignore {
+impl<M> Default for Ignore<M> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+impl<M> core::fmt::Debug for Ignore<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Ignore")
+    }
+}
+impl<M> PartialEq for Ignore<M> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl<M> Eq for Ignore<M> {}
+impl<M> Ord for Ignore<M> {
+    fn cmp(&self, _: &Self) -> core::cmp::Ordering {
+        core::cmp::Ordering::Equal
+    }
+}
+impl<M> PartialOrd for Ignore<M> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<M> Write for Ignore<M>
+where
+    M: edge::Meta,
+{
     type Len = ();
+    type Edge = M;
 
     #[inline]
     fn len_from_bits(_bits: usize) -> Self::Len {}
 
     #[inline]
-    fn write(&mut self, (): Self::Len, _edge: byte::Array) -> Self::Len {}
+    fn write(&mut self, (): Self::Len, _edge: ribbit::Packed<Self::Edge>) -> Self::Len {}
 
     #[inline]
-    fn replace(&mut self, _start: Self::Len, _node: u8, _edge: byte::Array) {}
+    fn replace(&mut self, _start: Self::Len, _node: u8, _edge: ribbit::Packed<Self::Edge>) {}
 }
 
-impl<R> From<R> for Ignore
+impl<R, M> From<R> for Ignore<M>
 where
-    R: Read,
+    R: Read<Edge = M>,
 {
     fn from(_: R) -> Self {
-        Self
+        Self(PhantomData)
     }
 }
 
@@ -97,7 +149,7 @@ macro_rules! impl_unsigned_int {
                 type Write = integer::Writer<$ty>;
                 type Borrow<'k> = Self;
 
-                type Edge = byte::Array;
+                type Edge = edge::Be;
 
                 #[inline]
                 fn borrow(&self) -> Self {
@@ -130,7 +182,7 @@ impl Key for Vec<u8> {
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k [u8];
 
-    type Edge = byte::Array;
+    type Edge = edge::Be;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -172,7 +224,7 @@ impl Key for String {
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k str;
 
-    type Edge = byte::Array;
+    type Edge = edge::Be;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -217,26 +269,27 @@ mod tests {
     use crate::Key;
 
     pub(super) fn take_all<'k, K: Key>(array: &[u8], key: impl Into<K::Borrow<'k>>, lens: &[u8]) {
-        let mut reader = K::Read::from(key.into());
-
-        let mut index = 0;
-
-        for len in lens
-            .iter()
-            .copied()
-            .map(byte::Len::from_bytes)
-            .map(Option::unwrap)
-        {
-            assert_eq!(reader.bytes(), array.len() - index);
-
-            byte::Array::with_bytes(reader.take(len), |actual| {
-                assert_eq!(actual, &array[index..][..len.bytes() as usize]);
-            });
-
-            index += len.bytes() as usize;
-        }
-
-        assert_eq!(reader.bytes(), array.len() - index);
-        assert_eq!(reader.next(), array.get(index).copied());
+        todo!()
+        // let mut reader = K::Read::from(key.into());
+        //
+        // let mut index = 0;
+        //
+        // for len in lens
+        //     .iter()
+        //     .copied()
+        //     .map(byte::Len::from_bytes)
+        //     .map(Option::unwrap)
+        // {
+        //     assert_eq!(reader.bytes(), array.len() - index);
+        //
+        //     byte::Array::with_bytes(reader.take(len), |actual| {
+        //         assert_eq!(actual, &array[index..][..len.bytes() as usize]);
+        //     });
+        //
+        //     index += len.bytes() as usize;
+        // }
+        //
+        // assert_eq!(reader.bytes(), array.len() - index);
+        // assert_eq!(reader.next(), array.get(index).copied());
     }
 }

@@ -5,7 +5,6 @@ use core::sync::atomic::Ordering;
 use path::History as _;
 use ribbit::atomic::Atomic128;
 
-use crate::byte;
 use crate::key;
 use crate::raw::edge;
 use crate::raw::node;
@@ -15,7 +14,7 @@ use crate::raw::Op;
 use crate::stat;
 
 /// Tree traversal state.
-pub(crate) struct Point<'g, R, C, H> {
+pub(crate) struct Point<'g, R, M, H> {
     /// Total number of bits read from `key`
     bits: usize,
 
@@ -23,19 +22,20 @@ pub(crate) struct Point<'g, R, C, H> {
     key: R,
 
     /// Edge this cursor currently points to
-    edge: &'g Atomic128<Edge<C>>,
+    edge: &'g Atomic128<Edge<M>>,
 
     /// Path history of this cursor (sequence of path segments)
     history: H,
 }
 
-impl<'g, R, C, H> Point<'g, R, C, H>
+impl<'g, R, M, H> Point<'g, R, M, H>
 where
-    R: key::Read,
-    H: path::History<'g, R, C>,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
+    H: path::History<'g, R, M>,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<C>>, key: R) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<M>>, key: R) -> Self {
         Self {
             bits: 0,
             edge: root,
@@ -45,7 +45,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<C>> {
+    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<M>> {
         self.edge
     }
 
@@ -55,13 +55,12 @@ where
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<C>>, ()>> {
+    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<M>>, ()>> {
         loop {
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-
             let save = self.key;
-            let len = meta.key().match_exact(&mut self.key)?;
+            let bits = self.key.read_exact(meta)?;
 
             // Fast path: traversal
             if let Some(node) = edge.as_node() {
@@ -75,15 +74,15 @@ where
                 let byte = self.key.next()?;
                 let node = unsafe { node.into_ref_unchecked() };
                 let next = node.get(byte)?;
-                self.push(save, len, node, next);
+                self.push(save, bits, node, next);
                 continue;
             }
 
             self.key = save;
 
-            return if meta.is_frozen() {
+            return if M::is_frozen(meta) {
                 Some(Err(()))
-            } else if meta.is_value() {
+            } else if M::is_value(meta) {
                 Some(Ok(edge))
             } else {
                 validate!(edge.is_null());
@@ -98,15 +97,16 @@ where
     pub(crate) fn traverse_or_insert(
         &mut self,
         value: u64,
-    ) -> Result<(Op, ribbit::Packed<Edge<C>>, ribbit::Packed<Edge<C>>), ()> {
+    ) -> Result<(Op, ribbit::Packed<Edge<M>>, ribbit::Packed<Edge<M>>), ()> {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
-            let save = self.key;
-            let r#match = old_meta.key().match_split(&mut self.key);
+            let mut save = self.key;
+
+            let key = self.key.read_inexact(old_meta);
 
             // Fast path: traverse
-            if let byte::MatchSplit::Full(len) = r#match {
+            if M::equal(old_meta, key) {
                 if let Some(node) = old.as_node() {
                     if node.scan() {
                         self.wait_for_scan(stat::Counter::ScanInsert)?;
@@ -116,51 +116,42 @@ where
                     let byte = self.key.next().unwrap();
                     let node = unsafe { node.into_ref_unchecked() };
                     if let Some(next) = node.get_or_reserve(byte) {
-                        self.push(save, len, node, next);
+                        self.push(save, M::bits(key), node, next);
                         continue;
                     }
                 }
             }
 
-            if old_meta.is_frozen() {
+            if M::is_frozen(old_meta) {
                 return Err(());
             }
 
             // Revert key to before the current edge
             self.key = save;
 
-            let (op, new) = match r#match {
-                byte::MatchSplit::Full(_) => match old.child() {
+            let (op, new) = match M::expand(old_meta, key) {
+                Err(_) => match old.child() {
                     Some(edge::Child::Node(node)) => {
                         let node = unsafe { node.into_ref_unchecked() };
                         let (op, new) = node.replace(old_meta);
                         (Op::Node(op), new)
                     }
                     None | Some(edge::Child::Value(_)) => {
-                        if self.key.bits() > byte::Len::MAX.bits() as usize {
-                            (
-                                Op::Edge(edge::Op::Create),
-                                Edge::new_node::<Node3<C>, _>(self.key.peek(byte::Len::MAX), None),
-                            )
+                        // Note: avoid mutating `self.key` here
+                        let meta = save.read_all();
+                        if save.bits() == 0 {
+                            (Op::Edge(edge::Op::Insert), Edge::new_value(meta, value))
                         } else {
                             (
-                                Op::Edge(edge::Op::Insert),
-                                Edge::new_value(
-                                    self.key.peek(unsafe {
-                                        byte::Len::from_bits_unchecked(self.key.bits() as u8)
-                                    }),
-                                    value,
-                                ),
+                                Op::Edge(edge::Op::Create),
+                                Edge::new_node::<Node3<M>, _>(meta, None),
                             )
                         }
                     }
                 },
-                byte::MatchSplit::Partial { start, middle, end } => (
+                Ok((start, middle, end)) => (
                     Op::Edge(edge::Op::Expand),
-                    Edge::new_node::<Node3<C>, _>(
-                        start,
-                        Some((middle, old.with_meta(old_meta.with_key(end)))),
-                    ),
+                    Edge::new_node::<Node3<M>, _>(start, [(middle, old.with_meta(end))]),
                 ),
             };
 
@@ -169,12 +160,12 @@ where
     }
 
     #[cold]
-    pub(crate) fn freeze(&mut self) -> Result<Option<ribbit::Packed<Edge<C>>>, H::PopError> {
+    pub(crate) fn freeze(&mut self) -> Result<Option<ribbit::Packed<Edge<M>>>, H::PopError> {
         let mut node = self.pop()?;
         let mut edge = self.edge.load_packed(Ordering::Acquire);
 
         loop {
-            while edge.meta().is_frozen() {
+            while M::is_frozen(edge.meta()) {
                 node = self.pop()?;
                 edge = self.edge.load_packed(Ordering::Acquire);
             }
@@ -220,7 +211,7 @@ where
     pub(crate) fn wait_for_scan(
         &self,
         counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<C>>, ()> {
+    ) -> Result<ribbit::Packed<Edge<M>>, ()> {
         stat::increment(counter);
 
         loop {
@@ -231,46 +222,41 @@ where
                 None => return Ok(edge),
                 Some(edge::Child::Value(_)) => unreachable!(),
                 Some(edge::Child::Node(node)) if !node.scan() => return Ok(edge),
-                Some(edge::Child::Node(_)) if edge.meta().is_frozen() => return Err(()),
+                Some(edge::Child::Node(_)) if M::is_frozen(edge.meta()) => return Err(()),
                 Some(edge::Child::Node(_)) => continue,
             }
         }
     }
 
     #[inline]
-    fn push(
-        &mut self,
-        key: R,
-        len: byte::Len,
-        node: node::Ref<'g, C>,
-        edge: &'g Atomic128<Edge<C>>,
-    ) {
+    fn push(&mut self, key: R, bits: usize, node: node::Ref<'g, M>, edge: &'g Atomic128<Edge<M>>) {
         // 1 extra byte for node
-        self.bits += 8 + len.bits() as usize;
+        self.bits += 8 + bits;
         self.history.push(path::Segment {
             key,
-            len,
+            bits,
             edge: core::mem::replace(&mut self.edge, edge),
             node,
         })
     }
 
     #[cold]
-    fn pop(&mut self) -> Result<node::Ref<'g, C>, H::PopError> {
+    fn pop(&mut self) -> Result<node::Ref<'g, M>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.bits -= segment.len.bits() as usize + 8;
+        self.bits -= segment.bits + 8;
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(segment.node)
     }
 }
 
-impl<'g, R, C> Point<'g, R, C, path::Discard>
+impl<'g, R, M> Point<'g, R, M, path::Discard>
 where
-    R: key::Read,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
 {
     #[inline]
-    pub(crate) unsafe fn get(root: &'g Atomic128<Edge<C>>, key: R) -> Option<u64>
+    pub(crate) unsafe fn get(root: &'g Atomic128<Edge<M>>, key: R) -> Option<u64>
     where
         R: key::Read,
     {
@@ -278,8 +264,7 @@ where
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
-
-            let _ = meta.key().match_exact(&mut cursor.key)?;
+            let _ = cursor.key.read_exact(meta)?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {
@@ -295,17 +280,18 @@ where
     }
 }
 
-pub(crate) struct Prefix<'g, R, C, H> {
+pub(crate) struct Prefix<'g, R, M, H> {
     prefix: R,
-    cursor: Point<'g, R, C, H>,
+    cursor: Point<'g, R, M, H>,
 }
 
-impl<'g, R, C, H> Prefix<'g, R, C, H>
+impl<'g, R, M, H> Prefix<'g, R, M, H>
 where
-    R: key::Read,
-    H: path::History<'g, R, C>,
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
+    H: path::History<'g, R, M>,
 {
-    pub(crate) unsafe fn new_root(root: &'g Atomic128<Edge<C>>) -> Self {
+    pub(crate) unsafe fn new_root(root: &'g Atomic128<Edge<M>>) -> Self {
         let prefix = R::default();
         Self {
             prefix,
@@ -313,7 +299,7 @@ where
         }
     }
 
-    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<C>>, prefix: R) -> Option<Self> {
+    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<M>>, prefix: R) -> Option<Self> {
         let mut cursor = Self {
             prefix,
             cursor: Point::new(root, prefix),
@@ -326,22 +312,25 @@ where
         self.prefix.slice(self.cursor.bits)
     }
 
-    pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<M>>> {
         let (key, edge) = loop {
             let edge = self.cursor.edge.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.cursor.key;
 
-            if let byte::MatchPrefix::Full(len) = meta.key().match_prefix(&mut self.cursor.key)? {
-                if let Some(node) = edge.as_node() {
-                    let node = unsafe { node.into_ref_unchecked() };
-                    let Some(byte) = self.cursor.key.next() else {
-                        break (save, edge);
-                    };
-                    let next = node.get(byte)?;
-                    self.cursor.push(save, len, node, next);
-                    continue;
+            match self.cursor.key.read_prefix(meta)? {
+                bits if bits == M::bits(meta) => {
+                    if let Some(node) = edge.as_node() {
+                        let node = unsafe { node.into_ref_unchecked() };
+                        let Some(byte) = self.cursor.key.next() else {
+                            break (save, edge);
+                        };
+                        let next = node.get(byte)?;
+                        self.cursor.push(save, bits, node, next);
+                        continue;
+                    }
                 }
+                _ => (),
             }
 
             if edge.is_null() {
@@ -356,9 +345,13 @@ where
     }
 }
 
-impl<'g, R: key::Read, C> Prefix<'g, R, C, path::Hybrid<'g, R, C>> {
+impl<'g, R, M> Prefix<'g, R, M, path::Hybrid<'g, R, M>>
+where
+    R: key::Read<Edge = M>,
+    M: edge::Meta,
+{
     #[cold]
-    pub(crate) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<C>>> {
+    pub(crate) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<M>>> {
         todo!()
         // match self.cursor.freeze() {
         //     Ok(()) => return self.traverse(),

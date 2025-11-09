@@ -3,6 +3,8 @@ use core::fmt;
 use crate::byte;
 use crate::key;
 use crate::key::Read as _;
+use crate::raw;
+use crate::raw::edge;
 
 pub(super) trait Uint:
     'static
@@ -77,18 +79,20 @@ impl<U: Uint> Reader<U> {
 }
 
 impl<U: Uint> key::Read for Reader<U> {
+    type Edge = raw::edge::Be;
+
     #[inline]
     fn bits(&self) -> usize {
         self.bits as usize
     }
 
-    #[inline]
-    fn peek(&self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.bits());
-        validate_eq!(len.bits() & 0b111, 0);
-
-        byte::Array::from_u64_truncate(self.buffer.most_significant_u64(), len)
-    }
+    // #[inline]
+    // fn peek(&self, len: byte::Len) -> byte::Array {
+    //     validate!(len.bits() as usize <= self.bits());
+    //     validate_eq!(len.bits() & 0b111, 0);
+    //
+    //     byte::Array::from_u64_truncate(self.buffer.most_significant_u64(), len)
+    // }
 
     #[inline]
     fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
@@ -102,20 +106,20 @@ impl<U: Uint> key::Read for Reader<U> {
         )
     }
 
-    #[inline]
-    fn take(&mut self, len: byte::Len) -> byte::Array {
-        validate!(len.bits() as usize <= self.bits());
-        validate_eq!(len.bits() & 0b111, 0);
-
-        if len.bits() == 0 {
-            return byte::Array::EMPTY;
-        }
-
-        let array = self.peek(len);
-        self.buffer = self.buffer.shl_at_most_56(len.bits());
-        self.bits -= len.bits();
-        array
-    }
+    // #[inline]
+    // fn take(&mut self, len: byte::Len) -> byte::Array {
+    //     validate!(len.bits() as usize <= self.bits());
+    //     validate_eq!(len.bits() & 0b111, 0);
+    //
+    //     if len.bits() == 0 {
+    //         return byte::Array::EMPTY;
+    //     }
+    //
+    //     let array = self.peek(len);
+    //     self.buffer = self.buffer.shl_at_most_56(len.bits());
+    //     self.bits -= len.bits();
+    //     array
+    // }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
@@ -161,6 +165,22 @@ impl<U: Uint> key::Read for Reader<U> {
             bits,
         }
     }
+
+    fn read_all(&mut self) -> ribbit::Packed<Self::Edge> {
+        todo!()
+    }
+
+    fn read_exact(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
+        todo!()
+    }
+
+    fn read_inexact(&mut self, meta: ribbit::Packed<Self::Edge>) -> ribbit::Packed<Self::Edge> {
+        todo!()
+    }
+
+    fn read_prefix(&mut self, meta: ribbit::Packed<Self::Edge>) -> Option<usize> {
+        todo!()
+    }
 }
 
 impl<U: Uint> core::fmt::Debug for Reader<U> {
@@ -180,6 +200,7 @@ impl<U> Writer<U> {
 }
 
 impl<U: Uint> key::Write for Writer<U> {
+    type Edge = raw::edge::Be;
     type Len = usize;
 
     #[inline]
@@ -188,23 +209,31 @@ impl<U: Uint> key::Write for Writer<U> {
     }
 
     #[inline]
-    fn write(&mut self, bits: Self::Len, array: byte::Array) -> Self::Len {
-        validate!(bits + array.len().bits() as usize <= U::BITS as usize);
+    fn write(&mut self, bits: Self::Len, array: ribbit::Packed<Self::Edge>) -> Self::Len {
+        todo!()
 
-        if array.len().bits() == 0 {
-            return bits;
-        }
-
-        self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
-        bits + array.len().bits() as usize
+        // validate!(bits + array as usize <= U::BITS as usize);
+        //
+        // if edge::Meta::bits(array) == 0 {
+        //     return bits;
+        // }
+        // self.0 |= U::from_most_significant_u64(array.value() & !0xFF) >> bits;
+        // bits + array.len().bits() as usize
     }
 
-    fn replace(&mut self, start: Self::Len, node: u8, edge: byte::Array) -> Self::Len {
-        self.0 = self.0.most_significant(start as u8)
-            | (U::from_u8(node) >> start)
-            | (U::from_most_significant_u64(edge.value()).unbounded_shr(8 + start as u8));
+    fn replace(
+        &mut self,
+        start: Self::Len,
+        node: u8,
+        edge: ribbit::Packed<Self::Edge>,
+    ) -> Self::Len {
+        todo!()
 
-        start + 8 + edge.len().bits() as usize
+        // self.0 = self.0.most_significant(start as u8)
+        //     | (U::from_u8(node) >> start)
+        //     | (U::from_most_significant_u64(edge.value()).unbounded_shr(8 + start as u8));
+        //
+        // start + 8 + edge.len().bits() as usize
     }
 }
 

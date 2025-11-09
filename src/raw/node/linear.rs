@@ -12,23 +12,24 @@ use crate::raw::node::Op;
 use crate::raw::Node;
 
 #[repr(C, align(64))]
-pub(crate) struct Linear<const LEN: usize, H, V> {
+pub(crate) struct Linear<const LEN: usize, H, M> {
     pub(super) header: H,
-    pub(super) edges: [Atomic128<Edge<V>>; LEN],
+    pub(super) edges: [Atomic128<Edge<M>>; LEN],
 }
 
-impl<const LEN: usize, H: Default, V> Default for Linear<LEN, H, V> {
+impl<const LEN: usize, H: Default, M: edge::Meta> Default for Linear<LEN, H, M> {
     fn default() -> Self {
         Self {
             header: H::default(),
-            edges: core::array::from_fn(|_| Atomic128::default()),
+            edges: core::array::from_fn(|_| Atomic128::from_packed(Edge::DEFAULT)),
         }
     }
 }
 
-impl<const LEN: usize, H, C> Node<C> for Linear<LEN, H, C>
+impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
 where
-    H: Header<C>,
+    H: Header<M>,
+    M: edge::Meta,
 {
     const KIND: node::Kind = H::KIND;
     const GROW: usize = H::GROW;
@@ -37,33 +38,39 @@ where
     type Shrink = H::Shrink;
 
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge<C>>] {
+    fn edges(&self) -> &[Atomic128<Edge<M>>] {
         &self.edges
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<C>>> {
+    fn get(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
         let index = self.header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<C>>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<C>>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<M>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<edge::Meta>) -> (Op, ribbit::Packed<Edge<C>>) {
+    fn replace(&self, meta: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
+        // Caller must not call replace if doomed to fail CAS
+        validate!(!M::is_frozen(meta));
+
+        // Can only call replace on nodes
+        validate!(!M::is_value(meta));
+
         let len = self.header.freeze();
         self.edges.iter().take(len).for_each(Edge::freeze);
 
-        let mut edges: [(u8, ribbit::Packed<Edge<C>>); LEN] =
+        let mut edges: [(u8, ribbit::Packed<Edge<M>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
         let mut len = 0;
 
@@ -76,7 +83,7 @@ where
         .filter(|(_, edge)| !edge.is_null())
         .map(|(key, edge)| {
             validate!(
-                edge.meta().is_frozen(),
+                M::is_frozen(edge.meta()),
                 "{} edge must be frozen before replace",
                 core::any::type_name::<Self>(),
             );
@@ -92,14 +99,14 @@ where
             _ if len == Self::GROW => {
                 return (
                     node::Op::Grow,
-                    Edge::new_node::<Self::Grow, _>(parent.key(), edges.into_iter().take(len)),
+                    Edge::new_node::<Self::Grow, _>(meta, edges.into_iter().take(len)),
                 )
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
                 // FIXME: how to handle scan?
-                if let Some(compress) = parent.key().compress(*key, edge.meta().key()) {
-                    return (Op::Compress, edge.with_meta(edge.meta().with_key(compress)));
+                if let Some(meta) = M::compress(meta, *key, edge.meta()) {
+                    return (Op::Compress, edge.with_meta(meta));
                 }
             }
 
@@ -109,12 +116,15 @@ where
         // Catch-all:
         (
             node::Op::Replace,
-            Edge::new_node::<Self, _>(parent.key(), edges.into_iter().take(len)),
+            Edge::new_node::<Self, _>(meta, edges.into_iter().take(len)),
         )
     }
 }
 
-impl<const LEN: usize, H: Header<V>, V> Linear<LEN, H, V> {
+impl<const LEN: usize, H: Header<M>, M> Linear<LEN, H, M>
+where
+    M: edge::Meta,
+{
     // FIXME
     #[inline]
     pub(crate) fn keys_range<L: crate::raw::node::Lower, G: crate::raw::node::Upper>(
@@ -136,7 +146,10 @@ impl<const LEN: usize, H: Header<V>, V> Linear<LEN, H, V> {
     }
 }
 
-impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
+impl<const LEN: usize, H: Debug, M: edge::Meta> Debug for Linear<LEN, H, M>
+where
+    M::Packed: Debug,
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = const {
             if LEN == 3 {
@@ -155,12 +168,15 @@ impl<const LEN: usize, H: Debug, V> Debug for Linear<LEN, H, V> {
     }
 }
 
-pub(crate) trait Header<C>: Default {
+pub(crate) trait Header<M>: Default
+where
+    M: edge::Meta,
+{
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
 
-    type Grow: Node<C>;
-    type Shrink: Node<C>;
+    type Grow: Node<M>;
+    type Shrink: Node<M>;
 
     fn freeze(&self) -> usize;
     fn get(&self, key: u8) -> Option<u8>;

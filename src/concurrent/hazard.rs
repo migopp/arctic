@@ -90,6 +90,7 @@ use ribbit::atomic::Atomic128;
 use thread_local::ThreadLocal;
 
 use crate::concurrent::Value;
+use crate::raw::edge;
 use crate::raw::Edge;
 use crate::stat;
 
@@ -159,14 +160,14 @@ impl<'g, V: Value> Local<'g, V> {
         TraverseGuard(self)
     }
 
-    unsafe fn retire_edge<C>(&mut self, bits: usize, edge: ribbit::Packed<Edge<C>>) {
+    unsafe fn retire_edge<M: edge::Meta>(&mut self, bits: usize, edge: ribbit::Packed<Edge<M>>) {
         validate!(!edge.is_null());
         stat::increment(stat::Counter::Retire);
 
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
-            .into_prefix(edge.meta().is_value(), Some(bits));
+            .into_prefix(M::is_value(edge.meta()), Some(bits));
 
         self.retired.push((prefix, edge.into_raw()));
 
@@ -228,7 +229,11 @@ impl<V: Value> Drop for TraverseGuard<'_, '_, V> {
 }
 
 impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
-    pub(crate) unsafe fn retire<C>(&mut self, bits: usize, edge: ribbit::Packed<Edge<C>>) {
+    pub(crate) unsafe fn retire<M: edge::Meta>(
+        &mut self,
+        bits: usize,
+        edge: ribbit::Packed<Edge<M>>,
+    ) {
         self.0.retire_edge(bits, edge);
     }
 
@@ -342,7 +347,8 @@ unsafe fn deallocate<V: Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
 
     if prefix.node() {
         unsafe {
-            crate::raw::edge::Node::<()>::new_unchecked(raw)
+            // FIXME: type of edge meta is irrelevant here
+            crate::raw::edge::Node::<crate::raw::edge::Be>::new_unchecked(raw)
                 .deallocate_unchecked(stat::Counter::FreeRetire);
         }
     } else {

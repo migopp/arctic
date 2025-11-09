@@ -1,3 +1,7 @@
+mod be;
+
+pub(crate) use be::Be;
+
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::num::NonZeroU32;
@@ -17,41 +21,26 @@ use crate::raw::node::Node256;
 use crate::raw::node::Node3;
 use crate::stat;
 
-#[derive(ribbit::Pack)]
+#[derive(Copy, Clone, Default, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
-pub struct Edge<C> {
+pub struct Edge<M> {
     #[ribbit(size = 64)]
-    pub(crate) meta: Meta,
+    pub(crate) meta: M,
 
     data: u64,
-
-    // FIXME: swap out edge type
-    _compressed: PhantomData<C>,
 }
 
-impl<C> Copy for Edge<C> {}
-impl<C> Clone for Edge<C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<C> Default for EdgePacked<C> {
-    fn default() -> Self {
-        Edge::DEFAULT
-    }
-}
-
-impl<C> Edge<C> {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(Meta::DEFAULT, 0);
+impl<M: Meta> Edge<M> {
+    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(M::DEFAULT, 0);
 
     #[inline]
     pub(crate) fn freeze(edge: &Atomic128<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
-        while !old.meta().is_frozen() {
+        while !M::is_frozen(old.meta()) {
             match edge.compare_exchange_packed(
                 old,
-                old.with_meta(old.meta().with_frozen(true)),
+                old.with_meta(M::with_frozen(old.meta(), true)),
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -62,11 +51,13 @@ impl<C> Edge<C> {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: byte::Array, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(meta: ribbit::Packed<M>, edges: I) -> ribbit::Packed<Self>
     where
-        N: node::Node<C>,
-        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<C>>)>,
+        N: node::Node<M>,
+        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
     {
+        validate!(!M::is_frozen(meta));
+
         let mut node = Box::new(N::default());
 
         for (key, edge) in edges {
@@ -75,32 +66,34 @@ impl<C> Edge<C> {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(Meta::DEFAULT.with_key(key), Node::new(node).value.get())
+        ribbit::Packed::<Self>::new(M::with_value(meta, false), Node::new(node).value.get())
     }
 
-    pub(crate) fn new_value(key: byte::Array, value: u64) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(Meta::VALUE.with_key(key), value)
+    pub(crate) fn new_value(meta: ribbit::Packed<M>, value: u64) -> ribbit::Packed<Self> {
+        validate!(!M::is_frozen(meta));
+
+        ribbit::Packed::<Self>::new(M::with_value(meta, true), value)
     }
 }
 
-impl<C> EdgePacked<C> {
+impl<M: Meta> EdgePacked<M> {
     #[inline]
     pub(crate) fn is_null(self) -> bool {
-        !self.meta().is_value() && self.data() == 0
+        !M::is_value(self.meta()) && self.data() == 0
     }
 
     #[inline]
-    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<C>>> {
-        if self.meta().is_value() {
+    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<M>>> {
+        if M::is_value(self.meta()) {
             return None;
         }
 
-        unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(self.data()) }
+        unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(self.data()) }
     }
 
     #[inline]
     pub(crate) fn as_value(self) -> Option<u64> {
-        self.meta().is_value().then(|| self.data())
+        M::is_value(self.meta()).then(|| self.data())
     }
 
     #[inline]
@@ -109,30 +102,30 @@ impl<C> EdgePacked<C> {
     }
 
     #[inline]
-    pub(crate) fn child(self) -> Option<Child<C>> {
+    pub(crate) fn child(self) -> Option<Child<M>> {
         let data = self.data();
-        if self.meta().is_value() {
+        if M::is_value(self.meta()) {
             Some(Child::Value(data))
         } else {
-            unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(data) }.map(Child::Node)
+            unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(data) }.map(Child::Node)
         }
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<Node<C>>) -> Self {
-        validate!(!self.meta().is_value());
+    pub(crate) fn with_node(self, node: ribbit::Packed<Node<M>>) -> Self {
+        validate!(!M::is_value(self.meta()));
         self.with_data(node.value.get())
     }
 
     #[inline]
     pub(crate) fn with_value(self, value: u64) -> Self {
-        validate!(self.meta().is_value());
+        validate!(M::is_value(self.meta()));
         self.with_data(value)
     }
 
     #[inline]
     pub(crate) fn unfreeze(self) -> Self {
-        self.with_meta(self.meta().with_frozen(false))
+        self.with_meta(M::with_frozen(self.meta(), false))
     }
 
     #[inline]
@@ -161,7 +154,10 @@ impl<C> EdgePacked<C> {
     }
 }
 
-impl<C> Debug for EdgePacked<C> {
+impl<M: Meta> Debug for EdgePacked<M>
+where
+    M::Packed: core::fmt::Debug,
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug = f.debug_struct("Edge");
 
@@ -172,54 +168,29 @@ impl<C> Debug for EdgePacked<C> {
     }
 }
 
-#[derive(Copy, Clone, Default, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = MetaPacked), eq)]
-pub(crate) struct Meta {
-    #[ribbit(with(skip))]
-    _placeholder_len: u6,
-    value: bool,
-    frozen: bool,
-    #[ribbit(with(skip))]
-    _placeholder_array: u56,
-}
+pub(crate) trait Meta: ribbit::Pack {
+    const DEFAULT: ribbit::Packed<Self>;
 
-impl Meta {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u6::new(0), false, false, u56::new(0));
+    fn bits(meta: ribbit::Packed<Self>) -> usize;
+    fn equal(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> bool;
+    fn cmp(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> core::cmp::Ordering;
 
-    pub(crate) const VALUE: ribbit::Packed<Self> = Self::DEFAULT.with_value(true);
-}
+    fn is_value(meta: ribbit::Packed<Self>) -> bool;
+    fn is_frozen(meta: ribbit::Packed<Self>) -> bool;
 
-impl MetaPacked {
-    #[inline]
-    pub(crate) fn key(self) -> byte::Array {
-        byte::Array::new_masked(self.value)
-    }
+    fn with_frozen(meta: ribbit::Packed<Self>, frozen: bool) -> ribbit::Packed<Self>;
+    fn with_value(meta: ribbit::Packed<Self>, value: bool) -> ribbit::Packed<Self>;
 
-    #[inline]
-    pub(crate) fn with_key(self, key: byte::Array) -> Self {
-        unsafe { Self::new_unchecked(self.value & !byte::Array::MASK | key.value()) }
-    }
+    fn expand(
+        old: ribbit::Packed<Self>,
+        new: ribbit::Packed<Self>,
+    ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), usize>;
 
-    #[inline]
-    pub(crate) fn is_value(self) -> bool {
-        self.value()
-    }
-
-    #[inline]
-    pub(crate) fn is_frozen(self) -> bool {
-        self.frozen()
-    }
-}
-
-impl Debug for MetaPacked {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Meta")
-            .field("value", &self.is_value())
-            .field("frozen", &self.is_frozen())
-            .field("key", &self.key())
-            .finish()
-    }
+    fn compress(
+        parent: ribbit::Packed<Self>,
+        byte: u8,
+        child: ribbit::Packed<Self>,
+    ) -> Option<ribbit::Packed<Self>>;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -284,12 +255,17 @@ impl<C> Clone for Node<C> {
     }
 }
 
-impl<C> Node<C> {
+impl<M> Node<M> {
     const MASK_TAG: u64 = 0b111;
     const MASK_PTR: u64 = !Self::MASK_TAG;
+}
 
+impl<M> Node<M>
+where
+    M: Meta,
+{
     #[inline]
-    fn new<N: node::Node<C>>(node: Box<N>) -> ribbit::Packed<Self> {
+    fn new<N: node::Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = NonNull::from(Box::leak(node));
         let kind = N::KIND as u64;
 
@@ -303,7 +279,7 @@ impl<C> Node<C> {
     }
 
     pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
-        let node = unsafe { ribbit::Packed::<Option<Node<C>>>::new_unchecked(raw) };
+        let node = unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(raw) };
         if cfg!(feature = "validate") {
             node.unwrap()
         } else {
@@ -312,37 +288,44 @@ impl<C> Node<C> {
     }
 }
 
-impl<C> NodePacked<C> {
+impl<M> NodePacked<M>
+where
+    M: Meta,
+{
     #[inline]
-    pub(crate) fn is_ref(self, node: node::Ref<'_, C>) -> bool {
+    pub(crate) fn is_ref(self, node: node::Ref<'_, M>) -> bool {
         let ptr = match node {
             node::Ref::Node3(node) => node as *const _ as u64,
             node::Ref::Node15(node) => node as *const _ as u64,
             node::Ref::Node256(node) => node as *const _ as u64,
         };
 
-        self.value.get() & Node::<C>::MASK_PTR == ptr
+        self.value.get() & Node::<M>::MASK_PTR == ptr
     }
 
     #[inline]
-    pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, C> {
+    pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, M> {
         #[inline]
-        unsafe fn as_ref<'g, C, N: node::Node<C> + 'g>(ptr: u64) -> &'g N {
+        unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
+        where
+            M: Meta,
+            N: node::Node<M> + 'g,
+        {
             let node = unsafe { (ptr as *const N).as_ref() };
             validate!(node.is_some());
             unsafe { node.unwrap_unchecked() }
         }
 
-        let ptr = self.value.get() & Node::<C>::MASK_PTR;
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            node::Ref::Node3(unsafe { as_ref::<_, Node3<C>>(ptr) })
+            node::Ref::Node3(unsafe { as_ref::<_, Node3<M>>(ptr) })
         } else if kind == node::Kind::NODE_15 {
-            node::Ref::Node15(unsafe { as_ref::<_, Node15<C>>(ptr) })
+            node::Ref::Node15(unsafe { as_ref::<_, Node15<M>>(ptr) })
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            node::Ref::Node256(unsafe { as_ref::<_, Node256<C>>(ptr) })
+            node::Ref::Node256(unsafe { as_ref::<_, Node256<M>>(ptr) })
         }
     }
 
@@ -353,26 +336,26 @@ impl<C> NodePacked<C> {
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        let ptr = self.value.get() & Node::<C>::MASK_PTR;
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            drop(Box::from_raw(ptr as *mut Node3<C>))
+            drop(Box::from_raw(ptr as *mut Node3<M>))
         } else if kind == node::Kind::NODE_15 {
-            drop(Box::from_raw(ptr as *mut Node15<C>))
+            drop(Box::from_raw(ptr as *mut Node15<M>))
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256<C>))
+            drop(Box::from_raw(ptr as *mut Node256<M>))
         }
     }
 }
 
-impl<C> Debug for NodePacked<C> {
+impl<M> Debug for NodePacked<M> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
             .field("kind", &self.kind())
             .field("scan", &self.scan())
-            .field("ptr", &(self.value.get() & Node::<C>::MASK_PTR))
+            .field("ptr", &(self.value.get() & Node::<M>::MASK_PTR))
             .finish()
     }
 }
