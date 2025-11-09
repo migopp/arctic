@@ -249,7 +249,6 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 
 #[cfg(test)]
 mod tests {
-    use crate::byte;
     use crate::key::Read as _;
     use crate::Key;
 

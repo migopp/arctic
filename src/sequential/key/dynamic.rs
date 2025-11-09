@@ -1,7 +1,6 @@
 use core::cmp;
 use core::fmt;
 
-use crate::byte;
 use crate::key;
 use crate::key::integer;
 use crate::raw::edge;
@@ -223,16 +222,6 @@ impl fmt::Debug for Reader<'_> {
             Reader::Small(small) => small.fmt(f),
         }
     }
-}
-
-/// # SAFETY
-///
-/// Caller must ensure `slice.len() >= 8`
-unsafe fn read_array(slice: &[u8], len: byte::Len) -> byte::Array {
-    validate!(slice.len() >= 8);
-
-    let buffer = unsafe { slice.as_ptr().cast::<u64>().read_unaligned() };
-    byte::Array::from_u64_truncate(buffer.to_be(), len)
 }
 
 #[repr(transparent)]

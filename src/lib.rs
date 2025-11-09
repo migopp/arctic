@@ -14,7 +14,6 @@ macro_rules! validate_eq {
     };
 }
 
-mod byte;
 pub mod concurrent;
 pub mod iter;
 mod raw;

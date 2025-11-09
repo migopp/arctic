@@ -10,10 +10,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::atomic::Atomic128;
-use ribbit::u6;
 use ribbit::OptionExt as _;
 
-use crate::byte;
 use crate::raw::node;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
