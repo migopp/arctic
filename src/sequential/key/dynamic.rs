@@ -138,6 +138,14 @@ impl key::Read for Reader<'_> {
         }
     }
 
+    #[inline]
+    fn prefix(self, bits: usize) -> Self {
+        match self {
+            Reader::Large(large) => Reader::from(&large[..bits >> 3]),
+            Reader::Small(small) => Reader::Small(small.prefix(bits)),
+        }
+    }
+
     fn suffix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
 
@@ -147,9 +155,9 @@ impl key::Read for Reader<'_> {
         }
     }
 
-    fn prefix(&self, other: &Self) -> Self {
+    fn common_prefix(self, other: Self) -> Self {
         if let (Self::Large(left), Self::Large(right)) = (self, other) {
-            let index = core::iter::zip(*left, *right)
+            let index = core::iter::zip(left, right)
                 .position(|(l, r)| l != r)
                 .unwrap_or_else(|| left.len().min(right.len()));
             return Self::from(&left[index..]);
@@ -157,15 +165,7 @@ impl key::Read for Reader<'_> {
 
         let left = self.to_small();
         let right = other.to_small();
-        Self::Small(left.prefix(&right))
-    }
-
-    #[inline]
-    fn slice(&self, bit: usize) -> Self {
-        match self {
-            Reader::Large(large) => Reader::from(&large[..bit >> 3]),
-            Reader::Small(small) => Reader::Small(small.slice(bit)),
-        }
+        Self::Small(left.common_prefix(right))
     }
 
     fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {

@@ -316,7 +316,7 @@ where
     }
 
     pub(crate) fn prefix(&self) -> R {
-        self.prefix.slice(self.cursor.bits)
+        self.prefix.prefix(self.cursor.bits)
     }
 
     pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<M>>> {

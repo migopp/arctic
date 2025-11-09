@@ -40,15 +40,14 @@ pub trait Read: Copy + fmt::Debug + Default {
     // FIXME: move under concurrent module
     fn hazard(&self) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be>;
 
-    fn slice(&self, bit: usize) -> Self;
-
+    // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
-
-    fn suffix(self, bits: usize) -> Self;
-
-    fn prefix(&self, other: &Self) -> Self;
-
     fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge>;
+
+    // Prefix operations for prefix and range iteration
+    fn prefix(self, bits: usize) -> Self;
+    fn suffix(self, bits: usize) -> Self;
+    fn common_prefix(self, other: Self) -> Self;
 }
 
 pub trait Write: Clone + fmt::Debug + Default + Ord {

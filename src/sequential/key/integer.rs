@@ -141,7 +141,7 @@ impl<U: Uint> key::Read for Reader<U> {
         }
     }
 
-    fn prefix(&self, other: &Self) -> Self {
+    fn common_prefix(self, other: Self) -> Self {
         let max = self.bits.min(other.bits);
         let bits = (self.buffer ^ other.buffer).leading_zeros().min(max) & !0b111;
         Self {
@@ -151,7 +151,7 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
-    fn slice(&self, bits: usize) -> Self {
+    fn prefix(self, bits: usize) -> Self {
         validate!(bits <= U::BITS as usize);
 
         let bits = bits as u8;

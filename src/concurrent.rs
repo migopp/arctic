@@ -300,7 +300,7 @@ where
         let cursor = cursor::Prefix::<_, _, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
-            min.prefix(&max),
+            min.common_prefix(max),
         )?;
         Some(iter::PrefixGuard::new(cursor, min..=max))
     }
