@@ -13,11 +13,11 @@
 pub(crate) mod cursor;
 pub(crate) mod edge;
 pub(crate) mod iter;
-pub mod key;
+pub(crate) mod key;
 pub(crate) mod node;
 
 pub(crate) use edge::Edge;
-pub use key::Key;
+pub(crate) use key::Key;
 pub(crate) use node::Node;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

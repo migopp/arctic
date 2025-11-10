@@ -10,8 +10,8 @@ use crate::raw;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
 use crate::raw::Edge;
-use crate::raw::Key;
 use crate::stat;
+use crate::Key;
 pub(crate) use value::Value;
 
 #[repr(transparent)]
@@ -41,14 +41,14 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+    pub fn get(&self, key: <K as Key>::Borrow<'_>) -> Option<V::Borrow<'_>> {
         unsafe { raw::cursor::Point::<K, _>::get(&self.root, K::Read::from(key)) }
             .map(|value| unsafe { V::borrow_from_raw(value) })
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn insert(&mut self, key: K::Borrow<'_>, value: u64) -> Option<u64> {
+    pub fn insert(&mut self, key: <K as Key>::Borrow<'_>, value: u64) -> Option<u64> {
         todo!()
         // let mut edge = self.root();
         // let mut key = K::Read::from(key);
@@ -114,13 +114,13 @@ impl<K: Key, V: Value> Map<K, V> {
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<u64> {
+    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<u64> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: u64) -> Option<u64> {
+    pub fn update(&mut self, key: <K as Key>::Borrow<'_>, value: u64) -> Option<u64> {
         todo!()
     }
 
@@ -144,7 +144,7 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
+    pub fn lend(&mut self) -> Option<(<K as Key>::Borrow<'_>, V::Borrow<'g>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 // FIXME: borrow without guard

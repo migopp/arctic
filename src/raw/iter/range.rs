@@ -13,7 +13,7 @@ use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 
-pub enum RangeIter<'g, R: key::Read, W: key::Write, M, B: raw::iter::Range<R>, O> {
+pub(crate) enum RangeIter<'g, R: key::Read, W: key::Write, M, B: raw::iter::Range<R>, O> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, M, B, O>),
 }

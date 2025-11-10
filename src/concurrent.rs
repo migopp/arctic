@@ -1,8 +1,8 @@
 mod cursor;
-pub(crate) mod hazard;
+mod hazard;
 mod iter;
-mod key;
-mod value;
+pub(crate) mod key;
+pub(crate) mod value;
 
 use core::ops::RangeFull;
 use core::ops::RangeInclusive;
@@ -19,9 +19,8 @@ use crate::raw::Edge;
 use crate::raw::Op;
 use crate::sequential;
 use crate::stat;
-
-pub use key::Key;
-pub use value::Value;
+use crate::Key;
+use crate::Value;
 
 pub struct Map<K: Key, V: Value> {
     smr: hazard::Global<V>,
@@ -30,7 +29,7 @@ pub struct Map<K: Key, V: Value> {
 
 unsafe impl<K: Key, V: Value + Send + Sync> Sync for Map<K, V> {}
 
-impl<K: Key, V: Value> Default for Map<K, V> {
+impl<K: crate::Key, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
             smr: hazard::Global::default(),
@@ -65,25 +64,29 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
+    pub fn get(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
         cursor::Point::<K, V, _>::get(&mut self.smr, self.raw.root(), K::Read::from(key))
     }
 
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
+    pub fn update(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        value: V,
+    ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
         unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
     }
 
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
+    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
         unsafe { self.compare_exchange(key, |_| Edge::DEFAULT) }
     }
 
     #[inline]
     unsafe fn compare_exchange<F>(
         &mut self,
-        key: K::Borrow<'_>,
+        key: <K as Key>::Borrow<'_>,
         mut exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
@@ -105,7 +108,7 @@ where
     #[inline]
     unsafe fn compare_exchange_optimistic<F>(
         &mut self,
-        key: K::Borrow<'_>,
+        key: <K as Key>::Borrow<'_>,
         exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
     where
@@ -117,7 +120,7 @@ where
     #[cold]
     unsafe fn compare_exchange_pessimistic<F>(
         &mut self,
-        key: K::Borrow<'_>,
+        key: <K as Key>::Borrow<'_>,
         exchange: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
@@ -134,7 +137,7 @@ where
     #[inline]
     unsafe fn compare_exchange_impl<'l, 'k, H, F>(
         &'l mut self,
-        key: K::Borrow<'k>,
+        key: <K as Key>::Borrow<'k>,
         mut exchange: F,
     ) -> Result<Option<V::OwnedGuard<'g, 'l>>, H::PopError>
     where
@@ -171,7 +174,11 @@ where
     }
 
     #[inline]
-    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
+    pub fn insert(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        value: V,
+    ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
         let mut map = &mut *self;
 
@@ -189,7 +196,7 @@ where
     #[inline]
     fn insert_optimistic(
         &mut self,
-        key: K::Borrow<'_>,
+        key: <K as Key>::Borrow<'_>,
         value: u64,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
         self.insert_impl::<cursor::path::Discard>(key, value)
@@ -198,7 +205,7 @@ where
     #[cold]
     fn insert_pessimistic(
         &mut self,
-        key: K::Borrow<'_>,
+        key: <K as Key>::Borrow<'_>,
         value: u64,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         stat::increment(stat::Counter::InsertPessimistic);
@@ -209,7 +216,7 @@ where
     #[inline]
     fn insert_impl<'k, H>(
         &mut self,
-        key: K::Borrow<'k>,
+        key: <K as Key>::Borrow<'k>,
         value: u64,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where

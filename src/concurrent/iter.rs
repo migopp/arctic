@@ -18,6 +18,7 @@ pub struct PrefixGuard<'g, 'l, 'k, K: Key, V: Value, R> {
     range: R,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
 where
     K: Key,
@@ -44,6 +45,7 @@ where
     }
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
 where
     K: Key,
@@ -82,11 +84,13 @@ where
 }
 
 /// Iterator over keys and values
+#[expect(private_bounds)]
 pub struct EntryIter<'g, 'l, 'k, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
     guard: &'l hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, K::Write, K::Edge, R, O>,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'k, K, V, R, O> EntryIter<'g, 'l, 'k, K, V, R, O>
 where
     K: Key,
@@ -95,7 +99,7 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
+    pub fn lend(&mut self) -> Option<(<K as Key>::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -104,7 +108,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(<K as Key>::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -138,11 +142,13 @@ where
 }
 
 /// Iterator over values only
+#[expect(private_bounds)]
 pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
     guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore<K::Edge>, K::Edge, R, O>,
 }
 
+#[expect(private_bounds)]
 impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>
 where
     K: Key,

@@ -21,7 +21,10 @@ pub(crate) struct Exclude<T>(pub(crate) T);
 pub(crate) struct Unbound;
 
 pub(crate) trait Range<R: key::Read>: Clone {
+    #[expect(private_bounds)]
     type Lower: Lower<R>;
+
+    #[expect(private_bounds)]
     type Upper: Upper<R>;
 
     fn suffix(self, bits: usize) -> Self;
@@ -50,7 +53,7 @@ impl<R: key::Read> Range<R> for RangeInclusive<R> {
     }
 }
 
-pub(crate) trait Lower<R: key::Read> {
+trait Lower<R: key::Read> {
     type Bound: raw::node::Lower;
 
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool;
@@ -58,7 +61,7 @@ pub(crate) trait Lower<R: key::Read> {
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
 }
 
-pub(crate) trait Upper<R: key::Read> {
+trait Upper<R: key::Read> {
     type Bound: raw::node::Upper;
 
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool;

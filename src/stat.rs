@@ -1,13 +1,13 @@
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use crate::concurrent::Value;
 use crate::iter::Unsorted;
 use crate::raw::edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
 use crate::raw::Op;
 use crate::Key;
+use crate::Value;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 

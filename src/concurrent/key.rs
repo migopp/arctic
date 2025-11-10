@@ -5,16 +5,19 @@ use crate::raw::key::integer;
 use crate::raw::key::Read as _;
 
 pub trait Key: raw::Key {
+    #[expect(private_interfaces)]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be>;
 }
 
 impl Key for Vec<u8> {
+    #[expect(private_interfaces)]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
         hazard_dynamic(reader)
     }
 }
 
 impl Key for String {
+    #[expect(private_interfaces)]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
         hazard_dynamic(reader)
     }
@@ -24,6 +27,7 @@ macro_rules! impl_integer {
     ($($integer:ty),* $(,)?) => {
         $(
             impl Key for $integer {
+                #[expect(private_interfaces)]
                 fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
                     hazard_integer(reader)
                 }

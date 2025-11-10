@@ -7,15 +7,15 @@ use core::marker::PhantomData;
 use crate::raw::edge;
 
 pub trait Key {
-    #[allow(private_bounds)]
     type Borrow<'k>: Copy;
 
-    #[allow(private_bounds)]
+    #[expect(private_bounds)]
     type Read<'k>: Read<Edge = Self::Edge> + From<Self::Borrow<'k>>;
 
-    #[allow(private_bounds)]
+    #[expect(private_bounds)]
     type Write: Write<Edge = Self::Edge> + for<'k> From<Self::Read<'k>>;
 
+    #[expect(private_bounds)]
     type Edge: edge::Meta;
 
     unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
@@ -27,7 +27,7 @@ pub trait Key {
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
 }
 
-pub trait Read: Copy + fmt::Debug + Default {
+pub(crate) trait Read: Copy + fmt::Debug + Default {
     type Edge: edge::Meta;
 
     fn bits(&self) -> usize;
@@ -47,7 +47,7 @@ pub trait Read: Copy + fmt::Debug + Default {
     fn common_prefix(self, other: Self) -> Self;
 }
 
-pub trait Write: Clone + fmt::Debug + Default + Ord {
+pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
     type Edge: edge::Meta;
 
@@ -68,7 +68,7 @@ pub trait Write: Clone + fmt::Debug + Default + Ord {
 }
 
 #[derive(Clone)]
-pub struct Ignore<M>(PhantomData<M>);
+pub(crate) struct Ignore<M>(PhantomData<M>);
 
 impl<M> Default for Ignore<M> {
     fn default() -> Self {

@@ -20,7 +20,7 @@ use crate::stat;
 
 #[derive(Copy, Clone, Default, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
-pub struct Edge<M> {
+pub(crate) struct Edge<M> {
     #[ribbit(size = 64)]
     pub(crate) meta: M,
 
@@ -249,7 +249,7 @@ impl<C> Debug for Child<C> {
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
-pub struct Node<C> {
+pub(crate) struct Node<C> {
     #[ribbit(size = 2)]
     kind: node::Kind,
 
