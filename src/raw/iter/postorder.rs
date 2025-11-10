@@ -1,6 +1,6 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::iter::Unsorted;
 use crate::raw::edge;
@@ -12,9 +12,9 @@ pub(crate) struct PostorderIter<'g, M: edge::Meta> {
     stack: Vec<RepeatIter<'g, M>>,
 }
 
-impl<'g, M: edge::Meta> PostorderIter<'g, M> {
+impl<'g, M: edge::Meta + 'g> PostorderIter<'g, M> {
     #[inline]
-    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<M>>) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic<Edge<M>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
         // since this iterator doesn't keep track of the key state,
         // so we can use an arbitrary byte.

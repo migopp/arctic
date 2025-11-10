@@ -1,4 +1,4 @@
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::concurrent::hazard;
 use crate::concurrent::Value;
@@ -26,7 +26,7 @@ where
     #[inline]
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<K::Edge>>,
+        root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
     ) -> Point<'g, 'l, 'k, K, V, H>
     where
@@ -41,7 +41,7 @@ where
     }
 
     #[inline]
-    pub(super) fn edge(&self) -> &'g Atomic128<Edge<K::Edge>> {
+    pub(super) fn edge(&self) -> &'g Atomic<Edge<K::Edge>> {
         self.raw.edge()
     }
 
@@ -103,7 +103,7 @@ where
     #[inline]
     pub(super) fn get(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<K::Edge>>,
+        root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
     ) -> Option<V::SharedGuard<'g, 'l>> {
         let guard = smr.guard(K::hazard(key));
@@ -127,7 +127,7 @@ where
 {
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<K::Edge>>,
+        root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
     ) -> Option<Self> {
         let guard = smr.guard(K::hazard(prefix));
@@ -139,7 +139,7 @@ where
 
     pub(super) fn new_root(
         smr: &'l mut hazard::Local<'g, V>,
-        root: &'g Atomic128<Edge<K::Edge>>,
+        root: &'g Atomic<Edge<K::Edge>>,
     ) -> Self {
         Self {
             guard: smr.guard(hazard::prefix::Be::HAZARD_ROOT),
@@ -151,7 +151,7 @@ where
         self.raw.prefix()
     }
 
-    pub(super) fn edge(&self) -> &'g Atomic128<Edge<K::Edge>> {
+    pub(super) fn edge(&self) -> &'g Atomic<Edge<K::Edge>> {
         self.raw.edge()
     }
 

@@ -86,7 +86,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 use thread_local::ThreadLocal;
 
 use crate::concurrent::Value;
@@ -102,7 +102,7 @@ struct Cache<T>(T);
 
 pub(crate) struct Global<V: Value> {
     _value: PhantomData<V>,
-    hazards: ThreadLocal<Cache<Atomic128<prefix::Be>>>,
+    hazards: ThreadLocal<Cache<Atomic<prefix::Be>>>,
     retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>>,
 }
 
@@ -113,7 +113,7 @@ impl<V: Value> Global<V> {
             hazards: &self.hazards,
             hazard: &self
                 .hazards
-                .get_or(|| Cache(Atomic128::from_packed(prefix::Be::HAZARD_NULL)))
+                .get_or(|| Cache(Atomic::new_packed(prefix::Be::HAZARD_NULL)))
                 .0,
             retired: self.retired.get_or_default().0.borrow_mut(),
         }
@@ -144,8 +144,8 @@ impl<V: Value> Drop for Global<V> {
 
 pub(crate) struct Local<'g, V: 'g> {
     _value: PhantomData<V>,
-    hazards: &'g ThreadLocal<Cache<Atomic128<prefix::Be>>>,
-    hazard: &'g Atomic128<prefix::Be>,
+    hazards: &'g ThreadLocal<Cache<Atomic<prefix::Be>>>,
+    hazard: &'g Atomic<prefix::Be>,
     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
 }
 

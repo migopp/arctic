@@ -3,7 +3,7 @@ mod value;
 use core::cell::Cell;
 use core::marker::PhantomData;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::iter::Order;
 use crate::raw;
@@ -16,7 +16,7 @@ pub(crate) use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {
-    root: Atomic128<Edge<K::Edge>>,
+    root: Atomic<Edge<K::Edge>>,
     _not_sync: PhantomData<Cell<()>>,
     _value: PhantomData<V>,
 }
@@ -24,7 +24,7 @@ pub struct Map<K: Key, V: Value> {
 impl<K: Key, V: Value> Default for Map<K, V> {
     fn default() -> Self {
         Self {
-            root: Atomic128::from_packed(Edge::DEFAULT),
+            root: Atomic::new_packed(Edge::DEFAULT),
             _not_sync: PhantomData,
             _value: PhantomData,
         }
@@ -32,7 +32,7 @@ impl<K: Key, V: Value> Default for Map<K, V> {
 }
 
 impl<K: Key, V: Value> Map<K, V> {
-    pub(crate) fn root(&self) -> &Atomic128<Edge<K::Edge>> {
+    pub(crate) fn root(&self) -> &Atomic<Edge<K::Edge>> {
         &self.root
     }
 

@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -10,7 +10,7 @@ use crate::raw::node::Op;
 use crate::raw::Node;
 
 #[repr(C, align(4096))]
-pub(crate) struct Node256<M>([Atomic128<Edge<M>>; 256]);
+pub(crate) struct Node256<M: ribbit::Pack>([Atomic<Edge<M>>; 256]);
 
 const _: () = assert!(core::mem::size_of::<Node256<()>>() == 4096);
 const _: () = assert!(core::mem::align_of::<Node256<()>>() == 4096);
@@ -20,9 +20,7 @@ where
     M: edge::Meta,
 {
     fn default() -> Self {
-        Self(core::array::from_fn(|_| {
-            Atomic128::from_packed(Edge::DEFAULT)
-        }))
+        Self(core::array::from_fn(|_| Atomic::new_packed(Edge::DEFAULT)))
     }
 }
 
@@ -37,23 +35,23 @@ where
     type Shrink = Node15<M>;
 
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge<M>>] {
+    fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.0
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
+    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked(key as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         self.get(key)
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<M>>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
@@ -63,7 +61,7 @@ where
     }
 }
 
-impl<M> Node256<M> {
+impl<M: ribbit::Pack> Node256<M> {
     #[inline]
     pub(crate) fn keys<L: node::iter::Lower, H: node::iter::Upper>(
         &self,

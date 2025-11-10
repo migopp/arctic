@@ -3,7 +3,7 @@ pub(crate) mod path;
 use core::sync::atomic::Ordering;
 
 use path::History as _;
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
@@ -24,7 +24,7 @@ pub(crate) struct Point<'g, 'k, K: Key, H> {
     key: K::Read<'k>,
 
     /// Edge this cursor currently points to
-    edge: &'g Atomic128<Edge<K::Edge>>,
+    edge: &'g Atomic<Edge<K::Edge>>,
 
     /// Path history of this cursor (sequence of path segments)
     history: H,
@@ -36,7 +36,7 @@ where
     H: path::History<'g, 'k, K>,
 {
     #[inline]
-    pub(crate) unsafe fn new(root: &'g Atomic128<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
         Self {
             bits: 0,
             edge: root,
@@ -46,7 +46,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn edge(&self) -> &'g Atomic128<Edge<K::Edge>> {
+    pub(crate) fn edge(&self) -> &'g Atomic<Edge<K::Edge>> {
         self.edge
     }
 
@@ -250,7 +250,7 @@ where
         key: K::Read<'k>,
         len: <K::Edge as edge::Meta>::Len,
         node: node::Ref<'g, K::Edge>,
-        edge: &'g Atomic128<Edge<K::Edge>>,
+        edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
         self.bits += 8 + K::Edge::len_to_bits(len);
@@ -277,7 +277,7 @@ where
     K: Key,
 {
     #[inline]
-    pub(crate) unsafe fn get(root: &'g Atomic128<Edge<K::Edge>>, key: K::Read<'k>) -> Option<u64> {
+    pub(crate) unsafe fn get(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Option<u64> {
         let mut cursor = Self::new(root, key);
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
@@ -312,7 +312,7 @@ where
     K: Key,
     H: path::History<'g, 'k, K>,
 {
-    pub(crate) unsafe fn new_root(root: &'g Atomic128<Edge<K::Edge>>) -> Self {
+    pub(crate) unsafe fn new_root(root: &'g Atomic<Edge<K::Edge>>) -> Self {
         let prefix = K::Read::default();
         Self {
             prefix,
@@ -320,10 +320,7 @@ where
         }
     }
 
-    pub(crate) unsafe fn new(
-        root: &'g Atomic128<Edge<K::Edge>>,
-        prefix: K::Read<'k>,
-    ) -> Option<Self> {
+    pub(crate) unsafe fn new(root: &'g Atomic<Edge<K::Edge>>, prefix: K::Read<'k>) -> Option<Self> {
         let mut cursor = Self {
             prefix,
             cursor: Point::new(root, prefix),

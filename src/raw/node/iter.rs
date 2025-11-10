@@ -2,27 +2,27 @@ use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::iter::Unbound;
 use crate::raw::node::linear;
 use crate::raw::node::node256;
 use crate::raw::Edge;
 
-pub(crate) struct NodeIter<'g, L, U, V> {
+pub(crate) struct NodeIter<'g, L, U, M: ribbit::Pack> {
     lower: L,
     upper: U,
 
     keys: KeyIter,
-    edges: NonNull<Atomic128<Edge<V>>>,
+    edges: NonNull<Atomic<Edge<M>>>,
 
     #[cfg(feature = "validate")]
     len: u16,
 
-    _slice: PhantomData<&'g [Atomic128<Edge<V>>]>,
+    _slice: PhantomData<&'g [Atomic<Edge<M>>]>,
 }
 
-impl<'g, L, U, V> NodeIter<'g, L, U, V> {
+impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
@@ -30,7 +30,7 @@ impl<'g, L, U, V> NodeIter<'g, L, U, V> {
         lower: L,
         upper: U,
         keys: KeyIter,
-        edges: &'g [Atomic128<Edge<V>>],
+        edges: &'g [Atomic<Edge<M>>],
     ) -> Self {
         Self {
             lower,
@@ -55,8 +55,8 @@ impl<'g, L, U, V> NodeIter<'g, L, U, V> {
     }
 }
 
-impl<'g, L, U, V> Iterator for NodeIter<'g, L, U, V> {
-    type Item = (u8, &'g Atomic128<Edge<V>>);
+impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
+    type Item = (u8, &'g Atomic<Edge<M>>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -80,7 +80,7 @@ impl<'g, L, U, V> Iterator for NodeIter<'g, L, U, V> {
     }
 }
 
-impl<'g, L, U, V> DoubleEndedIterator for NodeIter<'g, L, U, V> {
+impl<'g, L, U, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, L, U, M> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         let (key, index) = self.keys.next_back()?;
@@ -98,7 +98,7 @@ impl<'g, L, U, V> DoubleEndedIterator for NodeIter<'g, L, U, V> {
     }
 }
 
-impl<'g, L, U, V> ExactSizeIterator for NodeIter<'g, L, U, V> {
+impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();

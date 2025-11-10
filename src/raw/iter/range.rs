@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::iter::Order;
 use crate::raw;
@@ -13,7 +13,14 @@ use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 
-pub(crate) enum RangeIter<'g, R: key::Read, W: key::Write, M, B: raw::iter::Range<R>, O> {
+pub(crate) enum RangeIter<
+    'g,
+    R: key::Read,
+    W: key::Write,
+    M: ribbit::Pack,
+    B: raw::iter::Range<R>,
+    O,
+> {
     Root { key: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, M, B, O>),
 }
@@ -43,7 +50,7 @@ where
     B: raw::iter::Range<R>,
     O: Order,
 {
-    pub(crate) unsafe fn new_unchecked(root: &'g Atomic128<Edge<M>>, prefix: R, range: B) -> Self {
+    pub(crate) unsafe fn new_unchecked(root: &'g Atomic<Edge<M>>, prefix: R, range: B) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
 
         let Some(child) = edge.child() else {
@@ -114,7 +121,14 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'g, R: key::Read, W: key::Write, M: 'g, B: raw::iter::Range<R>, O> {
+pub(crate) struct NodeIter<
+    'g,
+    R: key::Read,
+    W: key::Write,
+    M: ribbit::Pack + 'g,
+    B: raw::iter::Range<R>,
+    O,
+> {
     lower: B::Lower,
     upper: B::Upper,
     key: W,

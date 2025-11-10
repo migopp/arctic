@@ -1,4 +1,4 @@
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::concurrent::cursor;
 use crate::concurrent::hazard;
@@ -13,7 +13,7 @@ use crate::raw::Edge;
 /// Guard all nodes and values below this prefix from memory reclamation.
 pub struct PrefixGuard<'g, 'l, 'k, K: Key, V: Value, R> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
-    root: &'g Atomic128<Edge<K::Edge>>,
+    root: &'g Atomic<Edge<K::Edge>>,
     prefix: K::Read<'k>,
     range: R,
 }

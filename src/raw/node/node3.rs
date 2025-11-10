@@ -1,8 +1,8 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic64;
 use ribbit::u24;
 use ribbit::u4;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -10,7 +10,7 @@ use crate::raw::node::linear;
 
 use super::Node15;
 
-pub(crate) type Node3<C> = super::Linear<3, Atomic64<Header>, C>;
+pub(crate) type Node3<C> = super::Linear<3, Atomic<Header>, C>;
 
 const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
@@ -34,7 +34,7 @@ impl Default for HeaderPacked {
     }
 }
 
-impl<M> linear::Header<M> for Atomic64<Header>
+impl<M> linear::Header<M> for Atomic<Header>
 where
     M: edge::Meta,
 {

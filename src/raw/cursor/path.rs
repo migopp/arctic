@@ -1,6 +1,6 @@
 use core::convert::Infallible;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -13,7 +13,7 @@ pub(crate) struct Segment<'g, 'k, K: Key> {
     pub(super) key: K::Read<'k>,
 
     /// Edge to match
-    pub(super) edge: &'g Atomic128<Edge<K::Edge>>,
+    pub(super) edge: &'g Atomic<Edge<K::Edge>>,
 
     /// Number of bytes matched along `edge`
     pub(super) len: <K::Edge as edge::Meta>::Len,
@@ -28,7 +28,7 @@ where
 {
     type PopError;
 
-    fn new(root: &'g Atomic128<Edge<K::Edge>>, key: K::Read<'k>) -> Self;
+    fn new(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self;
     fn push(&mut self, segment: Segment<'g, 'k, K>);
     fn pop(&mut self) -> Result<Option<Segment<'g, 'k, K>>, Self::PopError>;
 }
@@ -41,7 +41,7 @@ where
 {
     type PopError = ();
 
-    fn new(_root: &'g Atomic128<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
+    fn new(_root: &'g Atomic<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
         Self
     }
 
@@ -64,7 +64,7 @@ where
 {
     type PopError = Infallible;
 
-    fn new(_root: &'g Atomic128<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
+    fn new(_root: &'g Atomic<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
         Self { path: Vec::new() }
     }
 
@@ -80,7 +80,7 @@ where
 }
 
 pub(crate) enum Hybrid<'g, 'k, K: Key> {
-    Discard { root: &'g Atomic128<Edge<K::Edge>> },
+    Discard { root: &'g Atomic<Edge<K::Edge>> },
     Retain(Retain<'g, 'k, K>),
 }
 
@@ -90,7 +90,7 @@ where
 {
     type PopError = ();
 
-    fn new(root: &'g Atomic128<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
+    fn new(root: &'g Atomic<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
         Self::Discard { root }
     }
 

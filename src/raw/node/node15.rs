@@ -1,8 +1,8 @@
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
 use ribbit::u120;
 use ribbit::u4;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -10,7 +10,7 @@ use crate::raw::node::linear;
 use crate::raw::node::Node256;
 use crate::raw::node::Node3;
 
-pub(crate) type Node15<C> = super::Linear<15, Atomic128<Header>, C>;
+pub(crate) type Node15<C> = super::Linear<15, Atomic<Header>, C>;
 
 const _: () = assert!(core::mem::size_of::<Node15<()>>() == 256);
 const _: () = assert!(core::mem::align_of::<Node15<()>>() == 64);
@@ -34,7 +34,7 @@ impl Default for HeaderPacked {
     }
 }
 
-impl<M> linear::Header<M> for Atomic128<Header>
+impl<M> linear::Header<M> for Atomic<Header>
 where
     M: edge::Meta,
 {

@@ -14,7 +14,7 @@ use linear::Linear;
 pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::Edge;
@@ -29,13 +29,13 @@ where
     type Grow: Node<M>;
     type Shrink: Node<M>;
 
-    fn edges(&self) -> &[Atomic128<Edge<M>>];
+    fn edges(&self) -> &[Atomic<Edge<M>>];
 
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<M>>>;
+    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
 
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<M>>>;
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<M>>>;
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
 
     fn replace(&self, parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>);
 }
@@ -71,7 +71,7 @@ impl Op {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) enum Ref<'g, M> {
+pub(crate) enum Ref<'g, M: ribbit::Pack> {
     Node3(&'g Node3<M>),
     Node15(&'g Node15<M>),
     Node256(&'g Node256<M>),
@@ -125,7 +125,7 @@ where
     M: edge::Meta,
 {
     #[inline]
-    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic128<Edge<M>>> {
+    pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         match self {
             Self::Node3(node) => node.get(key),
             Self::Node15(node) => node.get(key),
@@ -134,7 +134,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic128<Edge<M>>> {
+    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         match self {
             Ref::Node3(node) => node.get_or_reserve(key),
             Ref::Node15(node) => node.get_or_reserve(key),

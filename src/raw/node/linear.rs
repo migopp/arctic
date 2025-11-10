@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -12,16 +12,16 @@ use crate::raw::node::Op;
 use crate::raw::Node;
 
 #[repr(C, align(64))]
-pub(crate) struct Linear<const LEN: usize, H, M> {
+pub(crate) struct Linear<const LEN: usize, H, M: ribbit::Pack> {
     pub(super) header: H,
-    pub(super) edges: [Atomic128<Edge<M>>; LEN],
+    pub(super) edges: [Atomic<Edge<M>>; LEN],
 }
 
 impl<const LEN: usize, H: Default, M: edge::Meta> Default for Linear<LEN, H, M> {
     fn default() -> Self {
         Self {
             header: H::default(),
-            edges: core::array::from_fn(|_| Atomic128::from_packed(Edge::DEFAULT)),
+            edges: core::array::from_fn(|_| Atomic::new_packed(Edge::DEFAULT)),
         }
     }
 }
@@ -38,24 +38,24 @@ where
     type Shrink = H::Shrink;
 
     #[inline]
-    fn edges(&self) -> &[Atomic128<Edge<M>>] {
+    fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
+    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic128<Edge<M>>> {
+    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic128<Edge<M>>> {
+    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         let index = self.header.get_or_reserve(key)?;
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }

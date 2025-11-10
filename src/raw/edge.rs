@@ -9,7 +9,7 @@ use core::num::NonZeroU64;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
-use ribbit::atomic::Atomic128;
+use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
 use crate::raw::node;
@@ -31,7 +31,7 @@ impl<M: Meta> Edge<M> {
     pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(M::DEFAULT, 0);
 
     #[inline]
-    pub(crate) fn freeze(edge: &Atomic128<Self>) {
+    pub(crate) fn freeze(edge: &Atomic<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
         while !M::is_frozen(old.meta()) {
