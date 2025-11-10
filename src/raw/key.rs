@@ -39,7 +39,7 @@ pub trait Read: Copy + fmt::Debug + Default {
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge>;
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> <Self::Edge as edge::Meta>::Key;
 
     // Prefix operations for prefix and range iteration
     fn prefix(self, bits: usize) -> Self;

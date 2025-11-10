@@ -97,10 +97,9 @@ where
 
         match &edges[..len] {
             _ if len == Self::GROW => {
-                return (
-                    node::Op::Grow,
-                    Edge::new_node::<Self::Grow, _>(meta, edges.into_iter().take(len)),
-                )
+                return (node::Op::Grow, unsafe {
+                    Edge::new_node_unchecked::<Self::Grow, _>(meta, edges.into_iter().take(len))
+                })
             }
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
@@ -114,10 +113,9 @@ where
         }
 
         // Catch-all:
-        (
-            node::Op::Replace,
-            Edge::new_node::<Self, _>(meta, edges.into_iter().take(len)),
-        )
+        (node::Op::Replace, unsafe {
+            Edge::new_node_unchecked::<Self, _>(meta, edges.into_iter().take(len))
+        })
     }
 }
 

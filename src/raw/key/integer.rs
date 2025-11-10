@@ -98,9 +98,9 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
+    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> <Self::Edge as edge::Meta>::Key {
         let len = edge::Be::min_len(len, self.bits as usize);
-        let meta = edge::Be::from_u64_truncate(self.buffer.most_significant_u64(), len);
+        let meta = edge::Be::key_from_u64_truncate(self.buffer.most_significant_u64(), len);
         self.buffer = self.buffer.shl_at_most_56(len.value());
         self.bits -= len.value();
         meta

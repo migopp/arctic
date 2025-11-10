@@ -61,9 +61,10 @@ where
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key;
-            let len = K::Edge::len(meta);
+            let key = K::Edge::key(meta);
+            let len = K::Edge::len(key);
 
-            if !K::Edge::equal(self.key.read(len), meta) {
+            if self.key.read(len) != key {
                 return None;
             }
 
@@ -115,11 +116,12 @@ where
             let old_meta = old.meta();
             let mut save = self.key;
 
-            let old_len = K::Edge::len(old_meta);
+            let old_key = K::Edge::key(old_meta);
+            let old_len = K::Edge::len(old_key);
             let key = self.key.read(old_len);
 
             // Fast path: traverse
-            if K::Edge::equal(key, old_meta) {
+            if key == old_key {
                 if let Some(node) = old.as_node() {
                     if node.scan() {
                         self.wait_for_scan(stat::Counter::ScanInsert)?;
@@ -278,8 +280,10 @@ where
         let mut cursor = Self::new(root, key);
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
-            let meta = edge.meta();
-            if !K::Edge::equal(cursor.key.read(K::Edge::len(meta)), meta) {
+            let key = K::Edge::key(edge.meta());
+            let len = K::Edge::len(key);
+
+            if cursor.key.read(len) != key {
                 return None;
             }
 
@@ -337,23 +341,24 @@ where
             let meta = edge.meta();
             let save = self.cursor.key;
 
-            let len = K::Edge::len(meta);
-            let key = self.cursor.key.read(len);
+            let key_edge = K::Edge::key(meta);
+            let len_edge = K::Edge::len(key_edge);
+            let key_cursor = self.cursor.key.read(len_edge);
 
             // Mismatch
-            if !K::Edge::equal(key, meta) {
+            if key_cursor != key_edge {
                 return None;
             }
 
             // Full match
-            if K::Edge::len(key) == len {
+            if K::Edge::len(key_cursor) == len_edge {
                 if let Some(node) = edge.as_node() {
                     let node = unsafe { node.into_ref_unchecked() };
                     let Some(byte) = self.cursor.key.next() else {
                         break (save, edge);
                     };
                     let next = node.get(byte)?;
-                    self.cursor.push(save, len, node, next);
+                    self.cursor.push(save, len_edge, node, next);
                     continue;
                 }
             }

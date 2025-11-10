@@ -7,7 +7,7 @@ use ribbit::u6;
 use crate::raw::edge::Meta;
 
 #[derive(Copy, Clone, ribbit::Pack)]
-#[ribbit(size = 64)]
+#[ribbit(size = 64, eq, ord)]
 pub struct Be {
     len: u6,
     value: bool,
@@ -16,10 +16,11 @@ pub struct Be {
 }
 
 impl Be {
-    const MASK_PREFIX: u64 = !0b1100_0000;
+    const MASK_META: u64 = 0b1100_0000;
+    const MASK_KEY: u64 = !Self::MASK_META;
 
     #[inline]
-    pub(crate) fn from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
+    pub(crate) fn key_from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
         let mask = !(u64::MAX >> len.value());
         validate_eq!(len.value() & 0b111, 0);
         unsafe { ribbit::Packed::<Self>::new_unchecked(value & mask | (len.value() as u64)) }
@@ -43,25 +44,21 @@ impl Meta for Be {
     const MAX_LEN: Self::Len = u6::new(56);
 
     type Len = u6;
+    type Key = ribbit::Packed<Self>;
 
     #[inline]
-    fn len(meta: ribbit::Packed<Self>) -> Self::Len {
-        meta.len()
+    fn key(meta: ribbit::Packed<Self>) -> Self::Key {
+        unsafe { ribbit::Packed::<Self>::new_unchecked(meta.value & Self::MASK_KEY) }
+    }
+
+    #[inline]
+    fn len(key: Self::Key) -> Self::Len {
+        key.len()
     }
 
     #[inline]
     fn len_to_bits(len: Self::Len) -> usize {
         len.value() as usize
-    }
-
-    #[inline]
-    fn equal(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> bool {
-        (left.value ^ right.value) & Self::MASK_PREFIX == 0
-    }
-
-    #[inline]
-    fn cmp(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> core::cmp::Ordering {
-        (left.value & Self::MASK_PREFIX).cmp(&(right.value & Self::MASK_PREFIX))
     }
 
     #[inline]
@@ -87,9 +84,9 @@ impl Meta for Be {
     #[inline]
     fn expand(
         old: ribbit::Packed<Self>,
-        new: ribbit::Packed<Self>,
+        new: Self::Key,
     ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), ()> {
-        if Self::equal(old, new) {
+        if Self::key(old) == new {
             return Err(());
         }
 
@@ -107,9 +104,9 @@ impl Meta for Be {
 
         let len_middle = unsafe { u6::new_unchecked(len_start.value() + 8) };
         Ok((
-            Self::from_u64_truncate(old.value, len_start).with_value(false),
+            Self::key_from_u64_truncate(old.value, len_start).with_value(false),
             old.value.rotate_left(len_middle.value() as u32) as u8,
-            Self::from_u64_truncate(old.value << len_middle.value(), old.len() - len_middle)
+            Self::key_from_u64_truncate(old.value << len_middle.value(), old.len() - len_middle)
                 .with_value(old.value()),
         ))
     }

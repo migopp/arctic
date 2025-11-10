@@ -48,12 +48,25 @@ impl<M: Meta> Edge<M> {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(meta: ribbit::Packed<M>, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(key: M::Key, edges: I) -> ribbit::Packed<Self>
+    where
+        N: node::Node<M>,
+        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
+    {
+        unsafe { Self::new_node_unchecked::<N, I>(M::with_value(key, false), edges) }
+    }
+
+    #[cold]
+    pub(crate) unsafe fn new_node_unchecked<N, I>(
+        meta: ribbit::Packed<M>,
+        edges: I,
+    ) -> ribbit::Packed<Self>
     where
         N: node::Node<M>,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
     {
         validate!(!M::is_frozen(meta));
+        validate!(!M::is_value(meta));
 
         let mut node = Box::new(N::default());
 
@@ -63,12 +76,10 @@ impl<M: Meta> Edge<M> {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(M::with_value(meta, false), Node::new(node).value.get())
+        ribbit::Packed::<Self>::new(meta, Node::new(node).value.get())
     }
 
-    pub(crate) fn new_value(meta: ribbit::Packed<M>, value: u64) -> ribbit::Packed<Self> {
-        validate!(!M::is_frozen(meta));
-
+    pub(crate) fn new_value(meta: M::Key, value: u64) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(M::with_value(meta, true), value)
     }
 }
@@ -171,23 +182,22 @@ pub(crate) trait Meta: ribbit::Pack {
     const MAX_LEN: Self::Len;
 
     type Len: Copy + Eq;
+    type Key: Copy + Eq + Ord;
 
-    fn len(meta: ribbit::Packed<Self>) -> Self::Len;
+    fn key(meta: ribbit::Packed<Self>) -> Self::Key;
+    fn len(key: Self::Key) -> Self::Len;
     fn len_to_bits(len: Self::Len) -> usize;
-
-    fn equal(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> bool;
-    fn cmp(left: ribbit::Packed<Self>, right: ribbit::Packed<Self>) -> core::cmp::Ordering;
 
     fn is_value(meta: ribbit::Packed<Self>) -> bool;
     fn is_frozen(meta: ribbit::Packed<Self>) -> bool;
 
     fn with_frozen(meta: ribbit::Packed<Self>, frozen: bool) -> ribbit::Packed<Self>;
-    fn with_value(meta: ribbit::Packed<Self>, value: bool) -> ribbit::Packed<Self>;
+    fn with_value(meta: Self::Key, value: bool) -> ribbit::Packed<Self>;
 
     fn expand(
         old: ribbit::Packed<Self>,
-        new: ribbit::Packed<Self>,
-    ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), ()>;
+        new: Self::Key,
+    ) -> Result<(Self::Key, u8, ribbit::Packed<Self>), ()>;
 
     fn compress(
         parent: ribbit::Packed<Self>,

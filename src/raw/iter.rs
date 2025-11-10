@@ -71,20 +71,24 @@ impl<R: key::Read> Lower<R> for Include<R> {
 
     #[inline]
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        let len = R::Edge::len(edge);
+        let key = R::Edge::key(edge);
+        let len = R::Edge::len(key);
 
         if self.0.bits() < R::Edge::len_to_bits(len) {
             return false;
         }
 
-        match R::Edge::cmp(self.0.read(len), edge) {
+        match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => false,
             cmp::Ordering::Equal | cmp::Ordering::Greater => true,
         }
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        match R::Edge::cmp(self.0.read(R::Edge::len(edge)), edge) {
+        let key = R::Edge::key(edge);
+        let len = R::Edge::len(key);
+
+        match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => None,
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => Some(Default::default()),
@@ -96,20 +100,24 @@ impl<R: key::Read> Upper<R> for Include<R> {
     type Bound = Option<u8>;
 
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        let len = R::Edge::len(edge);
+        let key = R::Edge::key(edge);
+        let len = R::Edge::len(key);
 
         if self.0.bits() > R::Edge::len_to_bits(len) {
             return false;
         }
 
-        match R::Edge::cmp(self.0.read(len), edge) {
+        match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less | cmp::Ordering::Equal => true,
             cmp::Ordering::Greater => false,
         }
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        match R::Edge::cmp(self.0.read(R::Edge::len(edge)), edge) {
+        let key = R::Edge::key(edge);
+        let len = R::Edge::len(key);
+
+        match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => Some(Default::default()),
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => None,

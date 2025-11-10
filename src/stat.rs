@@ -29,7 +29,8 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
         };
 
         let meta = edge.meta();
-        let len = <K::Edge as edge::Meta>::len(meta);
+        let key = <K::Edge as edge::Meta>::key(meta);
+        let len = <K::Edge as edge::Meta>::len(key);
         let bits = <K::Edge as edge::Meta>::len_to_bits(len);
         compression.record((bits >> 3) as u64);
 
