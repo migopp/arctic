@@ -189,7 +189,8 @@ where
 
             let old = match edge.child() {
                 Some(edge::Child::Node(old)) if old.is_ref(node) => old,
-                // Already helped by another thread
+                // Already helped by another thread OR freeze was pushed down by
+                // a concurrent edge expansion operation
                 None | Some(edge::Child::Node(_)) => return Ok(None),
                 // Should be impossible to freeze value
                 Some(edge::Child::Value(_)) => unreachable!(),
