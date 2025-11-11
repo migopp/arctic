@@ -12,15 +12,18 @@ use crate::raw::node::Op;
 use crate::raw::Node;
 
 #[repr(C, align(64))]
-pub(crate) struct Linear<const LEN: usize, H, M: ribbit::Pack> {
-    pub(super) header: H,
+pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack> {
+    pub(super) header: Atomic<H>,
     pub(super) edges: [Atomic<Edge<M>>; LEN],
 }
 
-impl<const LEN: usize, H: Default, M: edge::Meta> Default for Linear<LEN, H, M> {
+impl<const LEN: usize, H: ribbit::Pack, M: edge::Meta> Default for Linear<LEN, H, M>
+where
+    H::Packed: Default,
+{
     fn default() -> Self {
         Self {
-            header: H::default(),
+            header: Atomic::new_packed(H::Packed::default()),
             edges: core::array::from_fn(|_| Atomic::new_packed(Edge::DEFAULT)),
         }
     }
@@ -28,14 +31,15 @@ impl<const LEN: usize, H: Default, M: edge::Meta> Default for Linear<LEN, H, M> 
 
 impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
 where
-    H: Header<M>,
+    H: ribbit::Pack,
+    H::Packed: Header + Default,
     M: edge::Meta,
 {
-    const KIND: node::Kind = H::KIND;
-    const GROW: usize = H::GROW;
+    const KIND: node::Kind = <H::Packed as Header>::KIND;
+    const GROW: usize = <H::Packed as Header>::GROW;
 
-    type Grow = H::Grow;
-    type Shrink = H::Shrink;
+    type Grow = <H::Packed as Header>::Grow<M>;
+    type Shrink = <H::Packed as Header>::Shrink<M>;
 
     #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
@@ -44,20 +48,51 @@ where
 
     #[inline]
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        let index = self.header.get(key)?;
+        let header = self.header.load_packed(Ordering::Relaxed);
+        let index = header.get(key)?;
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
     #[inline]
     fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        let index = self.header.get_or_reserve(key)?;
-        Some(unsafe { self.edges.get_unchecked(index as usize) })
+        let mut old = self.header.load_packed(Ordering::Relaxed);
+
+        let index = loop {
+            let new = match old.get_or_insert(key) {
+                Ok(index) => break index as usize,
+                Err(None) => return None,
+                Err(Some(new)) => new,
+            };
+
+            match self.header.compare_exchange_packed(
+                old,
+                new,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break old.len(),
+                Err(conflict) if conflict.is_frozen() => return None,
+                Err(conflict) => old = conflict,
+            }
+        };
+
+        Some(unsafe { self.edges.get_unchecked(index) })
     }
 
     #[inline]
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
-        let index = self.header.get_or_reserve(key)?;
-        Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
+        let old = self.header.get_packed();
+
+        let index = match old.get_or_insert(key) {
+            Ok(index) => index as usize,
+            Err(None) => return None,
+            Err(Some(new)) => {
+                self.header.set_packed(new);
+                old.len()
+            }
+        };
+
+        Some(unsafe { self.edges.get_unchecked_mut(index) })
     }
 
     fn replace(&self, meta: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
@@ -67,15 +102,14 @@ where
         // Can only call replace on nodes
         validate!(!M::is_value(meta));
 
-        let len = self.header.freeze();
-        self.edges.iter().take(len).for_each(Edge::freeze);
+        let header = self.freeze();
 
         let mut edges: [(u8, ribbit::Packed<Edge<M>>); LEN] =
             core::array::from_fn(|_| (0, Edge::DEFAULT));
         let mut len = 0;
 
         core::iter::zip(
-            self.header.keys_unsorted().map(|(key, _)| key),
+            header.keys_unsorted().map(|(key, _)| key),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
@@ -119,10 +153,31 @@ where
     }
 }
 
-impl<const LEN: usize, H: Header<M>, M> Linear<LEN, H, M>
+impl<const LEN: usize, H, M> Linear<LEN, H, M>
 where
+    H: ribbit::Pack,
+    H::Packed: Header,
     M: edge::Meta,
 {
+    fn freeze(&self) -> ribbit::Packed<H> {
+        let mut header = self.header.load_packed(Ordering::Relaxed);
+
+        while !header.is_frozen() {
+            match self.header.compare_exchange_packed(
+                header,
+                header.freeze(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) => header = conflict,
+            }
+        }
+
+        self.edges.iter().take(header.len()).for_each(Edge::freeze);
+        header
+    }
+
     // FIXME
     #[inline]
     pub(crate) fn keys_range<L: crate::raw::node::Lower, G: crate::raw::node::Upper>(
@@ -130,22 +185,25 @@ where
         low: L,
         high: G,
     ) -> KeyIter {
-        self.header.keys_range(low, high)
+        self.header
+            .load_packed(Ordering::Relaxed)
+            .keys_range(low, high)
     }
 
     #[inline]
     pub(crate) fn keys_sorted(&self) -> KeyIter {
-        self.header.keys_sorted()
+        self.header.load_packed(Ordering::Relaxed).keys_sorted()
     }
 
     #[inline]
     pub(crate) fn keys_unsorted(&self) -> KeyIter {
-        self.header.keys_unsorted()
+        self.header.load_packed(Ordering::Relaxed).keys_unsorted()
     }
 }
 
-impl<const LEN: usize, H: Debug, M: edge::Meta> Debug for Linear<LEN, H, M>
+impl<const LEN: usize, H: ribbit::Pack, M: edge::Meta> Debug for Linear<LEN, H, M>
 where
+    H::Packed: Debug,
     M::Packed: Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -166,29 +224,37 @@ where
     }
 }
 
-pub(crate) trait Header<M>: Default
-where
-    M: edge::Meta,
-{
+pub(crate) trait Header: ribbit::Unpack {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
 
-    type Grow: Node<M>;
-    type Shrink: Node<M>;
+    type Grow<M>: Node<M>
+    where
+        M: edge::Meta;
 
-    fn freeze(&self) -> usize;
-    fn get(&self, key: u8) -> Option<u8>;
-    fn get_or_reserve(&self, key: u8) -> Option<u8>;
+    type Shrink<M>: Node<M>
+    where
+        M: edge::Meta;
+
+    fn freeze(self) -> Self;
+
+    fn is_frozen(self) -> bool;
+
+    fn len(self) -> usize;
+
+    fn get(self, key: u8) -> Option<u8>;
+
+    fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>>;
 
     fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
-        &self,
+        self,
         low: L,
         high: H,
     ) -> KeyIter;
 
-    fn keys_sorted(&self) -> KeyIter;
+    fn keys_sorted(self) -> KeyIter;
 
-    fn keys_unsorted(&self) -> KeyIter;
+    fn keys_unsorted(self) -> KeyIter;
 }
 
 pub(crate) union KeyIter {

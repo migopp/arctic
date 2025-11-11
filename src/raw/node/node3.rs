@@ -1,8 +1,5 @@
-use core::sync::atomic::Ordering;
-
 use ribbit::u24;
 use ribbit::u4;
-use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -10,7 +7,7 @@ use crate::raw::node::linear;
 
 use super::Node15;
 
-pub(crate) type Node3<C> = super::Linear<3, Atomic<Header>, C>;
+pub(crate) type Node3<C> = super::Linear<3, Header, C>;
 
 const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
@@ -34,79 +31,61 @@ impl Default for HeaderPacked {
     }
 }
 
-impl<M> linear::Header<M> for Atomic<Header>
-where
-    M: edge::Meta,
-{
+impl linear::Header for ribbit::Packed<Header> {
     const KIND: node::Kind = node::Kind::Node3;
     const GROW: usize = 3;
 
-    type Grow = Node15<M>;
-    type Shrink = Node3<M>;
+    type Grow<M>
+        = Node15<M>
+    where
+        M: edge::Meta;
+    type Shrink<M>
+        = Node3<M>
+    where
+        M: edge::Meta;
 
-    fn freeze(&self) -> usize {
-        let mut old = self.load_packed(Ordering::Relaxed);
-
-        while !old.frozen() {
-            match self.compare_exchange_packed(
-                old,
-                old.with_frozen(true),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(old) => return old.len().value() as usize,
-                Err(conflict) => old = conflict,
-            }
-        }
-
-        old.len().value() as usize
+    #[inline]
+    fn freeze(self) -> Self {
+        self.with_frozen(true)
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<u8> {
-        let header = self.load_packed(Ordering::Relaxed);
-        let index = get(header.value, key);
-        (index < header.len().value()).then_some(index)
+    fn is_frozen(self) -> bool {
+        self.frozen()
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<u8> {
-        let mut old = self.load_packed(Ordering::Acquire);
+    fn len(self) -> usize {
+        self.len().value() as usize
+    }
 
-        loop {
-            let index = get(old.value, key);
-            let len = old.len().value();
+    #[inline]
+    fn get(self, key: u8) -> Option<u8> {
+        let index = get(self.value, key);
+        (index < self.len().value()).then_some(index)
+    }
 
-            if index < len {
-                return Some(index);
-            } else if len >= 3 || old.frozen() {
-                return None;
-            }
-
-            match self.compare_exchange_packed(
-                old,
-                ribbit::Packed::<Header>::new(
-                    u24::new(old.keys().value() | ((key as u32) << (len * 8))),
-                    u4::new(len + 1),
-                    false,
-                ),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return Some(len),
-                Err(conflict) => old = conflict,
-            }
+    #[inline]
+    fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
+        let len = self.len().value();
+        match self.get(key) {
+            Some(index) if index < len => Ok(index),
+            _ if len >= 3 || self.is_frozen() => Err(None),
+            _ => Err(Some(Self::new(
+                u24::new(self.keys().value() | ((key as u32) << (len << 3))),
+                u4::new(len + 1),
+                false,
+            ))),
         }
     }
 
     fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
-        &self,
+        self,
         low: L,
         high: H,
     ) -> linear::KeyIter {
-        let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value() as usize;
-        let keys = header.value.to_le_bytes();
+        let len = self.len().value() as usize;
+        let keys = self.value.to_le_bytes();
         let mut valid = 0;
         let low = low.get();
         let high = high.get();
@@ -124,19 +103,17 @@ where
         linear::KeyIter::new_3(linear::RawIter::new(indexes, valid))
     }
 
-    fn keys_sorted(&self) -> linear::KeyIter {
-        let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value();
-        let keys = header.value.to_le_bytes();
+    fn keys_sorted(self) -> linear::KeyIter {
+        let len = self.len().value();
+        let keys = self.value.to_le_bytes();
         let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len as usize].sort_unstable();
         linear::KeyIter::new_3(linear::RawIter::new(indexes, len))
     }
 
-    fn keys_unsorted(&self) -> linear::KeyIter {
-        let header = self.load_packed(Ordering::Relaxed);
-        let len = header.len().value();
-        let keys = header.value.to_le_bytes();
+    fn keys_unsorted(self) -> linear::KeyIter {
+        let len = self.len().value();
+        let keys = self.value.to_le_bytes();
         let indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
         linear::KeyIter::new_3(linear::RawIter::new(indexes, len))
     }
