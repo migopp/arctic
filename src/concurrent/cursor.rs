@@ -5,7 +5,6 @@ use crate::concurrent::Value;
 use crate::raw;
 pub(super) use crate::raw::cursor::path;
 use crate::raw::Edge;
-use crate::raw::Op;
 use crate::stat;
 use crate::Key;
 
@@ -61,18 +60,8 @@ where
     }
 
     #[inline]
-    pub(super) fn traverse_or_insert(
-        &mut self,
-        value: u64,
-    ) -> Result<
-        (
-            Op,
-            ribbit::Packed<Edge<K::Edge>>,
-            ribbit::Packed<Edge<K::Edge>>,
-        ),
-        (),
-    > {
-        self.raw.traverse_or_insert(value)
+    pub(super) fn traverse_or_insert(&mut self) -> raw::cursor::Insert<K::Edge> {
+        self.raw.traverse_or_insert()
     }
 
     #[cold]

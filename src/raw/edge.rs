@@ -215,30 +215,24 @@ pub(crate) trait Len: Copy + Eq {
     fn bits(self) -> usize;
 }
 
+/// Edge-related structural modification operation. Does not require freezing.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Op {
+pub(crate) enum Smo {
     /// Node creation
     Create,
 
     /// Path expansion
     Expand,
 
-    /// Value insertion
+    // FIXME: remove
     Insert,
-
-    /// Value removal
-    #[expect(dead_code)]
-    Remove,
 }
 
-impl Op {
+impl Smo {
     /// Whether this operation allocates a new node.
     #[inline]
     pub(crate) fn is_allocate(self) -> bool {
-        match self {
-            Self::Insert | Self::Remove => false,
-            Self::Create | Self::Expand => true,
-        }
+        !matches!(self, Self::Insert)
     }
 }
 

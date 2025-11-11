@@ -12,11 +12,12 @@ use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 
 use crate::iter::Order;
+use crate::raw::cursor::Insert;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
-use crate::raw::Op;
+use crate::raw::Smo;
 use crate::sequential;
 use crate::stat;
 use crate::Key;
@@ -226,9 +227,14 @@ where
         let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
-            let (op, old, new) = match cursor.traverse_or_insert(value) {
-                Ok(cas) => cas,
-                Err(()) => {
+            let (op, old, new) = match cursor.traverse_or_insert() {
+                Insert::Value { old, key } => (
+                    Smo::Edge(edge::Smo::Insert),
+                    old,
+                    Edge::new_value(key, value),
+                ),
+                Insert::Smo { op, old, new } => (op, old, new),
+                Insert::Frozen => {
                     cursor.freeze()?;
                     continue;
                 }
@@ -242,7 +248,7 @@ where
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) if op == Op::Edge(crate::raw::edge::Op::Insert) => {
+                Ok(_) if op == Smo::Edge(crate::raw::edge::Smo::Insert) => {
                     stat::increment(op);
                     return match old.as_value() {
                         Some(value) => {

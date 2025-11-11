@@ -8,7 +8,7 @@ use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
-use crate::raw::Op;
+use crate::raw::Smo;
 use crate::Key;
 use crate::Value;
 
@@ -113,7 +113,7 @@ pub struct Process {
 
 #[cfg_attr(not(feature = "stat"), expect(dead_code))]
 pub(crate) enum Counter {
-    Op(Op),
+    Op(Smo),
     InsertPessimistic,
     Retire,
     Flush,
@@ -138,21 +138,21 @@ pub(crate) enum Record {
     RangeConflict,
 }
 
-impl From<Op> for Counter {
-    fn from(op: Op) -> Self {
+impl From<Smo> for Counter {
+    fn from(op: Smo) -> Self {
         Self::Op(op)
     }
 }
 
-impl From<edge::Op> for Counter {
-    fn from(op: edge::Op) -> Self {
-        Self::Op(Op::Edge(op))
+impl From<edge::Smo> for Counter {
+    fn from(op: edge::Smo) -> Self {
+        Self::Op(Smo::Edge(op))
     }
 }
 
-impl From<node::Op> for Counter {
-    fn from(op: node::Op) -> Self {
-        Self::Op(Op::Node(op))
+impl From<node::Smo> for Counter {
+    fn from(op: node::Smo) -> Self {
+        Self::Op(Smo::Node(op))
     }
 }
 
@@ -197,25 +197,23 @@ struct Edge {
     create: u64,
     expand: u64,
     insert: u64,
-    remove: u64,
 }
 
 #[cfg(feature = "stat")]
 impl Thread {
-    fn op(&mut self, op: Op) -> &mut u64 {
+    fn op(&mut self, op: Smo) -> &mut u64 {
         match op {
-            Op::Node(op) => match op {
-                node::Op::Shrink => &mut self.node.shrink,
-                node::Op::Replace => &mut self.node.replace,
-                node::Op::Grow => &mut self.node.grow,
-                node::Op::Destroy => &mut self.node.destroy,
-                node::Op::Compress => &mut self.node.compress,
+            Smo::Node(op) => match op {
+                node::Smo::Shrink => &mut self.node.shrink,
+                node::Smo::Replace => &mut self.node.replace,
+                node::Smo::Grow => &mut self.node.grow,
+                node::Smo::Destroy => &mut self.node.destroy,
+                node::Smo::Compress => &mut self.node.compress,
             },
-            Op::Edge(op) => match op {
-                edge::Op::Create => &mut self.edge.create,
-                edge::Op::Expand => &mut self.edge.expand,
-                edge::Op::Insert => &mut self.edge.insert,
-                edge::Op::Remove => &mut self.edge.remove,
+            Smo::Edge(op) => match op {
+                edge::Smo::Create => &mut self.edge.create,
+                edge::Smo::Expand => &mut self.edge.expand,
+                edge::Smo::Insert => &mut self.edge.insert,
             },
         }
     }

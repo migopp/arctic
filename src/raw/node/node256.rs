@@ -6,7 +6,7 @@ use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
 use crate::raw::node::Node15;
-use crate::raw::node::Op;
+use crate::raw::node::Smo;
 use crate::raw::Node;
 
 #[repr(C, align(4096))]
@@ -56,7 +56,7 @@ where
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn replace(&self, _parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
+    fn replace(&self, _parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
         todo!()
     }
 }

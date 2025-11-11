@@ -37,11 +37,12 @@ where
 
     fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
 
-    fn replace(&self, parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>);
+    fn replace(&self, parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>);
 }
 
+/// Node-related structural modification operation. Requires freezing.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Op {
+pub(crate) enum Smo {
     /// Node shrink (smaller size)
     #[expect(dead_code)]
     Shrink,
@@ -59,7 +60,7 @@ pub(crate) enum Op {
     Compress,
 }
 
-impl Op {
+impl Smo {
     /// Whether this operation allocates a new node.
     #[inline]
     pub(crate) fn is_allocate(self) -> bool {
@@ -143,7 +144,7 @@ where
     }
 
     #[cold]
-    pub(crate) fn replace(&self, parent: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
+    pub(crate) fn replace(&self, parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
         match self {
             Self::Node3(node) => node.replace(parent),
             Self::Node15(node) => node.replace(parent),

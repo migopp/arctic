@@ -14,7 +14,7 @@ use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::raw::Edge;
 use crate::raw::Key;
-use crate::raw::Op;
+use crate::raw::Smo;
 use crate::stat;
 
 /// Tree traversal state.
@@ -30,6 +30,21 @@ pub(crate) struct Point<'g, 'k, K: Key, H> {
 
     /// Path history of this cursor (sequence of path segments)
     history: H,
+}
+
+pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
+    Value {
+        old: ribbit::Packed<Edge<E>>,
+        key: <E::Packed as edge::Meta>::Key,
+    },
+
+    /// Structural modification required
+    Smo {
+        op: Smo,
+        old: ribbit::Packed<Edge<E>>,
+        new: ribbit::Packed<Edge<E>>,
+    },
+    Frozen,
 }
 
 impl<'g, 'k, K, H> Point<'g, 'k, K, H>
@@ -102,17 +117,7 @@ where
     /// Return CAS operands to either insert the value or structurally update
     /// the tree on the way to inserting the value.
     #[inline]
-    pub(crate) fn traverse_or_insert(
-        &mut self,
-        value: u64,
-    ) -> Result<
-        (
-            Op,
-            ribbit::Packed<Edge<K::Edge>>,
-            ribbit::Packed<Edge<K::Edge>>,
-        ),
-        (),
-    > {
+    pub(crate) fn traverse_or_insert(&mut self) -> Insert<K::Edge> {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -126,8 +131,10 @@ where
             if key == old_key {
                 if let Some(node) = old.as_node() {
                     if node.scan() {
-                        self.wait_for_scan(stat::Counter::ScanInsert)?;
-                        continue;
+                        match self.wait_for_scan(stat::Counter::ScanInsert) {
+                            Ok(_) => continue,
+                            Err(()) => return Insert::Frozen,
+                        }
                     }
 
                     let byte = self.key.next().unwrap();
@@ -139,41 +146,44 @@ where
                 }
             }
 
-            if old_meta.is_frozen() {
-                return Err(());
-            }
-
             // Revert key to before the current edge
             self.key = save;
 
             let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
+                    Some(edge::Child::Node(_)) if old_meta.is_frozen() => return Insert::Frozen,
                     Some(edge::Child::Node(node)) => {
                         let node = unsafe { node.into_ref_unchecked() };
                         let (op, new) = node.replace(old_meta);
-                        (Op::Node(op), new)
+                        (Smo::Node(op), new)
                     }
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
-                        let meta =
+                        let key =
                             save.read(<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::MAX_LEN);
+
                         if save.bits() == 0 {
-                            (Op::Edge(edge::Op::Insert), Edge::new_value(meta, value))
-                        } else {
-                            (
-                                Op::Edge(edge::Op::Create),
-                                Edge::new_node::<Node3<K::Edge>, _>(meta, None),
-                            )
+                            return Insert::Value { old, key };
                         }
+
+                        if old_meta.is_frozen() {
+                            return Insert::Frozen;
+                        }
+
+                        (
+                            Smo::Edge(edge::Smo::Create),
+                            Edge::new_node::<Node3<K::Edge>, _>(key, None),
+                        )
                     }
                 },
+                Ok(_) if old_meta.is_frozen() => return Insert::Frozen,
                 Ok((start, middle, end)) => (
-                    Op::Edge(edge::Op::Expand),
+                    Smo::Edge(edge::Smo::Expand),
                     Edge::new_node::<Node3<K::Edge>, _>(start, [(middle, old.with_meta(end))]),
                 ),
             };
 
-            return Ok((op, old, new));
+            return Insert::Smo { op, old, new };
         }
     }
 

@@ -9,7 +9,7 @@ use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::node;
 use crate::raw::node::Edge;
-use crate::raw::node::Op;
+use crate::raw::node::Smo;
 use crate::raw::Node;
 
 #[repr(C, align(64))]
@@ -96,7 +96,7 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index) })
     }
 
-    fn replace(&self, meta: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
+    fn replace(&self, meta: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
         // Caller must not call replace if doomed to fail CAS
         validate!(!meta.is_frozen());
 
@@ -132,15 +132,15 @@ where
 
         match &edges[..len] {
             _ if len == Self::GROW => {
-                return (node::Op::Grow, unsafe {
+                return (node::Smo::Grow, unsafe {
                     Edge::new_node_unchecked::<Self::Grow, _>(meta, edges.into_iter().take(len))
                 })
             }
-            [] => return (Op::Destroy, Edge::DEFAULT),
+            [] => return (Smo::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
                 // FIXME: how to handle scan?
                 if let Some(meta) = meta.compress(*key, edge.meta()) {
-                    return (Op::Compress, edge.with_meta(meta));
+                    return (Smo::Compress, edge.with_meta(meta));
                 }
             }
 
@@ -148,7 +148,7 @@ where
         }
 
         // Catch-all:
-        (node::Op::Replace, unsafe {
+        (node::Smo::Replace, unsafe {
             Edge::new_node_unchecked::<Self, _>(meta, edges.into_iter().take(len))
         })
     }

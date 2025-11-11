@@ -20,14 +20,15 @@ pub(crate) use edge::Edge;
 pub(crate) use key::Key;
 pub(crate) use node::Node;
 
+/// Structural modification operation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Op {
-    Node(node::Op),
-    Edge(edge::Op),
+pub(crate) enum Smo {
+    Node(node::Smo),
+    Edge(edge::Smo),
 }
 
-impl Op {
-    /// Whether this operation allocates a new node.
+impl Smo {
+    /// Whether this structural modification operation allocates a new node.
     #[inline]
     pub fn is_allocate(self) -> bool {
         match self {
