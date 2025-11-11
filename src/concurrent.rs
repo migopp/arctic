@@ -227,57 +227,55 @@ where
         let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
-            let (op, old, new) = match cursor.traverse_or_insert() {
-                Insert::Value { old, key } => (
-                    Smo::Edge(edge::Smo::Insert),
-                    old,
-                    Edge::new_value(key, value),
-                ),
-                Insert::Smo { op, old, new } => (op, old, new),
-                Insert::Frozen => {
-                    cursor.freeze()?;
-                    continue;
-                }
-            };
-
-            validate!(!old.meta().is_frozen());
-
-            match cursor.edge().compare_exchange_packed(
-                old,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) if op == Smo::Edge(crate::raw::edge::Smo::Insert) => {
-                    stat::increment(op);
-                    return match old.as_value() {
-                        Some(value) => {
-                            Ok(Some(unsafe { V::guard_owned(cursor.into_guard(), value) }))
-                        }
-                        None => {
-                            validate!(old.is_null());
-                            Ok(None)
-                        }
-                    };
-                }
-                Ok(_) => {
-                    stat::increment(op);
-                    if op.is_retire() {
-                        unsafe {
-                            cursor.retire(old);
-                        }
+            match cursor.traverse_or_insert() {
+                Insert::Value { old, key } if !old.meta().is_frozen() => {
+                    if cursor
+                        .edge()
+                        .compare_exchange_packed(
+                            old,
+                            Edge::new_value(key, value),
+                            Ordering::AcqRel,
+                            Ordering::Relaxed,
+                        )
+                        .is_err()
+                    {
+                        continue;
                     }
+
+                    return Ok(old
+                        .as_value()
+                        .map(|value| unsafe { V::guard_owned(cursor.into_guard(), value) }));
                 }
-                Err(_) => {
-                    // Does not go through SMR because `new` is still thread-local
-                    if op.is_allocate() {
-                        if let Some(edge::Child::Node(node)) = new.child() {
-                            unsafe {
-                                node.deallocate_unchecked(stat::Counter::FreeConflict);
+                Insert::Smo { op, old, new } => {
+                    validate!(!old.meta().is_frozen());
+
+                    match cursor.edge().compare_exchange_packed(
+                        old,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            stat::increment(op);
+                            if op.is_retire() {
+                                unsafe {
+                                    cursor.retire(old);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Does not go through SMR because `new` is still thread-local
+                            if op.is_allocate() {
+                                if let Some(edge::Child::Node(node)) = new.child() {
+                                    unsafe {
+                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                Insert::Frozen | Insert::Value { .. } => cursor.freeze()?,
             }
         }
     }

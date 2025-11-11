@@ -223,16 +223,13 @@ pub(crate) enum Smo {
 
     /// Path expansion
     Expand,
-
-    // FIXME: remove
-    Insert,
 }
 
 impl Smo {
     /// Whether this operation allocates a new node.
     #[inline]
     pub(crate) fn is_allocate(self) -> bool {
-        !matches!(self, Self::Insert)
+        true
     }
 }
 

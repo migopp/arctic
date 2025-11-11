@@ -213,7 +213,6 @@ impl Thread {
             Smo::Edge(op) => match op {
                 edge::Smo::Create => &mut self.edge.create,
                 edge::Smo::Expand => &mut self.edge.expand,
-                edge::Smo::Insert => &mut self.edge.insert,
             },
         }
     }
