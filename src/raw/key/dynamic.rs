@@ -2,6 +2,7 @@ use core::cmp;
 use core::fmt;
 
 use crate::raw::edge;
+use crate::raw::edge::Len as _;
 use crate::raw::key;
 use crate::raw::key::integer;
 
@@ -60,47 +61,6 @@ impl key::Read for Reader<'_> {
         }
     }
 
-    // #[inline]
-    // fn peek(&self, len: byte::Len) -> byte::Array {
-    //     validate!(len.bits() as usize <= self.bits());
-    //
-    //     match self {
-    //         Reader::Large(large) => unsafe { read_array(large, len) },
-    //         Reader::Small(small) => small.peek(len),
-    //     }
-    // }
-
-    // #[inline]
-    // fn take(&mut self, len: byte::Len) -> byte::Array {
-    //     validate!(len.bits() as usize <= self.bits());
-    //
-    //     match self {
-    //         Reader::Large(large) => {
-    //             validate!(large.len() > 8);
-    //
-    //             let array = unsafe { read_array(large, len) };
-    //             let after = (large.len() << 3) - len.bits() as usize;
-    //
-    //             if after > 64 {
-    //                 *self = Self::Large(&large[len.bytes() as usize..]);
-    //                 return array;
-    //             }
-    //
-    //             let buffer = unsafe {
-    //                 (&large[large.len() - 8] as *const u8)
-    //                     .cast::<u64>()
-    //                     .read_unaligned()
-    //             }
-    //             .to_be()
-    //                 << (64 - after);
-    //
-    //             *self = Self::Small(unsafe { integer::Reader::new_unchecked(buffer, after as u8) });
-    //             array
-    //         }
-    //         Reader::Small(small) => small.take(len),
-    //     }
-    // }
-
     #[inline]
     fn next(&mut self) -> Option<u8> {
         match self {
@@ -118,6 +78,40 @@ impl key::Read for Reader<'_> {
                 Some(byte)
             }
             Self::Small(small) => small.next(),
+        }
+    }
+
+    #[inline]
+    fn read(
+        &mut self,
+        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    ) -> ribbit::Packed<Self::Edge> {
+        match self {
+            Reader::Large(large) => {
+                validate!(large.len() > 8);
+
+                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
+                let array = edge::Be::key_from_u64_truncate(buffer.to_be(), len);
+                let after = (large.len() << 3) - len.bits();
+
+                if after > 64 {
+                    let bytes = len.bits() >> 3;
+                    *self = Self::Large(&large[bytes..]);
+                    return array;
+                }
+
+                let buffer = unsafe {
+                    (&large[large.len() - 8] as *const u8)
+                        .cast::<u64>()
+                        .read_unaligned()
+                }
+                .to_be()
+                    << (64 - after);
+
+                *self = Self::Small(unsafe { integer::Reader::new_unchecked(buffer, after as u8) });
+                array
+            }
+            Reader::Small(small) => small.read(len),
         }
     }
 
@@ -149,13 +143,6 @@ impl key::Read for Reader<'_> {
         let left = self.to_small();
         let right = other.to_small();
         Self::Small(left.common_prefix(right))
-    }
-
-    fn read(
-        &mut self,
-        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
-    ) -> ribbit::Packed<Self::Edge> {
-        todo!()
     }
 }
 
@@ -227,9 +214,8 @@ impl key::Write for Writer {
     #[inline]
     fn write(&mut self, bits: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
         validate_eq!(bits, self.0.len() << 3);
-        todo!()
-        // self.0.extend(edge);
-        // self.0.len() << 3
+        self.0.extend(edge);
+        self.0.len() << 3
     }
 
     fn replace(
@@ -239,11 +225,10 @@ impl key::Write for Writer {
         edge: ribbit::Packed<Self::Edge>,
     ) -> Self::Len {
         validate!(start <= (self.0.len() << 3));
-        todo!()
-        // self.0.truncate(start >> 3);
-        // self.0.push(node);
-        // self.0.extend(edge);
-        // self.0.len() << 3
+        self.0.truncate(start >> 3);
+        self.0.push(node);
+        self.0.extend(edge);
+        self.0.len() << 3
     }
 }
 

@@ -249,31 +249,35 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 
 #[cfg(test)]
 mod tests {
+    use ribbit::u6;
+
+    use crate::raw;
+    use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
     use crate::raw::Key;
 
-    pub(super) fn take_all<'k, K: Key>(array: &[u8], key: impl Into<K::Borrow<'k>>, lens: &[u8]) {
-        todo!()
-        // let mut reader = K::Read::from(key.into());
-        //
-        // let mut index = 0;
-        //
-        // for len in lens
-        //     .iter()
-        //     .copied()
-        //     .map(byte::Len::from_bytes)
-        //     .map(Option::unwrap)
-        // {
-        //     assert_eq!(reader.bytes(), array.len() - index);
-        //
-        //     byte::Array::with_bytes(reader.take(len), |actual| {
-        //         assert_eq!(actual, &array[index..][..len.bytes() as usize]);
-        //     });
-        //
-        //     index += len.bytes() as usize;
-        // }
-        //
-        // assert_eq!(reader.bytes(), array.len() - index);
-        // assert_eq!(reader.next(), array.get(index).copied());
+    pub(super) fn take_all<'k, K: Key<Edge = raw::edge::Be>>(
+        array: &[u8],
+        key: impl Into<K::Borrow<'k>>,
+        lens: &[u8],
+    ) {
+        let mut reader = K::Read::from(key.into());
+
+        let mut index = 0;
+
+        for len in lens.iter().copied().map(|bytes| bytes << 3).map(u6::new) {
+            assert_eq!(reader.bytes(), array.len() - index);
+
+            let bytes = len.bits() >> 3;
+
+            reader
+                .read(len)
+                .with_be_bytes(|actual| assert_eq!(actual, &array[index..][..bytes]));
+
+            index += bytes;
+        }
+
+        assert_eq!(reader.bytes(), array.len() - index);
+        assert_eq!(reader.next(), array.get(index).copied());
     }
 }

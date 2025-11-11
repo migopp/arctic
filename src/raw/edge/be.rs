@@ -36,6 +36,22 @@ impl BePacked {
     pub(crate) fn raw(self) -> u64 {
         self.value
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
+        apply(&self.value.to_be_bytes()[..(self.len().value() >> 3) as usize])
+    }
+}
+
+impl IntoIterator for ribbit::Packed<Be> {
+    type Item = u8;
+    type IntoIter = core::iter::Take<core::array::IntoIter<u8, 8>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.value
+            .to_be_bytes()
+            .into_iter()
+            .take((self.len().value() >> 3) as usize)
+    }
 }
 
 impl edge::Meta for ribbit::Packed<Be> {

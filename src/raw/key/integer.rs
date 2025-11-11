@@ -40,6 +40,7 @@ pub(crate) trait Uint:
     }
 
     fn shl_at_most_56(self, bits: u8) -> Self;
+    fn unbounded_shl(self, bits: u8) -> Self;
     fn unbounded_shr(self, bits: u8) -> Self;
     fn leading_zeros(self) -> u8;
 
@@ -125,7 +126,7 @@ impl<U: Uint> key::Read for Reader<U> {
         validate!(self.bits() >= bits);
 
         Self {
-            buffer: self.buffer.shl_at_most_56(bits as u8),
+            buffer: self.buffer.unbounded_shl(bits as u8),
             bits: self.bits - bits as u8,
         }
     }
@@ -253,6 +254,11 @@ macro_rules! impl_unsigned_int {
                     } else {
                         self << bits
                     }
+                }
+
+                #[inline]
+                fn unbounded_shl(self, bits: u8) -> Self {
+                    <$ty>::unbounded_shl(self, bits as u32)
                 }
 
                 #[inline]
