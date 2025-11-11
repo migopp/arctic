@@ -16,7 +16,7 @@ pub(crate) struct Segment<'g, 'k, K: Key> {
     pub(super) edge: &'g Atomic<Edge<K::Edge>>,
 
     /// Number of bytes matched along `edge`
-    pub(super) len: <K::Edge as edge::Meta>::Len,
+    pub(super) len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
 
     /// Node underneath `edge`
     pub(super) node: node::Ref<'g, K::Edge>,

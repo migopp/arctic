@@ -21,7 +21,7 @@ use crate::raw::Edge;
 
 pub(crate) trait Node<M>: Default
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: Kind;
     const GROW: usize;
@@ -79,7 +79,7 @@ pub(crate) enum Ref<'g, M: ribbit::Pack> {
 
 impl<'g, M> Ref<'g, M>
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     #[inline]
     pub(crate) fn iter<O: crate::iter::Order, L: Lower, U: Upper>(
@@ -122,7 +122,7 @@ where
 
 impl<'g, M> Ref<'g, M>
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     #[inline]
     pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
@@ -154,8 +154,7 @@ where
 
 impl<M> Debug for Ref<'_, M>
 where
-    M: edge::Meta,
-    M::Packed: Debug,
+    M: ribbit::Pack<Packed: edge::Meta + Debug>,
 {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {

@@ -91,6 +91,7 @@ use thread_local::ThreadLocal;
 
 use crate::concurrent::Value;
 use crate::raw::edge;
+use crate::raw::edge::Meta as _;
 use crate::raw::Edge;
 use crate::stat;
 
@@ -160,14 +161,18 @@ impl<'g, V: Value> Local<'g, V> {
         TraverseGuard(self)
     }
 
-    unsafe fn retire_edge<M: edge::Meta>(&mut self, bits: usize, edge: ribbit::Packed<Edge<M>>) {
+    unsafe fn retire_edge<M: ribbit::Pack<Packed: edge::Meta>>(
+        &mut self,
+        bits: usize,
+        edge: ribbit::Packed<Edge<M>>,
+    ) {
         validate!(!edge.is_null());
         stat::increment(stat::Counter::Retire);
 
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
-            .into_prefix(M::is_value(edge.meta()), Some(bits));
+            .into_prefix(edge.meta().is_value(), Some(bits));
 
         self.retired.push((prefix, edge.into_raw()));
 
@@ -229,7 +234,7 @@ impl<V: Value> Drop for TraverseGuard<'_, '_, V> {
 }
 
 impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
-    pub(crate) unsafe fn retire<M: edge::Meta>(
+    pub(crate) unsafe fn retire<M: ribbit::Pack<Packed: edge::Meta>>(
         &mut self,
         bits: usize,
         edge: ribbit::Packed<Edge<M>>,

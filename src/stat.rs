@@ -3,6 +3,9 @@ use core::sync::atomic::Ordering;
 
 use crate::iter::Unsorted;
 use crate::raw::edge;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
 use crate::raw::Op;
@@ -29,9 +32,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
         };
 
         let meta = edge.meta();
-        let key = <K::Edge as edge::Meta>::key(meta);
-        let len = <K::Edge as edge::Meta>::len(key);
-        let bits = <K::Edge as edge::Meta>::len_to_bits(len);
+        let bits = meta.key().len().bits();
         compression.record((bits >> 3) as u64);
 
         match child {

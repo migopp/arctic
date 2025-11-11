@@ -1,7 +1,8 @@
 use core::fmt;
 
 use crate::raw::edge;
-use crate::raw::edge::Meta as _;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
 use crate::raw::key;
 use crate::raw::key::Read as _;
 
@@ -98,7 +99,10 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> <Self::Edge as edge::Meta>::Key {
+    fn read(
+        &mut self,
+        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
         let len = edge::Be::min_len(len, self.bits as usize);
         let meta = edge::Be::key_from_u64_truncate(self.buffer.most_significant_u64(), len);
         self.buffer = self.buffer.shl_at_most_56(len.value());
@@ -163,7 +167,7 @@ impl<U: Uint> key::Write for Writer<U> {
 
     #[inline]
     fn write(&mut self, bits: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
-        let bits_edge = Self::Edge::len_to_bits(Self::Edge::len(edge));
+        let bits_edge = edge.len().bits();
 
         validate!(bits + bits_edge <= U::BITS as usize);
 
@@ -186,7 +190,7 @@ impl<U: Uint> key::Write for Writer<U> {
             | (U::from_u8(node) >> start)
             | (U::from_most_significant_u64(edge.raw()).unbounded_shr(8 + start as u8));
 
-        start + 8 + Self::Edge::len_to_bits(Self::Edge::len(edge))
+        start + 8 + edge.len().bits()
     }
 }
 

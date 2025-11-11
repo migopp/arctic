@@ -8,6 +8,8 @@ pub(crate) use postorder::PostorderIter;
 pub(crate) use range::RangeIter;
 
 use crate::raw;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
 
@@ -74,10 +76,10 @@ impl<R: key::Read> Lower<R> for Include<R> {
 
     #[inline]
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        let key = R::Edge::key(edge);
-        let len = R::Edge::len(key);
+        let key = edge.key();
+        let len = key.len();
 
-        if self.0.bits() < R::Edge::len_to_bits(len) {
+        if self.0.bits() < len.bits() {
             return false;
         }
 
@@ -88,8 +90,8 @@ impl<R: key::Read> Lower<R> for Include<R> {
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = R::Edge::key(edge);
-        let len = R::Edge::len(key);
+        let key = edge.key();
+        let len = key.len();
 
         match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => None,
@@ -103,10 +105,10 @@ impl<R: key::Read> Upper<R> for Include<R> {
     type Bound = Option<u8>;
 
     fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
-        let key = R::Edge::key(edge);
-        let len = R::Edge::len(key);
+        let key = edge.key();
+        let len = key.len();
 
-        if self.0.bits() > R::Edge::len_to_bits(len) {
+        if self.0.bits() > len.bits() {
             return false;
         }
 
@@ -117,8 +119,8 @@ impl<R: key::Read> Upper<R> for Include<R> {
     }
 
     fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = R::Edge::key(edge);
-        let len = R::Edge::len(key);
+        let key = edge.key();
+        let len = key.len();
 
         match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => Some(Default::default()),

@@ -4,7 +4,7 @@ use core::ops::BitXor as _;
 use ribbit::u56;
 use ribbit::u6;
 
-use crate::raw::edge::Meta;
+use crate::raw::edge;
 
 #[derive(Copy, Clone, ribbit::Pack)]
 #[ribbit(size = 64, eq, ord)]
@@ -38,63 +38,44 @@ impl BePacked {
     }
 }
 
-impl Meta for Be {
-    const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u6::new(0), false, false, u56::new(0));
+impl edge::Meta for ribbit::Packed<Be> {
+    const DEFAULT: Self = Self::new(u6::new(0), false, false, u56::new(0));
     const MAX_LEN: Self::Len = u6::new(56);
 
     type Len = u6;
-    type Key = ribbit::Packed<Self>;
+    type Key = Self;
 
     #[inline]
-    fn key(meta: ribbit::Packed<Self>) -> Self::Key {
-        unsafe { ribbit::Packed::<Self>::new_unchecked(meta.value & Self::MASK_KEY) }
+    fn key(self) -> Self::Key {
+        unsafe { Self::new_unchecked(self.value & Be::MASK_KEY) }
     }
 
     #[inline]
-    fn len(key: Self::Key) -> Self::Len {
-        key.len()
+    fn is_value(self) -> bool {
+        self.value()
     }
 
     #[inline]
-    fn len_to_bits(len: Self::Len) -> usize {
-        len.value() as usize
+    fn is_frozen(self) -> bool {
+        self.frozen()
     }
 
     #[inline]
-    fn is_value(meta: ribbit::Packed<Self>) -> bool {
-        meta.value()
+    fn with_frozen(self, frozen: bool) -> Self {
+        self.with_frozen(frozen)
     }
 
     #[inline]
-    fn is_frozen(meta: ribbit::Packed<Self>) -> bool {
-        meta.frozen()
-    }
-
-    #[inline]
-    fn with_frozen(meta: ribbit::Packed<Self>, frozen: bool) -> ribbit::Packed<Self> {
-        meta.with_frozen(frozen)
-    }
-
-    #[inline]
-    fn with_value(meta: ribbit::Packed<Self>, value: bool) -> ribbit::Packed<Self> {
-        meta.with_value(value)
-    }
-
-    #[inline]
-    fn expand(
-        old: ribbit::Packed<Self>,
-        new: Self::Key,
-    ) -> Result<(ribbit::Packed<Self>, u8, ribbit::Packed<Self>), ()> {
-        if Self::key(old) == new {
+    fn expand(self, new: Self::Key) -> Result<(Self, u8, Self), ()> {
+        if self.key() == new {
             return Err(());
         }
 
-        let len = old.len().min(new.len());
+        let len = self.len().min(new.len());
 
         let len_start = unsafe {
             u6::new_unchecked(
-                old.value
+                self.value
                     .bitxor(new.value)
                     .bitor(1u64.rotate_right(1) >> len.value())
                     .leading_zeros() as u8
@@ -104,19 +85,37 @@ impl Meta for Be {
 
         let len_middle = unsafe { u6::new_unchecked(len_start.value() + 8) };
         Ok((
-            Self::key_from_u64_truncate(old.value, len_start).with_value(false),
-            old.value.rotate_left(len_middle.value() as u32) as u8,
-            Self::key_from_u64_truncate(old.value << len_middle.value(), old.len() - len_middle)
-                .with_value(old.value()),
+            Be::key_from_u64_truncate(self.value, len_start).with_value(false),
+            self.value.rotate_left(len_middle.value() as u32) as u8,
+            Be::key_from_u64_truncate(self.value << len_middle.value(), self.len() - len_middle)
+                .with_value(self.value()),
         ))
     }
 
     #[inline]
-    fn compress(
-        parent: ribbit::Packed<Self>,
-        byte: u8,
-        child: ribbit::Packed<Self>,
-    ) -> Option<ribbit::Packed<Self>> {
+    fn compress(self, _byte: u8, _child: Self) -> Option<Self> {
         todo!()
+    }
+}
+
+impl edge::Key for ribbit::Packed<Be> {
+    type Meta = ribbit::Packed<Be>;
+    type Len = u6;
+
+    #[inline]
+    fn len(self) -> Self::Len {
+        self.len()
+    }
+
+    #[inline]
+    fn with_value(self, value: bool) -> Self::Meta {
+        self.with_value(value)
+    }
+}
+
+impl edge::Len for u6 {
+    #[inline]
+    fn bits(self) -> usize {
+        self.value() as usize
     }
 }

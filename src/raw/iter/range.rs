@@ -17,7 +17,7 @@ pub(crate) enum RangeIter<
     'g,
     R: key::Read,
     W: key::Write,
-    M: ribbit::Pack,
+    M: ribbit::Pack<Packed: edge::Meta>,
     B: raw::iter::Range<R>,
     O,
 > {
@@ -30,7 +30,7 @@ where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
     W: From<R>,
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
     B: raw::iter::Range<R>,
 {
     fn default() -> Self {
@@ -46,7 +46,7 @@ where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
     W: From<R>,
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
     B: raw::iter::Range<R>,
     O: Order,
 {
@@ -125,7 +125,7 @@ pub(crate) struct NodeIter<
     'g,
     R: key::Read,
     W: key::Write,
-    M: ribbit::Pack + 'g,
+    M: ribbit::Pack<Packed: edge::Meta> + 'g,
     B: raw::iter::Range<R>,
     O,
 > {
@@ -148,7 +148,7 @@ impl<'g, R, W, M, B, O> NodeIter<'g, R, W, M, B, O>
 where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta> + 'g,
     B: raw::iter::Range<R>,
     O: Order,
 {

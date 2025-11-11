@@ -17,7 +17,7 @@ const _: () = assert!(core::mem::align_of::<Node256<()>>() == 4096);
 
 impl<M> Default for Node256<M>
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     fn default() -> Self {
         Self(core::array::from_fn(|_| Atomic::new_packed(Edge::DEFAULT)))
@@ -26,7 +26,7 @@ where
 
 impl<M> Node<M> for Node256<M>
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = node::Kind::Node256;
     const GROW: usize = 256;
@@ -74,8 +74,7 @@ impl<M: ribbit::Pack> Node256<M> {
 
 impl<M> Debug for Node256<M>
 where
-    M: edge::Meta,
-    M::Packed: Debug,
+    M: ribbit::Pack<Packed: edge::Meta + Debug>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node256").field("edges", &self.0).finish()

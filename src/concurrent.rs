@@ -234,7 +234,7 @@ where
                 }
             };
 
-            validate!(!K::Edge::is_frozen(old.meta()));
+            validate!(!old.meta().is_frozen());
 
             match cursor.edge().compare_exchange_packed(
                 old,
@@ -483,9 +483,9 @@ where
                 return Some(());
             };
 
-            if K::Edge::is_frozen(edge.meta()) || node.scan() {
+            if edge.meta().is_frozen() || node.scan() {
                 match cursor.wait_for_scan(stat::Counter::ScanScan) {
-                    Ok(safe) if !K::Edge::is_frozen(edge.meta()) => edge = safe,
+                    Ok(safe) if !edge.meta().is_frozen() => edge = safe,
                     Ok(_) | Err(()) => {
                         edge = cursor.freeze()?;
                         continue;
@@ -519,7 +519,7 @@ where
         loop {
             validate!(node.scan());
 
-            if K::Edge::is_frozen(edge.meta()) {
+            if edge.meta().is_frozen() {
                 edge = match cursor.freeze() {
                     Some(edge) => edge,
                     None => unreachable!("Locked edge must be reachable"),

@@ -16,7 +16,7 @@ pub trait Key {
     type Write: Write<Edge = Self::Edge> + for<'k> From<Self::Read<'k>>;
 
     #[expect(private_bounds)]
-    type Edge: edge::Meta;
+    type Edge: ribbit::Pack<Packed: edge::Meta>;
 
     unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
 
@@ -28,7 +28,7 @@ pub trait Key {
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
-    type Edge: edge::Meta;
+    type Edge: ribbit::Pack<Packed: edge::Meta>;
 
     fn bits(&self) -> usize;
 
@@ -39,7 +39,10 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> <Self::Edge as edge::Meta>::Key;
+    fn read(
+        &mut self,
+        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key;
 
     // Prefix operations for prefix and range iteration
     fn prefix(self, bits: usize) -> Self;
@@ -49,7 +52,7 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
 pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
-    type Edge: edge::Meta;
+    type Edge: ribbit::Pack<Packed: edge::Meta>;
 
     fn len_from_bits(bits: usize) -> Self::Len;
 
@@ -99,7 +102,7 @@ impl<M> PartialOrd for Ignore<M> {
 
 impl<M> Write for Ignore<M>
 where
-    M: edge::Meta,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     type Len = ();
     type Edge = M;

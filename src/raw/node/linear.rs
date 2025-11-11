@@ -6,6 +6,7 @@ use core::sync::atomic::Ordering;
 use ribbit::Atomic;
 
 use crate::raw::edge;
+use crate::raw::edge::Meta as _;
 use crate::raw::node;
 use crate::raw::node::Edge;
 use crate::raw::node::Op;
@@ -17,9 +18,10 @@ pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack> {
     pub(super) edges: [Atomic<Edge<M>>; LEN],
 }
 
-impl<const LEN: usize, H: ribbit::Pack, M: edge::Meta> Default for Linear<LEN, H, M>
+impl<const LEN: usize, H, M> Default for Linear<LEN, H, M>
 where
-    H::Packed: Default,
+    H: ribbit::Pack<Packed: Default>,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     fn default() -> Self {
         Self {
@@ -31,9 +33,8 @@ where
 
 impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
 where
-    H: ribbit::Pack,
-    H::Packed: Header + Default,
-    M: edge::Meta,
+    H: ribbit::Pack<Packed: Header + Default>,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = <H::Packed as Header>::KIND;
     const GROW: usize = <H::Packed as Header>::GROW;
@@ -97,10 +98,10 @@ where
 
     fn replace(&self, meta: ribbit::Packed<M>) -> (Op, ribbit::Packed<Edge<M>>) {
         // Caller must not call replace if doomed to fail CAS
-        validate!(!M::is_frozen(meta));
+        validate!(!meta.is_frozen());
 
         // Can only call replace on nodes
-        validate!(!M::is_value(meta));
+        validate!(!meta.is_value());
 
         let header = self.freeze();
 
@@ -117,7 +118,7 @@ where
         .filter(|(_, edge)| !edge.is_null())
         .map(|(key, edge)| {
             validate!(
-                M::is_frozen(edge.meta()),
+                edge.meta().is_frozen(),
                 "{} edge must be frozen before replace",
                 core::any::type_name::<Self>(),
             );
@@ -138,7 +139,7 @@ where
             [] => return (Op::Destroy, Edge::DEFAULT),
             [(key, edge)] => {
                 // FIXME: how to handle scan?
-                if let Some(meta) = M::compress(meta, *key, edge.meta()) {
+                if let Some(meta) = meta.compress(*key, edge.meta()) {
                     return (Op::Compress, edge.with_meta(meta));
                 }
             }
@@ -155,9 +156,8 @@ where
 
 impl<const LEN: usize, H, M> Linear<LEN, H, M>
 where
-    H: ribbit::Pack,
-    H::Packed: Header,
-    M: edge::Meta,
+    H: ribbit::Pack<Packed: Header>,
+    M: ribbit::Pack<Packed: edge::Meta>,
 {
     fn freeze(&self) -> ribbit::Packed<H> {
         let mut header = self.header.load_packed(Ordering::Relaxed);
@@ -201,10 +201,10 @@ where
     }
 }
 
-impl<const LEN: usize, H: ribbit::Pack, M: edge::Meta> Debug for Linear<LEN, H, M>
+impl<const LEN: usize, H, M> Debug for Linear<LEN, H, M>
 where
-    H::Packed: Debug,
-    M::Packed: Debug,
+    H: ribbit::Pack<Packed: Debug>,
+    M: ribbit::Pack<Packed: edge::Meta + Debug>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = const {
@@ -230,11 +230,11 @@ pub(crate) trait Header: ribbit::Unpack {
 
     type Grow<M>: Node<M>
     where
-        M: edge::Meta;
+        M: ribbit::Pack<Packed: edge::Meta>;
 
     type Shrink<M>: Node<M>
     where
-        M: edge::Meta;
+        M: ribbit::Pack<Packed: edge::Meta>;
 
     fn freeze(self) -> Self;
 

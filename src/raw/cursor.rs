@@ -6,6 +6,8 @@ use path::History as _;
 use ribbit::Atomic;
 
 use crate::raw::edge;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::node;
@@ -61,8 +63,8 @@ where
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key;
-            let key = K::Edge::key(meta);
-            let len = K::Edge::len(key);
+            let key = meta.key();
+            let len = key.len();
 
             if self.key.read(len) != key {
                 return None;
@@ -86,9 +88,9 @@ where
 
             self.key = save;
 
-            return if K::Edge::is_frozen(meta) {
+            return if meta.is_frozen() {
                 Some(Err(()))
-            } else if K::Edge::is_value(meta) {
+            } else if meta.is_value() {
                 Some(Ok(edge))
             } else {
                 validate!(edge.is_null());
@@ -116,8 +118,8 @@ where
             let old_meta = old.meta();
             let mut save = self.key;
 
-            let old_key = K::Edge::key(old_meta);
-            let old_len = K::Edge::len(old_key);
+            let old_key = old_meta.key();
+            let old_len = old_key.len();
             let key = self.key.read(old_len);
 
             // Fast path: traverse
@@ -137,14 +139,14 @@ where
                 }
             }
 
-            if K::Edge::is_frozen(old_meta) {
+            if old_meta.is_frozen() {
                 return Err(());
             }
 
             // Revert key to before the current edge
             self.key = save;
 
-            let (op, new) = match K::Edge::expand(old_meta, key) {
+            let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
                     Some(edge::Child::Node(node)) => {
                         let node = unsafe { node.into_ref_unchecked() };
@@ -153,7 +155,8 @@ where
                     }
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
-                        let meta = save.read(K::Edge::MAX_LEN);
+                        let meta =
+                            save.read(<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::MAX_LEN);
                         if save.bits() == 0 {
                             (Op::Edge(edge::Op::Insert), Edge::new_value(meta, value))
                         } else {
@@ -180,7 +183,7 @@ where
         let mut edge = self.edge.load_packed(Ordering::Acquire);
 
         loop {
-            while K::Edge::is_frozen(edge.meta()) {
+            while edge.meta().is_frozen() {
                 node = self.pop()?;
                 edge = self.edge.load_packed(Ordering::Acquire);
             }
@@ -238,7 +241,7 @@ where
                 None => return Ok(edge),
                 Some(edge::Child::Value(_)) => unreachable!(),
                 Some(edge::Child::Node(node)) if !node.scan() => return Ok(edge),
-                Some(edge::Child::Node(_)) if K::Edge::is_frozen(edge.meta()) => return Err(()),
+                Some(edge::Child::Node(_)) if edge.meta().is_frozen() => return Err(()),
                 Some(edge::Child::Node(_)) => continue,
             }
         }
@@ -248,12 +251,12 @@ where
     fn push(
         &mut self,
         key: K::Read<'k>,
-        len: <K::Edge as edge::Meta>::Len,
+        len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
         node: node::Ref<'g, K::Edge>,
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
-        self.bits += 8 + K::Edge::len_to_bits(len);
+        self.bits += 8 + len.bits();
         self.history.push(path::Segment {
             key,
             len,
@@ -265,7 +268,7 @@ where
     #[cold]
     fn pop(&mut self) -> Result<node::Ref<'g, K::Edge>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
-        self.bits -= K::Edge::len_to_bits(segment.len) + 8;
+        self.bits -= segment.len.bits() + 8;
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(segment.node)
@@ -281,8 +284,8 @@ where
         let mut cursor = Self::new(root, key);
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
-            let key = K::Edge::key(edge.meta());
-            let len = K::Edge::len(key);
+            let key = edge.meta().key();
+            let len = key.len();
 
             if cursor.key.read(len) != key {
                 return None;
@@ -339,8 +342,8 @@ where
             let meta = edge.meta();
             let save = self.cursor.key;
 
-            let key_edge = K::Edge::key(meta);
-            let len_edge = K::Edge::len(key_edge);
+            let key_edge = meta.key();
+            let len_edge = key_edge.len();
             let key_cursor = self.cursor.key.read(len_edge);
 
             // Mismatch
@@ -349,7 +352,7 @@ where
             }
 
             // Full match
-            if K::Edge::len(key_cursor) == len_edge {
+            if key_cursor.len() == len_edge {
                 if let Some(node) = edge.as_node() {
                     let node = unsafe { node.into_ref_unchecked() };
                     let Some(byte) = self.cursor.key.next() else {

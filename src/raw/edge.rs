@@ -27,17 +27,18 @@ pub(crate) struct Edge<M> {
     data: u64,
 }
 
-impl<M: Meta> Edge<M> {
-    pub(crate) const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(M::DEFAULT, 0);
+impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
+    pub(crate) const DEFAULT: ribbit::Packed<Self> =
+        ribbit::Packed::<Self>::new(<M::Packed as Meta>::DEFAULT, 0);
 
     #[inline]
     pub(crate) fn freeze(edge: &Atomic<Self>) {
         let mut old = edge.load_packed(Ordering::Relaxed);
 
-        while !M::is_frozen(old.meta()) {
+        while !old.meta().is_frozen() {
             match edge.compare_exchange_packed(
                 old,
-                old.with_meta(M::with_frozen(old.meta(), true)),
+                old.with_meta(old.meta().with_frozen(true)),
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
@@ -48,12 +49,15 @@ impl<M: Meta> Edge<M> {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(key: M::Key, edges: I) -> ribbit::Packed<Self>
+    pub(crate) fn new_node<N, I>(
+        key: <<M as ribbit::Pack>::Packed as Meta>::Key,
+        edges: I,
+    ) -> ribbit::Packed<Self>
     where
         N: node::Node<M>,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
     {
-        unsafe { Self::new_node_unchecked::<N, I>(M::with_value(key, false), edges) }
+        unsafe { Self::new_node_unchecked::<N, I>(key.with_value(false), edges) }
     }
 
     #[cold]
@@ -65,8 +69,8 @@ impl<M: Meta> Edge<M> {
         N: node::Node<M>,
         I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
     {
-        validate!(!M::is_frozen(meta));
-        validate!(!M::is_value(meta));
+        validate!(!meta.is_frozen());
+        validate!(!meta.is_value());
 
         let mut node = Box::new(N::default());
 
@@ -79,20 +83,23 @@ impl<M: Meta> Edge<M> {
         ribbit::Packed::<Self>::new(meta, Node::new(node).value.get())
     }
 
-    pub(crate) fn new_value(meta: M::Key, value: u64) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(M::with_value(meta, true), value)
+    pub(crate) fn new_value(
+        meta: <<M as ribbit::Pack>::Packed as Meta>::Key,
+        value: u64,
+    ) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(meta.with_value(true), value)
     }
 }
 
-impl<M: Meta> EdgePacked<M> {
+impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     #[inline]
     pub(crate) fn is_null(self) -> bool {
-        !M::is_value(self.meta()) && self.data() == 0
+        !self.meta().is_value() && self.data() == 0
     }
 
     #[inline]
     pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<M>>> {
-        if M::is_value(self.meta()) {
+        if self.meta().is_value() {
             return None;
         }
 
@@ -101,7 +108,7 @@ impl<M: Meta> EdgePacked<M> {
 
     #[inline]
     pub(crate) fn as_value(self) -> Option<u64> {
-        M::is_value(self.meta()).then(|| self.data())
+        self.meta().is_value().then(|| self.data())
     }
 
     #[inline]
@@ -112,7 +119,7 @@ impl<M: Meta> EdgePacked<M> {
     #[inline]
     pub(crate) fn child(self) -> Option<Child<M>> {
         let data = self.data();
-        if M::is_value(self.meta()) {
+        if self.meta().is_value() {
             Some(Child::Value(data))
         } else {
             unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(data) }.map(Child::Node)
@@ -121,19 +128,19 @@ impl<M: Meta> EdgePacked<M> {
 
     #[inline]
     pub(crate) fn with_node(self, node: ribbit::Packed<Node<M>>) -> Self {
-        validate!(!M::is_value(self.meta()));
+        validate!(!self.meta().is_value());
         self.with_data(node.value.get())
     }
 
     #[inline]
     pub(crate) fn with_value(self, value: u64) -> Self {
-        validate!(M::is_value(self.meta()));
+        validate!(self.meta().is_value());
         self.with_data(value)
     }
 
     #[inline]
     pub(crate) fn unfreeze(self) -> Self {
-        self.with_meta(M::with_frozen(self.meta(), false))
+        self.with_meta(self.meta().with_frozen(false))
     }
 
     #[inline]
@@ -162,9 +169,9 @@ impl<M: Meta> EdgePacked<M> {
     }
 }
 
-impl<M: Meta> Debug for EdgePacked<M>
+impl<M: ribbit::Pack> Debug for EdgePacked<M>
 where
-    M::Packed: core::fmt::Debug,
+    M::Packed: Meta + core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut debug = f.debug_struct("Edge");
@@ -176,34 +183,36 @@ where
     }
 }
 
-pub(crate) trait Meta: ribbit::Pack {
-    const DEFAULT: ribbit::Packed<Self>;
+pub(crate) trait Meta: ribbit::Unpack {
+    const DEFAULT: Self;
 
     const MAX_LEN: Self::Len;
 
-    type Len: Copy + Eq;
-    type Key: Copy + Eq + Ord;
+    type Len: Len;
+    type Key: Key<Meta = Self, Len = Self::Len>;
 
-    fn key(meta: ribbit::Packed<Self>) -> Self::Key;
-    fn len(key: Self::Key) -> Self::Len;
-    fn len_to_bits(len: Self::Len) -> usize;
+    fn key(self) -> Self::Key;
 
-    fn is_value(meta: ribbit::Packed<Self>) -> bool;
-    fn is_frozen(meta: ribbit::Packed<Self>) -> bool;
+    fn is_value(self) -> bool;
+    fn is_frozen(self) -> bool;
 
-    fn with_frozen(meta: ribbit::Packed<Self>, frozen: bool) -> ribbit::Packed<Self>;
-    fn with_value(meta: Self::Key, value: bool) -> ribbit::Packed<Self>;
+    fn with_frozen(self, frozen: bool) -> Self;
 
-    fn expand(
-        old: ribbit::Packed<Self>,
-        new: Self::Key,
-    ) -> Result<(Self::Key, u8, ribbit::Packed<Self>), ()>;
+    fn expand(self, new: Self::Key) -> Result<(Self::Key, u8, Self), ()>;
 
-    fn compress(
-        parent: ribbit::Packed<Self>,
-        byte: u8,
-        child: ribbit::Packed<Self>,
-    ) -> Option<ribbit::Packed<Self>>;
+    fn compress(self, byte: u8, child: Self) -> Option<Self>;
+}
+
+pub(crate) trait Key: Copy + Eq + Ord {
+    type Meta;
+    type Len: Len;
+
+    fn len(self) -> Self::Len;
+    fn with_value(self, value: bool) -> Self::Meta;
+}
+
+pub(crate) trait Len: Copy + Eq {
+    fn bits(self) -> usize;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -275,7 +284,7 @@ impl<M> Node<M> {
 
 impl<M> Node<M>
 where
-    M: Meta,
+    M: ribbit::Pack<Packed: Meta>,
 {
     #[inline]
     fn new<N: node::Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
@@ -303,7 +312,7 @@ where
 
 impl<M> NodePacked<M>
 where
-    M: Meta,
+    M: ribbit::Pack<Packed: Meta>,
 {
     #[inline]
     pub(crate) fn is_ref(self, node: node::Ref<'_, M>) -> bool {
@@ -321,7 +330,7 @@ where
         #[inline]
         unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
         where
-            M: Meta,
+            M: ribbit::Pack<Packed: Meta>,
             N: node::Node<M> + 'g,
         {
             let node = unsafe { (ptr as *const N).as_ref() };

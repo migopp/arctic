@@ -38,11 +38,11 @@ impl linear::Header for ribbit::Packed<Header> {
     type Grow<M>
         = Node256<M>
     where
-        M: edge::Meta;
+        M: ribbit::Pack<Packed: edge::Meta>;
     type Shrink<M>
         = Node3<M>
     where
-        M: edge::Meta;
+        M: ribbit::Pack<Packed: edge::Meta>;
 
     fn freeze(self) -> Self {
         self.with_frozen(true)

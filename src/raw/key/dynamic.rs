@@ -151,7 +151,10 @@ impl key::Read for Reader<'_> {
         Self::Small(left.common_prefix(right))
     }
 
-    fn read(&mut self, len: <Self::Edge as edge::Meta>::Len) -> ribbit::Packed<Self::Edge> {
+    fn read(
+        &mut self,
+        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    ) -> ribbit::Packed<Self::Edge> {
         todo!()
     }
 }

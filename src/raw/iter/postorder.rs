@@ -8,11 +8,14 @@ use crate::raw::iter::Unbound;
 use crate::raw::node;
 use crate::raw::Edge;
 
-pub(crate) struct PostorderIter<'g, M: edge::Meta> {
+pub(crate) struct PostorderIter<'g, M: ribbit::Pack> {
     stack: Vec<RepeatIter<'g, M>>,
 }
 
-impl<'g, M: edge::Meta + 'g> PostorderIter<'g, M> {
+impl<'g, M> PostorderIter<'g, M>
+where
+    M: ribbit::Pack<Packed: edge::Meta> + 'g,
+{
     #[inline]
     pub(crate) unsafe fn new(root: &'g Atomic<Edge<M>>) -> Self {
         // HACK: we're masquerading as a node here--this is okay
@@ -68,13 +71,16 @@ impl<'g, M: edge::Meta + 'g> PostorderIter<'g, M> {
     }
 }
 
-struct RepeatIter<'g, M: edge::Meta> {
+struct RepeatIter<'g, M: ribbit::Pack> {
     first: bool,
     edge: ribbit::Packed<Edge<M>>,
     iter: node::NodeIter<'g, Unbound, Unbound, M>,
 }
 
-impl<'g, M: edge::Meta> RepeatIter<'g, M> {
+impl<'g, M> RepeatIter<'g, M>
+where
+    M: ribbit::Pack<Packed: edge::Meta> + 'g,
+{
     #[inline]
     fn new(iter: node::NodeIter<'g, Unbound, Unbound, M>) -> Self {
         Self {
