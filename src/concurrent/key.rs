@@ -36,7 +36,7 @@ macro_rules! impl_integer {
     }
 }
 
-impl_integer!(u16, u32, u64);
+impl_integer!(u16, u32, u64, u128);
 
 #[inline]
 fn hazard_integer<U: integer::Uint>(
