@@ -186,42 +186,62 @@ where
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = map.insert_optimistic(key, value) {
+            if let Ok(old) = map.insert_with_optimistic(key, &mut |_| value, &mut |_| ()) {
                 polonius_return!(old);
             }
         });
 
-        map.insert_pessimistic(key, value)
+        unsafe { map.insert_with_pessimistic(key, &mut |_| value, &mut |_| ()) }
     }
 
     #[inline]
-    fn insert_optimistic(
+    fn insert_with_optimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
-        value: u64,
-    ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()> {
-        self.insert_impl::<cursor::path::Discard>(key, value)
+        allocate: &mut A,
+        deallocate: &mut D,
+    ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
+    where
+        A: FnMut(Option<V::Borrow<'_>>) -> u64,
+        D: FnMut(u64),
+    {
+        unsafe { self.insert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate) }
     }
 
     #[cold]
-    fn insert_pessimistic(
+    unsafe fn insert_with_pessimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
-        value: u64,
-    ) -> Option<V::OwnedGuard<'g, '_>> {
+        allocate: &mut A,
+        deallocate: &mut D,
+    ) -> Option<V::OwnedGuard<'g, '_>>
+    where
+        A: FnMut(Option<V::Borrow<'_>>) -> u64,
+        D: FnMut(u64),
+    {
         stat::increment(stat::Counter::InsertPessimistic);
-        self.insert_impl::<cursor::path::Retain<_>>(key, value)
-            .unwrap()
+        unsafe {
+            self.insert_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
+                .unwrap()
+        }
     }
 
+    // Note: the reason we need a `deallocate` function is to share this common
+    // logic between (a) insert operations that insert one value unconditionally,
+    // and don't need to allocate/deallocate based on the previous value, and
+    // (b) insert operations that do depend on the previous value, and need to
+    // be deallocated.
     #[inline]
-    fn insert_impl<'k, H>(
+    unsafe fn insert_with_impl<'k, H, A, D>(
         &mut self,
         key: <K as Key>::Borrow<'k>,
-        value: u64,
+        allocate: &mut A,
+        deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
+        A: FnMut(Option<V::Borrow<'_>>) -> u64,
+        D: FnMut(u64),
     {
         let reader = K::Read::from(key);
         let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
@@ -229,16 +249,20 @@ where
         loop {
             match cursor.traverse_or_insert() {
                 Insert::Value { old, key } if !old.meta().is_frozen() => {
+                    let old_value = old.as_value().map(|raw| unsafe { V::borrow_from_raw(raw) });
+                    let new_value = allocate(old_value);
+
                     if cursor
                         .edge()
                         .compare_exchange_packed(
                             old,
-                            Edge::new_value(key, value),
+                            Edge::new_value(key, new_value),
                             Ordering::AcqRel,
                             Ordering::Relaxed,
                         )
                         .is_err()
                     {
+                        deallocate(new_value);
                         continue;
                     }
 
