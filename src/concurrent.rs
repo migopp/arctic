@@ -17,7 +17,6 @@ use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
-use crate::raw::Smo;
 use crate::sequential;
 use crate::stat;
 use crate::Key;
@@ -333,6 +332,41 @@ where
                 Insert::Frozen | Insert::Value { .. } => cursor.freeze()?,
             }
         }
+    }
+
+    #[inline]
+    pub fn get_or_insert<F>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        value: V,
+    ) -> V::SharedGuard<'g, '_>
+    where
+        F: FnOnce() -> V,
+    {
+        self.get_or_insert_with(key, || value)
+    }
+
+    #[inline]
+    pub fn get_or_insert_with<F>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        with: F,
+    ) -> V::SharedGuard<'g, '_>
+    where
+        F: FnOnce() -> V,
+    {
+        let mut map = &mut *self;
+        let mut with = Thunk::new(|| V::into_raw(with()));
+
+        // Cursed workaround for:
+        // https://github.com/rust-lang/rust/issues/54663
+        polonius!(|map| -> V::SharedGuard<'g, 'polonius> {
+            if let Ok(old) = unsafe { map.get_or_insert_with_optimistic(key, &mut with) } {
+                polonius_return!(old);
+            }
+        });
+
+        unsafe { map.get_or_insert_with_pessimistic(key, &mut with) }
     }
 
     #[inline]
