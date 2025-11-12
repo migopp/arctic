@@ -335,6 +335,114 @@ where
         }
     }
 
+    #[inline]
+    unsafe fn get_or_insert_with_optimistic<W>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        with: &mut Thunk<W>,
+    ) -> Result<V::SharedGuard<'g, '_>, ()>
+    where
+        W: FnOnce() -> u64,
+    {
+        self.get_or_insert_with_impl::<cursor::path::Discard, _>(key, with)
+    }
+
+    #[cold]
+    unsafe fn get_or_insert_with_pessimistic<W>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        with: &mut Thunk<W>,
+    ) -> V::SharedGuard<'g, '_>
+    where
+        W: FnOnce() -> u64,
+    {
+        stat::increment(stat::Counter::GetOrInsertPessimistic);
+        unsafe {
+            self.get_or_insert_with_impl::<cursor::path::Retain<_>, _>(key, with)
+                .unwrap()
+        }
+    }
+
+    #[inline]
+    unsafe fn get_or_insert_with_impl<'k, H, W>(
+        &mut self,
+        key: <K as Key>::Borrow<'k>,
+        with: &mut Thunk<W>,
+    ) -> Result<V::SharedGuard<'g, '_>, H::PopError>
+    where
+        H: cursor::path::History<'g, 'k, K>,
+        W: FnOnce() -> u64,
+    {
+        let reader = K::Read::from(key);
+        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+
+        loop {
+            match cursor.traverse_or_insert() {
+                Insert::Value { old, key } => match old.as_value() {
+                    Some(value) => {
+                        // Deallocate `with` if we evaluated it
+                        match with {
+                            Thunk::Unevaluated(_) => (),
+                            Thunk::Evaluated(value) => drop(unsafe { V::from_raw(*value) }),
+                        }
+
+                        return Ok(unsafe { V::guard_shared(cursor.into_guard(), value) });
+                    }
+                    // Fall through to freeze
+                    None if old.meta().is_frozen() => (),
+                    None => {
+                        let new_value = with.evaluate();
+                        let new = Edge::new_value(key, new_value);
+
+                        if cursor
+                            .edge()
+                            .compare_exchange_packed(old, new, Ordering::AcqRel, Ordering::Relaxed)
+                            .is_ok()
+                        {
+                            return Ok(unsafe { V::guard_shared(cursor.into_guard(), new_value) });
+                        }
+
+                        continue;
+                    }
+                },
+                Insert::Smo { op, old, new } => {
+                    validate!(!old.meta().is_frozen());
+
+                    match cursor.edge().compare_exchange_packed(
+                        old,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            stat::increment(op);
+                            if op.is_retire() {
+                                unsafe {
+                                    cursor.retire(old);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Does not go through SMR because `new` is still thread-local
+                            if op.is_allocate() {
+                                if let Some(edge::Child::Node(node)) = new.child() {
+                                    unsafe {
+                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+                Insert::Frozen => (),
+            }
+
+            cursor.freeze()?;
+        }
+    }
+
     pub fn all(&mut self) -> iter::PrefixGuard<'g, '_, '_, K, V, RangeFull> {
         let cursor =
             cursor::Prefix::<_, _, cursor::path::Discard>::new_root(&mut self.smr, self.raw.root());
@@ -599,6 +707,32 @@ where
                 }
             }
         }
+    }
+}
+
+enum Thunk<F> {
+    Unevaluated(F),
+    Evaluated(u64),
+}
+
+impl<F> Thunk<F> {
+    fn new(with: F) -> Self {
+        Self::Unevaluated(with)
+    }
+}
+
+impl<F> Thunk<F>
+where
+    F: FnOnce() -> u64,
+{
+    fn evaluate(&mut self) -> u64 {
+        let thunk = core::mem::replace(self, Self::Evaluated(0));
+        let value = match thunk {
+            Self::Unevaluated(with) => with(),
+            Self::Evaluated(value) => value,
+        };
+        *self = Self::Evaluated(value);
+        value
     }
 }
 

@@ -115,6 +115,7 @@ pub struct Process {
 pub(crate) enum Counter {
     Op(Smo),
     InsertPessimistic,
+    GetOrInsertPessimistic,
     Retire,
     Flush,
     FreeConflict,
@@ -162,6 +163,7 @@ pub struct Thread {
     node: Node,
     edge: Edge,
     insert_pessimistic: u64,
+    get_or_insert_pessimistic: u64,
     retire: u64,
     flush: u64,
     retire_cache: u64,
@@ -226,6 +228,7 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
             *match _counter.into() {
                 Counter::Op(op) => thread.op(op),
                 Counter::InsertPessimistic => &mut thread.insert_pessimistic,
+                Counter::GetOrInsertPessimistic => &mut thread.get_or_insert_pessimistic,
                 Counter::Retire => &mut thread.retire,
                 Counter::Flush => &mut thread.flush,
                 Counter::FreeConflict => &mut thread.free_conflict,
