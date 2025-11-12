@@ -75,58 +75,64 @@ where
         value: V,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
-        unsafe { self.compare_exchange(key, |old| old.with_value(value)) }
+        unsafe { self.update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ()) }
     }
 
     #[inline]
     pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
-        unsafe { self.compare_exchange(key, |_| Edge::DEFAULT) }
+        unsafe { self.update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) }
     }
 
     #[inline]
-    unsafe fn compare_exchange<F>(
+    unsafe fn update_with<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
-        mut exchange: F,
+        allocate: &mut A,
+        deallocate: &mut D,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
+        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
+        D: FnMut(u64),
     {
         let mut map = self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = map.compare_exchange_optimistic::<_>(key, &mut exchange) {
+            if let Ok(old) = map.update_with_optimistic(key, allocate, deallocate) {
                 polonius_return!(old);
             }
         });
 
-        map.compare_exchange_pessimistic(key, exchange)
+        map.update_with_pessimistic(key, allocate, deallocate)
     }
 
     #[inline]
-    unsafe fn compare_exchange_optimistic<F>(
+    unsafe fn update_with_optimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
-        exchange: F,
+        allocate: &mut A,
+        deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
     where
-        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
+        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
+        D: FnMut(u64),
     {
-        self.compare_exchange_impl::<cursor::path::Discard, _>(key, exchange)
+        self.update_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
-    unsafe fn compare_exchange_pessimistic<F>(
+    unsafe fn update_with_pessimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
-        exchange: F,
+        allocate: &mut A,
+        deallocate: &mut D,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
-        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
+        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
+        D: FnMut(u64),
     {
-        self.compare_exchange_impl::<cursor::path::Retain<_>, _>(key, exchange)
+        self.update_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
             .unwrap()
     }
 
@@ -135,14 +141,16 @@ where
     /// Caller must guarantee that `exchange` removes the old value from the tree,
     /// or else we will duplicate ownership.
     #[inline]
-    unsafe fn compare_exchange_impl<'l, 'k, H, F>(
+    unsafe fn update_with_impl<'l, 'k, H, A, D>(
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
-        mut exchange: F,
+        allocate: &mut A,
+        deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, 'l>>, H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
-        F: FnMut(ribbit::Packed<Edge<K::Edge>>) -> ribbit::Packed<Edge<K::Edge>>,
+        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
+        D: FnMut(u64),
     {
         let reader = K::Read::from(key);
         let mut cursor = cursor::Point::<K, V, H>::new(&mut self.smr, self.raw.root(), reader);
@@ -157,18 +165,29 @@ where
                 }
             };
 
-            if cursor
-                .edge()
-                .compare_exchange_packed(old, exchange(old), Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-            {
-                return Ok(match old.as_value() {
-                    Some(value) => Some(unsafe { V::guard_owned(cursor.into_guard(), value) }),
-                    None => {
-                        validate!(old.is_null());
-                        None
-                    }
-                });
+            let new = match allocate(old) {
+                Some(new) => new,
+                None => return Ok(None),
+            };
+
+            match cursor.edge().compare_exchange_packed(
+                old,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Ok(match old.as_value() {
+                        Some(value) => Some(unsafe { V::guard_owned(cursor.into_guard(), value) }),
+                        None => {
+                            validate!(old.is_null());
+                            None
+                        }
+                    })
+                }
+                Err(_) => {
+                    deallocate(new.into_raw());
+                }
             }
         }
     }
