@@ -335,11 +335,7 @@ where
     }
 
     #[inline]
-    pub fn get_or_insert<F>(
-        &mut self,
-        key: <K as Key>::Borrow<'_>,
-        value: V,
-    ) -> V::SharedGuard<'g, '_>
+    pub fn get_or_insert<F>(&mut self, key: <K as Key>::Borrow<'_>, value: V) -> Entry<'g, '_, V>
     where
         F: FnOnce() -> V,
     {
@@ -351,7 +347,7 @@ where
         &mut self,
         key: <K as Key>::Borrow<'_>,
         with: F,
-    ) -> V::SharedGuard<'g, '_>
+    ) -> Entry<'g, '_, V>
     where
         F: FnOnce() -> V,
     {
@@ -360,7 +356,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> V::SharedGuard<'g, 'polonius> {
+        polonius!(|map| -> Entry<'g, 'polonius, V> {
             if let Ok(old) = unsafe { map.get_or_insert_with_optimistic(key, &mut with) } {
                 polonius_return!(old);
             }
@@ -370,11 +366,11 @@ where
     }
 
     #[inline]
-    unsafe fn get_or_insert_with_optimistic<W>(
-        &mut self,
-        key: <K as Key>::Borrow<'_>,
+    unsafe fn get_or_insert_with_optimistic<'l, 'k, W>(
+        &'l mut self,
+        key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<W>,
-    ) -> Result<V::SharedGuard<'g, '_>, ()>
+    ) -> Result<Entry<'g, 'l, V>, ()>
     where
         W: FnOnce() -> u64,
     {
@@ -382,11 +378,11 @@ where
     }
 
     #[cold]
-    unsafe fn get_or_insert_with_pessimistic<W>(
-        &mut self,
-        key: <K as Key>::Borrow<'_>,
+    unsafe fn get_or_insert_with_pessimistic<'l, 'k, W>(
+        &'l mut self,
+        key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<W>,
-    ) -> V::SharedGuard<'g, '_>
+    ) -> Entry<'g, 'l, V>
     where
         W: FnOnce() -> u64,
     {
@@ -398,17 +394,18 @@ where
     }
 
     #[inline]
-    unsafe fn get_or_insert_with_impl<'k, H, W>(
-        &mut self,
+    unsafe fn get_or_insert_with_impl<'l, 'k, H, W>(
+        &'l mut self,
         key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<W>,
-    ) -> Result<V::SharedGuard<'g, '_>, H::PopError>
+    ) -> Result<Entry<'g, 'l, V>, H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
         W: FnOnce() -> u64,
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor =
+            cursor::Point::<'g, 'l, 'k, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             match cursor.traverse_or_insert() {
@@ -420,7 +417,9 @@ where
                             Thunk::Evaluated(value) => drop(unsafe { V::from_raw(*value) }),
                         }
 
-                        return Ok(unsafe { V::guard_shared(cursor.into_guard(), value) });
+                        return Ok(Entry::Present(unsafe {
+                            V::guard_shared(cursor.into_guard(), value)
+                        }));
                     }
                     // Fall through to freeze
                     None if old.meta().is_frozen() => (),
@@ -433,7 +432,9 @@ where
                             .compare_exchange_packed(old, new, Ordering::AcqRel, Ordering::Relaxed)
                             .is_ok()
                         {
-                            return Ok(unsafe { V::guard_shared(cursor.into_guard(), new_value) });
+                            return Ok(Entry::Absent(unsafe {
+                                V::guard_shared(cursor.into_guard(), new_value)
+                            }));
                         }
 
                         continue;
@@ -740,6 +741,26 @@ where
                     edge = conflict;
                 }
             }
+        }
+    }
+}
+
+/// Provides information about the outcome of a `get_or_insert` operation,
+/// which may be useful for coordination. If there are no concurrent
+/// removal operations, only one thread will see `Entry::Absent`.
+pub enum Entry<'g: 'l, 'l, V: Value + 'g> {
+    /// Value was previously present in the tree
+    Present(V::SharedGuard<'g, 'l>),
+    /// Value was previously absent and newly inserted
+    Absent(V::SharedGuard<'g, 'l>),
+}
+
+impl<'g: 'l, 'l, V: Value + 'l> core::ops::Deref for Entry<'g, 'l, V> {
+    type Target = V::SharedGuard<'g, 'l>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Entry::Present(guard) | Entry::Absent(guard) => guard,
         }
     }
 }
