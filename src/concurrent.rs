@@ -75,16 +75,73 @@ where
         value: V,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
-        unsafe { self.update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ()) }
+        unsafe {
+            self.get_and_update_with(
+                key,
+                &mut |old| old.meta().is_value().then(|| old.with_value(value)),
+                &mut |_| (),
+            )
+        }
+    }
+
+    #[inline]
+    pub fn update_with<F>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        mut with: F,
+    ) -> Option<V::OwnedGuard<'g, '_>>
+    where
+        F: FnMut(V::Borrow<'_>) -> Option<V>,
+    {
+        unsafe {
+            self.get_and_update_with(
+                key,
+                &mut |old| {
+                    let old_value = V::borrow_from_raw(old.as_value()?);
+                    let new_value = V::into_raw(with(old_value)?);
+                    Some(old.with_value(new_value))
+                },
+                &mut |new| {
+                    drop(V::from_raw(new));
+                },
+            )
+        }
     }
 
     #[inline]
     pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
-        unsafe { self.update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) }
+        unsafe {
+            self.get_and_update_with(
+                key,
+                &mut |old| old.meta().is_value().then_some(Edge::DEFAULT),
+                &mut |_| (),
+            )
+        }
     }
 
     #[inline]
-    unsafe fn update_with<A, D>(
+    pub fn remove_with<F>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        mut with: F,
+    ) -> Option<V::OwnedGuard<'g, '_>>
+    where
+        F: FnMut(V::Borrow<'_>) -> bool,
+    {
+        unsafe {
+            self.get_and_update_with(
+                key,
+                &mut |old| {
+                    let old_value = V::borrow_from_raw(old.as_value()?);
+                    with(old_value).then_some(Edge::DEFAULT)
+                },
+                &mut |_| (),
+            )
+        }
+    }
+
+    #[inline]
+    unsafe fn get_and_update_with<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
@@ -99,16 +156,16 @@ where
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = map.update_with_optimistic(key, allocate, deallocate) {
+            if let Ok(old) = map.get_and_update_with_optimistic(key, allocate, deallocate) {
                 polonius_return!(old);
             }
         });
 
-        map.update_with_pessimistic(key, allocate, deallocate)
+        map.get_and_update_with_pessimistic(key, allocate, deallocate)
     }
 
     #[inline]
-    unsafe fn update_with_optimistic<A, D>(
+    unsafe fn get_and_update_with_optimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
@@ -118,11 +175,11 @@ where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
     {
-        self.update_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
+        self.get_and_update_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
-    unsafe fn update_with_pessimistic<A, D>(
+    unsafe fn get_and_update_with_pessimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
@@ -132,7 +189,7 @@ where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
     {
-        self.update_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
+        self.get_and_update_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
             .unwrap()
     }
 
@@ -141,7 +198,7 @@ where
     /// Caller must guarantee that `exchange` removes the old value from the tree,
     /// or else we will duplicate ownership.
     #[inline]
-    unsafe fn update_with_impl<'l, 'k, H, A, D>(
+    unsafe fn get_and_update_with_impl<'l, 'k, H, A, D>(
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
         allocate: &mut A,
@@ -385,25 +442,25 @@ where
     }
 
     #[inline]
-    unsafe fn get_or_insert_with_optimistic<'l, 'k, W>(
+    unsafe fn get_or_insert_with_optimistic<'l, 'k, F>(
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
-        with: &mut Thunk<W>,
+        with: &mut Thunk<F>,
     ) -> Result<Entry<'g, 'l, V>, ()>
     where
-        W: FnOnce() -> u64,
+        F: FnOnce() -> u64,
     {
         self.get_or_insert_with_impl::<cursor::path::Discard, _>(key, with)
     }
 
     #[cold]
-    unsafe fn get_or_insert_with_pessimistic<'l, 'k, W>(
+    unsafe fn get_or_insert_with_pessimistic<'l, 'k, F>(
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
-        with: &mut Thunk<W>,
+        with: &mut Thunk<F>,
     ) -> Entry<'g, 'l, V>
     where
-        W: FnOnce() -> u64,
+        F: FnOnce() -> u64,
     {
         stat::increment(stat::Counter::GetOrInsertPessimistic);
         unsafe {
@@ -413,14 +470,14 @@ where
     }
 
     #[inline]
-    unsafe fn get_or_insert_with_impl<'l, 'k, H, W>(
+    unsafe fn get_or_insert_with_impl<'l, 'k, H, F>(
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
-        with: &mut Thunk<W>,
+        with: &mut Thunk<F>,
     ) -> Result<Entry<'g, 'l, V>, H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
-        W: FnOnce() -> u64,
+        F: FnOnce() -> u64,
     {
         let reader = K::Read::from(key);
         let mut cursor =
