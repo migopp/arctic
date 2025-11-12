@@ -76,11 +76,7 @@ where
     ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
         unsafe {
-            self.get_and_update_with(
-                key,
-                &mut |old| old.meta().is_value().then(|| old.with_value(value)),
-                &mut |_| (),
-            )
+            self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
         }
     }
 
@@ -97,7 +93,7 @@ where
             self.get_and_update_with(
                 key,
                 &mut |old| {
-                    let old_value = V::borrow_from_raw(old.as_value()?);
+                    let old_value = V::borrow_from_raw(old.into_raw());
                     let new_value = V::into_raw(with(old_value)?);
                     Some(old.with_value(new_value))
                 },
@@ -110,13 +106,7 @@ where
 
     #[inline]
     pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
-        unsafe {
-            self.get_and_update_with(
-                key,
-                &mut |old| old.meta().is_value().then_some(Edge::DEFAULT),
-                &mut |_| (),
-            )
-        }
+        unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) }
     }
 
     #[inline]
@@ -132,7 +122,7 @@ where
             self.get_and_update_with(
                 key,
                 &mut |old| {
-                    let old_value = V::borrow_from_raw(old.as_value()?);
+                    let old_value = V::borrow_from_raw(old.into_raw());
                     with(old_value).then_some(Edge::DEFAULT)
                 },
                 &mut |_| (),
@@ -221,6 +211,8 @@ where
                     continue;
                 }
             };
+
+            validate!(old.meta().is_value());
 
             let new = match allocate(old) {
                 Some(new) => new,
