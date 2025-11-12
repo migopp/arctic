@@ -186,7 +186,8 @@ where
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = map.insert_with_optimistic(key, &mut |_| value, &mut |_| ()) {
+            if let Ok(old) = unsafe { map.insert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
+            {
                 polonius_return!(old);
             }
         });
@@ -195,7 +196,37 @@ where
     }
 
     #[inline]
-    fn insert_with_optimistic<A, D>(
+    pub fn insert_with<F>(
+        &mut self,
+        key: <K as Key>::Borrow<'_>,
+        mut with: F,
+    ) -> Option<V::OwnedGuard<'g, '_>>
+    where
+        F: FnMut(Option<V::Borrow<'_>>) -> V,
+    {
+        let mut map = &mut *self;
+
+        // Cursed workaround for:
+        // https://github.com/rust-lang/rust/issues/54663
+        polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
+            if let Ok(old) = unsafe {
+                map.insert_with_optimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
+                    drop(V::from_raw(raw))
+                })
+            } {
+                polonius_return!(old);
+            }
+        });
+
+        unsafe {
+            map.insert_with_pessimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
+                drop(V::from_raw(raw))
+            })
+        }
+    }
+
+    #[inline]
+    unsafe fn insert_with_optimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
@@ -205,7 +236,7 @@ where
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
     {
-        unsafe { self.insert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate) }
+        self.insert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
