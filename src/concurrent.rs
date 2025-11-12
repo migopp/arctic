@@ -75,10 +75,11 @@ where
         value: V,
     ) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
-        unsafe {
+        let (old, present) = unsafe {
             self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
-                .into_inner()
-        }
+        };
+        validate_eq!(old.is_some(), present);
+        old
     }
 
     #[inline]
@@ -86,7 +87,7 @@ where
         &mut self,
         key: <K as Key>::Borrow<'_>,
         mut with: F,
-    ) -> Effect<Option<V::OwnedGuard<'g, '_>>>
+    ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
         F: FnMut(V::Borrow<'_>) -> Option<V>,
     {
@@ -107,8 +108,10 @@ where
 
     #[inline]
     pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
-        unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) }
-            .into_inner()
+        let (old, present) =
+            unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) };
+        validate_eq!(old.is_some(), present);
+        old
     }
 
     #[inline]
@@ -116,7 +119,7 @@ where
         &mut self,
         key: <K as Key>::Borrow<'_>,
         mut with: F,
-    ) -> Effect<Option<V::OwnedGuard<'g, '_>>>
+    ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
         F: FnMut(V::Borrow<'_>) -> bool,
     {
@@ -138,7 +141,7 @@ where
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Effect<Option<V::OwnedGuard<'g, '_>>>
+    ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -147,7 +150,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Effect<Option<V::OwnedGuard<'g, 'polonius>>> {
+        polonius!(|map| -> (Option<V::OwnedGuard<'g, 'polonius>>, bool) {
             if let Ok(old) = map.get_and_update_with_optimistic(key, allocate, deallocate) {
                 polonius_return!(old);
             }
@@ -162,7 +165,7 @@ where
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Result<Effect<Option<V::OwnedGuard<'g, '_>>>, ()>
+    ) -> Result<(Option<V::OwnedGuard<'g, '_>>, bool), ()>
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -176,7 +179,7 @@ where
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Effect<Option<V::OwnedGuard<'g, '_>>>
+    ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -191,7 +194,7 @@ where
         key: <K as Key>::Borrow<'k>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Result<Effect<Option<V::OwnedGuard<'g, 'l>>>, H::PopError>
+    ) -> Result<(Option<V::OwnedGuard<'g, 'l>>, bool), H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
@@ -202,7 +205,7 @@ where
 
         loop {
             let old = match cursor.traverse_exact() {
-                None => return Ok(Effect::Read(None)),
+                None => return Ok((None, false)),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
                     cursor.freeze()?;
@@ -214,7 +217,7 @@ where
 
             let new = match allocate(old) {
                 Some(new) => new,
-                None => return Ok(Effect::Read(None)),
+                None => return Ok((None, true)),
             };
 
             match cursor.edge().compare_exchange_packed(
@@ -227,7 +230,7 @@ where
                     let guard = old
                         .as_value()
                         .map(|value| unsafe { V::guard_owned(cursor.into_guard(), value) });
-                    return Ok(Effect::Write(guard));
+                    return Ok((guard, true));
                 }
                 Err(_) => {
                     deallocate(new.into_raw());
@@ -397,24 +400,26 @@ where
         }
     }
 
+    /// Returns whether `key` was previously present in the tree.
     #[inline]
     pub fn get_or_insert<F>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         value: V,
-    ) -> Effect<V::SharedGuard<'g, '_>>
+    ) -> (V::SharedGuard<'g, '_>, bool)
     where
         F: FnOnce() -> V,
     {
         self.get_or_insert_with(key, || value)
     }
 
+    /// Returns whether `key` was previously present in the tree.
     #[inline]
     pub fn get_or_insert_with<F>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         with: F,
-    ) -> Effect<V::SharedGuard<'g, '_>>
+    ) -> (V::SharedGuard<'g, '_>, bool)
     where
         F: FnOnce() -> V,
     {
@@ -423,7 +428,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Effect<V::SharedGuard<'g, 'polonius>> {
+        polonius!(|map| -> (V::SharedGuard<'g, 'polonius>, bool) {
             if let Ok(old) = unsafe { map.get_or_insert_with_optimistic(key, &mut with) } {
                 polonius_return!(old);
             }
@@ -437,7 +442,7 @@ where
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<F>,
-    ) -> Result<Effect<V::SharedGuard<'g, 'l>>, ()>
+    ) -> Result<(V::SharedGuard<'g, 'l>, bool), ()>
     where
         F: FnOnce() -> u64,
     {
@@ -449,7 +454,7 @@ where
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<F>,
-    ) -> Effect<V::SharedGuard<'g, 'l>>
+    ) -> (V::SharedGuard<'g, 'l>, bool)
     where
         F: FnOnce() -> u64,
     {
@@ -465,7 +470,7 @@ where
         &'l mut self,
         key: <K as Key>::Borrow<'k>,
         with: &mut Thunk<F>,
-    ) -> Result<Effect<V::SharedGuard<'g, 'l>>, H::PopError>
+    ) -> Result<(V::SharedGuard<'g, 'l>, bool), H::PopError>
     where
         H: cursor::path::History<'g, 'k, K>,
         F: FnOnce() -> u64,
@@ -484,9 +489,7 @@ where
                             Thunk::Evaluated(value) => drop(unsafe { V::from_raw(*value) }),
                         }
 
-                        return Ok(Effect::Write(unsafe {
-                            V::guard_shared(cursor.into_guard(), value)
-                        }));
+                        return Ok((unsafe { V::guard_shared(cursor.into_guard(), value) }, true));
                     }
                     // Fall through to freeze
                     None if old.meta().is_frozen() => (),
@@ -499,9 +502,10 @@ where
                             .compare_exchange_packed(old, new, Ordering::AcqRel, Ordering::Relaxed)
                             .is_ok()
                         {
-                            return Ok(Effect::Read(unsafe {
-                                V::guard_shared(cursor.into_guard(), new_value)
-                            }));
+                            return Ok((
+                                unsafe { V::guard_shared(cursor.into_guard(), new_value) },
+                                false,
+                            ));
                         }
 
                         continue;
@@ -808,44 +812,6 @@ where
                     edge = conflict;
                 }
             }
-        }
-    }
-}
-
-/// Provides extra information about the effect of a fallible operation,
-/// which may be useful for coordination.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Effect<T> {
-    /// Effect is read-only, tree is not modified
-    Read(T),
-    /// Effect wrote to tree
-    Write(T),
-}
-
-impl<T> Effect<T> {
-    #[inline]
-    pub fn is_read(&self) -> bool {
-        matches!(self, Self::Read(_))
-    }
-
-    #[inline]
-    pub fn is_write(&self) -> bool {
-        matches!(self, Self::Write(_))
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> T {
-        match self {
-            Self::Read(inner) | Self::Write(inner) => inner,
-        }
-    }
-}
-
-impl<T> core::ops::Deref for Effect<T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Effect::Read(inner) | Effect::Write(inner) => inner,
         }
     }
 }
