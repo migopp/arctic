@@ -73,13 +73,17 @@ where
         &mut self,
         key: <K as Key>::Borrow<'_>,
         value: V,
-    ) -> Option<V::OwnedGuard<'g, '_>> {
+    ) -> Result<V::OwnedGuard<'g, '_>, V> {
         let value = value.into_raw();
         let (old, present) = unsafe {
             self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
         };
         validate_eq!(old.is_some(), present);
-        old
+
+        match old {
+            Some(guard) => Ok(guard),
+            None => Err(unsafe { V::from_raw(value) }),
+        }
     }
 
     #[inline]
