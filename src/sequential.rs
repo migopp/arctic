@@ -53,7 +53,7 @@ impl<K: Key, V: Value> Map<K, V> {
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn insert(&mut self, key: <K as Key>::Borrow<'_>, value: u64) -> Option<u64> {
+    pub fn insert(&mut self, key: <K as Key>::Borrow<'_>, value: V) -> Option<V> {
         let mut edge = self.root();
         let mut reader = K::Read::from(key);
 
@@ -97,11 +97,11 @@ impl<K: Key, V: Value> Map<K, V> {
             };
 
             edge.store_packed(new, Ordering::Relaxed);
-            return old.as_value();
+            return old.as_value().map(|value| unsafe { V::from_raw(value) });
         }
     }
 
-    fn insert_help(mut reader: K::Read<'_>, value: u64) -> ribbit::Packed<Edge<K::Edge>> {
+    fn insert_help(mut reader: K::Read<'_>, value: V) -> ribbit::Packed<Edge<K::Edge>> {
         let prefix = reader.read(<ribbit::Packed<K::Edge> as edge::Meta>::MAX_LEN);
 
         if reader.bits() > 0 {
@@ -111,19 +111,19 @@ impl<K: Key, V: Value> Map<K, V> {
                 [(byte, Self::insert_help(reader, value))],
             )
         } else {
-            Edge::new_value(prefix, value)
+            Edge::new_value(prefix, value.into_raw())
         }
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<u64> {
+    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn update(&mut self, key: <K as Key>::Borrow<'_>, value: u64) -> Option<u64> {
+    pub fn update(&mut self, key: <K as Key>::Borrow<'_>, value: V) -> Result<Option<V>, V> {
         todo!()
     }
 
