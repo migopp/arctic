@@ -18,7 +18,7 @@ use crate::raw::Smo;
 use crate::stat;
 
 /// Tree traversal state.
-pub(crate) struct Point<'g, 'k, K: Key, H> {
+pub(crate) struct Point<'k, 'g, K: Key, H> {
     /// Total number of bits read from `key`
     bits: usize,
 
@@ -47,10 +47,10 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
     Frozen,
 }
 
-impl<'g, 'k, K, H> Point<'g, 'k, K, H>
+impl<'k, 'g, K, H> Point<'k, 'g, K, H>
 where
     K: Key,
-    H: path::History<'g, 'k, K>,
+    H: path::History<'k, 'g, K>,
 {
     #[inline]
     pub(crate) unsafe fn new(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
@@ -285,7 +285,7 @@ where
     }
 }
 
-impl<'g, 'k, K> Point<'g, 'k, K, path::Discard>
+impl<'k, 'g, K> Point<'k, 'g, K, path::Discard>
 where
     K: Key,
 {
@@ -315,15 +315,15 @@ where
     }
 }
 
-pub(crate) struct Prefix<'g, 'k, K: Key, H> {
+pub(crate) struct Prefix<'k, 'g, K: Key, H> {
     prefix: K::Read<'k>,
-    cursor: Point<'g, 'k, K, H>,
+    cursor: Point<'k, 'g, K, H>,
 }
 
-impl<'g, 'k, K, H> Prefix<'g, 'k, K, H>
+impl<'k, 'g, K, H> Prefix<'k, 'g, K, H>
 where
     K: Key,
-    H: path::History<'g, 'k, K>,
+    H: path::History<'k, 'g, K>,
 {
     pub(crate) unsafe fn new_root(root: &'g Atomic<Edge<K::Edge>>) -> Self {
         let prefix = K::Read::default();
@@ -387,7 +387,7 @@ where
     }
 }
 
-impl<'g, 'k, K> Prefix<'g, 'k, K, path::Hybrid<'g, 'k, K>>
+impl<'k, 'g, K> Prefix<'k, 'g, K, path::Hybrid<'k, 'g, K>>
 where
     K: Key,
 {
@@ -421,17 +421,17 @@ where
     }
 }
 
-impl<'g, 'k, K, H> core::ops::Deref for Prefix<'g, 'k, K, H>
+impl<'k, 'g, K, H> core::ops::Deref for Prefix<'k, 'g, K, H>
 where
     K: Key,
 {
-    type Target = Point<'g, 'k, K, H>;
+    type Target = Point<'k, 'g, K, H>;
     fn deref(&self) -> &Self::Target {
         &self.cursor
     }
 }
 
-impl<'g, 'k, K, H> core::ops::DerefMut for Prefix<'g, 'k, K, H>
+impl<'k, 'g, K, H> core::ops::DerefMut for Prefix<'k, 'g, K, H>
 where
     K: Key,
 {

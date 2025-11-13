@@ -8,7 +8,7 @@ use crate::raw::Edge;
 use crate::raw::Key;
 
 /// A path along the tree is composed of 0 or more path segments.
-pub(crate) struct Segment<'g, 'k, K: Key> {
+pub(crate) struct Segment<'k, 'g, K: Key> {
     /// Key before matching on `edge`
     pub(super) key: K::Read<'k>,
 
@@ -22,20 +22,20 @@ pub(crate) struct Segment<'g, 'k, K: Key> {
     pub(super) node: node::Ref<'g, K::Edge>,
 }
 
-pub(crate) trait History<'g, 'k, K>
+pub(crate) trait History<'k, 'g, K>
 where
     K: Key,
 {
     type PopError;
 
     fn new(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self;
-    fn push(&mut self, segment: Segment<'g, 'k, K>);
-    fn pop(&mut self) -> Result<Option<Segment<'g, 'k, K>>, Self::PopError>;
+    fn push(&mut self, segment: Segment<'k, 'g, K>);
+    fn pop(&mut self) -> Result<Option<Segment<'k, 'g, K>>, Self::PopError>;
 }
 
 pub(crate) struct Discard;
 
-impl<'g, 'k, K> History<'g, 'k, K> for Discard
+impl<'k, 'g, K> History<'k, 'g, K> for Discard
 where
     K: Key,
 {
@@ -46,19 +46,19 @@ where
     }
 
     #[inline]
-    fn push(&mut self, _segment: Segment<'g, 'k, K>) {}
+    fn push(&mut self, _segment: Segment<'k, 'g, K>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, 'k, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'k, 'g, K>>, Self::PopError> {
         Err(())
     }
 }
 
-pub(crate) struct Retain<'g, 'k, K: Key> {
-    path: Vec<Segment<'g, 'k, K>>,
+pub(crate) struct Retain<'k, 'g, K: Key> {
+    path: Vec<Segment<'k, 'g, K>>,
 }
 
-impl<'g, 'k, K> History<'g, 'k, K> for Retain<'g, 'k, K>
+impl<'k, 'g, K> History<'k, 'g, K> for Retain<'k, 'g, K>
 where
     K: Key,
 {
@@ -69,22 +69,22 @@ where
     }
 
     #[inline]
-    fn push(&mut self, segment: Segment<'g, 'k, K>) {
+    fn push(&mut self, segment: Segment<'k, 'g, K>) {
         self.path.push(segment);
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, 'k, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'k, 'g, K>>, Self::PopError> {
         Ok(self.path.pop())
     }
 }
 
-pub(crate) enum Hybrid<'g, 'k, K: Key> {
+pub(crate) enum Hybrid<'k, 'g, K: Key> {
     Discard { root: &'g Atomic<Edge<K::Edge>> },
-    Retain(Retain<'g, 'k, K>),
+    Retain(Retain<'k, 'g, K>),
 }
 
-impl<'g, 'k, K> History<'g, 'k, K> for Hybrid<'g, 'k, K>
+impl<'k, 'g, K> History<'k, 'g, K> for Hybrid<'k, 'g, K>
 where
     K: Key,
 {
@@ -95,7 +95,7 @@ where
     }
 
     #[inline]
-    fn push(&mut self, segment: Segment<'g, 'k, K>) {
+    fn push(&mut self, segment: Segment<'k, 'g, K>) {
         match self {
             Self::Discard { .. } => (),
             Self::Retain(retain) => retain.push(segment),
@@ -103,7 +103,7 @@ where
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'g, 'k, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<'k, 'g, K>>, Self::PopError> {
         match self {
             Self::Discard { .. } => Err(()),
             Self::Retain(retain) => Ok(retain.pop().unwrap()),

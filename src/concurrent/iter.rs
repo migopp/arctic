@@ -11,7 +11,7 @@ use crate::raw::key::Read as _;
 use crate::raw::Edge;
 
 /// Guard all nodes and values below this prefix from memory reclamation.
-pub struct PrefixGuard<'g, 'l, 'k, K: Key, V: Value, R> {
+pub struct PrefixGuard<'k, 'g, 'l, K: Key, V: Value, R> {
     guard: hazard::PrefixGuard<'g, 'l, V>,
     root: &'g Atomic<Edge<K::Edge>>,
     prefix: K::Read<'k>,
@@ -19,20 +19,20 @@ pub struct PrefixGuard<'g, 'l, 'k, K: Key, V: Value, R> {
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
+impl<'k, 'g, 'l, K, V, R> PrefixGuard<'k, 'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
 {
     pub(super) fn new<H>(
-        cursor: cursor::Prefix<'g, 'l, 'k, K, V, H>,
+        cursor: cursor::Prefix<'k, 'g, 'l, K, V, H>,
         range: R,
-    ) -> PrefixGuard<'g, 'l, 'k, K, V, R>
+    ) -> PrefixGuard<'k, 'g, 'l, K, V, R>
     where
         K: Key,
         V: Value,
-        H: cursor::path::History<'g, 'k, K>,
+        H: cursor::path::History<'k, 'g, K>,
     {
         let prefix = cursor.prefix();
         let range = range.suffix(prefix.bits());
@@ -46,14 +46,14 @@ where
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, 'k, K, V, R> PrefixGuard<'g, 'l, 'k, K, V, R>
+impl<'k, 'g, 'l, K, V, R> PrefixGuard<'k, 'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
 {
     #[inline]
-    pub fn entries<O>(&self) -> EntryIter<'g, '_, 'k, K, V, R, O>
+    pub fn entries<O>(&self) -> EntryIter<'k, 'g, '_, K, V, R, O>
     where
         O: Order,
     {
@@ -66,7 +66,7 @@ where
     }
 
     #[inline]
-    pub fn values<O>(&self) -> ValueIter<'g, '_, 'k, K, V, R, O>
+    pub fn values<O>(&self) -> ValueIter<'k, 'g, '_, K, V, R, O>
     where
         O: Order,
     {
@@ -85,13 +85,13 @@ where
 
 /// Iterator over keys and values
 #[expect(private_bounds)]
-pub struct EntryIter<'g, 'l, 'k, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
+pub struct EntryIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
     guard: &'l hazard::PrefixGuard<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, K::Write, K::Edge, R, O>,
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, 'k, K, V, R, O> EntryIter<'g, 'l, 'k, K, V, R, O>
+impl<'k, 'g, 'l, K, V, R, O> EntryIter<'k, 'g, 'l, K, V, R, O>
 where
     K: Key,
     V: Value,
@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<'g, 'l, 'k, K, V, R, O> Iterator for EntryIter<'g, 'l, 'k, K, V, R, O>
+impl<'k, 'g, 'l, K, V, R, O> Iterator for EntryIter<'k, 'g, 'l, K, V, R, O>
 where
     K: Key,
     V: Value,
@@ -143,41 +143,41 @@ where
 
 /// Iterator over values only
 #[expect(private_bounds)]
-pub struct ValueIter<'g, 'l, 'guard, K: Key, V: Value, R: raw::iter::Range<K::Read<'l>>, O> {
-    guard: &'guard hazard::PrefixGuard<'g, 'l, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'l>, key::Ignore<K::Edge>, K::Edge, R, O>,
+pub struct ValueIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
+    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
+    iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R, O>,
 }
 
 #[expect(private_bounds)]
-impl<'g, 'l, 'guard, K, V, R, O> ValueIter<'g, 'l, 'guard, K, V, R, O>
+impl<'k, 'g, 'l, K, V, R, O> ValueIter<'k, 'g, 'l, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<V::Borrow<'guard>> {
+    pub fn lend(&mut self) -> Option<V::Borrow<'l>> {
         self.iter
             .lend()
             .map(|(_, value)| unsafe { V::guard_borrow(self.guard, value) })
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'guard>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(V::Borrow<'l>)>(self, mut apply: F) {
         self.iter
             .for_each(|_, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
     }
 }
 
-impl<'g, 'l, 'guard, K, V, R, O> Iterator for ValueIter<'g, 'l, 'guard, K, V, R, O>
+impl<'k, 'g, 'l, K, V, R, O> Iterator for ValueIter<'k, 'g, 'l, K, V, R, O>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<K::Read<'l>>,
+    R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = V::Borrow<'guard>;
+    type Item = V::Borrow<'l>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {

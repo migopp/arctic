@@ -9,29 +9,29 @@ use crate::stat;
 use crate::Key;
 
 /// Tree traversal state.
-pub(super) struct Point<'g, 'l, 'k, K: Key, V: Value, H> {
+pub(super) struct Point<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: hazard::TraverseGuard<'g, 'l, V>,
 
-    raw: crate::raw::cursor::Point<'g, 'k, K, H>,
+    raw: crate::raw::cursor::Point<'k, 'g, K, H>,
 }
 
-impl<'g, 'l, 'k, K, V, H> Point<'g, 'l, 'k, K, V, H>
+impl<'k, 'g, 'l, K, V, H> Point<'k, 'g, 'l, K, V, H>
 where
     K: Key,
     V: Value,
-    H: path::History<'g, 'k, K>,
+    H: path::History<'k, 'g, K>,
 {
     #[inline]
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
-    ) -> Point<'g, 'l, 'k, K, V, H>
+    ) -> Point<'k, 'g, 'l, K, V, H>
     where
         K: Key,
         V: Value,
-        H: path::History<'g, 'k, K>,
+        H: path::History<'k, 'g, K>,
     {
         Point {
             guard: smr.guard(K::hazard(key)),
@@ -84,7 +84,7 @@ where
     }
 }
 
-impl<'g, 'l, 'k, K, V> Point<'g, 'l, 'k, K, V, path::Discard>
+impl<'k, 'g, 'l, K, V> Point<'k, 'g, 'l, K, V, path::Discard>
 where
     K: Key,
     V: Value,
@@ -101,18 +101,18 @@ where
     }
 }
 
-pub(super) struct Prefix<'g, 'l, 'k, K: Key, V: Value, H> {
+pub(super) struct Prefix<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: hazard::TraverseGuard<'g, 'l, V>,
 
-    raw: crate::raw::cursor::Prefix<'g, 'k, K, H>,
+    raw: crate::raw::cursor::Prefix<'k, 'g, K, H>,
 }
 
-impl<'g, 'l, 'k, K, V, H> Prefix<'g, 'l, 'k, K, V, H>
+impl<'k, 'g, 'l, K, V, H> Prefix<'k, 'g, 'l, K, V, H>
 where
     K: Key,
     V: Value,
-    H: path::History<'g, 'k, K>,
+    H: path::History<'k, 'g, K>,
 {
     pub(super) fn new(
         smr: &'l mut hazard::Local<'g, V>,
@@ -161,7 +161,7 @@ where
     }
 }
 
-impl<'g, 'l, 'k, K, V> Prefix<'g, 'l, 'k, K, V, path::Hybrid<'g, 'k, K>>
+impl<'k, 'g, 'l, K, V> Prefix<'k, 'g, 'l, K, V, path::Hybrid<'k, 'g, K>>
 where
     K: Key,
     V: Value,

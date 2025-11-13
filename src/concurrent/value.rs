@@ -17,10 +17,10 @@ pub unsafe trait Value: Sized + crate::sequential::Value {
         Self: 'g + 'l,
         'g: 'l;
 
-    unsafe fn guard_borrow<'g, 'l, 'smr>(
-        smr: &'smr hazard::TraverseGuard<'g, 'l, Self>,
+    unsafe fn guard_borrow<'g, 'l>(
+        smr: &'l hazard::TraverseGuard<'g, 'l, Self>,
         raw: u64,
-    ) -> Self::Borrow<'smr>;
+    ) -> Self::Borrow<'l>;
 
     unsafe fn guard_owned<'g, 'l>(
         smr: hazard::TraverseGuard<'g, 'l, Self>,
@@ -143,10 +143,10 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn guard_borrow<'g, 'l, 'smr>(
-                    _smr: &'smr hazard::TraverseGuard<'g, 'l, Self>,
+                unsafe fn guard_borrow<'g, 'l>(
+                    _smr: &'l hazard::TraverseGuard<'g, 'l, Self>,
                     raw: u64,
-                ) -> Self::Borrow<'smr> {
+                ) -> Self::Borrow<'l> {
                     raw as $ty
                 }
 
