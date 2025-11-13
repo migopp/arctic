@@ -2,13 +2,18 @@ mod value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
 use crate::iter::Order;
 use crate::raw;
+use crate::raw::edge;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
+use crate::raw::key::Read as _;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
@@ -49,67 +54,65 @@ impl<K: Key, V: Value> Map<K, V> {
     #[expect(unused_variables)]
     #[inline]
     pub fn insert(&mut self, key: <K as Key>::Borrow<'_>, value: u64) -> Option<u64> {
-        todo!()
-        // let mut edge = self.root();
-        // let mut key = K::Read::from(key);
-        //
-        // loop {
-        //     let old = edge.load_packed(Ordering::Relaxed);
-        //     let old_meta = old.meta();
-        //     let save = key;
-        //     let r#match = old_meta.key().match_split(&mut key);
-        //
-        //     // Fast path: traverse
-        //     if let byte::MatchSplit::Full(len) = r#match {
-        //         if let Some(node) = old.as_node() {
-        //             let byte = key.next().unwrap();
-        //             let node = unsafe { node.into_ref_unchecked() };
-        //             if let Some(next) = node.get_or_reserve(byte) {
-        //                 edge = next;
-        //                 continue;
-        //             }
-        //         }
-        //     }
-        //
-        //     let new = match r#match {
-        //         byte::MatchSplit::Full(_) => match old.child() {
-        //             Some(edge::Child::Node(node)) => {
-        //                 // node.expand([(key.next(), Self::insert_help(key, value))]);
-        //                 todo!()
-        //             }
-        //             None | Some(edge::Child::Value(_)) => Self::insert_help(key, value),
-        //         },
-        //         byte::MatchSplit::Partial { start, middle, end } => {
-        //             key.take(start.len());
-        //             let byte = key.next().unwrap();
-        //             Edge::new_node::<raw::node::Node3<_>, _>(
-        //                 start,
-        //                 [
-        //                     (byte, Self::insert_help(key, value)),
-        //                     (middle, old.with_meta(old.meta().with_key(end))),
-        //                 ],
-        //             )
-        //         }
-        //     };
-        //
-        //     edge.store_packed(new, Ordering::Relaxed);
-        //     return old.as_value();
-        // }
+        let mut edge = self.root();
+        let mut reader = K::Read::from(key);
+
+        loop {
+            let old = edge.load_packed(Ordering::Relaxed);
+            let old_key = old.meta().key();
+            let old_len = old_key.len();
+
+            let key = reader.read(old_len);
+
+            // Fast path: traverse
+            if key == old_key {
+                if let Some(node) = old.as_node() {
+                    let byte = reader.next().unwrap();
+                    let node = unsafe { node.into_ref_unchecked() };
+                    if let Some(next) = node.get_or_reserve(byte) {
+                        edge = next;
+                        continue;
+                    }
+                }
+            }
+
+            let new = match old.meta().expand(key) {
+                Err(()) => match old.child() {
+                    Some(edge::Child::Node(node)) => {
+                        // node.expand([(key.next(), Self::insert_help(key, value))]);
+                        todo!()
+                    }
+                    None | Some(edge::Child::Value(_)) => Self::insert_help(reader, value),
+                },
+                Ok((start, middle, end)) => {
+                    let byte = reader.next().unwrap();
+                    Edge::new_node::<raw::node::Node3<_>, _>(
+                        start,
+                        [
+                            (byte, Self::insert_help(reader, value)),
+                            (middle, old.with_meta(end)),
+                        ],
+                    )
+                }
+            };
+
+            edge.store_packed(new, Ordering::Relaxed);
+            return old.as_value();
+        }
     }
 
-    fn insert_help(mut key: K::Read<'_>, value: u64) -> ribbit::Packed<Edge<K::Edge>> {
-        todo!()
-        // if key.bits() > byte::Len::MAX.bits() as usize {
-        //     let prefix = key.take(byte::Len::MAX);
-        //     let byte = key.next().unwrap();
-        //     Edge::new_node::<raw::node::Node3<_>, _>(
-        //         prefix,
-        //         [(byte, Self::insert_help(key, value))],
-        //     )
-        // } else {
-        //     let prefix = key.take(unsafe { byte::Len::from_bits_unchecked(key.bits() as u8) });
-        //     Edge::new_value(prefix, value)
-        // }
+    fn insert_help(mut reader: K::Read<'_>, value: u64) -> ribbit::Packed<Edge<K::Edge>> {
+        let prefix = reader.read(<ribbit::Packed<K::Edge> as edge::Meta>::MAX_LEN);
+
+        if reader.bits() > 0 {
+            let byte = reader.next().unwrap();
+            Edge::new_node::<raw::node::Node3<_>, _>(
+                prefix,
+                [(byte, Self::insert_help(reader, value))],
+            )
+        } else {
+            Edge::new_value(prefix, value)
+        }
     }
 
     #[expect(unused_variables)]
