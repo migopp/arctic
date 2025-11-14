@@ -43,7 +43,7 @@ impl BePacked {
     }
 }
 
-impl IntoIterator for ribbit::Packed<Be> {
+impl IntoIterator for BePacked {
     type Item = u8;
     type IntoIter = core::iter::Take<core::array::IntoIter<u8, 8>>;
     fn into_iter(self) -> Self::IntoIter {
@@ -54,7 +54,7 @@ impl IntoIterator for ribbit::Packed<Be> {
     }
 }
 
-impl edge::Meta for ribbit::Packed<Be> {
+impl edge::Meta for BePacked {
     const DEFAULT: Self = Self::new(u6::new(0), false, false, u56::new(0));
     const MAX_LEN: Self::Len = u6::new(56);
 
@@ -126,7 +126,7 @@ impl edge::Meta for ribbit::Packed<Be> {
     }
 }
 
-impl edge::Key for ribbit::Packed<Be> {
+impl edge::Key for BePacked {
     type Meta = ribbit::Packed<Be>;
     type Len = u6;
 
