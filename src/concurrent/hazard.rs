@@ -95,8 +95,6 @@ use crate::raw::edge::Meta as _;
 use crate::raw::Edge;
 use crate::stat;
 
-const RETIRED_COUNT: usize = 16;
-
 #[repr(C, align(64))]
 #[derive(Default)]
 struct Cache<T>(T);
@@ -105,9 +103,19 @@ pub(crate) struct Global<V: Value> {
     _value: PhantomData<V>,
     hazards: ThreadLocal<Cache<Atomic<prefix::Be>>>,
     retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>>,
+    reclaim_threshold: usize,
 }
 
 impl<V: Value> Global<V> {
+    pub(crate) fn with_reclaim_threshold(reclaim_threshold: usize) -> Self {
+        Self {
+            _value: PhantomData,
+            hazards: ThreadLocal::with_capacity(128),
+            retired: ThreadLocal::with_capacity(128),
+            reclaim_threshold,
+        }
+    }
+
     pub(crate) fn pin(&self) -> Local<V> {
         Local {
             _value: PhantomData,
@@ -117,17 +125,14 @@ impl<V: Value> Global<V> {
                 .get_or(|| Cache(Atomic::new_packed(prefix::Be::HAZARD_NULL)))
                 .0,
             retired: self.retired.get_or_default().0.borrow_mut(),
+            reclaim_threshold: self.reclaim_threshold,
         }
     }
 }
 
 impl<V: Value> Default for Global<V> {
     fn default() -> Self {
-        Self {
-            _value: PhantomData,
-            hazards: ThreadLocal::with_capacity(128),
-            retired: ThreadLocal::with_capacity(128),
-        }
+        Self::with_reclaim_threshold(16)
     }
 }
 
@@ -148,6 +153,7 @@ pub(crate) struct Local<'g, V: 'g> {
     hazards: &'g ThreadLocal<Cache<Atomic<prefix::Be>>>,
     hazard: &'g Atomic<prefix::Be>,
     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
+    reclaim_threshold: usize,
 }
 
 impl<'g, V: Value> Local<'g, V> {
@@ -176,7 +182,7 @@ impl<'g, V: Value> Local<'g, V> {
 
         self.retired.push((prefix, edge.into_raw()));
 
-        if self.retired.len() >= RETIRED_COUNT {
+        if self.retired.len() >= self.reclaim_threshold {
             self.flush();
         }
     }
@@ -191,7 +197,7 @@ impl<'g, V: Value> Local<'g, V> {
 
         self.retired.push((prefix, raw));
 
-        if self.retired.len() >= RETIRED_COUNT {
+        if self.retired.len() >= self.reclaim_threshold {
             self.flush();
         }
     }

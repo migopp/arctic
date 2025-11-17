@@ -39,6 +39,17 @@ impl<K: crate::Key, V: Value> Default for Map<K, V> {
 }
 
 impl<K: Key, V: Value> Map<K, V> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_reclaim_threshold(reclaim_threshold: usize) -> Self {
+        Self {
+            smr: hazard::Global::with_reclaim_threshold(reclaim_threshold),
+            raw: sequential::Map::<K, V>::default(),
+        }
+    }
+
     #[inline]
     pub fn pin(&self) -> MapRef<K, V> {
         MapRef {
