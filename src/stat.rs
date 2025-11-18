@@ -117,7 +117,6 @@ pub(crate) enum Counter {
     InsertPessimistic,
     GetOrInsertPessimistic,
     Retire,
-    Flush,
     FreeConflict,
     FreeRetire,
     FreeDrop,
@@ -136,6 +135,7 @@ pub(crate) enum Max {
 }
 
 pub(crate) enum Record {
+    Flush,
     RangeConflict,
 }
 
@@ -164,8 +164,8 @@ pub struct Thread {
     edge: Edge,
     insert_pessimistic: u64,
     get_or_insert_pessimistic: u64,
+    flush: Histogram,
     retire: u64,
-    flush: u64,
     retire_cache: u64,
     free_conflict: u64,
     free_retire: u64,
@@ -230,7 +230,6 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::InsertPessimistic => &mut thread.insert_pessimistic,
                 Counter::GetOrInsertPessimistic => &mut thread.get_or_insert_pessimistic,
                 Counter::Retire => &mut thread.retire,
-                Counter::Flush => &mut thread.flush,
                 Counter::FreeConflict => &mut thread.free_conflict,
                 Counter::FreeRetire => &mut thread.free_retire,
                 Counter::FreeDrop => &mut thread.free_drop,
@@ -265,6 +264,7 @@ pub(crate) fn record(_record: Record, _value: u64) {
     if RECORD.load(Ordering::Relaxed) {
         THREAD.with_borrow_mut(|thread| {
             let old = match _record {
+                Record::Flush => &mut thread.flush,
                 Record::RangeConflict => &mut thread.range_retry,
             };
             old.record(_value);

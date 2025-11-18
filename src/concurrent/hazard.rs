@@ -248,7 +248,6 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
     #[cold]
     fn flush(&mut self) {
         stat::max(stat::Max::RetireCache, self.retired.len() as u64);
-        stat::increment(stat::Counter::Flush);
 
         membarrier::slow();
 
@@ -259,15 +258,20 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
             .filter(|hazard| hazard.is_active())
             .collect::<Vec<_>>();
 
+        let mut freed = 0;
+
         self.retired.retain(|(prefix, raw)| {
             if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
                 stat::increment(stat::Counter::HazardMatch);
                 return true;
             }
 
+            freed += 1;
             unsafe { deallocate_hazard::<V>(*prefix, *raw) };
             false
-        })
+        });
+
+        stat::record(stat::Record::Flush, freed);
     }
 }
 
