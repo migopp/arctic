@@ -7,7 +7,9 @@ use crate::concurrent::hazard::prefix;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub struct Traverse<'g, 'l, V: concurrent::Value>(&'l mut hazard::Local<'g, V>);
+pub struct Traverse<'g, 'l, V: concurrent::Value> {
+    local: &'l mut hazard::Local<'g, V>,
+}
 
 impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
     #[inline]
@@ -16,7 +18,7 @@ impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
             return;
         }
 
-        self.0
+        self.local
             .hazard
             .store_packed(prefix::Be::HAZARD_NULL, Ordering::Relaxed);
     }
@@ -24,7 +26,7 @@ impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
 
 impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     pub(super) fn new(local: &'l mut hazard::Local<'g, V>) -> Self {
-        Self(local)
+        Self { local }
     }
 
     pub(crate) unsafe fn retire<M: ribbit::Pack<Packed: edge::Meta>>(
@@ -36,7 +38,7 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
             return;
         }
 
-        self.0.retire_edge(bits, edge);
+        self.local.retire_edge(bits, edge);
     }
 
     /// # SAFETY
@@ -45,8 +47,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     #[inline]
     pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> Value<'g, 'l, true, V> {
         if !cfg!(feature = "smr-disable") {
-            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-            self.0.hazard.store_packed(
+            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            self.local.hazard.store_packed(
                 hazard.with_overlap(false).with_node(false).with_value(true),
                 Ordering::Relaxed,
             );
@@ -58,8 +60,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     #[inline]
     pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> Value<'g, 'l, false, V> {
         if !cfg!(feature = "smr-disable") {
-            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-            self.0.hazard.store_packed(
+            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            self.local.hazard.store_packed(
                 hazard.with_overlap(false).with_node(false).with_value(true),
                 Ordering::Relaxed,
             );
@@ -71,8 +73,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     #[inline]
     pub(crate) fn guard_prefix(self) -> Prefix<'g, 'l, V> {
         if !cfg!(feature = "smr-disable") {
-            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-            self.0
+            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            self.local
                 .hazard
                 .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
         }
@@ -83,8 +85,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     #[inline]
     pub(crate) fn guard_linearizable(self) -> Values<'g, 'l, V> {
         if !cfg!(feature = "smr-disable") {
-            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-            self.0
+            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            self.local
                 .hazard
                 .store_packed(hazard.with_node(false), Ordering::Relaxed);
         }
@@ -151,7 +153,11 @@ where
             // NOTE: could technically unguard before retiring, since
             // we will not access `value` anymore, but then we'd want
             // to avoid dropping `self.inner`.
-            unsafe { self.inner.0.retire_value(V::borrow_into_raw(self.value)) }
+            unsafe {
+                self.inner
+                    .local
+                    .retire_value(V::borrow_into_raw(self.value))
+            }
         }
     }
 }
