@@ -11,11 +11,13 @@ opt-node15-get = []
 opt-membarrier = ["dep:libc"]
 
 smr-disable = []
+smr-epoch = ["dep:crossbeam-epoch"]
 
 validate = []
 
 [dependencies]
 base64 = { version = "0.22.1", optional = true }
+crossbeam-epoch = { version = "0.9.18", optional = true }
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false, features = ["serialization"] }
 libc = { version = "0.2.176", optional = true }
 polonius-the-crab = "0.4.2"

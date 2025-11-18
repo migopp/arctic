@@ -34,7 +34,10 @@ where
         H: path::History<'k, 'g, K>,
     {
         Point {
-            guard: smr.guard(K::hazard(key)),
+            guard: smr.guard(
+                #[cfg(not(feature = "smr-epoch"))]
+                K::hazard(key),
+            ),
             raw: unsafe { raw::cursor::Point::new(root, key) },
         }
     }
@@ -95,7 +98,10 @@ where
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
     ) -> Option<V::SharedGuard<'g, 'l>> {
-        let guard = smr.guard(K::hazard(key));
+        let guard = smr.guard(
+            #[cfg(not(feature = "smr-epoch"))]
+            K::hazard(key),
+        );
         let value = unsafe { crate::raw::cursor::Point::<K, _>::get(root, key)? };
         Some(unsafe { V::guard_shared(guard, value) })
     }
@@ -119,7 +125,10 @@ where
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
     ) -> Option<Self> {
-        let guard = smr.guard(K::hazard(prefix));
+        let guard = smr.guard(
+            #[cfg(not(feature = "smr-epoch"))]
+            K::hazard(prefix),
+        );
         Some(Self {
             guard,
             raw: unsafe { crate::raw::cursor::Prefix::new(root, prefix) }?,
@@ -131,7 +140,10 @@ where
         root: &'g Atomic<Edge<K::Edge>>,
     ) -> Self {
         Self {
-            guard: smr.guard(hazard::prefix::Be::HAZARD_ROOT),
+            guard: smr.guard(
+                #[cfg(not(feature = "smr-epoch"))]
+                hazard::prefix::Be::HAZARD_ROOT,
+            ),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }
     }
