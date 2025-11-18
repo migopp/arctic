@@ -12,6 +12,10 @@ pub struct Traverse<'g, 'l, V: concurrent::Value>(&'l mut hazard::Local<'g, V>);
 impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
     #[inline]
     fn drop(&mut self) {
+        if cfg!(feature = "smr-disable") {
+            return;
+        }
+
         self.0
             .hazard
             .store_packed(prefix::Be::HAZARD_NULL, Ordering::Relaxed);
@@ -28,6 +32,10 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
         bits: usize,
         edge: ribbit::Packed<Edge<M>>,
     ) {
+        if cfg!(feature = "smr-disable") {
+            return;
+        }
+
         self.0.retire_edge(bits, edge);
     }
 
@@ -36,42 +44,50 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     /// Caller must ensure that only one thread calls this for any given value.
     #[inline]
     pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> Value<'g, 'l, true, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_overlap(false).with_node(false).with_value(true),
-            Ordering::Relaxed,
-        );
+        if !cfg!(feature = "smr-disable") {
+            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+            self.0.hazard.store_packed(
+                hazard.with_overlap(false).with_node(false).with_value(true),
+                Ordering::Relaxed,
+            );
+        }
 
         Value { inner: self, value }
     }
 
     #[inline]
     pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> Value<'g, 'l, false, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_overlap(false).with_node(false).with_value(true),
-            Ordering::Relaxed,
-        );
+        if !cfg!(feature = "smr-disable") {
+            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+            self.0.hazard.store_packed(
+                hazard.with_overlap(false).with_node(false).with_value(true),
+                Ordering::Relaxed,
+            );
+        }
 
         Value { inner: self, value }
     }
 
     #[inline]
     pub(crate) fn guard_prefix(self) -> Prefix<'g, 'l, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0
-            .hazard
-            .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
+        if !cfg!(feature = "smr-disable") {
+            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+            self.0
+                .hazard
+                .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
+        }
 
         Prefix(self)
     }
 
     #[inline]
     pub(crate) fn guard_linearizable(self) -> Values<'g, 'l, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0
-            .hazard
-            .store_packed(hazard.with_node(false), Ordering::Relaxed);
+        if !cfg!(feature = "smr-disable") {
+            let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
+            self.0
+                .hazard
+                .store_packed(hazard.with_node(false), Ordering::Relaxed);
+        }
 
         Values(self)
     }
@@ -127,6 +143,10 @@ where
     V: concurrent::Value,
 {
     fn drop(&mut self) {
+        if cfg!(feature = "smr-disable") {
+            return;
+        }
+
         if OWNED {
             // NOTE: could technically unguard before retiring, since
             // we will not access `value` anymore, but then we'd want
