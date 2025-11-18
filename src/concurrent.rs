@@ -1,6 +1,6 @@
 mod cursor;
 mod hazard;
-mod iter;
+pub mod iter;
 pub(crate) mod key;
 pub(crate) mod value;
 
