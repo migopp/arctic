@@ -165,7 +165,7 @@ impl<V: concurrent::Value> Drop for Global<V> {
             .map(|Cache(retired)| retired)
             .flat_map(core::cell::RefCell::get_mut)
             .for_each(|(prefix, raw)| {
-                unsafe { deallocate_hazard::<V>(*prefix, *raw) };
+                unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeDrop) };
             })
     }
 }
@@ -267,7 +267,7 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
             }
 
             freed += 1;
-            unsafe { deallocate_hazard::<V>(*prefix, *raw) };
+            unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeRetire) };
             false
         });
 
@@ -276,18 +276,22 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
 }
 
 #[cfg_attr(feature = "smr-epoch", expect(dead_code))]
-unsafe fn deallocate_hazard<V: concurrent::Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
+unsafe fn deallocate_hazard<V: concurrent::Value>(
+    prefix: ribbit::Packed<prefix::Be>,
+    raw: u64,
+    counter: stat::Counter,
+) {
     validate!(prefix.value() ^ prefix.node());
 
     if prefix.node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
             crate::raw::edge::Node::<crate::raw::edge::Be>::new_unchecked(raw)
-                .deallocate_unchecked(stat::Counter::FreeRetire);
+                .deallocate_unchecked(counter);
         }
     } else {
         unsafe {
-            stat::increment(stat::Counter::FreeRetire);
+            stat::increment(counter);
             drop(V::from_raw(raw));
         }
     }
