@@ -78,18 +78,18 @@
 //! all values with key prefixes underneath its key prefix from
 //! reclamation.
 
+pub(crate) mod guard;
 mod membarrier;
 pub(crate) mod prefix;
 
 use core::cell::RefCell;
-use core::fmt;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 use thread_local::ThreadLocal;
 
-use crate::concurrent::Value;
+use crate::concurrent;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::Edge;
@@ -99,14 +99,14 @@ use crate::stat;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub(crate) struct Global<V: Value> {
+pub(crate) struct Global<V: concurrent::Value> {
     _value: PhantomData<V>,
     hazards: ThreadLocal<Cache<Atomic<prefix::Be>>>,
     retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>>,
     reclaim_threshold: usize,
 }
 
-impl<V: Value> Global<V> {
+impl<V: concurrent::Value> Global<V> {
     pub(crate) fn with_reclaim_threshold(reclaim_threshold: usize) -> Self {
         Self {
             _value: PhantomData,
@@ -130,13 +130,13 @@ impl<V: Value> Global<V> {
     }
 }
 
-impl<V: Value> Default for Global<V> {
+impl<V: concurrent::Value> Default for Global<V> {
     fn default() -> Self {
         Self::with_reclaim_threshold(16)
     }
 }
 
-impl<V: Value> Drop for Global<V> {
+impl<V: concurrent::Value> Drop for Global<V> {
     fn drop(&mut self) {
         self.retired
             .iter_mut()
@@ -156,15 +156,15 @@ pub(crate) struct Local<'g, V: 'g> {
     reclaim_threshold: usize,
 }
 
-impl<'g, V: Value> Local<'g, V> {
+impl<'g, V: concurrent::Value> Local<'g, V> {
     #[inline]
     pub(crate) fn guard<'l>(
         &'l mut self,
         prefix: ribbit::Packed<prefix::Be>,
-    ) -> TraverseGuard<'g, 'l, V> {
+    ) -> guard::Traverse<'g, 'l, V> {
         self.hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast();
-        TraverseGuard(self)
+        guard::Traverse::new(self)
     }
 
     unsafe fn retire_edge<M: ribbit::Pack<Packed: edge::Meta>>(
@@ -228,132 +228,7 @@ impl<'g, V: Value> Local<'g, V> {
     }
 }
 
-pub struct TraverseGuard<'g, 'l, V: Value>(&'l mut Local<'g, V>);
-
-impl<V: Value> Drop for TraverseGuard<'_, '_, V> {
-    #[inline]
-    fn drop(&mut self) {
-        self.0
-            .hazard
-            .store_packed(prefix::Be::HAZARD_NULL, Ordering::Relaxed);
-    }
-}
-
-impl<'g, 'l, V: Value> TraverseGuard<'g, 'l, V> {
-    pub(crate) unsafe fn retire<M: ribbit::Pack<Packed: edge::Meta>>(
-        &mut self,
-        bits: usize,
-        edge: ribbit::Packed<Edge<M>>,
-    ) {
-        self.0.retire_edge(bits, edge);
-    }
-
-    /// # SAFETY
-    ///
-    /// Caller must ensure that only one thread calls this for any given value.
-    #[inline]
-    pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, true, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_overlap(false).with_node(false).with_value(true),
-            Ordering::Relaxed,
-        );
-
-        ValueGuard { inner: self, value }
-    }
-
-    #[inline]
-    pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> ValueGuard<'g, 'l, false, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0.hazard.store_packed(
-            hazard.with_overlap(false).with_node(false).with_value(true),
-            Ordering::Relaxed,
-        );
-
-        ValueGuard { inner: self, value }
-    }
-
-    #[inline]
-    pub(crate) fn guard_prefix(self) -> PrefixGuard<'g, 'l, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0
-            .hazard
-            .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
-
-        PrefixGuard(self)
-    }
-
-    #[inline]
-    pub(crate) fn guard_linearizable(self) -> LinearizableGuard<'g, 'l, V> {
-        let hazard = self.0.hazard.load_packed(Ordering::Relaxed);
-        self.0
-            .hazard
-            .store_packed(hazard.with_node(false), Ordering::Relaxed);
-
-        LinearizableGuard(self)
-    }
-}
-
-pub struct PrefixGuard<'g, 'l, V: Value>(TraverseGuard<'g, 'l, V>);
-
-impl<'g, 'l, V: Value> core::ops::Deref for PrefixGuard<'g, 'l, V> {
-    type Target = TraverseGuard<'g, 'l, V>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct LinearizableGuard<'g, 'l, V: Value>(TraverseGuard<'g, 'l, V>);
-
-impl<'g, 'l, V: Value> core::ops::Deref for LinearizableGuard<'g, 'l, V> {
-    type Target = TraverseGuard<'g, 'l, V>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct ValueGuard<'g, 'l, const OWNED: bool, V: Value> {
-    inner: TraverseGuard<'g, 'l, V>,
-    value: V::Borrow<'l>,
-}
-
-impl<'l, const OWNED: bool, V> fmt::Debug for ValueGuard<'_, 'l, OWNED, V>
-where
-    V: Value,
-    V::Borrow<'l>: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<'g, 'l, const OWNED: bool, V> core::ops::Deref for ValueGuard<'g, 'l, OWNED, V>
-where
-    V: Value,
-{
-    type Target = V::Borrow<'l>;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<'g, 'l, const OWNED: bool, V> Drop for ValueGuard<'g, 'l, OWNED, V>
-where
-    V: Value,
-{
-    fn drop(&mut self) {
-        if OWNED {
-            // NOTE: could technically unguard before retiring, since
-            // we will not access `value` anymore, but then we'd want
-            // to avoid dropping `self.inner`.
-            unsafe { self.inner.0.retire_value(V::borrow_into_raw(self.value)) }
-        }
-    }
-}
-
-unsafe fn deallocate<V: Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
+unsafe fn deallocate<V: concurrent::Value>(prefix: ribbit::Packed<prefix::Be>, raw: u64) {
     validate!(prefix.value() ^ prefix.node());
 
     if prefix.node() {

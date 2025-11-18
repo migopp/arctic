@@ -12,7 +12,7 @@ use crate::raw::Edge;
 
 /// Guard all nodes and values below this prefix from memory reclamation.
 pub struct PrefixGuard<'k, 'g, 'l, K: Key, V: Value, R> {
-    guard: hazard::PrefixGuard<'g, 'l, V>,
+    guard: hazard::guard::Prefix<'g, 'l, V>,
     root: &'g Atomic<Edge<K::Edge>>,
     prefix: K::Read<'k>,
     range: R,
@@ -86,7 +86,7 @@ where
 /// Iterator over keys and values
 #[expect(private_bounds)]
 pub struct EntryIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
-    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
+    guard: &'l hazard::guard::Prefix<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, K::Write, K::Edge, R, O>,
 }
 
@@ -144,7 +144,7 @@ where
 /// Iterator over values only
 #[expect(private_bounds)]
 pub struct ValueIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
-    guard: &'l hazard::PrefixGuard<'g, 'l, V>,
+    guard: &'l hazard::guard::Prefix<'g, 'l, V>,
     iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R, O>,
 }
 

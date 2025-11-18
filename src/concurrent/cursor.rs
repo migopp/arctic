@@ -11,7 +11,7 @@ use crate::Key;
 /// Tree traversal state.
 pub(super) struct Point<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: hazard::TraverseGuard<'g, 'l, V>,
+    guard: hazard::guard::Traverse<'g, 'l, V>,
 
     raw: crate::raw::cursor::Point<'k, 'g, K, H>,
 }
@@ -50,7 +50,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> hazard::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, V> {
         self.guard
     }
 
@@ -103,7 +103,7 @@ where
 
 pub(super) struct Prefix<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: hazard::TraverseGuard<'g, 'l, V>,
+    guard: hazard::guard::Traverse<'g, 'l, V>,
 
     raw: crate::raw::cursor::Prefix<'k, 'g, K, H>,
 }
@@ -145,7 +145,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> hazard::TraverseGuard<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, V> {
         self.guard
     }
 
