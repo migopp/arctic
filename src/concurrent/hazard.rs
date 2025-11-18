@@ -153,7 +153,7 @@ impl<V: concurrent::Value> Global<V> {
 
 impl<V: concurrent::Value> Default for Global<V> {
     fn default() -> Self {
-        Self::with_reclaim_threshold(16)
+        Self::with_reclaim_threshold(64)
     }
 }
 
