@@ -81,6 +81,8 @@
 pub(crate) mod guard;
 mod membarrier;
 pub(crate) mod prefix;
+#[cfg(not(feature = "smr-epoch"))]
+mod tls;
 
 use core::marker::PhantomData;
 #[cfg(not(feature = "smr-epoch"))]
@@ -103,11 +105,8 @@ pub(crate) struct Global<V: concurrent::Value> {
     collector: crossbeam_epoch::Collector,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
-    #[cfg(not(feature = "smr-epoch"))]
-    retired: thread_local::ThreadLocal<
-        Cache<core::cell::RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>,
-    >,
+    inner: tls::Global,
+
     #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
 }
@@ -121,15 +120,16 @@ impl<V: concurrent::Value> Global<V> {
             collector: crossbeam_epoch::Collector::default(),
 
             #[cfg(not(feature = "smr-epoch"))]
-            hazards: thread_local::ThreadLocal::with_capacity(128),
-            #[cfg(not(feature = "smr-epoch"))]
-            retired: thread_local::ThreadLocal::with_capacity(128),
+            inner: tls::Global::default(),
             #[cfg(not(feature = "smr-epoch"))]
             reclaim_threshold: _reclaim_threshold,
         }
     }
 
     pub(crate) fn pin(&self) -> Local<V> {
+        #[cfg(not(feature = "smr-epoch"))]
+        tls::Global::init_thread();
+
         Local {
             _value: PhantomData,
 
@@ -137,14 +137,11 @@ impl<V: concurrent::Value> Global<V> {
             handle: self.collector.register(),
 
             #[cfg(not(feature = "smr-epoch"))]
-            hazards: &self.hazards,
+            global: &self.inner,
             #[cfg(not(feature = "smr-epoch"))]
-            hazard: &self
-                .hazards
-                .get_or(|| Cache(ribbit::Atomic::new_packed(prefix::Be::HAZARD_NULL)))
-                .0,
+            hazard: &self.inner.hazard(),
             #[cfg(not(feature = "smr-epoch"))]
-            retired: self.retired.get_or_default().0.borrow_mut(),
+            retired: self.inner.retires().borrow_mut(),
             #[cfg(not(feature = "smr-epoch"))]
             reclaim_threshold: self.reclaim_threshold,
         }
@@ -160,13 +157,9 @@ impl<V: concurrent::Value> Default for Global<V> {
 #[cfg(not(feature = "smr-epoch"))]
 impl<V: concurrent::Value> Drop for Global<V> {
     fn drop(&mut self) {
-        self.retired
-            .iter_mut()
-            .map(|Cache(retired)| retired)
-            .flat_map(core::cell::RefCell::get_mut)
-            .for_each(|(prefix, raw)| {
-                unsafe { deallocate_hazard::<V>(*prefix, *raw) };
-            })
+        self.inner.retires_mut().for_each(|(prefix, raw)| {
+            unsafe { deallocate_hazard::<V>(*prefix, *raw) };
+        })
     }
 }
 
@@ -177,7 +170,7 @@ pub(crate) struct Local<'g, V> {
     handle: crossbeam_epoch::LocalHandle,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
+    global: &'g tls::Global,
     #[cfg(not(feature = "smr-epoch"))]
     hazard: &'g ribbit::Atomic<prefix::Be>,
     #[cfg(not(feature = "smr-epoch"))]
@@ -253,9 +246,9 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
         membarrier::slow();
 
         let hazards = self
-            .hazards
-            .iter()
-            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+            .global
+            .hazards()
+            .map(|hazard| hazard.load_packed(Ordering::Relaxed))
             .filter(|hazard| hazard.is_active())
             .collect::<Vec<_>>();
 
