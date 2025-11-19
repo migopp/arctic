@@ -417,14 +417,11 @@ where
 
     /// Returns whether `key` was previously present in the tree.
     #[inline]
-    pub fn get_or_insert<F>(
+    pub fn get_or_insert(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         value: V,
-    ) -> (V::SharedGuard<'g, '_>, bool)
-    where
-        F: FnOnce() -> V,
-    {
+    ) -> (V::SharedGuard<'g, '_>, bool) {
         self.get_or_insert_with(key, || value)
     }
 
