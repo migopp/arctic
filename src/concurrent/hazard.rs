@@ -270,6 +270,9 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
                 return true;
             }
 
+            if cfg!(feature = "stat") {
+                stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
+            }
             freed += 1;
             unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeRetire) };
             false

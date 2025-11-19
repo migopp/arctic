@@ -137,6 +137,7 @@ pub(crate) enum Max {
 pub(crate) enum Record {
     Flush,
     RangeConflict,
+    ReclaimDepth,
     ReclaimAge0,
     ReclaimAge1,
     ReclaimAge2,
@@ -182,6 +183,8 @@ pub struct Thread {
     scan_freeze: u64,
     lock_frozen: u64,
     unlock_frozen: u64,
+
+    reclaim_depth: Histogram,
 
     // Age at reclamation for allocations with n byte prefixes
     reclaim_age_0: Histogram,
@@ -276,6 +279,7 @@ pub(crate) fn record(_record: Record, _value: u64) {
             let old = match _record {
                 Record::Flush => &mut thread.flush,
                 Record::RangeConflict => &mut thread.range_retry,
+                Record::ReclaimDepth => &mut thread.reclaim_depth,
                 Record::ReclaimAge0 => &mut thread.reclaim_age_0,
                 Record::ReclaimAge1 => &mut thread.reclaim_age_1,
                 Record::ReclaimAge2 => &mut thread.reclaim_age_2,
