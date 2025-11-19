@@ -261,9 +261,12 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
 
         let mut freed = 0;
 
-        self.retired.retain(|(prefix, raw)| {
+        self.retired.retain_mut(|(prefix, raw)| {
             if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
                 stat::increment(stat::Counter::HazardMatch);
+                if cfg!(feature = "stat") {
+                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                }
                 return true;
             }
 
@@ -283,6 +286,23 @@ unsafe fn deallocate_hazard<V: concurrent::Value>(
     counter: stat::Counter,
 ) {
     validate!(prefix.value() ^ prefix.node());
+
+    if cfg!(feature = "stat") {
+        if let Some(record) = match prefix.bytes() {
+            0 => Some(stat::Record::ReclaimAge0),
+            1 => Some(stat::Record::ReclaimAge1),
+            2 => Some(stat::Record::ReclaimAge2),
+            3 => Some(stat::Record::ReclaimAge3),
+            _ => None,
+        } {
+            match counter {
+                stat::Counter::FreeRetire => stat::record(record, prefix.age() as u64 + 1),
+                // HACK: need some age to differentiate drop from retire
+                stat::Counter::FreeDrop => stat::record(record, 0),
+                _ => (),
+            }
+        }
+    }
 
     if prefix.node() {
         unsafe {

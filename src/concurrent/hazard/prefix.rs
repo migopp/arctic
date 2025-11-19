@@ -1,3 +1,7 @@
+use core::ops::BitAnd as _;
+use core::ops::BitOr as _;
+use core::ops::Not as _;
+
 use ribbit::traits::Integer as _;
 use ribbit::u120;
 use ribbit::u4;
@@ -82,6 +86,24 @@ impl BePacked {
         }
 
         self.is_overlap(prefix)
+    }
+
+    pub(super) fn bytes(&self) -> usize {
+        self.len().value() as usize
+    }
+
+    /// For measurement purposes only
+    pub(super) fn age(self) -> u32 {
+        self.prefix().value() as u32
+    }
+
+    /// For measurement purposes only
+    pub(super) fn with_age(self, age: u32) -> Self {
+        self.with_prefix(
+            self.prefix()
+                .bitand(u120::from(u32::MAX).not())
+                .bitor(u120::from(age)),
+        )
     }
 
     fn is_overlap(self, other: Self) -> bool {

@@ -137,6 +137,10 @@ pub(crate) enum Max {
 pub(crate) enum Record {
     Flush,
     RangeConflict,
+    ReclaimAge0,
+    ReclaimAge1,
+    ReclaimAge2,
+    ReclaimAge3,
 }
 
 impl From<Smo> for Counter {
@@ -178,6 +182,12 @@ pub struct Thread {
     scan_freeze: u64,
     lock_frozen: u64,
     unlock_frozen: u64,
+
+    // Age at reclamation for allocations with n byte prefixes
+    reclaim_age_0: Histogram,
+    reclaim_age_1: Histogram,
+    reclaim_age_2: Histogram,
+    reclaim_age_3: Histogram,
 }
 
 #[cfg(not(feature = "stat"))]
@@ -266,6 +276,10 @@ pub(crate) fn record(_record: Record, _value: u64) {
             let old = match _record {
                 Record::Flush => &mut thread.flush,
                 Record::RangeConflict => &mut thread.range_retry,
+                Record::ReclaimAge0 => &mut thread.reclaim_age_0,
+                Record::ReclaimAge1 => &mut thread.reclaim_age_1,
+                Record::ReclaimAge2 => &mut thread.reclaim_age_2,
+                Record::ReclaimAge3 => &mut thread.reclaim_age_3,
             };
             old.record(_value);
         })
