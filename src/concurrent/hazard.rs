@@ -254,6 +254,7 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
         let hazards = self
             .hazards
             .iter()
+            .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
             .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
             .filter(|hazard| hazard.is_active())
             .collect::<Vec<_>>();
