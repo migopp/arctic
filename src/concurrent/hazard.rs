@@ -103,10 +103,12 @@ pub(crate) struct Global<V: concurrent::Value> {
     collector: crossbeam_epoch::Collector,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
+    hazards: thread_local::ThreadLocal<
+        Cache<(core::sync::atomic::AtomicU64, ribbit::Atomic<prefix::Be>)>,
+    >,
     #[cfg(not(feature = "smr-epoch"))]
     retired: thread_local::ThreadLocal<
-        Cache<core::cell::RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>,
+        Cache<core::cell::RefCell<Vec<(u64, ribbit::Packed<prefix::Be>, u64)>>>,
     >,
     #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
@@ -141,7 +143,12 @@ impl<V: concurrent::Value> Global<V> {
             #[cfg(not(feature = "smr-epoch"))]
             hazard: &self
                 .hazards
-                .get_or(|| Cache(ribbit::Atomic::new_packed(prefix::Be::HAZARD_NULL)))
+                .get_or(|| {
+                    Cache((
+                        core::sync::atomic::AtomicU64::new(0),
+                        ribbit::Atomic::new_packed(prefix::Be::HAZARD_NULL),
+                    ))
+                })
                 .0,
             #[cfg(not(feature = "smr-epoch"))]
             retired: self.retired.get_or_default().0.borrow_mut(),
@@ -164,7 +171,7 @@ impl<V: concurrent::Value> Drop for Global<V> {
             .iter_mut()
             .map(|Cache(retired)| retired)
             .flat_map(core::cell::RefCell::get_mut)
-            .for_each(|(prefix, raw)| {
+            .for_each(|(_, prefix, raw)| {
                 unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeDrop) };
             })
     }
@@ -177,11 +184,13 @@ pub(crate) struct Local<'g, V> {
     handle: crossbeam_epoch::LocalHandle,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
+    hazards: &'g thread_local::ThreadLocal<
+        Cache<(core::sync::atomic::AtomicU64, ribbit::Atomic<prefix::Be>)>,
+    >,
     #[cfg(not(feature = "smr-epoch"))]
-    hazard: &'g ribbit::Atomic<prefix::Be>,
+    hazard: &'g (core::sync::atomic::AtomicU64, ribbit::Atomic<prefix::Be>),
     #[cfg(not(feature = "smr-epoch"))]
-    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
+    retired: std::cell::RefMut<'g, Vec<(u64, ribbit::Packed<prefix::Be>, u64)>>,
     #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
 }
@@ -201,14 +210,17 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
         &'l mut self,
         prefix: ribbit::Packed<prefix::Be>,
     ) -> guard::Traverse<'g, 'l, V> {
-        self.hazard.store_packed(prefix, Ordering::Relaxed);
+        let ts = unsafe { core::arch::x86_64::_rdtsc() };
+        self.hazard.0.store(ts, Ordering::Relaxed);
+        unsafe { core::arch::x86_64::_mm_sfence() };
+        self.hazard.1.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast();
         guard::Traverse::new(self)
     }
 
     unsafe fn retire_edge<M: ribbit::Pack<Packed: edge::Meta>>(
         &mut self,
-        _bits: usize,
+        bits: usize,
         edge: ribbit::Packed<Edge<M>>,
     ) {
         validate!(!edge.is_null());
@@ -217,12 +229,15 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
         {
             use crate::raw::edge::Meta as _;
 
+            let ts = unsafe { core::arch::x86_64::_rdtsc() };
+
             let prefix = self
                 .hazard
+                .1
                 .load_packed(Ordering::Relaxed)
-                .into_prefix(edge.meta().is_value(), Some(_bits));
+                .into_prefix(edge.meta().is_value(), Some(bits));
 
-            self.retired.push((prefix, edge.into_raw()));
+            self.retired.push((ts, prefix, edge.into_raw()));
 
             if self.retired.len() >= self.reclaim_threshold {
                 self.flush();
@@ -233,12 +248,15 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
     unsafe fn retire_value(&mut self, raw: u64) {
         stat::increment(stat::Counter::Retire);
 
+        let ts = unsafe { core::arch::x86_64::_rdtsc() };
+
         let prefix = self
             .hazard
+            .1
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
 
-        self.retired.push((prefix, raw));
+        self.retired.push((ts, prefix, raw));
 
         if self.retired.len() >= self.reclaim_threshold {
             self.flush();
@@ -254,14 +272,22 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
         let hazards = self
             .hazards
             .iter()
-            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-            .filter(|hazard| hazard.is_active())
+            .filter(|Cache(hazard)| !core::ptr::eq(self.hazard, hazard))
+            .map(|Cache((ts, hazard))| {
+                let ts = ts.load(Ordering::Relaxed);
+                let hazard = hazard.load_packed(Ordering::Relaxed);
+                (ts, hazard)
+            })
+            .filter(|(_, hazard)| hazard.is_active())
             .collect::<Vec<_>>();
 
         let mut freed = 0;
 
-        self.retired.retain(|(prefix, raw)| {
-            if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
+        self.retired.retain(|(prefix_ts, prefix, raw)| {
+            if hazards
+                .iter()
+                .any(|(hazard_ts, hazard)| hazard.is_conflict(*hazard_ts, *prefix_ts, *prefix))
+            {
                 stat::increment(stat::Counter::HazardMatch);
                 return true;
             }

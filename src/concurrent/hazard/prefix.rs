@@ -67,9 +67,14 @@ impl BePacked {
         self.value & 0b11 > 0
     }
 
-    pub(super) fn is_conflict(self, prefix: Self) -> bool {
+    pub(super) fn is_conflict(self, hazard_ts: u64, prefix_ts: u64, prefix: Self) -> bool {
         validate!(self.is_active());
         validate!(prefix.node() ^ prefix.value());
+
+        // Case: `prefix` was unlinked before `hazard` was installed
+        if prefix_ts < hazard_ts {
+            return false;
+        }
 
         // Case: `hazard` doesn't protect node or value
         if (self.value & prefix.value) & 0b11 == 0 {

@@ -26,7 +26,7 @@ impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
         }
 
         #[cfg(not(feature = "smr-epoch"))]
-        self.local.hazard.store_packed(
+        self.local.hazard.1.store_packed(
             hazard::prefix::Be::HAZARD_NULL,
             core::sync::atomic::Ordering::Relaxed,
         );
@@ -79,8 +79,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         {
-            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
-            self.local.hazard.store_packed(
+            let hazard = self.local.hazard.1.load_packed(Ordering::Relaxed);
+            self.local.hazard.1.store_packed(
                 hazard.with_overlap(false).with_node(false).with_value(true),
                 Ordering::Relaxed,
             );
@@ -103,8 +103,8 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         {
-            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
-            self.local.hazard.store_packed(
+            let hazard = self.local.hazard.1.load_packed(Ordering::Relaxed);
+            self.local.hazard.1.store_packed(
                 hazard.with_overlap(false).with_node(false).with_value(true),
                 Ordering::Relaxed,
             );
@@ -124,9 +124,10 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         {
-            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            let hazard = self.local.hazard.1.load_packed(Ordering::Relaxed);
             self.local
                 .hazard
+                .1
                 .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
         }
 
@@ -141,9 +142,10 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         {
-            let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
+            let hazard = self.local.hazard.1.load_packed(Ordering::Relaxed);
             self.local
                 .hazard
+                .1
                 .store_packed(hazard.with_node(false), Ordering::Relaxed);
         }
 
