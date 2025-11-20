@@ -17,7 +17,7 @@ pub(crate) mod key;
 pub(crate) mod node;
 
 pub(crate) use edge::Edge;
-pub(crate) use key::Key;
+pub use key::Key;
 pub(crate) use node::Node;
 
 /// Structural modification operation.

@@ -19,8 +19,9 @@ use crate::raw::key::Read as _;
 use crate::raw::Edge;
 use crate::sequential;
 use crate::stat;
-use crate::Key;
-use crate::Value;
+
+pub use key::Key;
+pub use value::Value;
 
 pub struct Map<K: Key, V: Value> {
     smr: hazard::Global<V>,
@@ -75,16 +76,12 @@ where
     V: Value + Send + Sync,
 {
     #[inline]
-    pub fn get(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
+    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
         cursor::Point::<K, V, _>::get(&mut self.smr, self.raw.root(), K::Read::from(key))
     }
 
     #[inline]
-    pub fn update(
-        &mut self,
-        key: <K as Key>::Borrow<'_>,
-        value: V,
-    ) -> Result<V::OwnedGuard<'g, '_>, V> {
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<V::OwnedGuard<'g, '_>, V> {
         let value = value.into_raw();
         let (old, present) = unsafe {
             self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
@@ -100,7 +97,7 @@ where
     #[inline]
     pub fn update_with<F>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         mut with: F,
     ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
@@ -122,7 +119,7 @@ where
     }
 
     #[inline]
-    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V::OwnedGuard<'g, '_>> {
         let (old, present) =
             unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) };
         validate_eq!(old.is_some(), present);
@@ -132,7 +129,7 @@ where
     #[inline]
     pub fn remove_with<F>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         mut with: F,
     ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
     where
@@ -153,7 +150,7 @@ where
     #[inline]
     unsafe fn get_and_update_with<A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
@@ -177,7 +174,7 @@ where
     #[inline]
     unsafe fn get_and_update_with_optimistic<A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> Result<(Option<V::OwnedGuard<'g, '_>>, bool), ()>
@@ -191,7 +188,7 @@ where
     #[cold]
     unsafe fn get_and_update_with_pessimistic<A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> (Option<V::OwnedGuard<'g, '_>>, bool)
@@ -206,7 +203,7 @@ where
     #[inline]
     unsafe fn get_and_update_with_impl<'k, 'l, H, A, D>(
         &'l mut self,
-        key: <K as Key>::Borrow<'k>,
+        key: K::Borrow<'k>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> Result<(Option<V::OwnedGuard<'g, 'l>>, bool), H::PopError>
@@ -255,11 +252,7 @@ where
     }
 
     #[inline]
-    pub fn upsert(
-        &mut self,
-        key: <K as Key>::Borrow<'_>,
-        value: V,
-    ) -> Option<V::OwnedGuard<'g, '_>> {
+    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V::OwnedGuard<'g, '_>> {
         let value = value.into_raw();
         let mut map = &mut *self;
 
@@ -278,7 +271,7 @@ where
     #[inline]
     pub fn upsert_with<F>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         mut with: F,
     ) -> Option<V::OwnedGuard<'g, '_>>
     where
@@ -308,7 +301,7 @@ where
     #[inline]
     unsafe fn upsert_with_optimistic<A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, ()>
@@ -322,7 +315,7 @@ where
     #[cold]
     unsafe fn insert_with_pessimistic<A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> Option<V::OwnedGuard<'g, '_>>
@@ -345,7 +338,7 @@ where
     #[inline]
     unsafe fn upsert_with_impl<'k, H, A, D>(
         &mut self,
-        key: <K as Key>::Borrow<'k>,
+        key: K::Borrow<'k>,
         allocate: &mut A,
         deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_>>, H::PopError>
@@ -419,7 +412,7 @@ where
     #[inline]
     pub fn get_or_insert(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         value: V,
     ) -> (V::SharedGuard<'g, '_>, bool) {
         self.get_or_insert_with(key, || value)
@@ -429,7 +422,7 @@ where
     #[inline]
     pub fn get_or_insert_with<F>(
         &mut self,
-        key: <K as Key>::Borrow<'_>,
+        key: K::Borrow<'_>,
         with: F,
     ) -> (V::SharedGuard<'g, '_>, bool)
     where
@@ -452,7 +445,7 @@ where
     #[inline]
     unsafe fn get_or_insert_with_optimistic<'l, 'k, F>(
         &'l mut self,
-        key: <K as Key>::Borrow<'k>,
+        key: K::Borrow<'k>,
         with: &mut Thunk<F>,
     ) -> Result<(V::SharedGuard<'g, 'l>, bool), ()>
     where
@@ -464,7 +457,7 @@ where
     #[cold]
     unsafe fn get_or_insert_with_pessimistic<'k, F>(
         &mut self,
-        key: <K as Key>::Borrow<'k>,
+        key: K::Borrow<'k>,
         with: &mut Thunk<F>,
     ) -> (V::SharedGuard<'g, '_>, bool)
     where
@@ -480,7 +473,7 @@ where
     #[inline]
     unsafe fn get_or_insert_with_impl<'k, H, F>(
         &mut self,
-        key: <K as Key>::Borrow<'k>,
+        key: K::Borrow<'k>,
         with: &mut Thunk<F>,
     ) -> Result<(V::SharedGuard<'g, '_>, bool), H::PopError>
     where

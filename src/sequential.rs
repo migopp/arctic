@@ -46,14 +46,14 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     #[inline]
-    pub fn get(&self, key: <K as Key>::Borrow<'_>) -> Option<V::Borrow<'_>> {
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
         unsafe { raw::cursor::Point::<K, _>::get(&self.root, K::Read::from(key)) }
             .map(|value| unsafe { V::borrow_from_raw(value) })
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn insert(&mut self, key: <K as Key>::Borrow<'_>, value: V) -> Option<V> {
+    pub fn insert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V> {
         let mut edge = self.root();
         let mut reader = K::Read::from(key);
 
@@ -117,13 +117,13 @@ impl<K: Key, V: Value> Map<K, V> {
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn remove(&mut self, key: <K as Key>::Borrow<'_>) -> Option<V> {
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
         todo!()
     }
 
     #[expect(unused_variables)]
     #[inline]
-    pub fn update(&mut self, key: <K as Key>::Borrow<'_>, value: V) -> Result<Option<V>, V> {
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Option<V>, V> {
         todo!()
     }
 
@@ -147,7 +147,7 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(<K as Key>::Borrow<'_>, V::Borrow<'g>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 // FIXME: borrow without guard

@@ -99,7 +99,7 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(<K as Key>::Borrow<'_>, V::Borrow<'l>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -108,7 +108,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(<K as Key>::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)

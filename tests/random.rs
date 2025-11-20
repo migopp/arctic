@@ -1,7 +1,11 @@
 use core::hash::Hasher as _;
 use std::sync::Barrier;
 
+use arctic::raw::Key;
+
 mod u64 {
+    use arctic::raw::Key;
+
     use super::test_map;
     use super::Workload;
 
@@ -30,7 +34,7 @@ mod u64 {
         where
             Self: 'a;
 
-        fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
+        fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
             index as u64
         }
 
@@ -41,7 +45,7 @@ mod u64 {
         fn validate_owned<'a, 'g, 'l>(
             &'a self,
             index: usize,
-            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            key: <Self::Key as Key>::Borrow<'a>,
             value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
         ) where
             'a: 'g,
@@ -54,7 +58,7 @@ mod u64 {
         fn validate_shared<'a, 'g, 'l>(
             &'a self,
             index: usize,
-            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            key: <Self::Key as Key>::Borrow<'a>,
             value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
         ) where
             'a: 'g,
@@ -67,6 +71,8 @@ mod u64 {
 }
 
 mod boxed {
+    use arctic::raw::Key;
+
     use super::test_map;
     use super::Workload;
 
@@ -102,7 +108,7 @@ mod boxed {
 
         type Value<'a> = Box<Entry>;
 
-        fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a> {
+        fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
             index as u32
         }
 
@@ -113,7 +119,7 @@ mod boxed {
         fn validate_owned<'a, 'g, 'l>(
             &'a self,
             index: usize,
-            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            key: <Self::Key as Key>::Borrow<'a>,
             value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
         ) where
             'a: 'g,
@@ -126,7 +132,7 @@ mod boxed {
         fn validate_shared<'a, 'g, 'l>(
             &'a self,
             index: usize,
-            key: <Self::Key as arctic::Key>::Borrow<'a>,
+            key: <Self::Key as Key>::Borrow<'a>,
             value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
         ) where
             'a: 'g,
@@ -139,20 +145,20 @@ mod boxed {
 }
 
 trait Workload: Sized + Sync {
-    type Key: arctic::Key + Sync;
+    type Key: arctic::concurrent::Key + Sync;
 
     type Value<'a>: arctic::Value + Send + Sync
     where
         Self: 'a;
 
-    fn key<'a>(&'a self, index: usize) -> <Self::Key as arctic::Key>::Borrow<'a>;
+    fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a>;
 
     fn value<'a>(&'a self, index: usize) -> Self::Value<'a>;
 
     fn validate_owned<'a, 'g, 'l>(
         &'a self,
         index: usize,
-        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        key: <Self::Key as Key>::Borrow<'a>,
         value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
     ) where
         'a: 'g,
@@ -161,7 +167,7 @@ trait Workload: Sized + Sync {
     fn validate_shared<'a, 'g, 'l>(
         &'a self,
         index: usize,
-        key: <Self::Key as arctic::Key>::Borrow<'a>,
+        key: <Self::Key as Key>::Borrow<'a>,
         value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
     ) where
         'a: 'g,
@@ -174,7 +180,7 @@ fn test_map<'k, K: Workload>(
     key_count_per_thread: usize,
     hash: bool,
 ) where
-    for<'a> <K::Key as arctic::Key>::Borrow<'a>: Sync,
+    for<'a> <K::Key as Key>::Borrow<'a>: Sync,
 {
     let barrier = &Barrier::new(thread_count);
     let items = if hash {

@@ -16,22 +16,12 @@ macro_rules! validate_eq {
 
 pub mod concurrent;
 pub mod iter;
-pub(crate) mod raw;
+pub mod raw;
 pub mod sequential;
 pub mod stat;
 
-pub use concurrent::value::Value;
-
-pub trait Key: for<'k> concurrent::key::Key<Borrow<'k> = <Self as Key>::Borrow<'k>> {
-    type Borrow<'k>: Copy;
-}
-
-impl<K> Key for K
-where
-    K: concurrent::key::Key,
-{
-    type Borrow<'k> = <Self as raw::key::Key>::Borrow<'k>;
-}
+pub use concurrent::Key;
+pub use concurrent::Value;
 
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
