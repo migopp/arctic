@@ -62,7 +62,7 @@ mod tests {
     fn smoke() {
         let map = Map::<Vec<u8>, _>::default();
         let mut map = map.pin();
-        map.insert(b"abcd", 1u32);
+        map.upsert(b"abcd", 1u32);
         assert_eq!(map.get(b"abcd"), Some(1));
     }
 
@@ -71,7 +71,7 @@ mod tests {
         let map = Map::<Vec<u8>, _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
         let mut map = map.pin();
-        map.insert(&key, 1u32);
+        map.upsert(&key, 1u32);
         assert_eq!(map.get(&key), Some(1));
     }
 
@@ -80,7 +80,7 @@ mod tests {
         let map = Map::<u64, _>::default();
         let mut map = map.pin();
         let key = 1u64;
-        map.insert(key, 2u32);
+        map.upsert(key, 2u32);
         let range = map.range(1u64, 1u64).unwrap();
         assert_eq!(
             range.entries::<crate::iter::Sorted>().collect::<Vec<_>>(),
@@ -128,7 +128,7 @@ mod tests {
         let mut pin = map.pin();
 
         for value in [1u32, 2, 3] {
-            pin.insert(1, value);
+            pin.upsert(1, value);
             assert_eq!(pin.get(1), Some(value));
         }
 
@@ -179,7 +179,7 @@ mod tests {
         let mut pin = map.pin();
 
         for key in [5, 1, 4, 3, 2] {
-            pin.insert(key, key);
+            pin.upsert(key, key);
             assert_eq!(pin.get(key), Some(key));
         }
         let range = pin.range(2, 4).unwrap();
@@ -222,7 +222,7 @@ mod tests {
         let mut pin = map.pin();
 
         for (key, value) in &keys {
-            pin.insert(key.borrow(), *value);
+            pin.upsert(key.borrow(), *value);
             assert_eq!(pin.get(key.borrow()), Some(*value));
         }
 

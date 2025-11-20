@@ -208,7 +208,7 @@ fn test_map<'k, K: Workload>(
 
                 for (index, key) in chunk {
                     let value = key_set.value(*index);
-                    let old = map.insert(*key, value);
+                    let old = map.upsert(*key, value);
                     assert!(old.is_none());
                 }
 

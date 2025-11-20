@@ -255,7 +255,7 @@ where
     }
 
     #[inline]
-    pub fn insert(
+    pub fn upsert(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         value: V,
@@ -266,7 +266,7 @@ where
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
-            if let Ok(old) = unsafe { map.insert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
+            if let Ok(old) = unsafe { map.upsert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
             {
                 polonius_return!(old);
             }
@@ -276,7 +276,7 @@ where
     }
 
     #[inline]
-    pub fn insert_with<F>(
+    pub fn upsert_with<F>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         mut with: F,
@@ -290,7 +290,7 @@ where
         // https://github.com/rust-lang/rust/issues/54663
         polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius>> {
             if let Ok(old) = unsafe {
-                map.insert_with_optimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
+                map.upsert_with_optimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
                     drop(V::from_raw(raw))
                 })
             } {
@@ -306,7 +306,7 @@ where
     }
 
     #[inline]
-    unsafe fn insert_with_optimistic<A, D>(
+    unsafe fn upsert_with_optimistic<A, D>(
         &mut self,
         key: <K as Key>::Borrow<'_>,
         allocate: &mut A,
@@ -316,7 +316,7 @@ where
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
     {
-        self.insert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
+        self.upsert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
@@ -332,7 +332,7 @@ where
     {
         stat::increment(stat::Counter::InsertPessimistic);
         unsafe {
-            self.insert_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
+            self.upsert_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
                 .unwrap()
         }
     }
@@ -343,7 +343,7 @@ where
     // (b) insert operations that do depend on the previous value, and need to
     // be deallocated.
     #[inline]
-    unsafe fn insert_with_impl<'k, H, A, D>(
+    unsafe fn upsert_with_impl<'k, H, A, D>(
         &mut self,
         key: <K as Key>::Borrow<'k>,
         allocate: &mut A,
