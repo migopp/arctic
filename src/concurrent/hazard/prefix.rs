@@ -43,6 +43,14 @@ impl Be {
 
         let bits = bits & 0b0111_1000;
 
+        let bits = if cfg!(feature = "stat") {
+            // Avoid clobbering logical age counter
+            // Bits is > 0 (>= 8), since there can be no key with length 0
+            bits - 8
+        } else {
+            bits
+        };
+
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(
                 // Protect nodes, values, and overlap
@@ -93,15 +101,15 @@ impl BePacked {
     }
 
     /// For measurement purposes only
-    pub(super) fn age(self) -> u32 {
-        self.prefix().value() as u32
+    pub(super) fn age(self) -> u8 {
+        self.prefix().value() as u8
     }
 
     /// For measurement purposes only
-    pub(super) fn with_age(self, age: u32) -> Self {
+    pub(super) fn with_age(self, age: u8) -> Self {
         self.with_prefix(
             self.prefix()
-                .bitand(u120::from(u32::MAX).not())
+                .bitand(u120::from(u8::MAX).not())
                 .bitor(u120::from(age)),
         )
     }
