@@ -4,6 +4,7 @@ mod iter;
 mod key;
 mod value;
 
+use core::ops::RangeFrom;
 use core::ops::RangeFull;
 use core::ops::RangeInclusive;
 use core::sync::atomic::Ordering;
@@ -591,6 +592,17 @@ where
             min.common_prefix(max),
         )?;
         Some(iter::Prefix::new(cursor, min..=max))
+    }
+
+    // FIXME: replace with generic range
+    pub fn scan<'k>(
+        &mut self,
+        min: impl Into<K::Read<'k>>,
+    ) -> iter::Prefix<'k, 'g, '_, K, V, RangeFrom<K::Read<'k>>> {
+        let min = min.into();
+        let cursor =
+            cursor::Prefix::<_, _, cursor::path::Discard>::new_root(&mut self.smr, self.raw.root());
+        iter::Prefix::new(cursor, min..)
     }
 
     pub fn prefix_optimistic<'k, 'l, O: Order>(
