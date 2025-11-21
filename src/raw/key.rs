@@ -42,6 +42,7 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
+    unsafe fn next_unchecked(&mut self) -> u8;
     fn read(
         &mut self,
         len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,

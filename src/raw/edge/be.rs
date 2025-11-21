@@ -6,8 +6,8 @@ use ribbit::u6;
 
 use crate::raw::edge;
 
-#[derive(Copy, Clone, ribbit::Pack)]
-#[ribbit(size = 64, eq, ord)]
+#[derive(Copy, Clone, Debug, ribbit::Pack)]
+#[ribbit(size = 64, debug, eq, ord)]
 pub struct Be {
     len: u6,
     value: bool,

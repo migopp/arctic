@@ -94,7 +94,14 @@ where
                     }
                 }
 
-                let byte = self.key.next()?;
+                let byte = if cfg!(feature = "validate") {
+                    self.key
+                        .next()
+                        .expect("Precondition: no key is prefix of another key")
+                } else {
+                    unsafe { self.key.next_unchecked() }
+                };
+
                 let node = unsafe { node.into_ref_unchecked() };
                 let next = node.get(byte)?;
                 self.push(save, len, node, next);
@@ -137,7 +144,14 @@ where
                         }
                     }
 
-                    let byte = self.key.next().unwrap();
+                    let byte = if cfg!(feature = "validate") {
+                        self.key
+                            .next()
+                            .expect("Precondition: no key is prefix of another key")
+                    } else {
+                        unsafe { self.key.next_unchecked() }
+                    };
+
                     let node = unsafe { node.into_ref_unchecked() };
                     if let Some(next) = node.get_or_insert(byte) {
                         self.push(save, old_len, node, next);
@@ -303,7 +317,15 @@ where
 
             match edge.child()? {
                 edge::Child::Node(node) => {
-                    let byte = cursor.key.next()?;
+                    let byte = if cfg!(feature = "validate") {
+                        cursor
+                            .key
+                            .next()
+                            .expect("Precondition: no key is prefix of another key")
+                    } else {
+                        unsafe { cursor.key.next_unchecked() }
+                    };
+
                     let node = unsafe { node.into_ref_unchecked() };
                     cursor.edge = node.get(byte)?;
                 }
@@ -347,7 +369,7 @@ where
     }
 
     pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
-        let (key, edge) = loop {
+        loop {
             let edge = self.cursor.edge.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.cursor.key;
@@ -365,12 +387,11 @@ where
             if key_cursor.len() == len_edge {
                 if let Some(node) = edge.as_node() {
                     let node = unsafe { node.into_ref_unchecked() };
-                    let Some(byte) = self.cursor.key.next() else {
-                        break (save, edge);
-                    };
-                    let next = node.get(byte)?;
-                    self.cursor.push(save, len_edge, node, next);
-                    continue;
+                    if let Some(byte) = self.cursor.key.next() {
+                        let next = node.get(byte)?;
+                        self.cursor.push(save, len_edge, node, next);
+                        continue;
+                    }
                 }
             }
 
@@ -378,12 +399,10 @@ where
             if edge.is_null() {
                 return None;
             } else {
-                break (save, edge);
+                self.cursor.key = save;
+                return Some(edge);
             }
-        };
-
-        self.cursor.key = key;
-        Some(edge)
+        }
     }
 }
 

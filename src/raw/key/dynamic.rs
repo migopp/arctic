@@ -66,7 +66,15 @@ impl key::Read for Reader<'_> {
     #[inline]
     fn next(&mut self) -> Option<u8> {
         match self {
-            Self::Large(large) => {
+            Self::Large(_) => Some(unsafe { self.next_unchecked() }),
+            Self::Small(small) => small.next(),
+        }
+    }
+
+    #[inline]
+    unsafe fn next_unchecked(&mut self) -> u8 {
+        match self {
+            Reader::Large(large) => {
                 validate!(large.len() > 8);
 
                 let len = large.len();
@@ -76,10 +84,9 @@ impl key::Read for Reader<'_> {
                 if len == 9 {
                     *self = Self::Small(self.to_small());
                 }
-
-                Some(byte)
+                byte
             }
-            Self::Small(small) => small.next(),
+            Reader::Small(small) => small.next_unchecked(),
         }
     }
 

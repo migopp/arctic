@@ -91,14 +91,16 @@ impl<U: Uint> key::Read for Reader<U> {
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        if self.bits == 0 {
-            return None;
-        }
+        (self.bits > 0).then(|| unsafe { self.next_unchecked() })
+    }
 
+    #[inline]
+    unsafe fn next_unchecked(&mut self) -> u8 {
+        validate!(self.bits > 0);
         let byte = self.buffer.most_significant_u8();
         self.buffer <<= 8;
         self.bits = self.bits.saturating_sub(8);
-        Some(byte)
+        byte
     }
 
     #[inline]

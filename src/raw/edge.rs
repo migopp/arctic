@@ -183,7 +183,7 @@ where
     }
 }
 
-pub(crate) trait Meta: ribbit::Unpack {
+pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug {
     const DEFAULT: Self;
 
     const MAX_LEN: Self::Len;
