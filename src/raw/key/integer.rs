@@ -80,6 +80,8 @@ impl<U: Uint> Reader<U> {
 }
 
 impl<U: Uint> key::Read for Reader<U> {
+    const BITS: Option<usize> = Some(U::BITS as usize);
+
     type Edge = edge::Be;
 
     #[inline]

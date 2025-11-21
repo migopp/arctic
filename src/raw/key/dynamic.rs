@@ -51,6 +51,8 @@ impl Default for Reader<'_> {
 }
 
 impl key::Read for Reader<'_> {
+    const BITS: Option<usize> = None;
+
     type Edge = edge::Be;
 
     #[inline]

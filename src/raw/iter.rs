@@ -129,7 +129,8 @@ impl<R: key::Read> Lower<R> for Include<R> {
         let key = edge.key();
         let len = key.len();
 
-        if self.0.bits() < len.bits() {
+        // Skip check for fixed-length keys
+        if R::BITS.is_none() && self.0.bits() < len.bits() {
             return None;
         }
 
@@ -148,7 +149,8 @@ impl<R: key::Read> Upper<R> for Include<R> {
         let key = edge.key();
         let len = key.len();
 
-        if self.0.bits() > len.bits() {
+        // Skip check for fixed-length keys
+        if R::BITS.is_none() && self.0.bits() > len.bits() {
             return None;
         }
 

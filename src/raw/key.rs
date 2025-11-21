@@ -28,6 +28,9 @@ pub trait Key {
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
+    // Hint for fixed-size keys
+    const BITS: Option<usize>;
+
     type Edge: ribbit::Pack<Packed: edge::Meta>;
 
     fn bits(&self) -> usize;
