@@ -46,12 +46,12 @@ where
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
+    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         self.get(key)
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
+    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         // SAFETY: `key` is a u8 and must be < 256
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }

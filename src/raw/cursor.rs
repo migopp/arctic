@@ -139,7 +139,7 @@ where
 
                     let byte = self.key.next().unwrap();
                     let node = unsafe { node.into_ref_unchecked() };
-                    if let Some(next) = node.get_or_reserve(byte) {
+                    if let Some(next) = node.get_or_insert(byte) {
                         self.push(save, old_len, node, next);
                         continue;
                     }

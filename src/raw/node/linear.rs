@@ -56,7 +56,7 @@ where
     }
 
     #[inline]
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
+    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let mut old = self.header.load_packed(Ordering::Relaxed);
 
         let index = loop {
@@ -83,7 +83,7 @@ where
     }
 
     #[inline]
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
+    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         let old = self.header.get_packed();
 
         let index = match old.get_or_insert(key) {

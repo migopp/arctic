@@ -69,7 +69,7 @@ impl<K: Key, V: Value> Map<K, V> {
                 if let Some(node) = old.as_node() {
                     let byte = reader.next().unwrap();
                     let node = unsafe { node.into_ref_unchecked() };
-                    if let Some(next) = node.get_or_reserve(byte) {
+                    if let Some(next) = node.get_or_insert(byte) {
                         edge = next;
                         continue;
                     }

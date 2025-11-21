@@ -33,9 +33,9 @@ where
 
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
 
-    fn get_or_reserve(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
+    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
 
-    fn reserve(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
+    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
 
     fn replace(&self, parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>);
 }
@@ -135,11 +135,11 @@ where
     }
 
     #[inline]
-    pub(crate) fn get_or_reserve(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
+    pub(crate) fn get_or_insert(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         match self {
-            Ref::Node3(node) => node.get_or_reserve(key),
-            Ref::Node15(node) => node.get_or_reserve(key),
-            Ref::Node256(node) => node.get_or_reserve(key),
+            Ref::Node3(node) => node.get_or_insert(key),
+            Ref::Node15(node) => node.get_or_insert(key),
+            Ref::Node256(node) => node.get_or_insert(key),
         }
     }
 

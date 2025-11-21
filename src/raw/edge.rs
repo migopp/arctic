@@ -75,7 +75,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         let mut node = Box::new(N::default());
 
         for (key, edge) in edges {
-            node.reserve(key)
+            node.insert(key)
                 .expect("Node can fit all edges")
                 .set_packed(edge);
         }
