@@ -51,6 +51,7 @@ where
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let header = self.header.load_packed(Ordering::Relaxed);
         let index = header.get(key)?;
+        validate!((index as usize) < self.edges.len());
         Some(unsafe { self.edges.get_unchecked(index as usize) })
     }
 
@@ -77,6 +78,7 @@ where
             }
         };
 
+        validate!(index < self.edges.len());
         Some(unsafe { self.edges.get_unchecked(index) })
     }
 
@@ -93,6 +95,7 @@ where
             }
         };
 
+        validate!(index < self.edges.len());
         Some(unsafe { self.edges.get_unchecked_mut(index) })
     }
 
