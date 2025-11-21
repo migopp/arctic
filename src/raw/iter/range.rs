@@ -65,21 +65,16 @@ where
         let mut lower = range.lower();
         let mut upper = range.upper();
 
-        match child {
-            edge::Child::Value(value) if lower.check_value(key) && upper.check_value(key) => {
-                Self::Root {
-                    key: writer,
-                    next: Some(value),
-                }
-            }
-            edge::Child::Value(_) => Self::default(),
-            edge::Child::Node(node) => {
-                let Some((lower_byte, upper_byte)) =
-                    lower.check_node(key).zip(upper.check_node(key))
-                else {
-                    return Self::default();
-                };
+        let Some((lower_byte, upper_byte)) = lower.check(key).zip(upper.check(key)) else {
+            return Self::default();
+        };
 
+        match child {
+            edge::Child::Value(value) => Self::Root {
+                key: writer,
+                next: Some(value),
+            },
+            edge::Child::Node(node) => {
                 let node = unsafe { node.into_ref_unchecked() };
                 let mut stack = Vec::with_capacity(7);
                 stack.push((bits, node.iter::<O, _, _>(lower_byte, upper_byte)));
@@ -211,61 +206,41 @@ where
 
                 crate::cold();
 
-                match child {
-                    edge::Child::Value(value) => {
-                        if check_lower && !self.lower.check_value(key) {
-                            if O::REVERSE {
-                                self.stack.clear();
-                                return None;
-                            } else {
-                                continue 'horizontal;
-                            }
+                let lower = if check_lower {
+                    match self.lower.check(key) {
+                        Some(lower) => lower,
+                        None if O::REVERSE => {
+                            self.stack.clear();
+                            return None;
                         }
+                        None => continue 'horizontal,
+                    }
+                } else {
+                    Default::default()
+                };
 
-                        if check_upper && !self.upper.check_value(key) {
-                            if O::REVERSE {
-                                continue 'horizontal;
-                            } else {
-                                self.stack.clear();
-                                return None;
-                            }
-                        }
-
-                        if YIELD {
-                            return Some((&self.key, value));
-                        } else {
-                            apply(&self.key, value);
+                let upper = if check_upper {
+                    match self.upper.check(key) {
+                        Some(upper) => upper,
+                        None if O::REVERSE => continue 'horizontal,
+                        None => {
+                            self.stack.clear();
+                            return None;
                         }
                     }
+                } else {
+                    Default::default()
+                };
+
+                match child {
+                    edge::Child::Value(value) if YIELD => {
+                        return Some((&self.key, value));
+                    }
+                    edge::Child::Value(value) => {
+                        apply(&self.key, value);
+                        continue 'horizontal;
+                    }
                     edge::Child::Node(node) => {
-                        let lower = if check_lower {
-                            let Some(lower) = self.lower.check_node(key) else {
-                                if O::REVERSE {
-                                    self.stack.clear();
-                                    return None;
-                                } else {
-                                    continue 'horizontal;
-                                }
-                            };
-                            lower
-                        } else {
-                            Default::default()
-                        };
-
-                        let upper = if check_upper {
-                            let Some(upper) = self.upper.check_node(key) else {
-                                if O::REVERSE {
-                                    continue 'horizontal;
-                                } else {
-                                    self.stack.clear();
-                                    return None;
-                                }
-                            };
-                            upper
-                        } else {
-                            Default::default()
-                        };
-
                         let node = unsafe { node.into_ref_unchecked() };
                         self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
                         continue 'vertical;

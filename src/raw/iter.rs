@@ -58,45 +58,30 @@ impl<R: key::Read> Range<R> for RangeInclusive<R> {
 trait Lower<R: key::Read> {
     type Bound: raw::node::Lower;
 
-    fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool;
-
-    fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
 }
 
 trait Upper<R: key::Read> {
     type Bound: raw::node::Upper;
 
-    fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool;
-
-    fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
 }
 
 impl<R: key::Read> Lower<R> for Include<R> {
     type Bound = Option<u8>;
 
-    #[inline]
-    fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
         let key = edge.key();
         let len = key.len();
 
         if self.0.bits() < len.bits() {
-            return false;
+            return None;
         }
-
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => false,
-            cmp::Ordering::Equal | cmp::Ordering::Greater => true,
-        }
-    }
-
-    fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
 
         match self.0.read(len).cmp(&key) {
             cmp::Ordering::Less => None,
             cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => Some(Default::default()),
+            cmp::Ordering::Greater => Some(None),
         }
     }
 }
@@ -104,26 +89,16 @@ impl<R: key::Read> Lower<R> for Include<R> {
 impl<R: key::Read> Upper<R> for Include<R> {
     type Bound = Option<u8>;
 
-    fn check_value(&mut self, edge: ribbit::Packed<R::Edge>) -> bool {
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
         let key = edge.key();
         let len = key.len();
 
         if self.0.bits() > len.bits() {
-            return false;
+            return None;
         }
 
         match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less | cmp::Ordering::Equal => true,
-            cmp::Ordering::Greater => false,
-        }
-    }
-
-    fn check_node(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
-
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => Some(Default::default()),
+            cmp::Ordering::Less => Some(None),
             cmp::Ordering::Equal => Some(self.0.next()),
             cmp::Ordering::Greater => None,
         }
@@ -153,11 +128,8 @@ impl<R: key::Read> Range<R> for core::ops::RangeFull {
 impl<R: key::Read> Lower<R> for Unbound {
     type Bound = Unbound;
 
-    fn check_value(&mut self, _edge: ribbit::Packed<R::Edge>) -> bool {
-        true
-    }
-
-    fn check_node(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+    #[inline]
+    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
         Some(Unbound)
     }
 }
@@ -166,12 +138,7 @@ impl<R: key::Read> Upper<R> for Unbound {
     type Bound = Unbound;
 
     #[inline]
-    fn check_value(&mut self, _edge: ribbit::Packed<R::Edge>) -> bool {
-        true
-    }
-
-    #[inline]
-    fn check_node(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
         Some(Unbound)
     }
 }
