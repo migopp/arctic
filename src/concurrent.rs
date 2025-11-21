@@ -1,8 +1,8 @@
 mod cursor;
 mod hazard;
 pub mod iter;
-pub(crate) mod key;
-pub(crate) mod value;
+mod key;
+mod value;
 
 use core::ops::RangeFull;
 use core::ops::RangeInclusive;
