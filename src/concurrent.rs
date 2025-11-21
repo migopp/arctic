@@ -1,6 +1,6 @@
 mod cursor;
 mod hazard;
-pub mod iter;
+mod iter;
 mod key;
 mod value;
 
@@ -20,6 +20,9 @@ use crate::raw::Edge;
 use crate::sequential;
 use crate::stat;
 
+pub use iter::EntryIter;
+pub use iter::Prefix;
+pub use iter::ValueIter;
 pub use key::Key;
 pub use value::Value;
 
@@ -554,24 +557,24 @@ where
         }
     }
 
-    pub fn all(&mut self) -> iter::PrefixGuard<'static, 'g, '_, K, V, RangeFull> {
+    pub fn all(&mut self) -> iter::Prefix<'static, 'g, '_, K, V, RangeFull> {
         let cursor =
             cursor::Prefix::<_, _, cursor::path::Discard>::new_root(&mut self.smr, self.raw.root());
 
-        iter::PrefixGuard::new(cursor, ..)
+        iter::Prefix::new(cursor, ..)
     }
 
     pub fn prefix<'k>(
         &mut self,
         prefix: impl Into<K::Read<'k>>,
-    ) -> Option<iter::PrefixGuard<'k, 'g, '_, K, V, RangeFull>> {
+    ) -> Option<iter::Prefix<'k, 'g, '_, K, V, RangeFull>> {
         let prefix = prefix.into();
         let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             prefix,
         )?;
-        Some(iter::PrefixGuard::new(cursor, ..))
+        Some(iter::Prefix::new(cursor, ..))
     }
 
     // FIXME: support `Option` for min, max
@@ -579,7 +582,7 @@ where
         &mut self,
         min: impl Into<K::Read<'k>>,
         max: impl Into<K::Read<'k>>,
-    ) -> Option<iter::PrefixGuard<'k, 'g, '_, K, V, RangeInclusive<K::Read<'k>>>> {
+    ) -> Option<iter::Prefix<'k, 'g, '_, K, V, RangeInclusive<K::Read<'k>>>> {
         let min = min.into();
         let max = max.into();
         let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new(
@@ -587,7 +590,7 @@ where
             self.raw.root(),
             min.common_prefix(max),
         )?;
-        Some(iter::PrefixGuard::new(cursor, min..=max))
+        Some(iter::Prefix::new(cursor, min..=max))
     }
 
     pub fn prefix_optimistic<'k, 'l, O: Order>(
@@ -670,7 +673,7 @@ where
 
     fn scan_optimistic<'k, R, O>(
         buffer: &mut Vec<(K::Write, u64)>,
-        guard: &iter::PrefixGuard<'k, 'g, '_, K, V, R>,
+        guard: &iter::Prefix<'k, 'g, '_, K, V, R>,
         limit: usize,
     ) -> Result<(), ()>
     where

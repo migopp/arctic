@@ -11,7 +11,7 @@ use crate::raw::key::Read as _;
 use crate::raw::Edge;
 
 /// Guard all nodes and values below this prefix from memory reclamation.
-pub struct PrefixGuard<'k, 'g, 'l, K: Key, V: Value, R> {
+pub struct Prefix<'k, 'g, 'l, K: Key, V: Value, R> {
     guard: hazard::guard::Prefix<'g, 'l, V>,
     root: &'g Atomic<Edge<K::Edge>>,
     prefix: K::Read<'k>,
@@ -19,7 +19,7 @@ pub struct PrefixGuard<'k, 'g, 'l, K: Key, V: Value, R> {
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R> PrefixGuard<'k, 'g, 'l, K, V, R>
+impl<'k, 'g, 'l, K, V, R> Prefix<'k, 'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
@@ -28,7 +28,7 @@ where
     pub(super) fn new<H>(
         cursor: cursor::Prefix<'k, 'g, 'l, K, V, H>,
         range: R,
-    ) -> PrefixGuard<'k, 'g, 'l, K, V, R>
+    ) -> Prefix<'k, 'g, 'l, K, V, R>
     where
         K: Key,
         V: Value,
@@ -36,7 +36,7 @@ where
     {
         let prefix = cursor.prefix();
         let range = range.suffix(prefix.bits());
-        PrefixGuard {
+        Prefix {
             root: cursor.edge(),
             prefix,
             guard: cursor.into_guard().guard_prefix(),
@@ -46,7 +46,7 @@ where
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R> PrefixGuard<'k, 'g, 'l, K, V, R>
+impl<'k, 'g, 'l, K, V, R> Prefix<'k, 'g, 'l, K, V, R>
 where
     K: Key,
     V: Value,
