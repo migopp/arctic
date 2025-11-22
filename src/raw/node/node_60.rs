@@ -200,42 +200,30 @@ impl Header {
 
     #[inline]
     fn get_impl(&self, key: u8) -> Result<u8, ribbit::Packed<Meta>> {
-        use core::arch::x86_64::_mm_cmpeq_epi8;
-        use core::arch::x86_64::_mm_movemask_epi8;
-        use core::arch::x86_64::_mm_set1_epi8;
-        use std::arch::x86_64::__m128i;
+        let meta = self.meta();
+        let data = self.data();
 
-        unsafe {
-            let meta = self.meta();
-            let data = self.data();
+        let mut r#match = 0;
+        for (i, chunk) in data
+            .into_iter()
+            .chain(core::iter::once(meta.value))
+            .enumerate()
+        {
+            let local = node::simd::mask_eq(chunk, key) as u64;
+            let global = local << (i * 16);
+            r#match |= global;
+        }
 
-            let key = _mm_set1_epi8(key as i8);
+        let len = meta.len().value();
+        let index = r#match
+            // Mask against node length
+            .bitand((1u64 << len) - 1)
+            .trailing_zeros() as u8;
 
-            let mut r#match = 0;
-            for (i, chunk) in data
-                .into_iter()
-                .chain(core::iter::once(meta.value))
-                .enumerate()
-            {
-                let local = _mm_movemask_epi8(_mm_cmpeq_epi8(
-                    key,
-                    core::mem::transmute::<u128, __m128i>(chunk),
-                )) as u64;
-                let global = local << (i * 16);
-                r#match |= global;
-            }
-
-            let len = meta.len().value();
-            let index = r#match
-                // Mask against node length
-                .bitand((1u64 << len) - 1)
-                .trailing_zeros() as u8;
-
-            if index < len {
-                Ok(index)
-            } else {
-                Err(meta)
-            }
+        if index < len {
+            Ok(index)
+        } else {
+            Err(meta)
         }
     }
 
@@ -273,7 +261,7 @@ impl Header {
                 .map(mask)
                 .unwrap_or(0u128);
 
-            let mask_range = node::simd::byte_in_range(chunk, lower.get(), upper.get());
+            let mask_range = node::simd::mask_range(chunk, lower.get(), upper.get());
             let mask_valid = mask_len & mask_range;
             len_valid += (mask_valid.count_ones() >> 3) as u8;
             keys[i] = chunk & mask_valid | !mask_valid;

@@ -57,7 +57,7 @@ impl linear::Header for ribbit::Packed<Header> {
     }
 
     fn get(self, key: u8) -> Option<u8> {
-        let index = get(self.value, key);
+        let index = node::simd::mask_eq(self.value, key).trailing_zeros() as u8;
         (index < self.len().value()).then_some(index)
     }
 
@@ -91,8 +91,7 @@ impl linear::Header for ribbit::Packed<Header> {
 
         let len = self.len().value() as usize;
         let mask_len = (1u128 << (len << 3)) - 1;
-
-        let mask_range = node::simd::byte_in_range(self.value, lower.get(), upper.get());
+        let mask_range = node::simd::mask_range(self.value, lower.get(), upper.get());
         let mask_valid = mask_len & mask_range;
         let len = (mask_valid.count_ones() >> 3) as u8;
 
@@ -103,83 +102,5 @@ impl linear::Header for ribbit::Packed<Header> {
         let entries: [(u8, u8); Self::LEN] =
             core::array::from_fn(|index| (keys[index], index as u8));
         node::KeyIter::from_node_15(linear::KeyIter::new(entries, len))
-    }
-}
-
-#[inline]
-fn get(array: u128, key: u8) -> u8 {
-    if cfg!(feature = "opt-node15-get") {
-        get_simd(array, key)
-    } else {
-        get_naive(array, key)
-    }
-}
-
-#[inline]
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-fn get_simd(array: u128, key: u8) -> u8 {
-    use core::arch::x86_64::_mm_cmpeq_epi8;
-    use core::arch::x86_64::_mm_movemask_epi8;
-    use core::arch::x86_64::_mm_set1_epi8;
-    use std::arch::x86_64::__m128i;
-
-    unsafe {
-        _mm_movemask_epi8(_mm_cmpeq_epi8(
-            core::mem::transmute::<u128, __m128i>(array),
-            _mm_set1_epi8(key as i8),
-        ))
-        .trailing_zeros() as u8
-    }
-}
-
-#[inline]
-fn get_naive(array: u128, key: u8) -> u8 {
-    array
-        .to_le_bytes()
-        .into_iter()
-        .position(|byte| byte == key)
-        .map(|index| index as u8)
-        .unwrap_or(u8::MAX)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::raw::node::node_15;
-
-    #[test]
-    fn zero() {
-        test_get(0x00_00_00_00, 0, 0)
-    }
-
-    #[test]
-    fn zero_high() {
-        test_get(0x00_00_12_34, 0, 2)
-    }
-
-    #[test]
-    fn nonzero_middle() {
-        test_get(0x00_11_12_13, 0x12, 1)
-    }
-
-    #[test]
-    fn duplicate() {
-        test_get(0x00_11_11_12, 0x11, 1)
-    }
-
-    #[test]
-    fn lsb() {
-        test_get(u128::MAX, 0xFF, 0)
-    }
-
-    #[test]
-    fn msb() {
-        test_get(0x0F << 120, 0x0F, 15)
-    }
-
-    fn test_get(array: u128, key: u8, expected: u8) {
-        assert_eq!(node_15::get_naive(array, key), expected);
-
-        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        assert_eq!(node_15::get_simd(array, key), expected);
     }
 }
