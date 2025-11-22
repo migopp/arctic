@@ -137,14 +137,14 @@ where
 
     // FIXME
     #[inline]
-    pub(crate) fn keys_range<L: crate::raw::node::Lower, G: crate::raw::node::Upper>(
+    pub(crate) fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         &self,
-        low: L,
-        high: G,
+        lower: L,
+        upper: U,
     ) -> node::KeyIter {
         self.header
             .load_packed(Ordering::Relaxed)
-            .keys_range(low, high)
+            .keys_range(lower, upper)
     }
 
     #[inline]
@@ -203,10 +203,10 @@ pub(crate) trait Header: ribbit::Unpack {
 
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>>;
 
-    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
+    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
-        low: L,
-        high: H,
+        lower: L,
+        upper: U,
     ) -> node::KeyIter;
 
     fn keys_sorted(self) -> node::KeyIter;

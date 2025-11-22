@@ -240,13 +240,13 @@ impl Drop for KeyIter {
 pub(crate) trait Lower: Copy + Default {
     const UNBOUND: bool;
     fn get(self) -> u8;
-    fn is(self, byte: u8) -> bool;
+    fn check(self, byte: u8) -> bool;
 }
 
 pub(crate) trait Upper: Copy + Default {
     const UNBOUND: bool;
     fn get(self) -> u8;
-    fn is(self, byte: u8) -> bool;
+    fn check(self, byte: u8) -> bool;
 }
 
 impl Lower for Unbound {
@@ -256,7 +256,7 @@ impl Lower for Unbound {
         0
     }
     #[inline]
-    fn is(self, _byte: u8) -> bool {
+    fn check(self, _byte: u8) -> bool {
         false
     }
 }
@@ -268,7 +268,7 @@ impl Upper for Unbound {
         255
     }
     #[inline]
-    fn is(self, _byte: u8) -> bool {
+    fn check(self, _byte: u8) -> bool {
         false
     }
 }
@@ -280,7 +280,7 @@ impl Lower for Option<u8> {
         self.unwrap_or(0)
     }
     #[inline]
-    fn is(self, byte: u8) -> bool {
+    fn check(self, byte: u8) -> bool {
         self == Some(byte)
     }
 }
@@ -292,7 +292,7 @@ impl Upper for Option<u8> {
         self.unwrap_or(255)
     }
     #[inline]
-    fn is(self, byte: u8) -> bool {
+    fn check(self, byte: u8) -> bool {
         self == Some(byte)
     }
 }

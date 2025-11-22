@@ -181,8 +181,8 @@ where
                 let key = edge.meta();
                 let bits = self.key.replace(bits, byte, key);
 
-                let check_lower = iter.lower().is(byte);
-                let check_upper = iter.upper().is(byte);
+                let check_lower = iter.lower().check(byte);
+                let check_upper = iter.upper().check(byte);
 
                 if !check_lower && !check_upper {
                     match child {

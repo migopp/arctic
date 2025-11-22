@@ -74,12 +74,12 @@ where
 
 impl<M: ribbit::Pack> Node256<M> {
     #[inline]
-    pub(crate) fn keys<L: node::iter::Lower, H: node::iter::Upper>(
+    pub(crate) fn keys<L: node::iter::Lower, U: node::iter::Upper>(
         &self,
-        low: L,
-        high: H,
+        lower: L,
+        upper: U,
     ) -> KeyIter {
-        KeyIter::new(low, high)
+        KeyIter::new(lower, upper)
     }
 }
 
@@ -110,10 +110,10 @@ enum Tag {
 
 impl KeyIter {
     #[inline]
-    fn new<L: node::iter::Lower, H: node::iter::Upper>(low: L, high: H) -> Self {
+    fn new<L: node::iter::Lower, U: node::iter::Upper>(lower: L, upper: U) -> Self {
         Self {
-            head: low.get() as u16,
-            tail: high.get() as u16 + 1,
+            head: lower.get() as u16,
+            tail: upper.get() as u16 + 1,
             _tag: Tag::Node256,
         }
     }

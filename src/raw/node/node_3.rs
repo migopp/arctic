@@ -79,19 +79,19 @@ impl linear::Header for ribbit::Packed<Header> {
         }
     }
 
-    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
+    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
-        low: L,
-        high: H,
+        lower: L,
+        upper: U,
     ) -> node::KeyIter {
         let len = self.len().value() as usize;
         let keys = self.value.to_le_bytes();
         let mut valid = 0;
-        let low = low.get();
-        let high = high.get();
+        let min = lower.get();
+        let max = upper.get();
 
         let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
-            if index < len && (low..=high).contains(&keys[index]) {
+            if index < len && (min..=max).contains(&keys[index]) {
                 valid += 1;
                 (keys[index], index as u8)
             } else {

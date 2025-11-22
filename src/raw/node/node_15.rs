@@ -92,10 +92,10 @@ impl linear::Header for ribbit::Packed<Header> {
         node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
     }
 
-    fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
+    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
-        low: L,
-        high: H,
+        lower: L,
+        upper: U,
     ) -> node::KeyIter {
         // https://stackoverflow.com/a/28383095
         // https://talkchess.com/viewtopic.php?t=78804
@@ -113,8 +113,8 @@ impl linear::Header for ribbit::Packed<Header> {
                 (1u128 << (len << 3)) - 1,
             );
 
-            let min = low.get();
-            let max = high.get();
+            let min = lower.get();
+            let max = upper.get();
 
             let min = _mm_set1_epi8(min as i8);
             let max = _mm_set1_epi8(max as i8);
