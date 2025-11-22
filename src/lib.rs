@@ -159,6 +159,16 @@ mod tests {
     }
 
     #[test]
+    fn node60_full() {
+        insert_all(0u16..60);
+    }
+
+    #[test]
+    fn node60_expand() {
+        insert_all(0u16..61);
+    }
+
+    #[test]
     fn node256_full() {
         insert_all(0u16..=255);
     }
