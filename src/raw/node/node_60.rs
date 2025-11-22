@@ -204,9 +204,9 @@ impl Header {
         let data = self.data();
 
         let mut r#match = 0;
-        for (i, chunk) in data
+        // Explicit array here is enough for compiler to unroll loop
+        for (i, chunk) in [data[0], data[1], data[2], meta.value]
             .into_iter()
-            .chain(core::iter::once(meta.value))
             .enumerate()
         {
             let local = node::simd::mask_eq(chunk, key) as u64;
@@ -304,12 +304,11 @@ impl Header {
 
         // `get_or_insert` atomically maintains consistency
         // when len > 48, so helping is not necessary here
-        if i == 3 {
+        let Some(keys) = self.data.get(i as usize) else {
             stat::increment(stat::Counter::Node60Consistent);
             return;
-        }
+        };
 
-        let keys = &self.data[i as usize];
         let old = keys.load(Ordering::Relaxed);
         let last = meta.last();
 
