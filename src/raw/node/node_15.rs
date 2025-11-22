@@ -6,7 +6,6 @@ use crate::raw::node;
 use crate::raw::node::linear;
 use crate::raw::node::Node3;
 use crate::raw::node::Node60;
-use crate::raw::Edge;
 
 pub(crate) type Node15<C> = super::Linear<15, Header, C>;
 
@@ -34,7 +33,7 @@ impl Default for HeaderPacked {
 
 impl linear::Header for ribbit::Packed<Header> {
     const KIND: node::Kind = node::Kind::Node15;
-    const GROW: usize = 15;
+    const LEN: usize = 15;
 
     type Grow<M>
         = Node60<M>
@@ -44,19 +43,6 @@ impl linear::Header for ribbit::Packed<Header> {
         = Node3<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
-
-    type KeyBuffer = [u8; 15];
-    type EdgeBuffer<M>
-        = [ribbit::Packed<Edge<M>>; 15]
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-
-    fn buffer<M: ribbit::Pack<Packed: edge::Meta>>() -> (Self::KeyBuffer, Self::EdgeBuffer<M>) {
-        (
-            core::array::from_fn(|_| 0),
-            core::array::from_fn(|_| Edge::DEFAULT),
-        )
-    }
 
     fn freeze(self) -> Self {
         self.with_frozen(true)
@@ -77,10 +63,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
         let len = self.len().value();
-        validate!(len <= Self::GROW as u8);
+        validate!(len <= Self::LEN as u8);
         match self.get(key) {
             Some(index) => Ok(index),
-            _ if len == Self::GROW as u8 || self.is_frozen() => Err(None),
+            _ if len == Self::LEN as u8 || self.is_frozen() => Err(None),
             _ => Err(Some(Self::new(
                 u120::new(self.keys().value() | ((key as u128) << (len * 8))),
                 u4::new(len + 1),
@@ -92,7 +78,7 @@ impl linear::Header for ribbit::Packed<Header> {
     fn keys_unsorted(self) -> node::KeyIter {
         let keys = self.value.to_le_bytes();
         let len = self.len().value();
-        let indexes: [(u8, u8); Self::GROW] =
+        let indexes: [(u8, u8); Self::LEN] =
             core::array::from_fn(|index| (keys[index], index as u8));
         node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
     }
@@ -100,7 +86,7 @@ impl linear::Header for ribbit::Packed<Header> {
     fn keys_sorted(self) -> node::KeyIter {
         let keys = self.value.to_le_bytes();
         let len = self.len().value();
-        let mut indexes: [(u8, u8); Self::GROW] =
+        let mut indexes: [(u8, u8); Self::LEN] =
             core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len as usize].sort_unstable();
         node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))

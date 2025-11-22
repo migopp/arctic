@@ -27,16 +27,10 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: Kind;
-    const GROW: usize;
+    const LEN: usize;
 
     type Grow: Node<M>;
     type Shrink: Node<M>;
-
-    // Work around not being able to use associated consts in array lengths
-    type KeyBuffer: AsMut<[u8]>;
-    type EdgeBuffer: AsMut<[ribbit::Packed<Edge<M>>]>;
-
-    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer);
 
     fn edges(&self) -> &[Atomic<Edge<M>>];
 
@@ -53,21 +47,25 @@ where
         impl Iterator<Item = ribbit::Packed<Edge<M>>>,
     );
 
-    fn replace(&self, meta: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
+    fn replace<const LEN_: usize>(
+        &self,
+        meta: ribbit::Packed<M>,
+    ) -> (Smo, ribbit::Packed<Edge<M>>) {
+        const {
+            assert!(Self::LEN == LEN_);
+        }
+
         // Caller must not call replace if doomed to fail CAS
         validate!(!meta.is_frozen());
 
         // Can only call replace on nodes
         validate!(!meta.is_value());
 
-        let mut len = 0;
-        let (mut keys, mut edges) = Self::buffer();
-        let keys = keys.as_mut();
-        let edges = edges.as_mut();
-
+        let mut keys = [0u8; LEN_];
+        let mut edges = [Edge::DEFAULT; LEN_];
         let (keys_frozen, edges_frozen) = self.freeze();
 
-        keys_frozen
+        let len = keys_frozen
             .zip(edges_frozen)
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {
@@ -78,13 +76,13 @@ where
                 );
                 (key, edge.unfreeze())
             })
-            .zip(&mut *keys)
-            .zip(&mut *edges)
-            .for_each(|(((key_in, edge_in), key_out), edge_out)| {
-                *key_out = key_in;
-                *edge_out = edge_in;
-                len += 1;
-            });
+            .zip(&mut keys)
+            .zip(&mut edges)
+            .map(|(((key_old, edge_old), key_new), edge_new)| {
+                *key_new = key_old;
+                *edge_new = edge_old;
+            })
+            .count();
 
         if len == 0 {
             return (Smo::Destroy, Edge::DEFAULT);
@@ -96,10 +94,10 @@ where
             }
         }
 
-        let keys = keys.iter().take(len).copied();
-        let edges = edges.iter().take(len).copied();
+        let keys = keys.into_iter().take(len);
+        let edges = edges.into_iter().take(len);
 
-        if len == Self::GROW {
+        if len == Self::LEN {
             (Smo::Grow, unsafe {
                 Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges)
             })
@@ -222,10 +220,10 @@ where
     #[cold]
     pub(crate) fn replace(&self, parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
         match self {
-            Self::Node3(node) => node.replace(parent),
-            Self::Node15(node) => node.replace(parent),
-            Self::Node60(node) => node.replace(parent),
-            Self::Node256(node) => node.replace(parent),
+            Self::Node3(node) => node.replace::<3>(parent),
+            Self::Node15(node) => node.replace::<15>(parent),
+            Self::Node60(node) => node.replace::<60>(parent),
+            Self::Node256(node) => node.replace::<256>(parent),
         }
     }
 }

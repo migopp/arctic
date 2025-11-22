@@ -33,17 +33,10 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = <H::Packed as Header>::KIND;
-    const GROW: usize = <H::Packed as Header>::GROW;
+    const LEN: usize = <H::Packed as Header>::LEN;
 
     type Grow = <H::Packed as Header>::Grow<M>;
     type Shrink = <H::Packed as Header>::Shrink<M>;
-
-    type KeyBuffer = <H::Packed as Header>::KeyBuffer;
-    type EdgeBuffer = <H::Packed as Header>::EdgeBuffer<M>;
-
-    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer) {
-        <H::Packed as Header>::buffer::<M>()
-    }
 
     #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
@@ -190,7 +183,7 @@ where
 
 pub(crate) trait Header: ribbit::Unpack {
     const KIND: node::Kind;
-    const GROW: usize;
+    const LEN: usize;
 
     type Grow<M>: Node<M>
     where
@@ -199,13 +192,6 @@ pub(crate) trait Header: ribbit::Unpack {
     type Shrink<M>: Node<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
-
-    type KeyBuffer: AsMut<[u8]>;
-    type EdgeBuffer<M>: AsMut<[ribbit::Packed<Edge<M>>]>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-
-    fn buffer<M: ribbit::Pack<Packed: edge::Meta>>() -> (Self::KeyBuffer, Self::EdgeBuffer<M>);
 
     fn freeze(self) -> Self;
 

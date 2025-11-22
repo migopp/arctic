@@ -40,20 +40,10 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = node::Kind::Node60;
-    const GROW: usize = 60;
+    const LEN: usize = 60;
 
     type Grow = Node256<M>;
     type Shrink = Node15<M>;
-
-    type KeyBuffer = [u8; 60];
-    type EdgeBuffer = [ribbit::Packed<Edge<M>>; 60];
-
-    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer) {
-        (
-            core::array::from_fn(|_| 0),
-            core::array::from_fn(|_| Edge::DEFAULT),
-        )
-    }
 
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
