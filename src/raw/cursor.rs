@@ -186,14 +186,14 @@ where
 
                         (
                             Smo::Edge(edge::Smo::Create),
-                            Edge::new_node::<Node3<K::Edge>, _>(key, None),
+                            Edge::new_node::<Node3<K::Edge>, _, _>(key, [], []),
                         )
                     }
                 },
                 Ok(_) if old_meta.is_frozen() => return Insert::Frozen,
                 Ok((start, middle, end)) => (
                     Smo::Edge(edge::Smo::Expand),
-                    Edge::new_node::<Node3<K::Edge>, _>(start, [(middle, old.with_meta(end))]),
+                    Edge::new_node::<Node3<K::Edge>, _, _>(start, [middle], [old.with_meta(end)]),
                 ),
             };
 
@@ -313,6 +313,7 @@ where
         let mut cursor = Self::new(root, key);
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
+            // eprintln!("{:x?}", edge);
             let key = edge.meta().key();
             let len = key.len();
 

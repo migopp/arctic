@@ -50,32 +50,36 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     }
 
     #[cold]
-    pub(crate) fn new_node<N, I>(
+    pub(crate) fn new_node<N, K, E>(
         key: <<M as ribbit::Pack>::Packed as Meta>::Key,
-        edges: I,
+        keys: K,
+        edges: E,
     ) -> ribbit::Packed<Self>
     where
         N: node::Node<M>,
-        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
+        K: IntoIterator<Item = u8>,
+        E: IntoIterator<Item = ribbit::Packed<Edge<M>>>,
     {
-        unsafe { Self::new_node_unchecked::<N, I>(key.with_value(false), edges) }
+        unsafe { Self::new_node_unchecked::<N, K, E>(key.with_value(false), keys, edges) }
     }
 
     #[cold]
-    pub(crate) unsafe fn new_node_unchecked<N, I>(
+    pub(crate) unsafe fn new_node_unchecked<N, K, E>(
         meta: ribbit::Packed<M>,
-        edges: I,
+        keys: K,
+        edges: E,
     ) -> ribbit::Packed<Self>
     where
         N: node::Node<M>,
-        I: IntoIterator<Item = (u8, ribbit::Packed<Edge<M>>)>,
+        K: IntoIterator<Item = u8>,
+        E: IntoIterator<Item = ribbit::Packed<Edge<M>>>,
     {
         validate!(!meta.is_frozen());
         validate!(!meta.is_value());
 
         let mut node = Box::new(N::default());
 
-        for (key, edge) in edges {
+        for (key, edge) in keys.into_iter().zip(edges) {
             node.insert(key)
                 .expect("Node can fit all edges")
                 .set_packed(edge);

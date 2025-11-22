@@ -42,6 +42,13 @@ where
     type Grow = <H::Packed as Header>::Grow<M>;
     type Shrink = <H::Packed as Header>::Shrink<M>;
 
+    type KeyBuffer = <H::Packed as Header>::KeyBuffer;
+    type EdgeBuffer = <H::Packed as Header>::EdgeBuffer<M>;
+
+    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer) {
+        <H::Packed as Header>::buffer::<M>()
+    }
+
     #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
@@ -99,61 +106,19 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index) })
     }
 
-    fn replace(&self, meta: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
-        // Caller must not call replace if doomed to fail CAS
-        validate!(!meta.is_frozen());
-
-        // Can only call replace on nodes
-        validate!(!meta.is_value());
-
-        let header = self.freeze();
-
-        let mut edges: [(u8, ribbit::Packed<Edge<M>>); LEN] =
-            core::array::from_fn(|_| (0, Edge::DEFAULT));
-        let mut len = 0;
-
-        core::iter::zip(
+    fn freeze(
+        &self,
+    ) -> (
+        impl Iterator<Item = u8>,
+        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
+    ) {
+        let header = Linear::freeze(self);
+        (
             header.keys_unsorted().map(|(key, _)| key),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
         )
-        .filter(|(_, edge)| !edge.is_null())
-        .map(|(key, edge)| {
-            validate!(
-                edge.meta().is_frozen(),
-                "{} edge must be frozen before replace",
-                core::any::type_name::<Self>(),
-            );
-            (key, edge.unfreeze())
-        })
-        .zip(&mut edges)
-        .for_each(|(edge, save)| {
-            *save = edge;
-            len += 1;
-        });
-
-        match &edges[..len] {
-            _ if len == Self::GROW => {
-                return (node::Smo::Grow, unsafe {
-                    Edge::new_node_unchecked::<Self::Grow, _>(meta, edges.into_iter().take(len))
-                })
-            }
-            [] => return (Smo::Destroy, Edge::DEFAULT),
-            [(key, edge)] => {
-                // FIXME: how to handle scan?
-                if let Some(meta) = meta.compress(*key, edge.meta()) {
-                    return (Smo::Compress, edge.with_meta(meta));
-                }
-            }
-
-            _ => (),
-        }
-
-        // Catch-all:
-        (node::Smo::Replace, unsafe {
-            Edge::new_node_unchecked::<Self, _>(meta, edges.into_iter().take(len))
-        })
     }
 }
 
@@ -238,6 +203,13 @@ pub(crate) trait Header: ribbit::Unpack {
     type Shrink<M>: Node<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
+
+    type KeyBuffer: AsMut<[u8]>;
+    type EdgeBuffer<M>: AsMut<[ribbit::Packed<Edge<M>>]>
+    where
+        M: ribbit::Pack<Packed: edge::Meta>;
+
+    fn buffer<M: ribbit::Pack<Packed: edge::Meta>>() -> (Self::KeyBuffer, Self::EdgeBuffer<M>);
 
     fn freeze(self) -> Self;
 

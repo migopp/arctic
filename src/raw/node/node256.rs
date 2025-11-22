@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
@@ -6,7 +7,6 @@ use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
 use crate::raw::node::Node60;
-use crate::raw::node::Smo;
 use crate::raw::Node;
 
 #[repr(C, align(4096))]
@@ -34,6 +34,16 @@ where
     type Grow = Node256<M>;
     type Shrink = Node60<M>;
 
+    type KeyBuffer = [u8; 256];
+    type EdgeBuffer = [ribbit::Packed<Edge<M>>; 256];
+
+    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer) {
+        (
+            core::array::from_fn(|_| 0),
+            core::array::from_fn(|_| Edge::DEFAULT),
+        )
+    }
+
     #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.0
@@ -56,8 +66,19 @@ where
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn replace(&self, _parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
-        todo!()
+    fn freeze(
+        &self,
+    ) -> (
+        impl Iterator<Item = u8>,
+        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
+    ) {
+        self.0.iter().for_each(Edge::freeze);
+        let keys = 0..=255;
+        let edges = self
+            .0
+            .iter()
+            .map(|edge| edge.load_packed(Ordering::Relaxed));
+        (keys, edges)
     }
 }
 

@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 
 mod iter;
 mod linear;
@@ -19,6 +20,7 @@ pub(crate) use node60::Node60;
 use ribbit::Atomic;
 
 use crate::raw::edge;
+use crate::raw::edge::Meta as _;
 use crate::raw::Edge;
 
 pub(crate) trait Node<M>: Default
@@ -31,6 +33,12 @@ where
     type Grow: Node<M>;
     type Shrink: Node<M>;
 
+    // Work around not being able to use associated consts in array lengths
+    type KeyBuffer: AsMut<[u8]>;
+    type EdgeBuffer: AsMut<[ribbit::Packed<Edge<M>>]>;
+
+    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer);
+
     fn edges(&self) -> &[Atomic<Edge<M>>];
 
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
@@ -39,7 +47,70 @@ where
 
     fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
 
-    fn replace(&self, parent: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>);
+    fn freeze(
+        &self,
+    ) -> (
+        impl Iterator<Item = u8>,
+        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
+    );
+
+    fn replace(&self, meta: ribbit::Packed<M>) -> (Smo, ribbit::Packed<Edge<M>>) {
+        // Caller must not call replace if doomed to fail CAS
+        validate!(!meta.is_frozen());
+
+        // Can only call replace on nodes
+        validate!(!meta.is_value());
+
+        let mut len = 0;
+        let (mut keys, mut edges) = Self::buffer();
+        let keys = keys.as_mut();
+        let edges = edges.as_mut();
+
+        let (keys_frozen, edges_frozen) = self.freeze();
+
+        keys_frozen
+            .zip(edges_frozen)
+            .filter(|(_, edge)| !edge.is_null())
+            .map(|(key, edge)| {
+                validate!(
+                    edge.meta().is_frozen(),
+                    "{} edge must be frozen before replace",
+                    core::any::type_name::<Self>(),
+                );
+                (key, edge.unfreeze())
+            })
+            .zip(&mut *keys)
+            .zip(&mut *edges)
+            .for_each(|(((key_in, edge_in), key_out), edge_out)| {
+                *key_out = key_in;
+                *edge_out = edge_in;
+                len += 1;
+            });
+
+        if len == 0 {
+            return (Smo::Destroy, Edge::DEFAULT);
+        } else if len == 1 {
+            let key = keys[0];
+            let edge = edges[0];
+            if let Some(meta) = meta.compress(key, edge.meta()) {
+                return (Smo::Compress, edge.with_meta(meta));
+            }
+        }
+
+        let keys = keys.iter().take(len).copied();
+        let edges = edges.iter().take(len).copied();
+
+        if len == Self::GROW {
+            (Smo::Grow, unsafe {
+                Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges)
+            })
+        } else {
+            // Catch-all:
+            (Smo::Replace, unsafe {
+                Edge::new_node_unchecked::<Self, _, _>(meta, keys, edges)
+            })
+        }
+    }
 }
 
 /// Node-related structural modification operation. Requires freezing.

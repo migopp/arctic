@@ -4,6 +4,7 @@ use ribbit::u4;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::linear;
+use crate::raw::Edge;
 
 use super::Node15;
 
@@ -43,6 +44,19 @@ impl linear::Header for ribbit::Packed<Header> {
         = Node3<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
+
+    type KeyBuffer = [u8; 3];
+    type EdgeBuffer<M>
+        = [ribbit::Packed<Edge<M>>; 3]
+    where
+        M: ribbit::Pack<Packed: edge::Meta>;
+
+    fn buffer<M: ribbit::Pack<Packed: edge::Meta>>() -> (Self::KeyBuffer, Self::EdgeBuffer<M>) {
+        (
+            core::array::from_fn(|_| 0),
+            core::array::from_fn(|_| Edge::DEFAULT),
+        )
+    }
 
     #[inline]
     fn freeze(self) -> Self {

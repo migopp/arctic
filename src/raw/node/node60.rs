@@ -45,6 +45,16 @@ where
     type Grow = Node256<M>;
     type Shrink = Node15<M>;
 
+    type KeyBuffer = [u8; 60];
+    type EdgeBuffer = [ribbit::Packed<Edge<M>>; 60];
+
+    fn buffer() -> (Self::KeyBuffer, Self::EdgeBuffer) {
+        (
+            core::array::from_fn(|_| 0),
+            core::array::from_fn(|_| Edge::DEFAULT),
+        )
+    }
+
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
     }
@@ -67,8 +77,20 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn replace(&self, parent: ribbit::Packed<M>) -> (super::Smo, ribbit::Packed<Edge<M>>) {
-        todo!()
+    fn freeze(
+        &self,
+    ) -> (
+        impl Iterator<Item = u8>,
+        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
+    ) {
+        self.header.freeze();
+        self.edges.iter().for_each(Edge::freeze);
+        (
+            self.header.keys(),
+            self.edges
+                .iter()
+                .map(|edge| edge.load_packed(Ordering::Relaxed)),
+        )
     }
 }
 
@@ -91,6 +113,21 @@ struct Header {
 }
 
 impl Header {
+    fn freeze(&self) {
+        let mut old = self.meta.load_packed(Ordering::Relaxed);
+        while !old.frozen() {
+            match self.meta.compare_exchange_packed(
+                old,
+                old.with_frozen(true),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) => old = conflict,
+            }
+        }
+    }
+
     fn get(&self, key: u8) -> Option<u8> {
         self.get_impl(key).ok()
     }
