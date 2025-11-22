@@ -118,6 +118,7 @@ impl Header {
     fn freeze(&self) {
         let mut old = self.meta.load_packed(Ordering::Relaxed);
         while !old.frozen() {
+            self.ensure_meta_consistent(old);
             match self.meta.compare_exchange_packed(
                 old,
                 old.with_frozen(true),
