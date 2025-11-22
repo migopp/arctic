@@ -251,61 +251,37 @@ impl Header {
         let meta = self.meta();
         let data = self.data();
 
-        // https://stackoverflow.com/a/28383095
-        // https://talkchess.com/viewtopic.php?t=78804
-        unsafe {
-            use core::arch::x86_64::__m128i;
-            use core::arch::x86_64::_mm_cmpeq_epi8;
-            use core::arch::x86_64::_mm_max_epu8;
-            use core::arch::x86_64::_mm_min_epu8;
-            use core::arch::x86_64::_mm_set1_epi8;
-
-            #[inline(always)]
-            const fn avx_to_u128(value: __m128i) -> u128 {
-                unsafe { core::mem::transmute::<__m128i, u128>(value) }
+        #[inline(always)]
+        const fn mask(len: u8) -> u128 {
+            match (1u128).checked_shl((len as u32) << 3) {
+                None => u128::MAX,
+                Some(mask) => mask - 1,
             }
-
-            #[inline(always)]
-            const fn u128_to_avx(value: u128) -> __m128i {
-                unsafe { core::mem::transmute::<u128, __m128i>(value) }
-            }
-
-            const fn mask(len: u8) -> u128 {
-                match (1u128).checked_shl((len as u32) << 3) {
-                    None => u128::MAX,
-                    Some(mask) => mask - 1,
-                }
-            }
-
-            let len_total = meta.len().value();
-            let mut len_valid = 0;
-            let min = _mm_set1_epi8(lower.get() as i8);
-            let max = _mm_set1_epi8(upper.get() as i8);
-
-            let mut keys = [0u128; 4];
-
-            for (i, chunk) in data
-                .into_iter()
-                .chain(core::iter::once(meta.value))
-                .enumerate()
-            {
-                let mask_len = len_total
-                    .checked_sub(i as u8 * 16)
-                    .map(mask)
-                    .unwrap_or(0u128);
-                let mask_range = avx_to_u128(_mm_cmpeq_epi8(
-                    u128_to_avx(chunk),
-                    _mm_min_epu8(_mm_max_epu8(u128_to_avx(chunk), min), max),
-                ));
-                let mask_valid = mask_len & mask_range;
-                len_valid += (mask_valid.count_ones() >> 3) as u8;
-                keys[i] = chunk & mask_valid | !mask_valid;
-            }
-
-            let keys = core::mem::transmute::<[u128; 4], [u8; 64]>(keys);
-            let entries = core::array::from_fn(|index| (keys[index], index as u8));
-            node::KeyIter::from_node_60(linear::KeyIter::new(entries, len_valid))
         }
+
+        let len_total = meta.len().value();
+        let mut len_valid = 0;
+        let mut keys = [0u128; 4];
+
+        for (i, chunk) in data
+            .into_iter()
+            .chain(core::iter::once(meta.value))
+            .enumerate()
+        {
+            let mask_len = len_total
+                .checked_sub(i as u8 * 16)
+                .map(mask)
+                .unwrap_or(0u128);
+
+            let mask_range = node::simd::byte_in_range(chunk, lower.get(), upper.get());
+            let mask_valid = mask_len & mask_range;
+            len_valid += (mask_valid.count_ones() >> 3) as u8;
+            keys[i] = chunk & mask_valid | !mask_valid;
+        }
+
+        let keys = unsafe { core::mem::transmute::<[u128; 4], [u8; 64]>(keys) };
+        let entries = core::array::from_fn(|index| (keys[index], index as u8));
+        node::KeyIter::from_node_60(linear::KeyIter::new(entries, len_valid))
     }
 
     #[inline]
