@@ -16,13 +16,13 @@ const _: () = assert!(core::mem::align_of::<Node15<()>>() == 64);
 #[ribbit(size = 128, packed(rename = "HeaderPacked"), debug)]
 pub(crate) struct Header {
     keys: u120,
-    len: u4,
     frozen: bool,
+    len: u4,
 }
 
 impl Header {
     const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u120::new(0), u4::new(0), false);
+        ribbit::Packed::<Self>::new(u120::new(0), false, u4::new(0));
 }
 
 impl Default for HeaderPacked {
@@ -69,8 +69,8 @@ impl linear::Header for ribbit::Packed<Header> {
             _ if len == Self::LEN as u8 || self.is_frozen() => Err(None),
             _ => Err(Some(Self::new(
                 u120::new(self.keys().value() | ((key as u128) << (len * 8))),
-                u4::new(len + 1),
                 false,
+                u4::new(len + 1),
             ))),
         }
     }

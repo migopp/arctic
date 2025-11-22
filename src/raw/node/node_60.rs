@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 use core::ops::BitAnd as _;
-use core::ops::Shr as _;
 use core::sync::atomic::Ordering;
 
 use ribbit::u112;
@@ -51,7 +50,7 @@ where
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        todo!()
+        self.header.keys_range(lower, upper)
     }
 
     fn edges(&self) -> &[Atomic<Edge<M>>] {
@@ -85,7 +84,7 @@ where
         self.header.freeze();
         self.edges.iter().for_each(Edge::freeze);
         (
-            self.header.keys_unsorted().map(|(key, _)| key),
+            self.header.keys_unsorted().0.map(|(key, _)| key),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
@@ -105,11 +104,14 @@ where
     }
 }
 
+#[repr(C, align(64))]
 #[derive(Default)]
 struct Header {
-    meta: Atomic<Meta>,
     data: [Atomic<u128>; 3],
+    meta: Atomic<Meta>,
 }
+
+const _: [(); 64] = [(); core::mem::size_of::<Header>()];
 
 impl Header {
     fn freeze(&self) {
@@ -133,25 +135,30 @@ impl Header {
 
     fn get_or_insert(&self, key: u8) -> Option<u8> {
         loop {
-            let meta = match self.get_impl(key) {
+            let old = match self.get_impl(key) {
                 Ok(index) => return Some(index),
                 Err(meta) => meta,
             };
 
-            let len = meta.len().value();
-            if len == 60 || meta.frozen() {
+            let len = old.len().value();
+            if len == 60 || old.frozen() {
                 return None;
             }
 
-            match self.meta.compare_exchange_packed(
-                meta,
-                meta.with_len(u6::new(len + 1)).with_last(key),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
+            let mut new = old.with_len(u6::new(len + 1));
+            if len >= 48 {
+                let key = (key as u128) << ((len - 48) << 3);
+                new = unsafe { ribbit::Packed::<Meta>::new_unchecked(new.value | key) }
+            } else {
+                new = new.with_last(key);
+            }
+
+            match self
+                .meta
+                .compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed)
+            {
                 Ok(_) => {
-                    // Must ensure new key is visible to readers before returning
-                    self.help(len + 1, key);
+                    self.ensure_meta_consistent(new);
                     return Some(len);
                 }
                 Err(conflict) if conflict.frozen() => return None,
@@ -161,32 +168,32 @@ impl Header {
     }
 
     fn insert(&mut self, key: u8) -> Option<u8> {
-        let old = self.meta.get_packed();
-        let len = old.len().value();
+        let old_meta = self.meta.get_packed();
+        let len = old_meta.len().value();
 
-        validate!(!old.frozen());
+        validate!(!old_meta.frozen());
         validate!(len <= 60);
 
         if len == 60 {
             return None;
         }
 
-        let mut new = old.with_len(u6::new(len + 1)).with_last(key);
+        let mut new_meta = old_meta.with_len(u6::new(len + 1));
+        let i = len / 16;
+        let j = len % 16;
+        let key_data = (key as u128) << (j << 3);
 
-        let i = (len + 2) / 16;
-        let j = (len + 2) % 16;
-        let key = (key as u128) << (j << 3);
+        if i < 3 {
+            new_meta = new_meta.with_last(key);
 
-        match i.checked_sub(1) {
-            None => new.value |= key,
-            Some(i) => {
-                let old = &mut self.data[i as usize];
-                let new = old.get() | key;
-                old.set(new);
-            }
+            let old_data = &mut self.data[i as usize];
+            let new_data = old_data.get() | key_data;
+            old_data.set(new_data);
+        } else {
+            new_meta = unsafe { ribbit::Packed::<Meta>::new_unchecked(new_meta.value | key_data) }
         }
 
-        self.meta.set_packed(new);
+        self.meta.set_packed(new_meta);
         Some(len)
     }
 
@@ -198,42 +205,28 @@ impl Header {
         use std::arch::x86_64::__m128i;
 
         unsafe {
+            let meta = self.meta();
+            let data = self.data();
+
             let key = _mm_set1_epi8(key as i8);
 
-            let meta = self.meta.load_packed(Ordering::Relaxed);
-            let len = meta.len().value();
-            self.help(len, meta.last());
+            let mut r#match = 0;
+            for (i, chunk) in data
+                .into_iter()
+                .chain(core::iter::once(meta.value))
+                .enumerate()
+            {
+                let local = _mm_movemask_epi8(_mm_cmpeq_epi8(
+                    key,
+                    core::mem::transmute::<u128, __m128i>(chunk),
+                )) as u64;
+                let global = local << (i * 16);
+                r#match |= global;
+            }
 
-            let data_0 = self.data[0].load(Ordering::Relaxed);
-            let data_1 = self.data[1].load(Ordering::Relaxed);
-            let data_2 = self.data[2].load(Ordering::Relaxed);
-
-            let match_0 = _mm_movemask_epi8(_mm_cmpeq_epi8(
-                key,
-                core::mem::transmute::<u128, __m128i>(meta.value),
-            )) as u64;
-
-            let match_1 = _mm_movemask_epi8(_mm_cmpeq_epi8(
-                key,
-                core::mem::transmute::<u128, __m128i>(data_0),
-            )) as u64;
-
-            let match_2 = _mm_movemask_epi8(_mm_cmpeq_epi8(
-                key,
-                core::mem::transmute::<u128, __m128i>(data_1),
-            )) as u64;
-
-            let match_3 = _mm_movemask_epi8(_mm_cmpeq_epi8(
-                key,
-                core::mem::transmute::<u128, __m128i>(data_2),
-            )) as u64;
-
-            let r#match = match_0 | (match_1 << 16) | (match_2 << 32) | (match_3 << 48);
             let len = meta.len().value();
             let index = r#match
-                // Skip bottom two metadata bytes
-                .shr(2u8)
-                // Filter by node length
+                // Mask against node length
                 .bitand((1u64 << len) - 1)
                 .trailing_zeros() as u8;
 
@@ -245,101 +238,138 @@ impl Header {
         }
     }
 
-    fn keys_unsorted(&self) -> node::KeyIter {
-        self.keys_inner().0
-    }
-
     fn keys_range<L: node::iter::Lower, U: node::iter::Upper>(
         &self,
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        todo!()
-        // // https://stackoverflow.com/a/28383095
-        // // https://talkchess.com/viewtopic.php?t=78804
-        // let (keys, len) = unsafe {
-        //     use core::arch::x86_64::_mm_and_si128;
-        //     use core::arch::x86_64::_mm_cmpeq_epi8;
-        //     use core::arch::x86_64::_mm_max_epu8;
-        //     use core::arch::x86_64::_mm_min_epu8;
-        //     use core::arch::x86_64::_mm_set1_epi8;
-        //
-        //     let len = self.len().value() as usize;
-        //
-        //     let mask_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
-        //         (1u128 << (len << 3)) - 1,
-        //     );
-        //
-        //     let min = lower.get();
-        //     let max = upper.get();
-        //
-        //     let min = _mm_set1_epi8(min as i8);
-        //     let max = _mm_set1_epi8(max as i8);
-        //     let mask_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
-        //
-        //     let mask_valid = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(
-        //         _mm_and_si128(mask_len, mask_range),
-        //     );
-        //     let len = (mask_valid.count_ones() >> 3) as u8;
-        //
-        //     (self.value & mask_valid | !mask_valid, len)
-        // };
+        if L::UNBOUND && U::UNBOUND {
+            return self.keys_unsorted().0;
+        }
+
+        let meta = self.meta();
+        let data = self.data();
+
+        // https://stackoverflow.com/a/28383095
+        // https://talkchess.com/viewtopic.php?t=78804
+        unsafe {
+            use core::arch::x86_64::__m128i;
+            use core::arch::x86_64::_mm_cmpeq_epi8;
+            use core::arch::x86_64::_mm_max_epu8;
+            use core::arch::x86_64::_mm_min_epu8;
+            use core::arch::x86_64::_mm_set1_epi8;
+
+            #[inline(always)]
+            const fn avx_to_u128(value: __m128i) -> u128 {
+                unsafe { core::mem::transmute::<__m128i, u128>(value) }
+            }
+
+            #[inline(always)]
+            const fn u128_to_avx(value: u128) -> __m128i {
+                unsafe { core::mem::transmute::<u128, __m128i>(value) }
+            }
+
+            const fn mask(len: u8) -> u128 {
+                match (1u128).checked_shl((len as u32) << 3) {
+                    None => u128::MAX,
+                    Some(mask) => mask - 1,
+                }
+            }
+
+            let len_total = meta.len().value();
+            let mut len_valid = 0;
+            let min = _mm_set1_epi8(lower.get() as i8);
+            let max = _mm_set1_epi8(upper.get() as i8);
+
+            let mut keys = [0u128; 4];
+
+            for (i, chunk) in data
+                .into_iter()
+                .chain(core::iter::once(meta.value))
+                .enumerate()
+            {
+                let mask_len = len_total
+                    .checked_sub(i as u8 * 16)
+                    .map(mask)
+                    .unwrap_or(0u128);
+                let mask_range = avx_to_u128(_mm_cmpeq_epi8(
+                    u128_to_avx(chunk),
+                    _mm_min_epu8(_mm_max_epu8(u128_to_avx(chunk), min), max),
+                ));
+                let mask_valid = mask_len & mask_range;
+                len_valid += (mask_valid.count_ones() >> 3) as u8;
+                keys[i] = chunk & mask_valid | !mask_valid;
+            }
+
+            let keys = core::mem::transmute::<[u128; 4], [u8; 64]>(keys);
+            let entries = core::array::from_fn(|index| (keys[index], index as u8));
+            node::KeyIter::from_node_60(linear::KeyIter::new(entries, len_valid))
+        }
     }
 
     #[inline]
-    fn keys_inner(&self) -> (node::KeyIter, ribbit::Packed<Meta>) {
-        let meta = self.meta.load_packed(Ordering::Relaxed);
+    fn keys_unsorted(&self) -> (node::KeyIter, ribbit::Packed<Meta>) {
+        let meta = self.meta();
+        let data = self.data();
+
         let len = meta.len().value();
-        self.help(len, meta.last());
-
-        let mut entries = [(0u8, 0u8); 60];
-
-        meta.value
-            .to_le_bytes()
-            .into_iter()
-            .skip(2)
-            .chain(
-                self.data
-                    .iter()
-                    .flat_map(|keys| keys.load(Ordering::Relaxed).to_ne_bytes()),
-            )
-            .zip(&mut entries)
-            .take(len as usize)
-            .enumerate()
-            .for_each(|(index_old, (key_old, (key_new, index_new)))| {
-                *key_new = key_old;
-                *index_new = index_old as u8;
-            });
-
+        let mut keys = unsafe {
+            core::mem::transmute::<[u128; 4], [u8; 64]>([data[0], data[1], data[2], meta.value])
+        };
+        keys[len as usize..].fill(0xFF);
+        let entries = core::array::from_fn(|index| (keys[index], index as u8));
         (
             node::KeyIter::from_node_60(linear::KeyIter::new(entries, len)),
             meta,
         )
     }
 
-    fn help(&self, len: u8, last: u8) {
+    fn meta(&self) -> ribbit::Packed<Meta> {
+        let meta = self.meta.load_packed(Ordering::Relaxed);
+        self.ensure_meta_consistent(meta);
+        meta
+    }
+
+    fn ensure_meta_consistent(&self, meta: ribbit::Packed<Meta>) {
+        let len = meta.len().value();
         validate!((15..=60).contains(&len));
 
-        let i = (len - 14 - 1) / 16;
-        let j = ((len - 14 - 1) % 16) << 3;
+        let Some(index) = len.checked_sub(1) else {
+            return;
+        };
+
+        let i = index / 16;
+        let j = (index % 16) << 3;
+
+        // `get_or_insert` atomically maintains consistency
+        // when len > 48, so helping is not necessary here
+        if i == 3 {
+            return;
+        }
 
         let keys = &self.data[i as usize];
         let old = keys.load(Ordering::Relaxed);
+        let last = meta.last();
 
+        // Consistent state
         if (old >> j) as u8 == last {
             return;
         }
 
         let new = old | ((last as u128) << j);
 
-        // Safe to ignore failure: someone must have helped
+        // Failed CAS is okay, means someone else helped
         let _ = keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed);
+    }
+
+    fn data(&self) -> [u128; 3] {
+        core::array::from_fn(|i| self.data[i].load(Ordering::Relaxed))
     }
 }
 
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (iter, meta) = self.keys_inner();
+        let (iter, meta) = self.keys_unsorted();
         let len = meta.len().value();
         let mut keys = [0u8; 60];
         keys.iter_mut()
@@ -358,17 +388,15 @@ impl Debug for Header {
 #[derive(Copy, Clone, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = "MetaPacked"))]
 struct Meta {
-    len: u6,
-    frozen: bool,
-    #[ribbit(offset = 8)]
-    last: u8,
-    #[ribbit(offset = 16)]
     keys: u112,
+    last: u8,
+    frozen: bool,
+    len: u6,
 }
 
 impl Meta {
     const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u6::new(0), false, 0, u112::new(0));
+        ribbit::Packed::<Self>::new(u112::new(0), 0, false, u6::new(0));
 }
 
 impl Default for MetaPacked {

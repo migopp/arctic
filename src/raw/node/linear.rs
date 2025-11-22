@@ -206,7 +206,7 @@ pub(crate) trait Header: ribbit::Unpack {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(super) struct KeyIter<const N: usize> {
     head: u8,
     inner: [(u8, u8); N],
