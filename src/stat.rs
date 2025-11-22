@@ -126,6 +126,10 @@ pub(crate) enum Counter {
     FreeDrop,
     HazardMatch,
 
+    Node60Consistent,
+    Node60CasSuccess,
+    Node60CasFailure,
+
     ScanInsert,
     ScanUpdate,
     ScanScan,
@@ -188,6 +192,10 @@ pub struct Thread {
     scan_freeze: u64,
     lock_frozen: u64,
     unlock_frozen: u64,
+
+    node_60_consistent: u64,
+    node_60_cas_success: u64,
+    node_60_cas_failure: u64,
 
     freeze_pop: Histogram,
 
@@ -257,6 +265,10 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::ScanInsert => &mut thread.scan_insert,
                 Counter::ScanUpdate => &mut thread.scan_update,
                 Counter::ScanScan => &mut thread.scan_scan,
+
+                Counter::Node60Consistent => &mut thread.node_60_consistent,
+                Counter::Node60CasSuccess => &mut thread.node_60_cas_success,
+                Counter::Node60CasFailure => &mut thread.node_60_cas_failure,
 
                 Counter::LockFrozen => &mut thread.lock_frozen,
                 Counter::UnlockFrozen => &mut thread.unlock_frozen,

@@ -13,6 +13,7 @@ use crate::raw::node::Node15;
 use crate::raw::node::Node256;
 use crate::raw::Edge;
 use crate::raw::Node;
+use crate::stat;
 
 #[repr(C, align(1024))]
 pub(crate) struct Node60<M: ribbit::Pack> {
@@ -331,19 +332,16 @@ impl Header {
     }
 
     fn ensure_meta_consistent(&self, meta: ribbit::Packed<Meta>) {
-        let len = meta.len().value();
-        validate!((15..=60).contains(&len));
+        validate!((15..=60).contains(&meta.len().value()));
 
-        let Some(index) = len.checked_sub(1) else {
-            return;
-        };
-
+        let index = meta.len().value() - 1;
         let i = index / 16;
         let j = (index % 16) << 3;
 
         // `get_or_insert` atomically maintains consistency
         // when len > 48, so helping is not necessary here
         if i == 3 {
+            stat::increment(stat::Counter::Node60Consistent);
             return;
         }
 
@@ -353,13 +351,17 @@ impl Header {
 
         // Consistent state
         if (old >> j) as u8 == last {
+            stat::increment(stat::Counter::Node60Consistent);
             return;
         }
 
         let new = old | ((last as u128) << j);
 
         // Failed CAS is okay, means someone else helped
-        let _ = keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed);
+        match keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => stat::increment(stat::Counter::Node60CasSuccess),
+            Err(_) => stat::increment(stat::Counter::Node60CasFailure),
+        }
     }
 
     fn data(&self) -> [u128; 3] {
