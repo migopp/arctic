@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::sync::atomic::Ordering;
 
 mod iter;
 mod linear;
@@ -165,22 +164,22 @@ where
         let (keys, edges) = match self {
             Self::Node3(node) => {
                 let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
-                    KeyIter::from_linear(node.keys_sorted())
+                    node.keys_sorted()
                 } else if O::SORTED {
-                    KeyIter::from_linear(node.keys_range(lower, upper))
+                    node.keys_range(lower, upper)
                 } else {
-                    KeyIter::from_linear(node.keys_unsorted())
+                    node.keys_unsorted()
                 };
 
                 (keys, node.edges())
             }
             Self::Node15(node) => {
                 let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
-                    KeyIter::from_linear(node.keys_sorted())
+                    node.keys_sorted()
                 } else if O::SORTED {
-                    KeyIter::from_linear(node.keys_range(lower, upper))
+                    node.keys_range(lower, upper)
                 } else {
-                    KeyIter::from_linear(node.keys_unsorted())
+                    node.keys_unsorted()
                 };
 
                 (keys, node.edges())

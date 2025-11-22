@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use core::mem::ManuallyDrop;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 use ribbit::Atomic;
@@ -108,36 +108,75 @@ impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
 }
 
 pub(crate) union KeyIter {
-    linear: ManuallyDrop<linear::KeyIter>,
+    node_3: linear::KeyIter<3>,
+    node_15: NonNull<linear::KeyIter<15>>,
     node_256: node256::KeyIter,
     raw: usize,
 }
 
 impl KeyIter {
-    const MASK_TAG: usize = 1usize.rotate_right(1);
+    const TAG_256: usize = 1usize.rotate_right(1);
+    const TAG_15: usize = 0b100
+        << if cfg!(target_endian = "little") {
+            56
+        } else {
+            0
+        };
 
     pub(crate) const ROOT: Self = Self {
-        linear: ManuallyDrop::new(linear::KeyIter::ROOT),
+        node_3: linear::KeyIter::new([(0, 0); 3], 1),
     };
 
     #[inline]
-    pub(super) fn from_linear(iter: linear::KeyIter) -> Self {
-        let iter = Self {
-            linear: ManuallyDrop::new(iter),
-        };
-        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, 0);
+    pub(super) fn from_node_3(node_3: linear::KeyIter<3>) -> Self {
+        let iter = Self { node_3 };
+        validate_eq!(unsafe { iter.raw } & Self::TAG_15, 0);
+        validate_eq!(unsafe { iter.raw } & Self::TAG_256, 0);
         iter
+    }
+
+    #[inline]
+    pub(super) fn from_node_15(node_15: linear::KeyIter<15>) -> Self {
+        let node_15 = NonNull::from(Box::leak(Box::new(node_15))).map_addr(|addr| {
+            validate_eq!(addr.get() & Self::TAG_15, 0);
+            validate_eq!(addr.get() & Self::TAG_256, 0);
+            unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_15) }
+        });
+        Self { node_15 }
     }
 
     #[inline]
     pub(super) fn from_node_256(iter: node256::KeyIter) -> Self {
         let iter = Self { node_256: iter };
-        validate_eq!(unsafe { iter.raw } & Self::MASK_TAG, Self::MASK_TAG);
+        validate_eq!(unsafe { iter.raw } & Self::TAG_256, Self::TAG_256);
         iter
     }
 
     fn is_node_256(&self) -> bool {
-        (unsafe { self.raw } & Self::MASK_TAG) > 0
+        (unsafe { self.raw } & Self::TAG_256) > 0
+    }
+
+    fn is_node_15(&self) -> bool {
+        (unsafe { self.raw } & Self::TAG_15) > 0
+    }
+
+    fn as_node_15(&self) -> Option<&linear::KeyIter<15>> {
+        self.as_node_15_raw()
+            .map(|node_15| unsafe { node_15.as_ref() })
+    }
+
+    fn as_node_15_mut(&mut self) -> Option<&mut linear::KeyIter<15>> {
+        self.as_node_15_raw()
+            .map(|mut node_15| unsafe { node_15.as_mut() })
+    }
+
+    fn as_node_15_raw(&self) -> Option<NonNull<linear::KeyIter<15>>> {
+        self.is_node_15().then(|| unsafe {
+            self.node_15.map_addr(|addr| {
+                validate_eq!(addr.get() & Self::TAG_15, Self::TAG_15);
+                NonZeroUsize::new_unchecked(addr.get() ^ Self::TAG_15)
+            })
+        })
     }
 }
 
@@ -148,8 +187,10 @@ impl Iterator for KeyIter {
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_node_256() {
             unsafe { &mut self.node_256 }.next().map(|key| (key, key))
+        } else if let Some(node_15) = self.as_node_15_mut() {
+            node_15.next()
         } else {
-            unsafe { &mut self.linear }.next()
+            unsafe { &mut self.node_3 }.next()
         }
     }
 
@@ -157,8 +198,10 @@ impl Iterator for KeyIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         if self.is_node_256() {
             unsafe { &self.node_256 }.size_hint()
+        } else if let Some(node_15) = self.as_node_15() {
+            node_15.size_hint()
         } else {
-            unsafe { &self.linear }.size_hint()
+            unsafe { &self.node_3 }.size_hint()
         }
     }
 }
@@ -170,8 +213,10 @@ impl DoubleEndedIterator for KeyIter {
             unsafe { &mut self.node_256 }
                 .next_back()
                 .map(|key| (key, key))
+        } else if let Some(node_15) = self.as_node_15_mut() {
+            node_15.next_back()
         } else {
-            unsafe { &mut self.linear }.next_back()
+            unsafe { &mut self.node_3 }.next_back()
         }
     }
 }
@@ -182,6 +227,14 @@ impl ExactSizeIterator for KeyIter {
         let (lower, upper) = self.size_hint();
         validate_eq!(upper, Some(lower));
         lower
+    }
+}
+
+impl Drop for KeyIter {
+    fn drop(&mut self) {
+        if let Some(node_15) = self.as_node_15_raw() {
+            drop(unsafe { Box::from_raw(node_15.as_ptr()) });
+        }
     }
 }
 

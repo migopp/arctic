@@ -97,7 +97,7 @@ impl linear::Header for ribbit::Packed<Header> {
         self,
         low: L,
         high: H,
-    ) -> linear::KeyIter {
+    ) -> node::KeyIter {
         let len = self.len().value() as usize;
         let keys = self.value.to_le_bytes();
         let mut valid = 0;
@@ -114,22 +114,22 @@ impl linear::Header for ribbit::Packed<Header> {
         });
 
         indexes.sort_unstable();
-        linear::KeyIter::new_3(linear::RawIter::new(indexes, valid))
+        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, valid))
     }
 
-    fn keys_sorted(self) -> linear::KeyIter {
+    fn keys_sorted(self) -> node::KeyIter {
         let len = self.len().value();
         let keys = self.value.to_le_bytes();
         let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len as usize].sort_unstable();
-        linear::KeyIter::new_3(linear::RawIter::new(indexes, len))
+        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, len))
     }
 
-    fn keys_unsorted(self) -> linear::KeyIter {
+    fn keys_unsorted(self) -> node::KeyIter {
         let len = self.len().value();
         let keys = self.value.to_le_bytes();
         let indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
-        linear::KeyIter::new_3(linear::RawIter::new(indexes, len))
+        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, len))
     }
 }
 

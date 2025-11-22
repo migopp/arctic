@@ -77,10 +77,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
         let len = self.len().value();
-        validate!(len <= 15);
+        validate!(len <= Self::GROW as u8);
         match self.get(key) {
             Some(index) => Ok(index),
-            _ if len == 15 || self.is_frozen() => Err(None),
+            _ if len == Self::GROW as u8 || self.is_frozen() => Err(None),
             _ => Err(Some(Self::new(
                 u120::new(self.keys().value() | ((key as u128) << (len * 8))),
                 u4::new(len + 1),
@@ -89,26 +89,28 @@ impl linear::Header for ribbit::Packed<Header> {
         }
     }
 
-    fn keys_unsorted(self) -> linear::KeyIter {
+    fn keys_unsorted(self) -> node::KeyIter {
         let keys = self.value.to_le_bytes();
         let len = self.len().value();
-        let indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
-        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
+        let indexes: [(u8, u8); Self::GROW] =
+            core::array::from_fn(|index| (keys[index], index as u8));
+        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
     }
 
-    fn keys_sorted(self) -> linear::KeyIter {
+    fn keys_sorted(self) -> node::KeyIter {
         let keys = self.value.to_le_bytes();
         let len = self.len().value();
-        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
+        let mut indexes: [(u8, u8); Self::GROW] =
+            core::array::from_fn(|index| (keys[index], index as u8));
         indexes[..len as usize].sort_unstable();
-        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
+        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
     }
 
     fn keys_range<L: crate::raw::node::Lower, H: crate::raw::node::Upper>(
         self,
         low: L,
         high: H,
-    ) -> linear::KeyIter {
+    ) -> node::KeyIter {
         // https://stackoverflow.com/a/28383095
         // https://talkchess.com/viewtopic.php?t=78804
         let (keys, len) = unsafe {
@@ -144,7 +146,7 @@ impl linear::Header for ribbit::Packed<Header> {
         let keys = keys.to_le_bytes();
         let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
         indexes.sort_unstable();
-        linear::KeyIter::new_15(linear::RawIter::new(indexes, len))
+        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
     }
 }
 
