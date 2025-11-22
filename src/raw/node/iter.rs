@@ -6,7 +6,7 @@ use ribbit::Atomic;
 
 use crate::raw::iter::Unbound;
 use crate::raw::node::linear;
-use crate::raw::node::node256;
+use crate::raw::node::node_256;
 use crate::raw::Edge;
 
 pub(crate) struct NodeIter<'g, L, U, M: ribbit::Pack> {
@@ -110,7 +110,7 @@ impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
 pub(crate) union KeyIter {
     node_3: linear::KeyIter<3>,
     node_15: NonNull<linear::KeyIter<15>>,
-    node_256: node256::KeyIter,
+    node_256: node_256::KeyIter,
     raw: usize,
 }
 
@@ -146,7 +146,7 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn from_node_256(iter: node256::KeyIter) -> Self {
+    pub(super) fn from_node_256(iter: node_256::KeyIter) -> Self {
         let iter = Self { node_256: iter };
         validate_eq!(unsafe { iter.raw } & Self::TAG_256, Self::TAG_256);
         iter

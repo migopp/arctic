@@ -2,20 +2,20 @@ use core::fmt::Debug;
 
 mod iter;
 mod linear;
-mod node15;
-mod node256;
-mod node3;
-mod node60;
+mod node_15;
+mod node_256;
+mod node_3;
+mod node_60;
 
 pub(crate) use iter::KeyIter;
 pub(crate) use iter::Lower;
 pub(crate) use iter::NodeIter;
 pub(crate) use iter::Upper;
 use linear::Linear;
-pub(crate) use node15::Node15;
-pub(crate) use node256::Node256;
-pub(crate) use node3::Node3;
-pub(crate) use node60::Node60;
+pub(crate) use node_15::Node15;
+pub(crate) use node_256::Node256;
+pub(crate) use node_3::Node3;
+pub(crate) use node_60::Node60;
 use ribbit::Atomic;
 
 use crate::raw::edge;

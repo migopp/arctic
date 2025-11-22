@@ -177,6 +177,8 @@ fn get_naive(array: u32, key: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use crate::raw::node::node_3;
+
     #[test]
     fn zero() {
         test_get(0x00_00_00_00, 0, 0)
@@ -198,7 +200,7 @@ mod tests {
     }
 
     fn test_get(array: u32, key: u8, expected: u8) {
-        assert_eq!(super::get_naive(array, key), expected);
-        assert_eq!(super::get_swar(array, key), expected);
+        assert_eq!(node_3::get_naive(array, key), expected);
+        assert_eq!(node_3::get_swar(array, key), expected);
     }
 }

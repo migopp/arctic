@@ -188,6 +188,8 @@ fn get_naive(array: u128, key: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use crate::raw::node::node_15;
+
     #[test]
     fn zero() {
         test_get(0x00_00_00_00, 0, 0)
@@ -219,9 +221,9 @@ mod tests {
     }
 
     fn test_get(array: u128, key: u8, expected: u8) {
-        assert_eq!(super::get_naive(array, key), expected);
+        assert_eq!(node_15::get_naive(array, key), expected);
 
         #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        assert_eq!(super::get_simd(array, key), expected);
+        assert_eq!(node_15::get_simd(array, key), expected);
     }
 }
