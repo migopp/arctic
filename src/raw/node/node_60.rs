@@ -9,6 +9,7 @@ use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
+use crate::raw::node::linear;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
 use crate::raw::Edge;
@@ -45,6 +46,14 @@ where
     type Grow = Node256<M>;
     type Shrink = Node15<M>;
 
+    fn keys<L: node::iter::Lower, U: node::iter::Upper>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> node::KeyIter {
+        todo!()
+    }
+
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
     }
@@ -76,7 +85,7 @@ where
         self.header.freeze();
         self.edges.iter().for_each(Edge::freeze);
         (
-            self.header.keys(),
+            self.header.keys_unsorted().map(|(key, _)| key),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
@@ -130,11 +139,6 @@ impl Header {
             };
 
             let len = meta.len().value();
-            validate!(len <= 60);
-
-            // Must help before initiating freeze
-            self.help(len, meta.last());
-
             if len == 60 || meta.frozen() {
                 return None;
             }
@@ -157,12 +161,12 @@ impl Header {
     }
 
     fn insert(&mut self, key: u8) -> Option<u8> {
-        validate!(self.keys().all(|key_| key != key_));
-
         let old = self.meta.get_packed();
-        validate!(!old.frozen());
         let len = old.len().value();
+
+        validate!(!old.frozen());
         validate!(len <= 60);
+
         if len == 60 {
             return None;
         }
@@ -186,23 +190,6 @@ impl Header {
         Some(len)
     }
 
-    fn help(&self, len: u8, last: u8) {
-        let i = (len - 14 - 1) / 16;
-        let j = ((len - 14 - 1) % 16) << 3;
-
-        let keys = &self.data[i as usize];
-        let old = keys.load(Ordering::Relaxed);
-
-        if (old >> j) as u8 == last {
-            return;
-        }
-
-        let new = old | ((last as u128) << j);
-
-        // Safe to ignore failure: someone must have helped
-        let _ = keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed);
-    }
-
     #[inline]
     fn get_impl(&self, key: u8) -> Result<u8, ribbit::Packed<Meta>> {
         use core::arch::x86_64::_mm_cmpeq_epi8;
@@ -214,6 +201,9 @@ impl Header {
             let key = _mm_set1_epi8(key as i8);
 
             let meta = self.meta.load_packed(Ordering::Relaxed);
+            let len = meta.len().value();
+            self.help(len, meta.last());
+
             let data_0 = self.data[0].load(Ordering::Relaxed);
             let data_1 = self.data[1].load(Ordering::Relaxed);
             let data_2 = self.data[2].load(Ordering::Relaxed);
@@ -255,11 +245,57 @@ impl Header {
         }
     }
 
-    fn keys(&self) -> impl Iterator<Item = u8> + '_ {
+    fn keys_unsorted(&self) -> node::KeyIter {
+        self.keys_inner().0
+    }
+
+    fn keys_range<L: node::iter::Lower, U: node::iter::Upper>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> node::KeyIter {
+        todo!()
+        // // https://stackoverflow.com/a/28383095
+        // // https://talkchess.com/viewtopic.php?t=78804
+        // let (keys, len) = unsafe {
+        //     use core::arch::x86_64::_mm_and_si128;
+        //     use core::arch::x86_64::_mm_cmpeq_epi8;
+        //     use core::arch::x86_64::_mm_max_epu8;
+        //     use core::arch::x86_64::_mm_min_epu8;
+        //     use core::arch::x86_64::_mm_set1_epi8;
+        //
+        //     let len = self.len().value() as usize;
+        //
+        //     let mask_len = core::mem::transmute::<u128, core::arch::x86_64::__m128i>(
+        //         (1u128 << (len << 3)) - 1,
+        //     );
+        //
+        //     let min = lower.get();
+        //     let max = upper.get();
+        //
+        //     let min = _mm_set1_epi8(min as i8);
+        //     let max = _mm_set1_epi8(max as i8);
+        //     let mask_range = _mm_cmpeq_epi8(_mm_min_epu8(_mm_max_epu8(min, keys), max), keys);
+        //
+        //     let mask_valid = core::mem::transmute::<core::arch::x86_64::__m128i, u128>(
+        //         _mm_and_si128(mask_len, mask_range),
+        //     );
+        //     let len = (mask_valid.count_ones() >> 3) as u8;
+        //
+        //     (self.value & mask_valid | !mask_valid, len)
+        // };
+    }
+
+    #[inline]
+    fn keys_inner(&self) -> (node::KeyIter, ribbit::Packed<Meta>) {
         let meta = self.meta.load_packed(Ordering::Relaxed);
-        let len = meta.len().value() as usize;
+        let len = meta.len().value();
+        self.help(len, meta.last());
+
+        let mut entries = [(0u8, 0u8); 60];
+
         meta.value
-            .to_ne_bytes()
+            .to_le_bytes()
             .into_iter()
             .skip(2)
             .chain(
@@ -267,25 +303,54 @@ impl Header {
                     .iter()
                     .flat_map(|keys| keys.load(Ordering::Relaxed).to_ne_bytes()),
             )
-            .take(len)
+            .zip(&mut entries)
+            .take(len as usize)
+            .enumerate()
+            .for_each(|(index_old, (key_old, (key_new, index_new)))| {
+                *key_new = key_old;
+                *index_new = index_old as u8;
+            });
+
+        (
+            node::KeyIter::from_node_60(linear::KeyIter::new(entries, len)),
+            meta,
+        )
+    }
+
+    fn help(&self, len: u8, last: u8) {
+        validate!((15..=60).contains(&len));
+
+        let i = (len - 14 - 1) / 16;
+        let j = ((len - 14 - 1) % 16) << 3;
+
+        let keys = &self.data[i as usize];
+        let old = keys.load(Ordering::Relaxed);
+
+        if (old >> j) as u8 == last {
+            return;
+        }
+
+        let new = old | ((last as u128) << j);
+
+        // Safe to ignore failure: someone must have helped
+        let _ = keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed);
     }
 }
 
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let meta = self.meta.load_packed(Ordering::Relaxed);
-        let len = meta.len();
-
+        let (iter, meta) = self.keys_inner();
+        let len = meta.len().value();
         let mut keys = [0u8; 60];
         keys.iter_mut()
-            .zip(self.keys())
-            .for_each(|(out, r#in)| *out = r#in);
+            .zip(iter)
+            .for_each(|(out, (key, _))| *out = key);
 
         f.debug_struct("Header")
             .field("len", &len)
             .field("frozen", &meta.frozen())
             .field("last", &meta.last())
-            .field("keys", &&keys[..len.value() as usize])
+            .field("keys", &&keys[..len as usize])
             .finish()
     }
 }

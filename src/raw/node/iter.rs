@@ -113,6 +113,7 @@ impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
 pub(crate) union KeyIter {
     node_3: linear::KeyIter<3>,
     node_15: NonNull<linear::KeyIter<15>>,
+    node_60: NonNull<linear::KeyIter<60>>,
     node_256: node_256::KeyIter,
     raw: u64,
 }
@@ -123,6 +124,7 @@ impl KeyIter {
     };
 
     const TAG_15: usize = (node::Kind::Node15 as usize) << 62;
+    const TAG_60: usize = (node::Kind::Node60 as usize) << 62;
 
     fn kind(&self) -> ribbit::Packed<node::Kind> {
         unsafe {
@@ -149,10 +151,33 @@ impl KeyIter {
     }
 
     #[inline]
+    pub(super) fn from_node_60(node_60: linear::KeyIter<60>) -> Self {
+        let iter = Self {
+            node_60: NonNull::from(Box::leak(Box::new(node_60)))
+                .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_60) }),
+        };
+        validate_eq!(iter.kind(), node::Kind::NODE_60);
+        iter
+    }
+
+    #[inline]
     pub(super) fn from_node_256(node_256: node_256::KeyIter) -> Self {
         let iter = Self { node_256 };
         validate_eq!(iter.kind(), node::Kind::NODE_256);
         iter
+    }
+
+    pub(super) fn sort_unstable(&mut self) {
+        let kind = self.kind();
+        if kind == node::Kind::NODE_3 {
+            unsafe { &mut self.node_3 }.sort_unstable();
+        } else if kind == node::Kind::NODE_15 {
+            unsafe { self.as_node_15_unchecked().as_mut() }.sort_unstable();
+        } else if kind == node::Kind::NODE_60 {
+            unsafe { self.as_node_60_unchecked().as_mut() }.sort_unstable();
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256)
+        }
     }
 
     unsafe fn as_node_15_unchecked(&self) -> NonNull<linear::KeyIter<15>> {
@@ -161,6 +186,16 @@ impl KeyIter {
             self.node_15.map_addr(|addr| {
                 validate_eq!(addr.get() & Self::TAG_15, Self::TAG_15);
                 NonZeroUsize::new_unchecked(addr.get() ^ Self::TAG_15)
+            })
+        }
+    }
+
+    unsafe fn as_node_60_unchecked(&self) -> NonNull<linear::KeyIter<60>> {
+        validate_eq!(self.kind(), node::Kind::NODE_60);
+        unsafe {
+            self.node_60.map_addr(|addr| {
+                validate_eq!(addr.get() & Self::TAG_60, Self::TAG_60);
+                NonZeroUsize::new_unchecked(addr.get() ^ Self::TAG_60)
             })
         }
     }
@@ -180,7 +215,7 @@ impl Iterator for KeyIter {
             unsafe { self.as_node_15_unchecked().as_mut() }.next()
         } else {
             validate_eq!(kind, node::Kind::NODE_60);
-            todo!()
+            unsafe { self.as_node_60_unchecked().as_mut() }.next()
         }
     }
 
@@ -195,7 +230,7 @@ impl Iterator for KeyIter {
             unsafe { self.as_node_15_unchecked().as_ref() }.size_hint()
         } else {
             validate_eq!(kind, node::Kind::NODE_60);
-            todo!()
+            unsafe { self.as_node_60_unchecked().as_ref() }.size_hint()
         }
     }
 }
@@ -214,7 +249,7 @@ impl DoubleEndedIterator for KeyIter {
             unsafe { self.as_node_15_unchecked().as_mut() }.next_back()
         } else {
             validate_eq!(kind, node::Kind::NODE_60);
-            todo!()
+            unsafe { self.as_node_60_unchecked().as_mut() }.next_back()
         }
     }
 }
@@ -231,8 +266,11 @@ impl ExactSizeIterator for KeyIter {
 impl Drop for KeyIter {
     fn drop(&mut self) {
         let kind = self.kind();
+
         if kind == node::Kind::NODE_15 {
             drop(unsafe { Box::from_raw(self.as_node_15_unchecked().as_ptr()) });
+        } else if kind == node::Kind::NODE_60 {
+            drop(unsafe { Box::from_raw(self.as_node_60_unchecked().as_ptr()) });
         }
     }
 }

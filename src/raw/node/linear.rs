@@ -3,6 +3,7 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
+use crate::raw;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
@@ -37,6 +38,17 @@ where
 
     type Grow = <H::Packed as Header>::Grow<M>;
     type Shrink = <H::Packed as Header>::Shrink<M>;
+
+    #[inline]
+    fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> node::KeyIter {
+        self.header
+            .load_packed(Ordering::Relaxed)
+            .keys(lower, upper)
+    }
 
     #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
@@ -103,7 +115,12 @@ where
     ) {
         let header = Linear::freeze(self);
         (
-            header.keys_unsorted().map(|(key, _)| key),
+            header
+                .keys::<raw::iter::Unbound, raw::iter::Unbound>(
+                    raw::iter::Unbound,
+                    raw::iter::Unbound,
+                )
+                .map(|(key, _)| key),
             self.edges
                 .iter()
                 .map(|edge| edge.load_packed(Ordering::Relaxed)),
@@ -133,28 +150,6 @@ where
 
         self.edges.iter().take(header.len()).for_each(Edge::freeze);
         header
-    }
-
-    // FIXME
-    #[inline]
-    pub(crate) fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
-        &self,
-        lower: L,
-        upper: U,
-    ) -> node::KeyIter {
-        self.header
-            .load_packed(Ordering::Relaxed)
-            .keys_range(lower, upper)
-    }
-
-    #[inline]
-    pub(crate) fn keys_sorted(&self) -> node::KeyIter {
-        self.header.load_packed(Ordering::Relaxed).keys_sorted()
-    }
-
-    #[inline]
-    pub(crate) fn keys_unsorted(&self) -> node::KeyIter {
-        self.header.load_packed(Ordering::Relaxed).keys_unsorted()
     }
 }
 
@@ -203,20 +198,16 @@ pub(crate) trait Header: ribbit::Unpack {
 
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>>;
 
-    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
         lower: L,
         upper: U,
     ) -> node::KeyIter;
-
-    fn keys_sorted(self) -> node::KeyIter;
-
-    fn keys_unsorted(self) -> node::KeyIter;
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub(crate) struct KeyIter<const N: usize> {
+pub(super) struct KeyIter<const N: usize> {
     head: u8,
     inner: [(u8, u8); N],
     tail: u8,
@@ -234,6 +225,12 @@ impl<const N: usize> KeyIter<N> {
             head: 0,
             tail: len,
         }
+    }
+
+    #[inline]
+    pub(super) fn sort_unstable(&mut self) {
+        validate_eq!(self.head, 0);
+        self.inner.sort_unstable();
     }
 }
 

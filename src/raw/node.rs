@@ -32,6 +32,8 @@ where
     type Grow: Node<M>;
     type Shrink: Node<M>;
 
+    fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
+
     fn edges(&self) -> &[Atomic<Edge<M>>];
 
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
@@ -159,36 +161,11 @@ where
         lower: L,
         upper: U,
     ) -> NodeIter<'g, L, U, M> {
-        let (keys, edges) = match self {
-            Self::Node3(node) => {
-                let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
-                    node.keys_sorted()
-                } else if O::SORTED {
-                    node.keys_range(lower, upper)
-                } else {
-                    node.keys_unsorted()
-                };
-
-                (keys, node.edges())
-            }
-            Self::Node15(node) => {
-                let keys = if O::SORTED && L::UNBOUND && U::UNBOUND {
-                    node.keys_sorted()
-                } else if O::SORTED {
-                    node.keys_range(lower, upper)
-                } else {
-                    node.keys_unsorted()
-                };
-
-                (keys, node.edges())
-            }
-            Self::Node60(_) => todo!(),
-            Self::Node256(node) => (
-                KeyIter::from_node_256(node.keys(lower, upper)),
-                node.edges(),
-            ),
-        };
-
+        let mut keys = self.keys(lower, upper);
+        if O::SORTED {
+            keys.sort_unstable();
+        }
+        let edges = self.edges();
         unsafe { NodeIter::new(lower, upper, keys, edges) }
     }
 }
@@ -197,6 +174,26 @@ impl<'g, M> Ref<'g, M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
+    #[inline]
+    fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter {
+        match self {
+            Self::Node3(node) => node.keys(lower, upper),
+            Self::Node15(node) => node.keys(lower, upper),
+            Self::Node60(node) => node.keys(lower, upper),
+            Self::Node256(node) => node.keys(lower, upper),
+        }
+    }
+
+    #[inline]
+    fn edges(&self) -> &'g [Atomic<Edge<M>>] {
+        match self {
+            Self::Node3(node) => node.edges(),
+            Self::Node15(node) => node.edges(),
+            Self::Node60(node) => node.edges(),
+            Self::Node256(node) => node.edges(),
+        }
+    }
+
     #[inline]
     pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         match self {

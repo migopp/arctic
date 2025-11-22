@@ -79,19 +79,27 @@ impl linear::Header for ribbit::Packed<Header> {
         }
     }
 
-    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        let len = self.len().value() as usize;
+        let len = self.len().value();
         let keys = self.value.to_le_bytes();
+
+        if L::UNBOUND && U::UNBOUND {
+            let mut entries: [(u8, u8); 3] =
+                core::array::from_fn(|index| (keys[index], index as u8));
+            entries[len as usize..].fill((0xFF, 0xFF));
+            return node::KeyIter::from_node_3(linear::KeyIter::new(entries, len));
+        }
+
         let mut valid = 0;
         let min = lower.get();
         let max = upper.get();
 
-        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| {
-            if index < len && (min..=max).contains(&keys[index]) {
+        let mut entries: [(u8, u8); 3] = core::array::from_fn(|index| {
+            if index < len as usize && (min..=max).contains(&keys[index]) {
                 valid += 1;
                 (keys[index], index as u8)
             } else {
@@ -99,23 +107,8 @@ impl linear::Header for ribbit::Packed<Header> {
             }
         });
 
-        indexes.sort_unstable();
-        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, valid))
-    }
-
-    fn keys_sorted(self) -> node::KeyIter {
-        let len = self.len().value();
-        let keys = self.value.to_le_bytes();
-        let mut indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
-        indexes[..len as usize].sort_unstable();
-        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, len))
-    }
-
-    fn keys_unsorted(self) -> node::KeyIter {
-        let len = self.len().value();
-        let keys = self.value.to_le_bytes();
-        let indexes: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
-        node::KeyIter::from_node_3(linear::KeyIter::new(indexes, len))
+        entries.sort_unstable();
+        node::KeyIter::from_node_3(linear::KeyIter::new(entries, valid))
     }
 }
 

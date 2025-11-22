@@ -35,6 +35,15 @@ where
     type Shrink = Node60<M>;
 
     #[inline]
+    fn keys<L: node::iter::Lower, U: node::iter::Upper>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> node::KeyIter {
+        node::KeyIter::from_node_256(KeyIter::new(lower, upper))
+    }
+
+    #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.0
     }
@@ -69,17 +78,6 @@ where
             .iter()
             .map(|edge| edge.load_packed(Ordering::Relaxed));
         (keys, edges)
-    }
-}
-
-impl<M: ribbit::Pack> Node256<M> {
-    #[inline]
-    pub(crate) fn keys<L: node::iter::Lower, U: node::iter::Upper>(
-        &self,
-        lower: L,
-        upper: U,
-    ) -> KeyIter {
-        KeyIter::new(lower, upper)
     }
 }
 

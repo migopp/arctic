@@ -75,28 +75,20 @@ impl linear::Header for ribbit::Packed<Header> {
         }
     }
 
-    fn keys_unsorted(self) -> node::KeyIter {
-        let keys = self.value.to_le_bytes();
-        let len = self.len().value();
-        let indexes: [(u8, u8); Self::LEN] =
-            core::array::from_fn(|index| (keys[index], index as u8));
-        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
-    }
-
-    fn keys_sorted(self) -> node::KeyIter {
-        let keys = self.value.to_le_bytes();
-        let len = self.len().value();
-        let mut indexes: [(u8, u8); Self::LEN] =
-            core::array::from_fn(|index| (keys[index], index as u8));
-        indexes[..len as usize].sort_unstable();
-        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
-    }
-
-    fn keys_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         self,
         lower: L,
         upper: U,
     ) -> node::KeyIter {
+        if L::UNBOUND && U::UNBOUND {
+            let keys = self.value.to_le_bytes();
+            let len = self.len().value();
+            let mut entries: [(u8, u8); Self::LEN] =
+                core::array::from_fn(|index| (keys[index], index as u8));
+            entries[len as usize..].fill((0xFF, 0xFF));
+            return node::KeyIter::from_node_15(linear::KeyIter::new(entries, len));
+        }
+
         // https://stackoverflow.com/a/28383095
         // https://talkchess.com/viewtopic.php?t=78804
         let (keys, len) = unsafe {
@@ -130,9 +122,9 @@ impl linear::Header for ribbit::Packed<Header> {
 
         // TODO: SIMD sorting network?
         let keys = keys.to_le_bytes();
-        let mut indexes: [(u8, u8); 15] = core::array::from_fn(|index| (keys[index], index as u8));
-        indexes.sort_unstable();
-        node::KeyIter::from_node_15(linear::KeyIter::new(indexes, len))
+        let entries: [(u8, u8); Self::LEN] =
+            core::array::from_fn(|index| (keys[index], index as u8));
+        node::KeyIter::from_node_15(linear::KeyIter::new(entries, len))
     }
 }
 
