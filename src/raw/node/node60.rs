@@ -97,9 +97,9 @@ impl Header {
 
     fn get_or_insert(&self, key: u8) -> Option<u8> {
         loop {
-            let (meta, data) = match self.get_impl(key) {
+            let meta = match self.get_impl(key) {
                 Ok(index) => return Some(index),
-                Err((meta, data)) => (meta, data),
+                Err(meta) => meta,
             };
 
             let len = meta.len().value();
@@ -177,7 +177,7 @@ impl Header {
     }
 
     #[inline]
-    fn get_impl(&self, key: u8) -> Result<u8, (ribbit::Packed<Meta>, [u128; 3])> {
+    fn get_impl(&self, key: u8) -> Result<u8, ribbit::Packed<Meta>> {
         use core::arch::x86_64::_mm_cmpeq_epi8;
         use core::arch::x86_64::_mm_movemask_epi8;
         use core::arch::x86_64::_mm_set1_epi8;
@@ -223,7 +223,7 @@ impl Header {
             if index < len {
                 Ok(index)
             } else {
-                Err((meta, [data_0, data_1, data_2]))
+                Err(meta)
             }
         }
     }
