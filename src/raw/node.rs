@@ -5,6 +5,7 @@ mod linear;
 mod node15;
 mod node256;
 mod node3;
+mod node60;
 
 pub(crate) use iter::KeyIter;
 pub(crate) use iter::Lower;
@@ -14,6 +15,7 @@ use linear::Linear;
 pub(crate) use node15::Node15;
 pub(crate) use node256::Node256;
 pub(crate) use node3::Node3;
+pub(crate) use node60::Node60;
 use ribbit::Atomic;
 
 use crate::raw::edge;
@@ -75,6 +77,7 @@ impl Smo {
 pub(crate) enum Ref<'g, M: ribbit::Pack> {
     Node3(&'g Node3<M>),
     Node15(&'g Node15<M>),
+    Node60(&'g Node60<M>),
     Node256(&'g Node256<M>),
 }
 
@@ -111,6 +114,7 @@ where
 
                 (keys, node.edges())
             }
+            Self::Node60(_) => todo!(),
             Self::Node256(node) => (
                 KeyIter::from_node_256(node.keys(lower, upper)),
                 node.edges(),
@@ -130,6 +134,7 @@ where
         match self {
             Self::Node3(node) => node.get(key),
             Self::Node15(node) => node.get(key),
+            Self::Node60(node) => node.get(key),
             Self::Node256(node) => node.get(key),
         }
     }
@@ -139,6 +144,7 @@ where
         match self {
             Ref::Node3(node) => node.get_or_insert(key),
             Ref::Node15(node) => node.get_or_insert(key),
+            Ref::Node60(node) => node.get_or_insert(key),
             Ref::Node256(node) => node.get_or_insert(key),
         }
     }
@@ -148,6 +154,7 @@ where
         match self {
             Self::Node3(node) => node.replace(parent),
             Self::Node15(node) => node.replace(parent),
+            Self::Node60(node) => node.replace(parent),
             Self::Node256(node) => node.replace(parent),
         }
     }
@@ -161,6 +168,7 @@ where
         match self {
             Self::Node3(node) => node.fmt(fmt),
             Self::Node15(node) => node.fmt(fmt),
+            Self::Node60(node) => node.fmt(fmt),
             Self::Node256(node) => node.fmt(fmt),
         }
     }
@@ -171,7 +179,8 @@ where
 pub(crate) enum Kind {
     Node3 = 0,
     Node15 = 1,
-    Node256 = 2,
+    Node60 = 2,
+    Node256 = 3,
 }
 
 impl Default for Kind {
@@ -183,5 +192,6 @@ impl Default for Kind {
 impl Kind {
     pub(crate) const NODE_3: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node3();
     pub(crate) const NODE_15: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node15();
+    pub(crate) const NODE_60: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node60();
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
 }

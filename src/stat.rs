@@ -24,6 +24,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut compression = Histogram::default();
     let mut node_3 = Histogram::default();
     let mut node_15 = Histogram::default();
+    let mut node_60 = Histogram::default();
     let mut node_256 = Histogram::default();
 
     map.as_sequential().postorder().for_each(|edge, depth_| {
@@ -45,6 +46,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                 let histogram = match node {
                     node::Ref::Node3(_) => &mut node_3,
                     node::Ref::Node15(_) => &mut node_15,
+                    node::Ref::Node60(_) => &mut node_60,
                     node::Ref::Node256(_) => &mut node_256,
                 };
 
@@ -63,6 +65,7 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
         compression,
         node_3,
         node_15,
+        node_60,
         node_256,
     }
 }
@@ -108,6 +111,7 @@ pub struct Process {
     compression: Histogram,
     node_3: Histogram,
     node_15: Histogram,
+    node_60: Histogram,
     node_256: Histogram,
 }
 

@@ -4,8 +4,8 @@ use ribbit::u4;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::linear;
-use crate::raw::node::Node256;
 use crate::raw::node::Node3;
+use crate::raw::node::Node60;
 
 pub(crate) type Node15<C> = super::Linear<15, Header, C>;
 
@@ -36,7 +36,7 @@ impl linear::Header for ribbit::Packed<Header> {
     const GROW: usize = 15;
 
     type Grow<M>
-        = Node256<M>
+        = Node60<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
     type Shrink<M>
@@ -63,9 +63,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
         let len = self.len().value();
+        validate!(len <= 15);
         match self.get(key) {
-            Some(index) if index < len => Ok(index),
-            _ if len >= 15 || self.is_frozen() => Err(None),
+            Some(index) => Ok(index),
+            _ if len == 15 || self.is_frozen() => Err(None),
             _ => Err(Some(Self::new(
                 u120::new(self.keys().value() | ((key as u128) << (len * 8))),
                 u4::new(len + 1),
