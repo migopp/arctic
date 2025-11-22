@@ -317,7 +317,7 @@ dependencies = [
 [[package]]
 name = "ribbit"
 version = "0.1.0"
-source = "git+https://github.com/nwtnni/ribbit.git#2f6b83fb00d5db62f81a5179c75a4f63f3935d0e"
+source = "git+https://github.com/nwtnni/ribbit.git#3f355125ab5e7c2125bc7ea6cfe1dcbe50e10247"
 dependencies = [
  "arbitrary-int",
  "ribbit-derive",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "ribbit-derive"
 version = "0.1.0"
-source = "git+https://github.com/nwtnni/ribbit.git#2f6b83fb00d5db62f81a5179c75a4f63f3935d0e"
+source = "git+https://github.com/nwtnni/ribbit.git#3f355125ab5e7c2125bc7ea6cfe1dcbe50e10247"
 dependencies = [
  "darling",
  "heck",

@@ -109,13 +109,13 @@ pub(crate) struct KeyIter {
     tail: u16,
 
     // FIXME: handle big-endian
-    _discriminant: Discriminant,
+    _tag: Tag,
 }
 
 #[repr(u32)]
 #[derive(Copy, Clone)]
-enum Discriminant {
-    Node256 = 1u32.rotate_right(1),
+enum Tag {
+    Node256 = (node::Kind::Node256 as u32) << 30,
 }
 
 impl KeyIter {
@@ -124,7 +124,7 @@ impl KeyIter {
         Self {
             head: low.get() as u16,
             tail: high.get() as u16 + 1,
-            _discriminant: Discriminant::Node256,
+            _tag: Tag::Node256,
         }
     }
 }
