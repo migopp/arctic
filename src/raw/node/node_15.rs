@@ -80,21 +80,19 @@ impl linear::Header for ribbit::Packed<Header> {
         lower: L,
         upper: U,
     ) -> node::KeyIter {
+        let len = self.len().value();
+        let mask_len = (1u128 << (len << 3)) - 1;
+
         if L::UNBOUND && U::UNBOUND {
-            let keys = self.value.to_le_bytes();
-            let len = self.len().value();
-            let mut entries: [(u8, u8); Self::LEN] =
+            let keys = (self.value | !mask_len).to_le_bytes();
+            let entries: [(u8, u8); Self::LEN] =
                 core::array::from_fn(|index| (keys[index], index as u8));
-            entries[len as usize..].fill((0xFF, 0xFF));
             return node::KeyIter::from_node_15(linear::KeyIter::new(entries, len));
         }
 
-        let len = self.len().value() as usize;
-        let mask_len = (1u128 << (len << 3)) - 1;
         let mask_range = node::simd::mask_range(self.value, lower.get(), upper.get());
         let mask_valid = mask_len & mask_range;
         let len = (mask_valid.count_ones() >> 3) as u8;
-
         let keys = self.value & mask_valid | !mask_valid;
 
         // TODO: SIMD sorting network?
