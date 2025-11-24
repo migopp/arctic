@@ -1,3 +1,5 @@
+use core::ops::ControlFlow;
+
 use ribbit::Atomic;
 
 use crate::concurrent::cursor;
@@ -108,7 +110,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>) -> ControlFlow<()>>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 V::guard_borrow(self.guard, value)
@@ -117,7 +119,7 @@ where
     }
 
     #[inline]
-    pub fn for_each_raw<F: FnMut(&K::Write, u64)>(self, apply: F) {
+    pub fn for_each_raw<F: FnMut(&K::Write, u64) -> ControlFlow<()>>(self, apply: F) {
         self.iter.for_each(apply)
     }
 }
@@ -164,7 +166,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'l>)>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(V::Borrow<'l>) -> ControlFlow<()>>(self, mut apply: F) {
         self.iter
             .for_each(|_, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
     }

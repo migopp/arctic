@@ -4,6 +4,7 @@ mod iter;
 mod key;
 mod value;
 
+use core::ops::ControlFlow;
 use core::ops::RangeFrom;
 use core::ops::RangeFull;
 use core::ops::RangeInclusive;
@@ -692,9 +693,10 @@ where
         R: crate::raw::iter::Range<K::Read<'k>>,
         O: Order,
     {
-        guard
-            .entries::<O>()
-            .for_each_raw(|key, value| buffer.push((key.clone(), value)));
+        guard.entries::<O>().for_each_raw(|key, value| {
+            buffer.push((key.clone(), value));
+            ControlFlow::Continue(())
+        });
 
         for retry in 0..=limit {
             let mut dirty = false;
@@ -707,7 +709,7 @@ where
                 let old = match buffer.get_mut(index) {
                     // Fast path: no change
                     Some((old_key, old_value)) if old_key == new_key && *old_value == new_value => {
-                        return;
+                        return ControlFlow::Continue(());
                     }
                     old => old,
                 };
@@ -732,6 +734,8 @@ where
                         buffer.insert(index, (new_key.clone(), new_value));
                     }
                 };
+
+                ControlFlow::Continue(())
             });
 
             if len == buffer.len() && !dirty {

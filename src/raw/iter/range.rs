@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
@@ -91,7 +92,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, u64)>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut(&W, u64) -> ControlFlow<()>>(self, mut apply: F) {
         match self {
             RangeIter::Root { key, mut next } => {
                 crate::cold();
@@ -149,16 +150,19 @@ where
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
-        self.walk::<true, _>(|_, _| ())
+        self.walk::<true, _>(|_, _| ControlFlow::Continue(()))
     }
 
     #[inline]
-    fn for_each<F: FnMut(&W, u64)>(&mut self, apply: F) {
+    fn for_each<F: FnMut(&W, u64) -> ControlFlow<()>>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&W, u64)>(&mut self, mut apply: F) -> Option<(&W, u64)> {
+    fn walk<const YIELD: bool, F: FnMut(&W, u64) -> ControlFlow<()>>(
+        &mut self,
+        mut apply: F,
+    ) -> Option<(&W, u64)> {
         'vertical: loop {
             let (bits, iter) = self.stack.last_mut()?;
             let bits = *bits;
@@ -186,14 +190,14 @@ where
 
                 if !check_lower && !check_upper {
                     match child {
-                        edge::Child::Value(value) => {
-                            if YIELD {
-                                return Some((&self.key, value));
-                            } else {
-                                apply(&self.key, value);
-                                continue 'horizontal;
+                        edge::Child::Value(value) if YIELD => return Some((&self.key, value)),
+                        edge::Child::Value(value) => match apply(&self.key, value) {
+                            ControlFlow::Continue(()) => continue 'horizontal,
+                            ControlFlow::Break(()) => {
+                                self.stack.clear();
+                                return None;
                             }
-                        }
+                        },
                         edge::Child::Node(node) => {
                             let node = unsafe { node.into_ref_unchecked() };
                             let lower = Default::default();
@@ -236,10 +240,13 @@ where
                     edge::Child::Value(value) if YIELD => {
                         return Some((&self.key, value));
                     }
-                    edge::Child::Value(value) => {
-                        apply(&self.key, value);
-                        continue 'horizontal;
-                    }
+                    edge::Child::Value(value) => match apply(&self.key, value) {
+                        ControlFlow::Continue(()) => continue 'horizontal,
+                        ControlFlow::Break(()) => {
+                            self.stack.clear();
+                            return None;
+                        }
+                    },
                     edge::Child::Node(node) => {
                         let node = unsafe { node.into_ref_unchecked() };
                         self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
