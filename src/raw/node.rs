@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 
 mod iter;
 mod linear;
@@ -21,6 +22,7 @@ use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
+use crate::raw::iter::Unbound;
 use crate::raw::Edge;
 
 pub(crate) trait Node<M>: Default
@@ -35,6 +37,18 @@ where
 
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
+    fn iter<O: crate::iter::Order, L: iter::Lower, U: iter::Upper>(
+        &self,
+        lower: L,
+        upper: U,
+    ) -> NodeIter<L, U, M> {
+        let mut keys = self.keys(lower, upper);
+        if O::SORTED {
+            keys.sort_unstable();
+        }
+        unsafe { NodeIter::new(lower, upper, keys, self.edges()) }
+    }
+
     fn edges(&self) -> &[Atomic<Edge<M>>];
 
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
@@ -43,12 +57,7 @@ where
 
     fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
 
-    fn freeze(
-        &self,
-    ) -> (
-        impl Iterator<Item = u8>,
-        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
-    );
+    fn freeze(&self);
 
     fn replace<const LEN_: usize>(
         &self,
@@ -66,10 +75,12 @@ where
 
         let mut keys = [0u8; LEN_];
         let mut edges = [Edge::DEFAULT; LEN_];
-        let (keys_frozen, edges_frozen) = self.freeze();
 
-        let len = keys_frozen
-            .zip(edges_frozen)
+        self.freeze();
+
+        let len = self
+            .iter::<crate::iter::Unsorted, _, _>(Unbound, Unbound)
+            .map(|(key, edge)| (key, edge.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {
                 validate!(
@@ -162,12 +173,12 @@ where
         lower: L,
         upper: U,
     ) -> NodeIter<'g, L, U, M> {
-        let mut keys = self.keys(lower, upper);
-        if O::SORTED {
-            keys.sort_unstable();
+        match self {
+            Self::Node3(node) => node.iter::<O, _, _>(lower, upper),
+            Self::Node15(node) => node.iter::<O, _, _>(lower, upper),
+            Self::Node47(node) => node.iter::<O, _, _>(lower, upper),
+            Self::Node256(node) => node.iter::<O, _, _>(lower, upper),
         }
-        let edges = self.edges();
-        unsafe { NodeIter::new(lower, upper, keys, edges) }
     }
 }
 
@@ -175,26 +186,6 @@ impl<'g, M> Ref<'g, M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    #[inline]
-    fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter {
-        match self {
-            Self::Node3(node) => node.keys(lower, upper),
-            Self::Node15(node) => node.keys(lower, upper),
-            Self::Node47(node) => node.keys(lower, upper),
-            Self::Node256(node) => node.keys(lower, upper),
-        }
-    }
-
-    #[inline]
-    fn edges(&self) -> &'g [Atomic<Edge<M>>] {
-        match self {
-            Self::Node3(node) => node.edges(),
-            Self::Node15(node) => node.edges(),
-            Self::Node47(node) => node.edges(),
-            Self::Node256(node) => node.edges(),
-        }
-    }
-
     #[inline]
     pub(crate) fn get(&self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         match self {

@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
@@ -65,19 +64,8 @@ where
         Some(unsafe { self.0.get_unchecked_mut(key as usize) })
     }
 
-    fn freeze(
-        &self,
-    ) -> (
-        impl Iterator<Item = u8>,
-        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
-    ) {
+    fn freeze(&self) {
         self.0.iter().for_each(Edge::freeze);
-        let keys = 0..=255;
-        let edges = self
-            .0
-            .iter()
-            .map(|edge| edge.load_packed(Ordering::Relaxed));
-        (keys, edges)
     }
 }
 

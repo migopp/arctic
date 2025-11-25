@@ -3,7 +3,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::raw;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
@@ -107,24 +106,8 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index) })
     }
 
-    fn freeze(
-        &self,
-    ) -> (
-        impl Iterator<Item = u8>,
-        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
-    ) {
-        let header = Linear::freeze(self);
-        (
-            header
-                .keys::<raw::iter::Unbound, raw::iter::Unbound>(
-                    raw::iter::Unbound,
-                    raw::iter::Unbound,
-                )
-                .map(|(key, _)| key),
-            self.edges
-                .iter()
-                .map(|edge| edge.load_packed(Ordering::Relaxed)),
-        )
+    fn freeze(&self) {
+        Linear::freeze(self);
     }
 }
 
@@ -133,7 +116,7 @@ where
     H: ribbit::Pack<Packed: Header>,
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    fn freeze(&self) -> ribbit::Packed<H> {
+    fn freeze(&self) {
         let mut header = self.header.load_packed(Ordering::Relaxed);
 
         while !header.is_frozen() {
@@ -149,7 +132,6 @@ where
         }
 
         self.edges.iter().take(header.len()).for_each(Edge::freeze);
-        header
     }
 }
 

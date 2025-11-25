@@ -75,20 +75,9 @@ where
         Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
     }
 
-    fn freeze(
-        &self,
-    ) -> (
-        impl Iterator<Item = u8>,
-        impl Iterator<Item = ribbit::Packed<Edge<M>>>,
-    ) {
+    fn freeze(&self) {
         self.header.freeze();
         self.edges.iter().for_each(Edge::freeze);
-        (
-            self.header.keys_unsorted().map(|(key, _)| key),
-            self.header
-                .keys_unsorted()
-                .map(|(_, index)| self.edges[index as usize].load_packed(Ordering::Relaxed)),
-        )
     }
 }
 

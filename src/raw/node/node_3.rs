@@ -1,4 +1,3 @@
-use ribbit::u24;
 use ribbit::u4;
 use ribbit::u48;
 
