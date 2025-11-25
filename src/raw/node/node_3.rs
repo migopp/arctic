@@ -1,5 +1,6 @@
 use ribbit::u24;
 use ribbit::u4;
+use ribbit::u48;
 
 use crate::raw::edge;
 use crate::raw::node;
@@ -13,16 +14,18 @@ const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
 const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
-#[ribbit(size = 32, packed(rename = "HeaderPacked"), debug)]
+#[ribbit(size = 64, packed(rename = "HeaderPacked"), debug)]
 pub(crate) struct Header {
-    keys: u24,
+    keys: u48,
+    #[ribbit(offset = 48)]
     frozen: bool,
+    #[ribbit(offset = 56)]
     len: u4,
 }
 
 impl Header {
     const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u24::new(0), false, u4::new(0));
+        ribbit::Packed::<Self>::new(u48::new(0), false, u4::new(0));
 }
 
 impl Default for HeaderPacked {
@@ -72,7 +75,7 @@ impl linear::Header for ribbit::Packed<Header> {
             Some(index) if index < len => Ok(index),
             _ if len >= 3 || self.is_frozen() => Err(None),
             _ => Err(Some(Self::new(
-                u24::new(self.keys().value() | ((key as u32) << (len << 3))),
+                u48::new(self.keys().value() | ((key as u64) << (len << 4))),
                 false,
                 u4::new(len + 1),
             ))),
@@ -88,7 +91,8 @@ impl linear::Header for ribbit::Packed<Header> {
         let keys = self.value.to_le_bytes();
 
         if lower.get() == 0 && upper.get() == 255 {
-            let entries: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
+            let entries: [(u8, u8); 3] =
+                core::array::from_fn(|index| (keys[index * 2], index as u8));
             return node::KeyIter::from_node_3(linear::KeyIter::new(entries, len));
         }
 
@@ -97,6 +101,7 @@ impl linear::Header for ribbit::Packed<Header> {
         let mut entries = [(0u8, 0u8); 3];
         let len = keys
             .into_iter()
+            .step_by(2)
             .take(len as usize)
             .enumerate()
             .filter(|(_, key)| (min..=max).contains(key))
@@ -112,7 +117,7 @@ impl linear::Header for ribbit::Packed<Header> {
 }
 
 #[inline]
-fn get(array: u32, key: u8) -> u8 {
+fn get(array: u64, key: u8) -> u8 {
     if cfg!(feature = "opt-node3-get") {
         get_swar(array, key)
     } else {
@@ -122,32 +127,34 @@ fn get(array: u32, key: u8) -> u8 {
 
 /// https://richardstartin.github.io/posts/finding-bytes
 /// https://orlp.net/blog/extracting-depositing-bits/
+/// https://lemire.me/blog/2022/01/21/swar-explained-parsing-eight-digits/
+/// https://lamport.azurewebsites.net/pubs/multiple-byte.pdf
 #[inline]
-fn get_swar(array: u32, key: u8) -> u8 {
-    const LOWER: u32 = 0x00_7F_7F_7F;
+fn get_swar(array: u64, key: u8) -> u8 {
+    const LOWER: u64 = 0x0000_00FF_00FF_00FF;
+    const OVERFLOW: u64 = 0x0000_0100_0100_0100;
+
+    let key = key as u64;
 
     // LLVM is smart enough to turn this into an `imul`
-    const fn broadcast(byte: u8) -> u32 {
-        let byte = byte as u32;
-        byte | (byte << 8) | (byte << 16)
-    }
+    let key = key | (key << 16) | (key << 32);
 
-    let diff = array ^ broadcast(key);
+    // Convert key bytes to zero
+    let key_to_zero = array ^ key;
 
-    // Carry lower 7 bits of each byte into top bit
-    let any_one_lower = (diff & LOWER) + LOWER;
+    // Set overflow bit for byte if byte is non-zero
+    let equal_zero = key_to_zero + LOWER;
 
-    // Combine top bit of `diff` with carried bit
-    let any_one = diff | any_one_lower;
-
-    ((any_one | LOWER).trailing_ones() >> 3) as u8
+    // Extract overflow bits
+    unsafe { core::arch::x86_64::_pext_u64(equal_zero, OVERFLOW) }.trailing_ones() as u8
 }
 
 #[inline]
-fn get_naive(array: u32, key: u8) -> u8 {
+fn get_naive(array: u64, key: u8) -> u8 {
     array
         .to_le_bytes()
         .into_iter()
+        .step_by(2)
         .position(|byte| byte == key)
         .map(|index| index as u8)
         .unwrap_or(u8::MAX)
@@ -159,25 +166,25 @@ mod tests {
 
     #[test]
     fn zero() {
-        test_get(0x00_00_00_00, 0, 0)
+        test_get(0x0000_0000_0000_0000, 0, 0)
     }
 
     #[test]
     fn zero_high() {
-        test_get(0x00_00_12_34, 0, 2)
+        test_get(0x0000_0000_0012_0034, 0, 2)
     }
 
     #[test]
     fn nonzero_middle() {
-        test_get(0x00_11_12_13, 0x12, 1)
+        test_get(0x00_0011_0012_0013, 0x12, 1)
     }
 
     #[test]
     fn duplicate() {
-        test_get(0x00_11_11_12, 0x11, 1)
+        test_get(0x0000_0011_0011_0012, 0x11, 1)
     }
 
-    fn test_get(array: u32, key: u8, expected: u8) {
+    fn test_get(array: u64, key: u8, expected: u8) {
         assert_eq!(node_3::get_naive(array, key), expected);
         assert_eq!(node_3::get_swar(array, key), expected);
     }
