@@ -173,10 +173,6 @@ impl KeyIter {
             unsafe { &mut self.node_3 }.sort_unstable();
         } else if kind == node::Kind::NODE_15 {
             unsafe { self.as_node_15_unchecked().as_mut() }.sort_unstable();
-        } else if kind == node::Kind::NODE_47 {
-            unsafe { self.as_node_47_unchecked().as_mut() }.sort_unstable();
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256)
         }
     }
 

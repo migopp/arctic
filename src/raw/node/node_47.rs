@@ -221,8 +221,6 @@ impl Header {
             })
             .count();
 
-        // FIXME
-        entries[len..].fill((0xFF, 0xFF));
         node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
     }
 
@@ -244,8 +242,6 @@ impl Header {
             })
             .count();
 
-        // FIXME
-        entries[len..].fill((0xFF, 0xFF));
         node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
     }
 
