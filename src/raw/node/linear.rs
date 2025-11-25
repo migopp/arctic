@@ -202,6 +202,7 @@ const _: [(); 32] = [(); core::mem::size_of::<KeyIter<15>>()];
 impl<const N: usize> KeyIter<N> {
     #[inline]
     pub(super) const fn new(entries: [node::iter::KeyIndex; N], len: u8) -> Self {
+        validate!(len as usize <= entries.len());
         Self {
             entries,
             head: 0,

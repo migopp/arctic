@@ -136,7 +136,7 @@ impl Header {
                 return Some(index);
             }
 
-            let old = self.meta();
+            let old = self.meta_consistent();
 
             let len = old.len().value();
             if len == 47 || old.frozen() {
@@ -245,7 +245,7 @@ impl Header {
         node::KeyIter::from_node_47(linear::KeyIter::new(entries, len))
     }
 
-    fn meta(&self) -> ribbit::Packed<Meta> {
+    fn meta_consistent(&self) -> ribbit::Packed<Meta> {
         let meta = self.meta.load_packed(Ordering::Relaxed);
         self.ensure_meta_consistent(meta);
         meta
@@ -253,6 +253,7 @@ impl Header {
 
     fn ensure_meta_consistent(&self, meta: ribbit::Packed<Meta>) {
         let len = meta.len().value();
+        validate!((15..=47).contains(&len));
 
         let key = meta.last();
         let i = key / 16;
