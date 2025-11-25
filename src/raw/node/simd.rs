@@ -12,6 +12,7 @@ use core::arch::x86_64::_mm_movemask_epi8;
 use core::arch::x86_64::_mm_mullo_epi16;
 use core::arch::x86_64::_mm_set1_epi16;
 use core::arch::x86_64::_mm_set1_epi8;
+use core::arch::x86_64::_mm_set_epi64x;
 use core::arch::x86_64::_mm_slli_epi16;
 use core::arch::x86_64::_mm_srli_epi16;
 use core::arch::x86_64::_mm_subs_epu8;
@@ -69,17 +70,26 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [(u8, u8); 16] 
 
     let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
     let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
-    let ks = (ks_lo as u128) | (ks_hi as u128).wrapping_shl(shift);
-
     let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
     let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
-    let is = (is_lo as u128) | (is_hi as u128).wrapping_shl(shift);
 
-    let out = interleave(ks, is);
+    validate!(shift <= 64);
+
+    let ks_hi_hi = ks_hi.unbounded_shr(64 - shift);
+    let is_hi_hi = is_hi.unbounded_shr(64 - shift);
+
+    let ks_hi_lo = ks_hi.unbounded_shl(shift);
+    let is_hi_lo = is_hi.unbounded_shl(shift);
+
+    let ks = unsafe { _mm_set_epi64x(ks_hi_hi as i64, (ks_hi_lo | ks_lo) as i64) };
+    let is = unsafe { _mm_set_epi64x(is_hi_hi as i64, (is_hi_lo | is_lo) as i64) };
+
+    let out = interleave(avx_to_u128(ks), avx_to_u128(is));
     let out = core::array::from_fn(|i| out[i].to_le_bytes());
     unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(out) }
 }
 
+#[inline(always)]
 pub(super) fn sub_one(array: u128) -> u128 {
     avx_to_u128(unsafe { _mm_subs_epu8(u128_to_avx(array), u128_to_avx(U8_1)) })
 }
@@ -89,6 +99,7 @@ pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
 pub(super) const U8_SEQ: u128 = 0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128;
 
 // https://stackoverflow.com/a/29155682
+#[inline(always)]
 pub(super) fn mul(a: u128, b: u8) -> u128 {
     let a = u128_to_avx(a);
     let b = unsafe { _mm_set1_epi8(b as i8) };
@@ -104,6 +115,7 @@ pub(super) fn mul(a: u128, b: u8) -> u128 {
     even | odd
 }
 
+#[inline(always)]
 pub(super) fn add(a: u128, b: u128) -> u128 {
     avx_to_u128(unsafe { _mm_adds_epu8(u128_to_avx(a), u128_to_avx(b)) })
 }
