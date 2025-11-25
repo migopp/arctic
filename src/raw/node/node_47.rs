@@ -279,11 +279,6 @@ impl Header {
     }
 }
 
-#[unsafe(no_mangle)]
-fn test() {
-    std::hint::black_box(Header::default()).keys();
-}
-
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta.load_packed(Ordering::Relaxed);
