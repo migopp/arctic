@@ -87,30 +87,37 @@ impl linear::Header for ribbit::Packed<Header> {
         upper: U,
     ) -> node::KeyIter {
         let len = self.len().value();
-        let keys = self.value.to_le_bytes();
 
         if lower.get() == 0 && upper.get() == 255 {
+            let keys = self.value.to_le_bytes();
             let entries: [(u8, u8); 3] =
                 core::array::from_fn(|index| (keys[index * 2], index as u8));
             return node::KeyIter::from_node_3(linear::KeyIter::new(entries, len));
         }
 
-        let min = lower.get();
-        let max = upper.get();
-        let mut entries = [(0u8, 0u8); 3];
-        let len = keys
-            .into_iter()
-            .step_by(2)
-            .take(len as usize)
-            .enumerate()
-            .filter(|(_, key)| (min..=max).contains(key))
-            .zip(&mut entries)
-            .map(|((index_in, key_in), (key_out, index_out))| {
-                *key_out = key_in;
-                *index_out = index_in as u8;
-            })
-            .count() as u8;
+        let min = broadcast(lower.get());
+        let max = broadcast(upper.get());
 
+        const LOWER: u64 = 0x0000_00FF_00FF_00FF;
+        const OVERFLOW: u64 = 0x0000_0100_0100_0100;
+        const INDICES: u64 = 0x0000_0200_0100_0000;
+
+        // Set overflow bit if byte is < min or > max
+        let mask_lt_min = min + (self.value ^ LOWER);
+        let mask_gt_max = self.value + (max ^ LOWER);
+
+        // Set lower bits if byte is within range
+        let mask_range = (((mask_lt_min | mask_gt_max) & OVERFLOW) >> 8) + LOWER;
+        // Cover indices in addition to keys
+        let mask_range = mask_range | mask_range << 8;
+
+        let mask_len = (1u64 << (len << 4)) - 1;
+        let mask_valid = mask_range & mask_len;
+
+        let entries = unsafe { core::arch::x86_64::_pext_u64(self.value | INDICES, mask_valid) }
+            .to_le_bytes();
+        let entries = unsafe { core::mem::transmute::<[u8; 8], [(u8, u8); 4]>(entries) };
+        let entries = core::array::from_fn(|i| entries[i]);
         node::KeyIter::from_node_3(linear::KeyIter::new(entries, len))
     }
 }
@@ -133,19 +140,21 @@ fn get_swar(array: u64, key: u8) -> u8 {
     const LOWER: u64 = 0x0000_00FF_00FF_00FF;
     const OVERFLOW: u64 = 0x0000_0100_0100_0100;
 
-    let key = key as u64;
-
-    // LLVM is smart enough to turn this into an `imul`
-    let key = key | (key << 16) | (key << 32);
-
     // Convert key bytes to zero
-    let key_to_zero = array ^ key;
+    let key_to_zero = array ^ broadcast(key);
 
     // Set overflow bit for byte if byte is non-zero
     let equal_zero = key_to_zero + LOWER;
 
     // Extract overflow bits
     unsafe { core::arch::x86_64::_pext_u64(equal_zero, OVERFLOW) }.trailing_ones() as u8
+}
+
+const fn broadcast(byte: u8) -> u64 {
+    let byte = byte as u64;
+
+    // LLVM is smart enough to turn this into an `imul`
+    byte | (byte << 16) | (byte << 32)
 }
 
 #[inline]
