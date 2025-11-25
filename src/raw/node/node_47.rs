@@ -1,8 +1,7 @@
 use core::fmt::Debug;
-use core::ops::BitAnd as _;
+use core::ops::Shr;
 use core::sync::atomic::Ordering;
 
-use ribbit::u112;
 use ribbit::u6;
 use ribbit::Atomic;
 
@@ -18,7 +17,7 @@ use crate::stat;
 #[repr(C, align(1024))]
 pub(crate) struct Node47<M: ribbit::Pack> {
     header: Header,
-    edges: [Atomic<Edge<M>>; 60],
+    edges: [Atomic<Edge<M>>; 47],
 }
 
 const _: () = assert!(core::mem::size_of::<Node47<()>>() == 1024);
@@ -41,7 +40,7 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = node::Kind::Node47;
-    const LEN: usize = 60;
+    const LEN: usize = 47;
 
     type Grow = Node256<M>;
     type Shrink = Node15<M>;
@@ -85,10 +84,10 @@ where
         self.header.freeze();
         self.edges.iter().for_each(Edge::freeze);
         (
-            self.header.keys_unsorted().0.map(|(key, _)| key),
-            self.edges
-                .iter()
-                .map(|edge| edge.load_packed(Ordering::Relaxed)),
+            self.header.keys_unsorted().map(|(key, _)| key),
+            self.header
+                .keys_unsorted()
+                .map(|(_, index)| self.edges[index as usize].load_packed(Ordering::Relaxed)),
         )
     }
 }
@@ -105,14 +104,14 @@ where
     }
 }
 
-#[repr(C, align(64))]
+#[repr(C, align(16))]
 #[derive(Default)]
 struct Header {
-    data: [Atomic<u128>; 3],
+    data: [Atomic<u128>; 16],
     meta: Atomic<Meta>,
 }
 
-const _: [(); 64] = [(); core::mem::size_of::<Header>()];
+const _: [(); 272] = [(); core::mem::size_of::<Header>()];
 
 impl Header {
     fn freeze(&self) {
@@ -132,28 +131,29 @@ impl Header {
     }
 
     fn get(&self, key: u8) -> Option<u8> {
-        self.get_impl(key).ok()
+        let i = key / 16;
+        let j = key % 16;
+        let index = (unsafe { self.data.get_unchecked(i as usize) }
+            .load(Ordering::Relaxed)
+            .shr(j << 3) as u8)
+            .wrapping_sub(1);
+        (index < 47).then_some(index)
     }
 
     fn get_or_insert(&self, key: u8) -> Option<u8> {
         loop {
-            let old = match self.get_impl(key) {
-                Ok(index) => return Some(index),
-                Err(meta) => meta,
-            };
+            if let Some(index) = self.get(key) {
+                return Some(index);
+            }
+
+            let old = self.meta();
 
             let len = old.len().value();
-            if len == 60 || old.frozen() {
+            if len == 47 || old.frozen() {
                 return None;
             }
 
-            let mut new = old.with_len(u6::new(len + 1));
-            if len >= 48 {
-                let key = (key as u128) << ((len - 48) << 3);
-                new = unsafe { ribbit::Packed::<Meta>::new_unchecked(new.value | key) }
-            } else {
-                new = new.with_last(key);
-            }
+            let new = old.with_len(u6::new(len + 1)).with_last(key);
 
             match self
                 .meta
@@ -171,61 +171,27 @@ impl Header {
 
     fn insert(&mut self, key: u8) -> Option<u8> {
         let old_meta = self.meta.get_packed();
-        let len = old_meta.len().value();
+        let old_len = old_meta.len().value();
 
         validate!(!old_meta.frozen());
-        validate!(len <= 60);
+        validate!(old_len <= 47);
 
-        if len == 60 {
+        if old_len == 47 {
             return None;
         }
 
-        let mut new_meta = old_meta.with_len(u6::new(len + 1));
-        let i = len / 16;
-        let j = len % 16;
-        let key_data = (key as u128) << (j << 3);
-
-        if i < 3 {
-            new_meta = new_meta.with_last(key);
-
-            let old_data = &mut self.data[i as usize];
-            let new_data = old_data.get() | key_data;
-            old_data.set(new_data);
-        } else {
-            new_meta = unsafe { ribbit::Packed::<Meta>::new_unchecked(new_meta.value | key_data) }
-        }
-
+        let new_len = old_len + 1;
+        let new_meta = old_meta.with_len(u6::new(new_len)).with_last(key);
         self.meta.set_packed(new_meta);
-        Some(len)
-    }
 
-    #[inline]
-    fn get_impl(&self, key: u8) -> Result<u8, ribbit::Packed<Meta>> {
-        let meta = self.meta();
-        let data = self.data();
+        let i = key / 16;
+        let j = key % 16;
 
-        let mut r#match = 0;
-        // Explicit array here is enough for compiler to unroll loop
-        for (i, chunk) in [data[0], data[1], data[2], meta.value]
-            .into_iter()
-            .enumerate()
-        {
-            let local = node::simd::mask_eq(chunk, key) as u64;
-            let global = local << (i * 16);
-            r#match |= global;
-        }
-
-        let len = meta.len().value();
-        let index = r#match
-            // Mask against node length
-            .bitand((1u64 << len) - 1)
-            .trailing_zeros() as u8;
-
-        if index < len {
-            Ok(index)
-        } else {
-            Err(meta)
-        }
+        let data = unsafe { self.data.get_unchecked_mut(i as usize) };
+        let old_data = data.get();
+        let new_data = old_data | ((new_len as u128) << (j << 3));
+        data.set(new_data);
+        Some(old_len)
     }
 
     fn keys_range<L: node::iter::Lower, U: node::iter::Upper>(
@@ -234,60 +200,53 @@ impl Header {
         upper: U,
     ) -> node::KeyIter {
         if L::UNBOUND && U::UNBOUND {
-            return self.keys_unsorted().0;
+            return self.keys_unsorted();
         }
 
-        let meta = self.meta();
         let data = self.data();
 
-        #[inline(always)]
-        const fn mask(len: u8) -> u128 {
-            match (1u128).checked_shl((len as u32) << 3) {
-                None => u128::MAX,
-                Some(mask) => mask - 1,
-            }
-        }
+        let mut entries = [(0u8, 0u8); 47];
 
-        let len_total = meta.len().value();
-        let mut len_valid = 0;
-        let mut keys = [0u128; 4];
-
-        for (i, chunk) in data
+        let len = data
             .into_iter()
-            .chain(core::iter::once(meta.value))
+            .flat_map(u128::to_le_bytes)
             .enumerate()
-        {
-            let mask_len = len_total
-                .checked_sub(i as u8 * 16)
-                .map(mask)
-                .unwrap_or(0u128);
+            .skip(lower.get() as usize)
+            .take(upper.get() as usize)
+            .filter_map(|(key, index)| index.checked_sub(1).map(|index| (key, index)))
+            .zip(&mut entries)
+            .map(|((key_in, index_in), (key_out, index_out))| {
+                *key_out = key_in as u8;
+                *index_out = index_in;
+            })
+            .count();
 
-            let mask_range = node::simd::mask_range(chunk, lower.get(), upper.get());
-            let mask_valid = mask_len & mask_range;
-            len_valid += (mask_valid.count_ones() >> 3) as u8;
-            keys[i] = chunk & mask_valid | !mask_valid;
-        }
-
-        let keys = unsafe { core::mem::transmute::<[u128; 4], [u8; 64]>(keys) };
-        let entries = core::array::from_fn(|index| (keys[index], index as u8));
-        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len_valid))
+        // FIXME
+        entries[len..].fill((0xFF, 0xFF));
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
     }
 
     #[inline]
-    fn keys_unsorted(&self) -> (node::KeyIter, ribbit::Packed<Meta>) {
-        let meta = self.meta();
+    fn keys_unsorted(&self) -> node::KeyIter {
         let data = self.data();
 
-        let len = meta.len().value();
-        let mut keys = unsafe {
-            core::mem::transmute::<[u128; 4], [u8; 64]>([data[0], data[1], data[2], meta.value])
-        };
-        keys[len as usize..].fill(0xFF);
-        let entries = core::array::from_fn(|index| (keys[index], index as u8));
-        (
-            node::KeyIter::from_node_47(linear::KeyIter::new(entries, len)),
-            meta,
-        )
+        let mut entries = [(0u8, 0u8); 47];
+
+        let len = data
+            .into_iter()
+            .flat_map(u128::to_le_bytes)
+            .enumerate()
+            .filter_map(|(key, index)| index.checked_sub(1).map(|index| (key, index)))
+            .zip(&mut entries)
+            .map(|((key_in, index_in), (key_out, index_out))| {
+                *key_out = key_in as u8;
+                *index_out = index_in;
+            })
+            .count();
+
+        // FIXME
+        entries[len..].fill((0xFF, 0xFF));
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
     }
 
     fn meta(&self) -> ribbit::Packed<Meta> {
@@ -297,47 +256,45 @@ impl Header {
     }
 
     fn ensure_meta_consistent(&self, meta: ribbit::Packed<Meta>) {
-        validate!((15..=60).contains(&meta.len().value()));
+        let len = meta.len().value();
 
-        let index = meta.len().value() - 1;
-        let i = index / 16;
-        let j = (index % 16) << 3;
+        let key = meta.last();
+        let i = key / 16;
+        let j = key % 16;
 
-        // `get_or_insert` atomically maintains consistency
-        // when len > 48, so helping is not necessary here
-        let Some(keys) = self.data.get(i as usize) else {
-            stat::increment(stat::Counter::Node47Consistent);
-            return;
-        };
+        let data = unsafe { self.data.get_unchecked(i as usize) };
+        let old = data.load(Ordering::Relaxed);
 
-        let old = keys.load(Ordering::Relaxed);
-        let last = meta.last();
-
-        // Consistent state
-        if (old >> j) as u8 == last {
+        if (old >> (j << 3)) as u8 == len {
             stat::increment(stat::Counter::Node47Consistent);
             return;
         }
 
-        let new = old | ((last as u128) << j);
-
-        // Failed CAS is okay, means someone else helped
-        match keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => stat::increment(stat::Counter::Node47CasSuccess),
+        match data.compare_exchange(
+            old,
+            old | ((len as u128) << (j << 3)),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => {
+                stat::increment(stat::Counter::Node47CasSuccess);
+            }
             Err(_) => stat::increment(stat::Counter::Node47CasFailure),
         }
     }
 
-    fn data(&self) -> [u128; 3] {
+    fn data(&self) -> [u128; 16] {
         core::array::from_fn(|i| self.data[i].load(Ordering::Relaxed))
     }
 }
 
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (iter, meta) = self.keys_unsorted();
+        let meta = self.meta.load_packed(Ordering::Relaxed);
+        let iter = self.keys_unsorted();
+
         let len = meta.len().value();
-        let mut keys = [0u8; 60];
+        let mut keys = [0u8; 47];
         keys.iter_mut()
             .zip(iter)
             .for_each(|(out, (key, _))| *out = key);
@@ -352,17 +309,15 @@ impl Debug for Header {
 }
 
 #[derive(Copy, Clone, ribbit::Pack)]
-#[ribbit(size = 128, packed(rename = "MetaPacked"))]
+#[ribbit(size = 16, packed(rename = "MetaPacked"))]
 struct Meta {
-    keys: u112,
     last: u8,
     frozen: bool,
     len: u6,
 }
 
 impl Meta {
-    const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u112::new(0), 0, false, u6::new(0));
+    const DEFAULT: ribbit::Packed<Self> = ribbit::Packed::<Self>::new(0, false, u6::new(0));
 }
 
 impl Default for MetaPacked {

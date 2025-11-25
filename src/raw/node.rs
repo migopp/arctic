@@ -220,7 +220,7 @@ where
         match self {
             Self::Node3(node) => node.replace::<3>(parent),
             Self::Node15(node) => node.replace::<15>(parent),
-            Self::Node47(node) => node.replace::<60>(parent),
+            Self::Node47(node) => node.replace::<47>(parent),
             Self::Node256(node) => node.replace::<256>(parent),
         }
     }

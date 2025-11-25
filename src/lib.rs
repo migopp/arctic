@@ -159,12 +159,12 @@ mod tests {
     }
 
     #[test]
-    fn node60_full() {
-        insert_all(0u16..60);
+    fn node47_full() {
+        insert_all(0u16..47);
     }
 
     #[test]
-    fn node60_expand() {
+    fn node47_expand() {
         insert_all(0u16..61);
     }
 
