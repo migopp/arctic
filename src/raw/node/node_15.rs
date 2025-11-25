@@ -5,7 +5,7 @@ use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::linear;
 use crate::raw::node::Node3;
-use crate::raw::node::Node60;
+use crate::raw::node::Node47;
 
 pub(crate) type Node15<C> = super::Linear<15, Header, C>;
 
@@ -36,7 +36,7 @@ impl linear::Header for ribbit::Packed<Header> {
     const LEN: usize = 15;
 
     type Grow<M>
-        = Node60<M>
+        = Node47<M>
     where
         M: ribbit::Pack<Packed: edge::Meta>;
     type Shrink<M>

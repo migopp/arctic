@@ -16,15 +16,15 @@ use crate::raw::Node;
 use crate::stat;
 
 #[repr(C, align(1024))]
-pub(crate) struct Node60<M: ribbit::Pack> {
+pub(crate) struct Node47<M: ribbit::Pack> {
     header: Header,
     edges: [Atomic<Edge<M>>; 60],
 }
 
-const _: () = assert!(core::mem::size_of::<Node60<()>>() == 1024);
-const _: () = assert!(core::mem::align_of::<Node60<()>>() == 1024);
+const _: () = assert!(core::mem::size_of::<Node47<()>>() == 1024);
+const _: () = assert!(core::mem::align_of::<Node47<()>>() == 1024);
 
-impl<M> Default for Node60<M>
+impl<M> Default for Node47<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -36,11 +36,11 @@ where
     }
 }
 
-impl<M> Node<M> for Node60<M>
+impl<M> Node<M> for Node47<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = node::Kind::Node60;
+    const KIND: node::Kind = node::Kind::Node47;
     const LEN: usize = 60;
 
     type Grow = Node256<M>;
@@ -93,12 +93,12 @@ where
     }
 }
 
-impl<M> Debug for Node60<M>
+impl<M> Debug for Node47<M>
 where
     M: ribbit::Pack<Packed: edge::Meta + Debug>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Node60")
+        f.debug_struct("Node47")
             .field("header", &self.header)
             .field("edges", &self.edges)
             .finish()
@@ -270,7 +270,7 @@ impl Header {
 
         let keys = unsafe { core::mem::transmute::<[u128; 4], [u8; 64]>(keys) };
         let entries = core::array::from_fn(|index| (keys[index], index as u8));
-        node::KeyIter::from_node_60(linear::KeyIter::new(entries, len_valid))
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len_valid))
     }
 
     #[inline]
@@ -285,7 +285,7 @@ impl Header {
         keys[len as usize..].fill(0xFF);
         let entries = core::array::from_fn(|index| (keys[index], index as u8));
         (
-            node::KeyIter::from_node_60(linear::KeyIter::new(entries, len)),
+            node::KeyIter::from_node_47(linear::KeyIter::new(entries, len)),
             meta,
         )
     }
@@ -306,7 +306,7 @@ impl Header {
         // `get_or_insert` atomically maintains consistency
         // when len > 48, so helping is not necessary here
         let Some(keys) = self.data.get(i as usize) else {
-            stat::increment(stat::Counter::Node60Consistent);
+            stat::increment(stat::Counter::Node47Consistent);
             return;
         };
 
@@ -315,7 +315,7 @@ impl Header {
 
         // Consistent state
         if (old >> j) as u8 == last {
-            stat::increment(stat::Counter::Node60Consistent);
+            stat::increment(stat::Counter::Node47Consistent);
             return;
         }
 
@@ -323,8 +323,8 @@ impl Header {
 
         // Failed CAS is okay, means someone else helped
         match keys.compare_exchange_packed(old, new, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => stat::increment(stat::Counter::Node60CasSuccess),
-            Err(_) => stat::increment(stat::Counter::Node60CasFailure),
+            Ok(_) => stat::increment(stat::Counter::Node47CasSuccess),
+            Err(_) => stat::increment(stat::Counter::Node47CasFailure),
         }
     }
 

@@ -16,7 +16,7 @@ use crate::raw::node;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
 use crate::raw::node::Node3;
-use crate::raw::node::Node60;
+use crate::raw::node::Node47;
 use crate::stat;
 
 #[derive(Copy, Clone, Default, ribbit::Pack)]
@@ -315,7 +315,7 @@ where
         let ptr = match node {
             node::Ref::Node3(node) => node as *const _ as u64,
             node::Ref::Node15(node) => node as *const _ as u64,
-            node::Ref::Node60(node) => node as *const _ as u64,
+            node::Ref::Node47(node) => node as *const _ as u64,
             node::Ref::Node256(node) => node as *const _ as u64,
         };
 
@@ -342,8 +342,8 @@ where
             node::Ref::Node3(unsafe { as_ref::<_, Node3<M>>(ptr) })
         } else if kind == node::Kind::NODE_15 {
             node::Ref::Node15(unsafe { as_ref::<_, Node15<M>>(ptr) })
-        } else if kind == node::Kind::NODE_60 {
-            node::Ref::Node60(unsafe { as_ref::<_, Node60<M>>(ptr) })
+        } else if kind == node::Kind::NODE_47 {
+            node::Ref::Node47(unsafe { as_ref::<_, Node47<M>>(ptr) })
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
             node::Ref::Node256(unsafe { as_ref::<_, Node256<M>>(ptr) })
@@ -364,8 +364,8 @@ where
             drop(Box::from_raw(ptr as *mut Node3<M>))
         } else if kind == node::Kind::NODE_15 {
             drop(Box::from_raw(ptr as *mut Node15<M>))
-        } else if kind == node::Kind::NODE_60 {
-            drop(Box::from_raw(ptr as *mut Node60<M>))
+        } else if kind == node::Kind::NODE_47 {
+            drop(Box::from_raw(ptr as *mut Node47<M>))
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
             drop(Box::from_raw(ptr as *mut Node256<M>))

@@ -6,7 +6,7 @@ use ribbit::Atomic;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
-use crate::raw::node::Node60;
+use crate::raw::node::Node47;
 use crate::raw::Node;
 
 #[repr(C, align(4096))]
@@ -32,7 +32,7 @@ where
     const LEN: usize = 256;
 
     type Grow = Node256<M>;
-    type Shrink = Node60<M>;
+    type Shrink = Node47<M>;
 
     #[inline]
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(
