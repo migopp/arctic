@@ -189,7 +189,7 @@ impl Header {
         upper: U,
     ) -> node::KeyIter {
         if lower.get() == 0 && upper.get() == 255 {
-            return self.keys_unsorted();
+            return self.keys();
         }
 
         let data = self.data();
@@ -214,7 +214,7 @@ impl Header {
     }
 
     #[inline]
-    fn keys_unsorted(&self) -> node::KeyIter {
+    fn keys(&self) -> node::KeyIter {
         let mut entries = [(0u8, 0u8); 64];
         let mut len = 0;
         let mut keys = node::simd::U8_SEQ;
@@ -285,7 +285,7 @@ impl Header {
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta.load_packed(Ordering::Relaxed);
-        let iter = self.keys_unsorted();
+        let iter = self.keys();
 
         let len = meta.len().value();
         let mut keys = [0u8; 47];
