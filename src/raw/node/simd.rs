@@ -20,13 +20,12 @@ use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
 
-/// Output has 1 bit set for each byte in `array` that is equal to `byte`.
+/// Output has 8 bits set for each byte in `array` that is equal to `byte`.
 #[inline(always)]
-pub(super) fn mask_eq(array: u128, byte: u8) -> u16 {
+pub(super) fn mask_eq(array: u128, byte: u8) -> u128 {
     let array = u128_to_avx(array);
     let byte = unsafe { _mm_set1_epi8(byte as i8) };
-    let mask = unsafe { _mm_movemask_epi8(_mm_cmpeq_epi8(array, byte)) };
-    mask as u16
+    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, byte) })
 }
 
 /// Output has 8 bits set for each byte in `array` that is within `min..=max`.
@@ -56,6 +55,12 @@ pub(super) fn mask_nonzero(array: u128) -> u128 {
 #[inline(always)]
 pub(super) fn mask_len(len: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmplt_epi8(u128_to_avx(U8_SEQ), _mm_set1_epi8(len as i8)) })
+}
+
+/// Convert byte mask to bit mask
+#[inline(always)]
+pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
+    unsafe { _mm_movemask_epi8(u128_to_avx(mask)) as u16 }
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -182,6 +187,9 @@ mod tests {
     }
 
     fn test_eq(array: u128, key: u8, expected: u8) {
-        assert_eq!(super::mask_eq(array, key).trailing_zeros() as u8, expected);
+        assert_eq!(
+            super::mask_byte_to_bit(super::mask_eq(array, key)).trailing_zeros() as u8,
+            expected
+        );
     }
 }

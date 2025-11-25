@@ -57,7 +57,8 @@ impl linear::Header for ribbit::Packed<Header> {
     }
 
     fn get(self, key: u8) -> Option<u8> {
-        let index = node::simd::mask_eq(self.value, key).trailing_zeros() as u8;
+        let index = node::simd::mask_byte_to_bit(node::simd::mask_eq(self.value, key))
+            .trailing_zeros() as u8;
         (index < self.len().value()).then_some(index)
     }
 
@@ -92,7 +93,7 @@ impl linear::Header for ribbit::Packed<Header> {
         let mask_len = node::simd::mask_len(len);
         let mask_range = node::simd::mask_range(self.value, lower.get(), upper.get());
         let mask_valid = mask_len & mask_range;
-        let len = (mask_valid.count_ones() >> 3) as u8;
+        let len = node::simd::mask_byte_to_bit(mask_valid).count_ones() as u8;
         let out = node::simd::compress(self.value, node::simd::U8_SEQ, mask_valid);
 
         // TODO: SIMD sorting network?

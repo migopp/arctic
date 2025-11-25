@@ -210,7 +210,7 @@ impl Header {
                     .add(len as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
-            len += (valid.count_ones() >> 3) as u8;
+            len += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
@@ -236,7 +236,7 @@ impl Header {
                     .add(len as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
-            len += (valid.count_ones() >> 3) as u8;
+            len += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
