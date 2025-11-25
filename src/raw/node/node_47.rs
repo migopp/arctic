@@ -219,20 +219,25 @@ impl Header {
 
         let mut entries = [(0u8, 0u8); 64];
         let mut i = 0;
+        let mut keys = node::simd::U8_SEQ;
 
-        for (j, chunk) in data.into_iter().enumerate() {
-            let nonzero = node::simd::mask_nonzero(chunk);
-            let chunk = node::simd::compress_47(chunk, j as u8 * 16, nonzero);
+        for indices in data.into_iter() {
+            let nonzero = node::simd::mask_nonzero(indices);
+            let (chunk_keys, chunk_indices) =
+                node::simd::compress(keys, node::simd::sub_one(indices), nonzero);
+            let chunk = node::simd::interleave(chunk_keys, chunk_indices);
             let chunk = core::array::from_fn(|i| chunk[i].to_le_bytes());
-            let chunk = unsafe { core::mem::transmute::<[[u8; 16]; 2], [u8; 32]>(chunk) };
+            let chunk = unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(chunk) };
             unsafe {
                 entries
                     .as_mut_ptr()
-                    .cast::<u8>()
-                    .byte_add(i as usize * 2)
-                    .copy_from_nonoverlapping(chunk.as_ptr(), 32)
+                    .cast::<(u8, u8)>()
+                    .add(i as usize)
+                    .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
+
             i += (nonzero.count_ones() >> 3) as u8;
+            keys = node::simd::add_sixteen(keys);
         }
 
         let entries = core::array::from_fn(|i| entries[i]);

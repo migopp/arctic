@@ -94,7 +94,9 @@ impl linear::Header for ribbit::Packed<Header> {
         let mask_valid = mask_len & mask_range;
         let len = (mask_valid.count_ones() >> 3) as u8;
 
-        let out = node::simd::compress(self.value, mask_valid);
+        let (meta, data) = node::simd::compress(node::simd::U8_SEQ, self.value, mask_valid);
+
+        let out = node::simd::interleave(data, meta);
         let out = core::array::from_fn(|i| out[i].to_le_bytes());
         let out = unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(out) };
 
