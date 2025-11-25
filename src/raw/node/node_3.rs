@@ -109,10 +109,10 @@ impl linear::Header for ribbit::Packed<Header> {
         let mask_lt_min = min + (self.value ^ LOWER);
         let mask_gt_max = self.value + (max ^ LOWER);
 
-        // Set lower bits if byte is within range
-        let mask_range = (((mask_lt_min | mask_gt_max) & OVERFLOW) >> 8) + LOWER;
-        // Cover indices in addition to keys
-        let mask_range = mask_range | mask_range << 8;
+        // Set lowest bit if byte is within range
+        let mask_range_bit = (!(mask_lt_min | mask_gt_max) & OVERFLOW) >> 8;
+        // Broadcast to 16 bits (keys and indices)
+        let mask_range = mask_range_bit * 0xFFFF;
 
         let mask_len = (1u64 << (len << 4)) - 1;
         let mask_valid = mask_range & mask_len;
