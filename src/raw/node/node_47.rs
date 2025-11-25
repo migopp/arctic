@@ -196,53 +196,57 @@ impl Header {
         let i = lower.get() / 16;
         let j = upper.get() / 16;
 
+        let len = self.meta_consistent().len().value();
         let mut entries = [KeyIndex::DEFAULT; 64];
-        let mut len = 0;
+        let mut index = 0;
         let mut keys = node::simd::add(node::simd::U8_SEQ, node::simd::mul(node::simd::U8_16, i));
 
         for k in i..=j {
             let indices = self.data[k as usize].load(Ordering::Relaxed);
-            let valid = node::simd::mask_nonzero(indices)
+            let valid = node::simd::mask_range(indices, 1, len)
                 & node::simd::mask_range(keys, lower.get(), upper.get());
             let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
             unsafe {
                 entries
                     .as_mut_ptr()
-                    .add(len as usize)
+                    .add(index as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
-            len += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
+            index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
         node::KeyIter::from_node_47(linear::KeyIter::new(
             core::array::from_fn(|i| entries[i]),
-            len,
+            index,
         ))
     }
 
     #[inline]
     fn keys(&self) -> node::KeyIter {
+        let len = self.meta_consistent().len().value();
+
         let mut entries = [KeyIndex::DEFAULT; 64];
-        let mut len = 0;
+        let mut index = 0;
         let mut keys = node::simd::U8_SEQ;
 
         for i in 0..16 {
             let indices = self.data[i].load(Ordering::Relaxed);
-            let valid = node::simd::mask_nonzero(indices);
+            let valid = node::simd::mask_range(indices, 1, len);
             let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
             unsafe {
                 entries
                     .as_mut_ptr()
-                    .add(len as usize)
+                    .add(index as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
-            len += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
+            index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
+        validate_eq!(index, len);
         let entries = core::array::from_fn(|i| entries[i]);
-        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len))
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, index))
     }
 
     fn meta_consistent(&self) -> ribbit::Packed<Meta> {
