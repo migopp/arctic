@@ -93,13 +93,13 @@ impl linear::Header for ribbit::Packed<Header> {
         let mask_range = node::simd::mask_range(self.value, lower.get(), upper.get());
         let mask_valid = mask_len & mask_range;
         let len = (mask_valid.count_ones() >> 3) as u8;
-        let keys = node::simd::compress(self.value, mask_valid).to_le_bytes();
-        let indices =
-            node::simd::compress(0x0F0E0D0C0B0A09080706050403020100u128, mask_valid).to_le_bytes();
+
+        let out = node::simd::compress(self.value, mask_valid);
+        let out = core::array::from_fn(|i| out[i].to_le_bytes());
+        let out = unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(out) };
 
         // TODO: SIMD sorting network?
-        let entries: [(u8, u8); Self::LEN] =
-            core::array::from_fn(|index| (keys[index], indices[index]));
+        let entries: [(u8, u8); Self::LEN] = core::array::from_fn(|i| out[i]);
         node::KeyIter::from_node_15(linear::KeyIter::new(entries, len))
     }
 }

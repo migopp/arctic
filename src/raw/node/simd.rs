@@ -7,6 +7,8 @@ use core::arch::x86_64::_mm_max_epu8;
 use core::arch::x86_64::_mm_min_epu8;
 use core::arch::x86_64::_mm_movemask_epi8;
 use core::arch::x86_64::_mm_set1_epi8;
+use core::arch::x86_64::_mm_unpackhi_epi8;
+use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
 
 /// Output has 1 bit set for each byte in `array` that is equal to `byte`.
@@ -35,20 +37,36 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
 
 // https://talkchess.com/viewtopic.php?t=78804
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
+// http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress(array: u128, mask: u128) -> u128 {
-    let array = u128_to_avx(array);
-    let mask = u128_to_avx(mask);
+pub(super) fn compress(data: u128, mask: u128) -> [u128; 2] {
+    let meta = 0x0F0E0D0C0B0A09080706050403020100u128;
 
-    let array_low = unsafe { _mm_cvtsi128_si64x(array) } as u64;
-    let array_high = unsafe { _mm_extract_epi64::<1>(array) } as u64;
+    let (data_lo, data_hi) = split(data);
+    let (meta_lo, meta_hi) = split(meta);
+    let (mask_lo, mask_hi) = split(mask);
+    let shift = mask_lo.count_ones();
 
-    let mask_low = unsafe { _mm_cvtsi128_si64x(mask) } as u64;
-    let mask_high = unsafe { _mm_extract_epi64::<1>(mask) } as u64;
+    let data_lo = unsafe { _pext_u64(data_lo, mask_lo) };
+    let data_hi = unsafe { _pext_u64(data_hi, mask_hi) };
+    let data = u128_to_avx((data_lo as u128) | (data_hi as u128).wrapping_shl(shift));
 
-    let low = unsafe { _pext_u64(array_low, mask_low) };
-    let high = unsafe { _pext_u64(array_high, mask_high) };
-    (low as u128) | (high as u128).unbounded_shl(mask_low.count_ones())
+    let meta_lo = unsafe { _pext_u64(meta_lo, mask_lo) };
+    let meta_hi = unsafe { _pext_u64(meta_hi, mask_hi) };
+    let meta = u128_to_avx((meta_lo as u128) | (meta_hi as u128).wrapping_shl(shift));
+
+    [
+        avx_to_u128(unsafe { _mm_unpacklo_epi8(data, meta) }),
+        avx_to_u128(unsafe { _mm_unpackhi_epi8(data, meta) }),
+    ]
+}
+
+#[inline(always)]
+fn split(value: u128) -> (u64, u64) {
+    let value = u128_to_avx(value);
+    let lo = unsafe { _mm_cvtsi128_si64x(value) } as u64;
+    let hi = unsafe { _mm_extract_epi64::<1>(value) } as u64;
+    (lo, hi)
 }
 
 #[inline(always)]
