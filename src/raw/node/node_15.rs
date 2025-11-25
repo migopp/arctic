@@ -89,7 +89,7 @@ impl linear::Header for ribbit::Packed<Header> {
             return node::KeyIter::from_node_15(linear::KeyIter::new(entries, len));
         }
 
-        let mask_len = (1u128 << (len << 3)) - 1;
+        let mask_len = node::simd::mask_len(len);
         let mask_range = node::simd::mask_range(self.value, lower.get(), upper.get());
         let mask_valid = mask_len & mask_range;
         let len = (mask_valid.count_ones() >> 3) as u8;
