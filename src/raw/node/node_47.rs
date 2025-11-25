@@ -199,7 +199,7 @@ impl Header {
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        if L::UNBOUND && U::UNBOUND {
+        if lower.get() == 0 && upper.get() == 255 {
             return self.keys_unsorted();
         }
 

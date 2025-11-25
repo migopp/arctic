@@ -82,7 +82,7 @@ impl linear::Header for ribbit::Packed<Header> {
     ) -> node::KeyIter {
         let len = self.len().value();
 
-        if L::UNBOUND && U::UNBOUND {
+        if lower.get() == 0 && upper.get() == 255 {
             let keys = self.value.to_le_bytes();
             let entries: [(u8, u8); Self::LEN] =
                 core::array::from_fn(|index| (keys[index], index as u8));
