@@ -1,12 +1,14 @@
 use core::arch::x86_64::__m128i;
+use core::arch::x86_64::_mm_add_epi8;
 use core::arch::x86_64::_mm_cmpeq_epi8;
+use core::arch::x86_64::_mm_cmpgt_epi8;
 use core::arch::x86_64::_mm_cvtsi128_si64x;
-use core::arch::x86_64::_mm_cvtsi64_si128;
 use core::arch::x86_64::_mm_extract_epi64;
 use core::arch::x86_64::_mm_max_epu8;
 use core::arch::x86_64::_mm_min_epu8;
 use core::arch::x86_64::_mm_movemask_epi8;
 use core::arch::x86_64::_mm_set1_epi8;
+use core::arch::x86_64::_mm_subs_epi8;
 use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
@@ -35,6 +37,14 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
 }
 
+/// Output has 8 bits set for each byte in `array` that is non-zero.
+#[inline(always)]
+pub(super) fn mask_nonzero(array: u128) -> u128 {
+    const ZERO: __m128i = u128_to_avx(0);
+    let array = u128_to_avx(array);
+    avx_to_u128(unsafe { _mm_cmpgt_epi8(array, ZERO) })
+}
+
 // https://talkchess.com/viewtopic.php?t=78804
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
@@ -58,6 +68,41 @@ pub(super) fn compress(data: u128, mask: u128) -> [u128; 2] {
     [
         avx_to_u128(unsafe { _mm_unpacklo_epi8(data, meta) }),
         avx_to_u128(unsafe { _mm_unpackhi_epi8(data, meta) }),
+    ]
+}
+
+// https://talkchess.com/viewtopic.php?t=78804
+// https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
+// http://const.me/articles/simd/simd.pdf
+#[inline(always)]
+pub(super) fn compress_47(data: u128, offset: u8, mask: u128) -> [u128; 2] {
+    let meta = unsafe {
+        avx_to_u128(_mm_add_epi8(
+            u128_to_avx(0x0F0E0D0C0B0A09080706050403020100u128),
+            _mm_set1_epi8(offset as i8),
+        ))
+    };
+
+    let data = u128_to_avx(data);
+    let ones = unsafe { _mm_set1_epi8(1) };
+    let data = avx_to_u128(unsafe { _mm_subs_epi8(data, ones) });
+
+    let (data_lo, data_hi) = split(data);
+    let (meta_lo, meta_hi) = split(meta);
+    let (mask_lo, mask_hi) = split(mask);
+    let shift = mask_lo.count_ones();
+
+    let meta_lo = unsafe { _pext_u64(meta_lo, mask_lo) };
+    let meta_hi = unsafe { _pext_u64(meta_hi, mask_hi) };
+    let meta = u128_to_avx((meta_lo as u128) | (meta_hi as u128).wrapping_shl(shift));
+
+    let data_lo = unsafe { _pext_u64(data_lo, mask_lo) };
+    let data_hi = unsafe { _pext_u64(data_hi, mask_hi) };
+    let data = u128_to_avx((data_lo as u128) | (data_hi as u128).wrapping_shl(shift));
+
+    [
+        avx_to_u128(unsafe { _mm_unpacklo_epi8(meta, data) }),
+        avx_to_u128(unsafe { _mm_unpackhi_epi8(meta, data) }),
     ]
 }
 

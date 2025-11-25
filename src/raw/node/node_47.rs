@@ -228,21 +228,26 @@ impl Header {
     fn keys_unsorted(&self) -> node::KeyIter {
         let data = self.data();
 
-        let mut entries = [(0u8, 0u8); 47];
+        let mut entries = [(0u8, 0u8); 64];
+        let mut i = 0;
 
-        let len = data
-            .into_iter()
-            .flat_map(u128::to_le_bytes)
-            .enumerate()
-            .filter_map(|(key, index)| index.checked_sub(1).map(|index| (key, index)))
-            .zip(&mut entries)
-            .map(|((key_in, index_in), (key_out, index_out))| {
-                *key_out = key_in as u8;
-                *index_out = index_in;
-            })
-            .count();
+        for (j, chunk) in data.into_iter().enumerate() {
+            let nonzero = node::simd::mask_nonzero(chunk);
+            let chunk = node::simd::compress_47(chunk, j as u8 * 16, nonzero);
+            let chunk = core::array::from_fn(|i| chunk[i].to_le_bytes());
+            let chunk = unsafe { core::mem::transmute::<[[u8; 16]; 2], [u8; 32]>(chunk) };
+            unsafe {
+                entries
+                    .as_mut_ptr()
+                    .cast::<u8>()
+                    .byte_add(i as usize * 2)
+                    .copy_from_nonoverlapping(chunk.as_ptr(), 32)
+            };
+            i += (nonzero.count_ones() >> 3) as u8;
+        }
 
-        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
+        let entries = core::array::from_fn(|i| entries[i]);
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, i))
     }
 
     fn meta(&self) -> ribbit::Packed<Meta> {
