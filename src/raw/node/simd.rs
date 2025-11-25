@@ -1,9 +1,13 @@
 use core::arch::x86_64::__m128i;
 use core::arch::x86_64::_mm_cmpeq_epi8;
+use core::arch::x86_64::_mm_cvtsi128_si64x;
+use core::arch::x86_64::_mm_cvtsi64_si128;
+use core::arch::x86_64::_mm_extract_epi64;
 use core::arch::x86_64::_mm_max_epu8;
 use core::arch::x86_64::_mm_min_epu8;
 use core::arch::x86_64::_mm_movemask_epi8;
 use core::arch::x86_64::_mm_set1_epi8;
+use core::arch::x86_64::_pext_u64;
 
 /// Output has 1 bit set for each byte in `array` that is equal to `byte`.
 #[inline(always)]
@@ -27,6 +31,24 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     let clamp = unsafe { _mm_min_epu8(clamp_min, max) };
 
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
+}
+
+// https://talkchess.com/viewtopic.php?t=78804
+// https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
+#[inline(always)]
+pub(super) fn compress(array: u128, mask: u128) -> u128 {
+    let array = u128_to_avx(array);
+    let mask = u128_to_avx(mask);
+
+    let array_low = unsafe { _mm_cvtsi128_si64x(array) } as u64;
+    let array_high = unsafe { _mm_extract_epi64::<1>(array) } as u64;
+
+    let mask_low = unsafe { _mm_cvtsi128_si64x(mask) } as u64;
+    let mask_high = unsafe { _mm_extract_epi64::<1>(mask) } as u64;
+
+    let low = unsafe { _pext_u64(array_low, mask_low) };
+    let high = unsafe { _pext_u64(array_high, mask_high) };
+    (low as u128) | (high as u128).unbounded_shl(mask_low.count_ones())
 }
 
 #[inline(always)]

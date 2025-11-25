@@ -88,27 +88,26 @@ impl linear::Header for ribbit::Packed<Header> {
         let keys = self.value.to_le_bytes();
 
         if L::UNBOUND && U::UNBOUND {
-            let mut entries: [(u8, u8); 3] =
-                core::array::from_fn(|index| (keys[index], index as u8));
-            entries[len as usize..].fill((0xFF, 0xFF));
+            let entries: [(u8, u8); 3] = core::array::from_fn(|index| (keys[index], index as u8));
             return node::KeyIter::from_node_3(linear::KeyIter::new(entries, len));
         }
 
-        let mut valid = 0;
         let min = lower.get();
         let max = upper.get();
+        let mut entries = [(0u8, 0u8); 3];
+        let len = keys
+            .into_iter()
+            .take(len as usize)
+            .enumerate()
+            .filter(|(_, key)| (min..=max).contains(key))
+            .zip(&mut entries)
+            .map(|((index_in, key_in), (key_out, index_out))| {
+                *key_out = key_in;
+                *index_out = index_in as u8;
+            })
+            .count() as u8;
 
-        let mut entries: [(u8, u8); 3] = core::array::from_fn(|index| {
-            if index < len as usize && (min..=max).contains(&keys[index]) {
-                valid += 1;
-                (keys[index], index as u8)
-            } else {
-                (255, 3)
-            }
-        });
-
-        entries.sort_unstable();
-        node::KeyIter::from_node_3(linear::KeyIter::new(entries, valid))
+        node::KeyIter::from_node_3(linear::KeyIter::new(entries, len))
     }
 }
 

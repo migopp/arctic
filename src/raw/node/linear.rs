@@ -230,7 +230,7 @@ impl<const N: usize> KeyIter<N> {
     #[inline]
     pub(super) fn sort_unstable(&mut self) {
         validate_eq!(self.head, 0);
-        self.inner.sort_unstable();
+        self.inner[..self.tail as usize].sort_unstable();
     }
 }
 
