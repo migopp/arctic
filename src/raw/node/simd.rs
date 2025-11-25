@@ -42,24 +42,6 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
 }
 
-/// Output has 8 bits set for each byte in `array` that is within `min..`.
-#[inline(always)]
-pub(super) fn mask_min(array: u128, min: u8) -> u128 {
-    let array = u128_to_avx(array);
-    let min = unsafe { _mm_set1_epi8(min as i8) };
-    let clamp = unsafe { _mm_max_epu8(array, min) };
-    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
-}
-
-/// Output has 8 bits set for each byte in `array` that is within `..=max`.
-#[inline(always)]
-pub(super) fn mask_max(array: u128, max: u8) -> u128 {
-    let array = u128_to_avx(array);
-    let max = unsafe { _mm_set1_epi8(max as i8) };
-    let clamp = unsafe { _mm_min_epu8(array, max) };
-    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
-}
-
 /// Output has 8 bits set for each byte in `array` that is non-zero.
 #[inline(always)]
 pub(super) fn mask_nonzero(array: u128) -> u128 {
