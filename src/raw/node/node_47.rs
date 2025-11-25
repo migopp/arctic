@@ -7,6 +7,7 @@ use ribbit::Atomic;
 
 use crate::raw::edge;
 use crate::raw::node;
+use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
@@ -195,7 +196,7 @@ impl Header {
         let i = lower.get() / 16;
         let j = upper.get() / 16;
 
-        let mut entries = [(0u8, 0u8); 64];
+        let mut entries = [KeyIndex::DEFAULT; 64];
         let mut len = 0;
         let mut keys = node::simd::add(node::simd::U8_SEQ, node::simd::mul(node::simd::U8_16, i));
 
@@ -222,7 +223,7 @@ impl Header {
 
     #[inline]
     fn keys(&self) -> node::KeyIter {
-        let mut entries = [(0u8, 0u8); 64];
+        let mut entries = [KeyIndex::DEFAULT; 64];
         let mut len = 0;
         let mut keys = node::simd::U8_SEQ;
 
@@ -288,7 +289,7 @@ impl Debug for Header {
         let mut keys = [0u8; 47];
         keys.iter_mut()
             .zip(iter)
-            .for_each(|(out, (key, _))| *out = key);
+            .for_each(|(out, KeyIndex { key, .. })| *out = key);
 
         f.debug_struct("Header")
             .field("len", &len)

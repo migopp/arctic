@@ -62,7 +62,7 @@ impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.keys.next()?;
+        let KeyIndex { key, index } = self.keys.next()?;
 
         #[cfg(feature = "validate")]
         validate!(
@@ -85,7 +85,7 @@ impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
 impl<'g, L, U, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, L, U, M> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let (key, index) = self.keys.next_back()?;
+        let KeyIndex { key, index } = self.keys.next_back()?;
 
         #[cfg(feature = "validate")]
         validate!(
@@ -118,9 +118,20 @@ pub(crate) union KeyIter {
     raw: u64,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct KeyIndex {
+    pub(super) key: u8,
+    pub(super) index: u8,
+}
+
+impl KeyIndex {
+    pub(crate) const DEFAULT: Self = Self { key: 0, index: 0 };
+}
+
 impl KeyIter {
     pub(crate) const ROOT: Self = Self {
-        node_3: linear::KeyIter::new([(0, 0); 3], 1),
+        node_3: linear::KeyIter::new([KeyIndex::DEFAULT; 3], 1),
     };
 
     const TAG_15: usize = (node::Kind::Node15 as usize) << 62;
@@ -198,13 +209,15 @@ impl KeyIter {
 }
 
 impl Iterator for KeyIter {
-    type Item = (u8, u8);
+    type Item = KeyIndex;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let kind = self.kind();
         if kind == node::Kind::NODE_256 {
-            unsafe { &mut self.node_256 }.next().map(|key| (key, key))
+            unsafe { &mut self.node_256 }
+                .next()
+                .map(|key| KeyIndex { key, index: key })
         } else if kind == node::Kind::NODE_3 {
             unsafe { &mut self.node_3 }.next()
         } else if kind == node::Kind::NODE_15 {
@@ -238,7 +251,7 @@ impl DoubleEndedIterator for KeyIter {
         if kind == node::Kind::NODE_256 {
             unsafe { &mut self.node_256 }
                 .next_back()
-                .map(|key| (key, key))
+                .map(|key| KeyIndex { key, index: key })
         } else if kind == node::Kind::NODE_3 {
             unsafe { &mut self.node_3 }.next_back()
         } else if kind == node::Kind::NODE_15 {

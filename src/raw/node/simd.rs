@@ -20,6 +20,8 @@ use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
 
+use crate::raw::node::iter::KeyIndex;
+
 /// Output has 8 bits set for each byte in `array` that is equal to `byte`.
 #[inline(always)]
 pub(super) fn mask_eq(array: u128, byte: u8) -> u128 {
@@ -67,7 +69,7 @@ pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [(u8, u8); 16] {
+pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] {
     let (ks_lo, ks_hi) = split(keys);
     let (is_lo, is_hi) = split(indices);
     let (mask_lo, mask_hi) = split(mask);
@@ -91,7 +93,7 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [(u8, u8); 16] 
 
     let out = interleave(avx_to_u128(ks), avx_to_u128(is));
     let out = core::array::from_fn(|i| out[i].to_le_bytes());
-    unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(out) }
+    unsafe { core::mem::transmute::<[[u8; 16]; 2], [KeyIndex; 16]>(out) }
 }
 
 #[inline(always)]

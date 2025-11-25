@@ -3,6 +3,7 @@ use ribbit::u4;
 
 use crate::raw::edge;
 use crate::raw::node;
+use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 use crate::raw::node::Node3;
 use crate::raw::node::Node47;
@@ -85,8 +86,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
         if lower.get() == 0 && upper.get() == 255 {
             let keys = self.value.to_le_bytes();
-            let entries: [(u8, u8); Self::LEN] =
-                core::array::from_fn(|index| (keys[index], index as u8));
+            let entries = core::array::from_fn(|index| KeyIndex {
+                key: keys[index],
+                index: index as u8,
+            });
             return node::KeyIter::from_node_15(linear::KeyIter::new(entries, len));
         }
 
@@ -97,7 +100,7 @@ impl linear::Header for ribbit::Packed<Header> {
         let out = node::simd::compress(self.value, node::simd::U8_SEQ, mask_valid);
 
         // TODO: SIMD sorting network?
-        let entries: [(u8, u8); Self::LEN] = core::array::from_fn(|i| out[i]);
+        let entries = core::array::from_fn(|i| out[i]);
         node::KeyIter::from_node_15(linear::KeyIter::new(entries, len))
     }
 }

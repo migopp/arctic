@@ -191,7 +191,7 @@ pub(crate) trait Header: ribbit::Unpack {
 #[derive(Copy, Clone, Debug)]
 pub(super) struct KeyIter<const N: usize> {
     head: u8,
-    inner: [(u8, u8); N],
+    entries: [node::iter::KeyIndex; N],
     tail: u8,
 }
 
@@ -201,9 +201,9 @@ const _: [(); 32] = [(); core::mem::size_of::<KeyIter<15>>()];
 
 impl<const N: usize> KeyIter<N> {
     #[inline]
-    pub(super) const fn new(inner: [(u8, u8); N], len: u8) -> Self {
+    pub(super) const fn new(entries: [node::iter::KeyIndex; N], len: u8) -> Self {
         Self {
-            inner,
+            entries,
             head: 0,
             tail: len,
         }
@@ -212,19 +212,19 @@ impl<const N: usize> KeyIter<N> {
     #[inline]
     pub(super) fn sort_unstable(&mut self) {
         validate_eq!(self.head, 0);
-        self.inner[..self.tail as usize].sort_unstable();
+        self.entries[..self.tail as usize].sort_unstable();
     }
 }
 
 impl<const N: usize> Iterator for KeyIter<N> {
-    type Item = (u8, u8);
+    type Item = node::iter::KeyIndex;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.head == self.tail {
             return None;
         }
 
-        let next = self.inner.get(self.head as usize).copied()?;
+        let next = self.entries.get(self.head as usize).copied()?;
         self.head += 1;
         Some(next)
     }
@@ -244,7 +244,7 @@ impl<const N: usize> DoubleEndedIterator for KeyIter<N> {
         }
 
         self.tail -= 1;
-        self.inner.get(self.tail as usize).copied()
+        self.entries.get(self.tail as usize).copied()
     }
 }
 

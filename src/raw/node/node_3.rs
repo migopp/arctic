@@ -3,6 +3,7 @@ use ribbit::u48;
 
 use crate::raw::edge;
 use crate::raw::node;
+use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 
 use super::Node15;
@@ -90,8 +91,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
         if lower.get() == 0 && upper.get() == 255 {
             let keys = self.value.to_le_bytes();
-            let entries: [(u8, u8); 3] =
-                core::array::from_fn(|index| (keys[index * 2], index as u8));
+            let entries: [KeyIndex; 3] = core::array::from_fn(|index| KeyIndex {
+                key: keys[index * 2],
+                index: index as u8,
+            });
             return node::KeyIter::from_node_3(linear::KeyIter::new(entries, len));
         }
 
@@ -116,7 +119,7 @@ impl linear::Header for ribbit::Packed<Header> {
 
         let entries = unsafe { core::arch::x86_64::_pext_u64(self.value | INDICES, mask_valid) }
             .to_le_bytes();
-        let entries = unsafe { core::mem::transmute::<[u8; 8], [(u8, u8); 4]>(entries) };
+        let entries = unsafe { core::mem::transmute::<[u8; 8], [KeyIndex; 4]>(entries) };
         let entries = core::array::from_fn(|i| entries[i]);
         node::KeyIter::from_node_3(linear::KeyIter::new(entries, len))
     }
