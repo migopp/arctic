@@ -215,13 +215,12 @@ impl Header {
 
     #[inline]
     fn keys_unsorted(&self) -> node::KeyIter {
-        let data = self.data();
-
         let mut entries = [(0u8, 0u8); 64];
-        let mut i = 0;
+        let mut len = 0;
         let mut keys = node::simd::U8_SEQ;
 
-        for indices in data.into_iter() {
+        for i in 0..16 {
+            let indices = self.data[i].load(Ordering::Relaxed);
             let nonzero = node::simd::mask_nonzero(indices);
             let (chunk_keys, chunk_indices) =
                 node::simd::compress(keys, node::simd::sub_one(indices), nonzero);
@@ -232,16 +231,16 @@ impl Header {
                 entries
                     .as_mut_ptr()
                     .cast::<(u8, u8)>()
-                    .add(i as usize)
+                    .add(len as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
 
-            i += (nonzero.count_ones() >> 3) as u8;
+            len += (nonzero.count_ones() >> 3) as u8;
             keys = node::simd::add_sixteen(keys);
         }
 
         let entries = core::array::from_fn(|i| entries[i]);
-        node::KeyIter::from_node_47(linear::KeyIter::new(entries, i))
+        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len))
     }
 
     fn meta(&self) -> ribbit::Packed<Meta> {
