@@ -1,5 +1,6 @@
 use core::arch::x86_64::__m128i;
 use core::arch::x86_64::_mm_adds_epu8;
+use core::arch::x86_64::_mm_and_si128;
 use core::arch::x86_64::_mm_cmpeq_epi8;
 use core::arch::x86_64::_mm_cmpgt_epi8;
 use core::arch::x86_64::_mm_cvtsi128_si64x;
@@ -7,7 +8,11 @@ use core::arch::x86_64::_mm_extract_epi64;
 use core::arch::x86_64::_mm_max_epu8;
 use core::arch::x86_64::_mm_min_epu8;
 use core::arch::x86_64::_mm_movemask_epi8;
+use core::arch::x86_64::_mm_mullo_epi16;
+use core::arch::x86_64::_mm_set1_epi16;
 use core::arch::x86_64::_mm_set1_epi8;
+use core::arch::x86_64::_mm_slli_epi16;
+use core::arch::x86_64::_mm_srli_epi16;
 use core::arch::x86_64::_mm_subs_epu8;
 use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
@@ -37,6 +42,24 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
 }
 
+/// Output has 8 bits set for each byte in `array` that is within `min..`.
+#[inline(always)]
+pub(super) fn mask_min(array: u128, min: u8) -> u128 {
+    let array = u128_to_avx(array);
+    let min = unsafe { _mm_set1_epi8(min as i8) };
+    let clamp = unsafe { _mm_max_epu8(array, min) };
+    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
+}
+
+/// Output has 8 bits set for each byte in `array` that is within `..=max`.
+#[inline(always)]
+pub(super) fn mask_max(array: u128, max: u8) -> u128 {
+    let array = u128_to_avx(array);
+    let max = unsafe { _mm_set1_epi8(max as i8) };
+    let clamp = unsafe { _mm_min_epu8(array, max) };
+    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
+}
+
 /// Output has 8 bits set for each byte in `array` that is non-zero.
 #[inline(always)]
 pub(super) fn mask_nonzero(array: u128) -> u128 {
@@ -49,21 +72,23 @@ pub(super) fn mask_nonzero(array: u128) -> u128 {
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress(meta: u128, data: u128, mask: u128) -> (u128, u128) {
-    let (meta_lo, meta_hi) = split(meta);
-    let (data_lo, data_hi) = split(data);
+pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [(u8, u8); 16] {
+    let (ks_lo, ks_hi) = split(keys);
+    let (is_lo, is_hi) = split(indices);
     let (mask_lo, mask_hi) = split(mask);
     let shift = mask_lo.count_ones();
 
-    let meta_lo = unsafe { _pext_u64(meta_lo, mask_lo) };
-    let meta_hi = unsafe { _pext_u64(meta_hi, mask_hi) };
-    let meta = (meta_lo as u128) | (meta_hi as u128).wrapping_shl(shift);
+    let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
+    let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
+    let ks = (ks_lo as u128) | (ks_hi as u128).wrapping_shl(shift);
 
-    let data_lo = unsafe { _pext_u64(data_lo, mask_lo) };
-    let data_hi = unsafe { _pext_u64(data_hi, mask_hi) };
-    let data = (data_lo as u128) | (data_hi as u128).wrapping_shl(shift);
+    let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
+    let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
+    let is = (is_lo as u128) | (is_hi as u128).wrapping_shl(shift);
 
-    (meta, data)
+    let out = interleave(ks, is);
+    let out = core::array::from_fn(|i| out[i].to_le_bytes());
+    unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(out) }
 }
 
 pub(super) fn sub_one(array: u128) -> u128 {
@@ -74,12 +99,28 @@ pub(super) const U8_1: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101u128;
 pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
 pub(super) const U8_SEQ: u128 = 0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128;
 
-pub(super) fn add_sixteen(array: u128) -> u128 {
-    avx_to_u128(unsafe { _mm_adds_epu8(u128_to_avx(array), u128_to_avx(U8_16)) })
+// https://stackoverflow.com/a/29155682
+pub(super) fn mul(a: u128, b: u8) -> u128 {
+    let a = u128_to_avx(a);
+    let b = unsafe { _mm_set1_epi8(b as i8) };
+
+    let even = avx_to_u128(unsafe { _mm_and_si128(_mm_mullo_epi16(a, b), _mm_set1_epi16(0xFF)) });
+    let odd = avx_to_u128(unsafe {
+        _mm_slli_epi16::<8>(_mm_mullo_epi16(
+            _mm_srli_epi16::<8>(a),
+            _mm_srli_epi16::<8>(b),
+        ))
+    });
+
+    even | odd
+}
+
+pub(super) fn add(a: u128, b: u128) -> u128 {
+    avx_to_u128(unsafe { _mm_adds_epu8(u128_to_avx(a), u128_to_avx(b)) })
 }
 
 #[inline(always)]
-pub(super) fn interleave(lo: u128, hi: u128) -> [u128; 2] {
+fn interleave(lo: u128, hi: u128) -> [u128; 2] {
     let lo = u128_to_avx(lo);
     let hi = u128_to_avx(hi);
 

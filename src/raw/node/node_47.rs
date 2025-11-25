@@ -192,25 +192,57 @@ impl Header {
             return self.keys();
         }
 
-        let data = self.data();
+        let i = lower.get() / 16;
+        let j = upper.get() / 16;
 
-        let mut entries = [(0u8, 0u8); 47];
+        let mut entries = [(0u8, 0u8); 64];
+        let mut len = 0;
+        let mut keys = node::simd::add(node::simd::U8_SEQ, node::simd::mul(node::simd::U8_16, i));
 
-        let len = data
-            .into_iter()
-            .flat_map(u128::to_le_bytes)
-            .enumerate()
-            .skip(lower.get() as usize)
-            .take(upper.get() as usize)
-            .filter_map(|(key, index)| index.checked_sub(1).map(|index| (key, index)))
-            .zip(&mut entries)
-            .map(|((key_in, index_in), (key_out, index_out))| {
-                *key_out = key_in as u8;
-                *index_out = index_in;
-            })
-            .count();
+        if i == j {
+            let indices = self.data[i as usize].load(Ordering::Relaxed);
+            let valid = node::simd::mask_nonzero(indices)
+                & node::simd::mask_range(keys, lower.get(), upper.get());
+            let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
+            entries[len as usize..][..16].copy_from_slice(&chunk);
+            return node::KeyIter::from_node_47(linear::KeyIter::new(
+                core::array::from_fn(|i| entries[i]),
+                (valid.count_ones() >> 3) as u8,
+            ));
+        }
 
-        node::KeyIter::from_node_47(linear::KeyIter::new(entries, len as u8))
+        let lower_keys = keys;
+        let lower_indices = self.data[i as usize].load(Ordering::Relaxed);
+        let lower_valid =
+            node::simd::mask_nonzero(lower_indices) & node::simd::mask_min(lower_keys, lower.get());
+        let lower_chunk =
+            node::simd::compress(lower_keys, node::simd::sub_one(lower_indices), lower_valid);
+        entries[len as usize..][..16].copy_from_slice(&lower_chunk);
+        len += (lower_valid.count_ones() >> 3) as u8;
+        keys = node::simd::add(keys, node::simd::U8_16);
+
+        for k in i + 1..j {
+            let indices = self.data[k as usize].load(Ordering::Relaxed);
+            let valid = node::simd::mask_nonzero(indices);
+            let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
+            entries[len as usize..][..16].copy_from_slice(&chunk);
+            len += (valid.count_ones() >> 3) as u8;
+            keys = node::simd::add(keys, node::simd::U8_16);
+        }
+
+        let upper_keys = keys;
+        let upper_indices = self.data[j as usize].load(Ordering::Relaxed);
+        let upper_valid =
+            node::simd::mask_nonzero(upper_indices) & node::simd::mask_max(upper_keys, upper.get());
+        let upper_chunk =
+            node::simd::compress(upper_keys, node::simd::sub_one(upper_indices), upper_valid);
+        entries[len as usize..][..16].copy_from_slice(&upper_chunk);
+        len += (upper_valid.count_ones() >> 3) as u8;
+
+        node::KeyIter::from_node_47(linear::KeyIter::new(
+            core::array::from_fn(|i| entries[i]),
+            len,
+        ))
     }
 
     #[inline]
@@ -222,21 +254,15 @@ impl Header {
         for i in 0..16 {
             let indices = self.data[i].load(Ordering::Relaxed);
             let nonzero = node::simd::mask_nonzero(indices);
-            let (chunk_keys, chunk_indices) =
-                node::simd::compress(keys, node::simd::sub_one(indices), nonzero);
-            let chunk = node::simd::interleave(chunk_keys, chunk_indices);
-            let chunk = core::array::from_fn(|i| chunk[i].to_le_bytes());
-            let chunk = unsafe { core::mem::transmute::<[[u8; 16]; 2], [(u8, u8); 16]>(chunk) };
+            let chunk = node::simd::compress(keys, node::simd::sub_one(indices), nonzero);
             unsafe {
                 entries
                     .as_mut_ptr()
-                    .cast::<(u8, u8)>()
                     .add(len as usize)
                     .copy_from_nonoverlapping(chunk.as_ptr(), 16)
             };
-
             len += (nonzero.count_ones() >> 3) as u8;
-            keys = node::simd::add_sixteen(keys);
+            keys = node::simd::add(keys, node::simd::U8_16);
         }
 
         let entries = core::array::from_fn(|i| entries[i]);
@@ -280,6 +306,11 @@ impl Header {
     fn data(&self) -> [u128; 16] {
         core::array::from_fn(|i| self.data[i].load(Ordering::Relaxed))
     }
+}
+
+#[unsafe(no_mangle)]
+fn test() {
+    std::hint::black_box(Header::default()).keys();
 }
 
 impl Debug for Header {
