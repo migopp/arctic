@@ -25,7 +25,7 @@ use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::Edge;
 
-pub(crate) trait Node<M>: Default
+pub(crate) unsafe trait Node<M>: Default
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -51,11 +51,55 @@ where
 
     fn edges(&self) -> &[Atomic<Edge<M>>];
 
-    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
+    fn edges_mut(&mut self) -> &mut [Atomic<Edge<M>>];
 
-    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>>;
+    /// # Safety
+    ///
+    /// Implementer must guarantee that `Some(index)` is within `self.edges()`
+    fn get_key(&self, key: u8) -> Option<u8>;
 
-    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>>;
+    #[inline]
+    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
+        let index = self.get_key(key)? as usize;
+        let edges = self.edges();
+        Some(if cfg!(feature = "validate") {
+            &edges[index]
+        } else {
+            unsafe { edges.get_unchecked(index) }
+        })
+    }
+
+    /// # Safety
+    ///
+    /// Implementer must guarantee that `Some(index)` is within `self.edges()`
+    fn get_or_insert_key(&self, key: u8) -> Option<u8>;
+
+    #[inline]
+    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
+        let index = self.get_or_insert_key(key)? as usize;
+        let edges = self.edges();
+        Some(if cfg!(feature = "validate") {
+            &edges[index]
+        } else {
+            unsafe { edges.get_unchecked(index) }
+        })
+    }
+
+    /// # Safety
+    ///
+    /// Implementer must guarantee that `Some(index)` is within `self.edges()`
+    fn insert_key(&mut self, key: u8) -> Option<u8>;
+
+    #[inline]
+    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
+        let index = self.insert_key(key)? as usize;
+        let edges = self.edges_mut();
+        Some(if cfg!(feature = "validate") {
+            &mut edges[index]
+        } else {
+            unsafe { edges.get_unchecked_mut(index) }
+        })
+    }
 
     fn freeze(&self);
 

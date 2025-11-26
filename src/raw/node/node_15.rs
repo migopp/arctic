@@ -45,24 +45,29 @@ impl linear::Header for ribbit::Packed<Header> {
     where
         M: ribbit::Pack<Packed: edge::Meta>;
 
+    #[inline]
     fn freeze(self) -> Self {
         self.with_frozen(true)
     }
 
+    #[inline]
     fn is_frozen(self) -> bool {
         self.frozen()
     }
 
-    fn len(self) -> usize {
-        self.len().value() as usize
+    #[inline]
+    fn len(self) -> u8 {
+        self.len().value()
     }
 
+    #[inline]
     fn get(self, key: u8) -> Option<u8> {
         let index = node::simd::mask_byte_to_bit(node::simd::mask_eq(self.value, key))
             .trailing_zeros() as u8;
         (index < self.len().value()).then_some(index)
     }
 
+    #[inline]
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
         let len = self.len().value();
         validate!(len <= Self::LEN as u8);

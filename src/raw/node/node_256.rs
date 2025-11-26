@@ -23,7 +23,7 @@ where
     }
 }
 
-impl<M> Node<M> for Node256<M>
+unsafe impl<M> Node<M> for Node256<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -48,20 +48,23 @@ where
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        // SAFETY: `key` is a u8 and must be < 256
-        Some(unsafe { self.0.get_unchecked(key as usize) })
+    fn edges_mut(&mut self) -> &mut [Atomic<Edge<M>>] {
+        &mut self.0
     }
 
     #[inline]
-    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        self.get(key)
+    fn get_key(&self, key: u8) -> Option<u8> {
+        Some(key)
     }
 
     #[inline]
-    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
-        // SAFETY: `key` is a u8 and must be < 256
-        Some(unsafe { self.0.get_unchecked_mut(key as usize) })
+    fn get_or_insert_key(&self, key: u8) -> Option<u8> {
+        Some(key)
+    }
+
+    #[inline]
+    fn insert_key(&mut self, key: u8) -> Option<u8> {
+        Some(key)
     }
 
     fn freeze(&self) {

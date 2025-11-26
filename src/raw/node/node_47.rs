@@ -36,7 +36,7 @@ where
     }
 }
 
-impl<M> Node<M> for Node47<M>
+unsafe impl<M> Node<M> for Node47<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -54,26 +54,29 @@ where
         self.header.keys_range(lower, upper)
     }
 
+    #[inline]
     fn edges(&self) -> &[Atomic<Edge<M>>] {
         &self.edges
     }
 
-    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        let index = self.header.get(key)?;
-        validate!((index as usize) < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked(index as usize) })
+    #[inline]
+    fn edges_mut(&mut self) -> &mut [Atomic<Edge<M>>] {
+        &mut self.edges
     }
 
-    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        let index = self.header.get_or_insert(key)?;
-        validate!((index as usize) < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked(index as usize) })
+    #[inline]
+    fn get_key(&self, key: u8) -> Option<u8> {
+        self.header.get(key)
     }
 
-    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
-        let index = self.header.insert(key)?;
-        validate!((index as usize) < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked_mut(index as usize) })
+    #[inline]
+    fn get_or_insert_key(&self, key: u8) -> Option<u8> {
+        self.header.get_or_insert(key)
+    }
+
+    #[inline]
+    fn insert_key(&mut self, key: u8) -> Option<u8> {
+        self.header.insert(key)
     }
 
     fn freeze(&self) {

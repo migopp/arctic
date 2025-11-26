@@ -58,8 +58,8 @@ impl linear::Header for ribbit::Packed<Header> {
     }
 
     #[inline]
-    fn len(self) -> usize {
-        self.len().value() as usize
+    fn len(self) -> u8 {
+        self.len().value()
     }
 
     #[inline]
@@ -153,6 +153,7 @@ fn get_swar(array: u64, key: u8) -> u8 {
     unsafe { core::arch::x86_64::_pext_u64(equal_zero, OVERFLOW) }.trailing_ones() as u8
 }
 
+#[inline]
 const fn broadcast(byte: u8) -> u64 {
     let byte = byte as u64;
 

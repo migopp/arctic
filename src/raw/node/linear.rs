@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
+unsafe impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
 where
     H: ribbit::Pack<Packed: Header + Default>,
     M: ribbit::Pack<Packed: edge::Meta>,
@@ -55,20 +55,22 @@ where
     }
 
     #[inline]
-    fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
-        let header = self.header.load_packed(Ordering::Relaxed);
-        let index = header.get(key)?;
-        validate!((index as usize) < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked(index as usize) })
+    fn edges_mut(&mut self) -> &mut [Atomic<Edge<M>>] {
+        &mut self.edges
     }
 
     #[inline]
-    fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
+    fn get_key(&self, key: u8) -> Option<u8> {
+        self.header.load_packed(Ordering::Relaxed).get(key)
+    }
+
+    #[inline]
+    fn get_or_insert_key(&self, key: u8) -> Option<u8> {
         let mut old = self.header.load_packed(Ordering::Relaxed);
 
-        let index = loop {
+        loop {
             let new = match old.get_or_insert(key) {
-                Ok(index) => break index as usize,
+                Ok(index) => return Some(index),
                 Err(None) => return None,
                 Err(Some(new)) => new,
             };
@@ -79,30 +81,24 @@ where
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => break old.len(),
+                Ok(_) => break Some(old.len()),
                 Err(conflict) => old = conflict,
             }
-        };
-
-        validate!(index < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked(index) })
+        }
     }
 
     #[inline]
-    fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
+    fn insert_key(&mut self, key: u8) -> Option<u8> {
         let old = self.header.get_packed();
 
-        let index = match old.get_or_insert(key) {
-            Ok(index) => index as usize,
+        match old.get_or_insert(key) {
+            Ok(index) => Some(index),
             Err(None) => return None,
             Err(Some(new)) => {
                 self.header.set_packed(new);
-                old.len()
+                Some(old.len())
             }
-        };
-
-        validate!(index < self.edges.len());
-        Some(unsafe { self.edges.get_unchecked_mut(index) })
+        }
     }
 
     fn freeze(&self) {
@@ -130,7 +126,10 @@ where
             }
         }
 
-        self.edges.iter().take(header.len()).for_each(Edge::freeze);
+        self.edges
+            .iter()
+            .take(header.len() as usize)
+            .for_each(Edge::freeze);
     }
 }
 
@@ -173,7 +172,7 @@ pub(crate) trait Header: ribbit::Unpack {
 
     fn is_frozen(self) -> bool;
 
-    fn len(self) -> usize;
+    fn len(self) -> u8;
 
     fn get(self, key: u8) -> Option<u8>;
 
