@@ -97,7 +97,7 @@ where
             RangeIter::Root { key, mut next } => {
                 crate::cold();
                 if let Some(value) = next.take() {
-                    apply(&key, value);
+                    let _ = apply(&key, value);
                 }
             }
             RangeIter::Node(mut iter) => iter.for_each(apply),
