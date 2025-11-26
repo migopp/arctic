@@ -2,7 +2,6 @@ use core::arch::x86_64::__m128i;
 use core::arch::x86_64::_mm_adds_epu8;
 use core::arch::x86_64::_mm_and_si128;
 use core::arch::x86_64::_mm_cmpeq_epi8;
-use core::arch::x86_64::_mm_cmpgt_epi8;
 use core::arch::x86_64::_mm_cmplt_epi8;
 use core::arch::x86_64::_mm_cvtsi128_si64x;
 use core::arch::x86_64::_mm_extract_epi64;
@@ -43,14 +42,6 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     let clamp = unsafe { _mm_min_epu8(clamp_min, max) };
 
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
-}
-
-/// Output has 8 bits set for each byte in `array` that is non-zero.
-#[inline(always)]
-pub(super) fn mask_nonzero(array: u128) -> u128 {
-    const ZERO: __m128i = u128_to_avx(0);
-    let array = u128_to_avx(array);
-    avx_to_u128(unsafe { _mm_cmpgt_epi8(array, ZERO) })
 }
 
 /// Output has 8 bits set for each byte in `array` below `len`
