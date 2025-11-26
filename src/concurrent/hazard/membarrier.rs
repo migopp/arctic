@@ -4,8 +4,8 @@
 use core::sync::atomic::Ordering;
 
 #[inline(always)]
-pub(crate) fn fast() {
-    if cfg!(feature = "opt-membarrier") {
+pub(crate) fn fast(membarrier: bool) {
+    if cfg!(feature = "opt-membarrier") && membarrier {
         core::sync::atomic::compiler_fence(Ordering::SeqCst);
     } else {
         core::sync::atomic::fence(Ordering::SeqCst);
@@ -13,7 +13,12 @@ pub(crate) fn fast() {
 }
 
 #[cfg(feature = "opt-membarrier")]
-pub(crate) fn slow() {
+pub(crate) fn slow(membarrier: bool) {
+    if !membarrier {
+        core::sync::atomic::fence(Ordering::SeqCst);
+        return;
+    }
+
     static INIT: std::sync::Once = std::sync::Once::new();
 
     INIT.call_once(|| {
@@ -45,6 +50,6 @@ pub(crate) fn slow() {
 
 #[cfg(not(feature = "opt-membarrier"))]
 #[inline(always)]
-pub(crate) fn slow() {
+pub(crate) fn slow(_membarrier: bool) {
     core::sync::atomic::fence(Ordering::SeqCst);
 }

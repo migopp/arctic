@@ -115,6 +115,7 @@ pub struct Process {
 }
 
 #[cfg_attr(not(feature = "stat"), expect(dead_code))]
+#[derive(Copy, Clone)]
 pub(crate) enum Counter {
     Op(Smo),
     InsertPessimistic,
@@ -122,6 +123,7 @@ pub(crate) enum Counter {
     Retire,
     FreeConflict,
     FreeRetire,
+    FreeReclaim,
     FreeDrop,
     HazardMatch,
 
@@ -182,6 +184,7 @@ pub struct Thread {
     retire_cache: u64,
     free_conflict: u64,
     free_retire: u64,
+    free_reclaim: u64,
     free_drop: u64,
     hazard_match: u64,
     range_retry: Histogram,
@@ -259,6 +262,7 @@ pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
                 Counter::Retire => &mut thread.retire,
                 Counter::FreeConflict => &mut thread.free_conflict,
                 Counter::FreeRetire => &mut thread.free_retire,
+                Counter::FreeReclaim => &mut thread.free_reclaim,
                 Counter::FreeDrop => &mut thread.free_drop,
                 Counter::HazardMatch => &mut thread.hazard_match,
                 Counter::ScanInsert => &mut thread.scan_insert,

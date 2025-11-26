@@ -346,7 +346,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn replace_unchecked<'g>(
+    pub(crate) unsafe fn replace_unchecked(
         self,
         parent: ribbit::Packed<M>,
     ) -> (node::Smo, ribbit::Packed<Edge<M>>) {

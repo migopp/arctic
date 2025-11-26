@@ -68,6 +68,16 @@ impl<K: Key, V: Value> Map<K, V> {
     pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
         &mut self.raw
     }
+
+    #[inline]
+    pub fn set_membarrier(&mut self, membarrier: bool) {
+        self.smr.set_membarrier(membarrier);
+    }
+
+    #[inline]
+    pub fn reclaim(&mut self) {
+        self.smr.reclaim(stat::Counter::FreeReclaim);
+    }
 }
 
 pub struct MapRef<'g, K: Key, V: Value> {
@@ -80,6 +90,11 @@ where
     K: Key,
     V: Value + Send + Sync,
 {
+    #[inline]
+    pub fn enable_membarrier(&self) {
+        self.smr.enable_membarrier();
+    }
+
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_>> {
         cursor::Point::<K, V, _>::get(&mut self.smr, self.raw.root(), K::Read::from(key))

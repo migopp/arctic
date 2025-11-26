@@ -83,6 +83,7 @@ mod membarrier;
 pub(crate) mod prefix;
 
 use core::marker::PhantomData;
+use core::sync::atomic::AtomicBool;
 #[cfg(not(feature = "smr-epoch"))]
 use core::sync::atomic::Ordering;
 
@@ -109,6 +110,8 @@ pub(crate) struct Global<V: concurrent::Value> {
         Cache<core::cell::RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>,
     >,
     #[cfg(not(feature = "smr-epoch"))]
+    membarrier: AtomicBool,
+    #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
 }
 
@@ -125,8 +128,15 @@ impl<V: concurrent::Value> Global<V> {
             #[cfg(not(feature = "smr-epoch"))]
             retired: thread_local::ThreadLocal::with_capacity(128),
             #[cfg(not(feature = "smr-epoch"))]
+            membarrier: AtomicBool::new(false),
+            #[cfg(not(feature = "smr-epoch"))]
             reclaim_threshold: _reclaim_threshold,
         }
+    }
+
+    #[inline]
+    pub(crate) fn set_membarrier(&mut self, membarrier: bool) {
+        *self.membarrier.get_mut() = membarrier;
     }
 
     pub(crate) fn pin(&self) -> Local<V> {
@@ -146,8 +156,20 @@ impl<V: concurrent::Value> Global<V> {
             #[cfg(not(feature = "smr-epoch"))]
             retired: self.retired.get_or_default().0.borrow_mut(),
             #[cfg(not(feature = "smr-epoch"))]
+            membarrier: &self.membarrier,
+            #[cfg(not(feature = "smr-epoch"))]
             reclaim_threshold: self.reclaim_threshold,
         }
+    }
+
+    pub(crate) fn reclaim(&mut self, counter: stat::Counter) {
+        self.retired
+            .iter_mut()
+            .map(|Cache(retired)| retired)
+            .flat_map(core::cell::RefCell::get_mut)
+            .for_each(|(prefix, raw)| {
+                unsafe { deallocate_hazard::<V>(*prefix, *raw, counter) };
+            })
     }
 }
 
@@ -160,13 +182,7 @@ impl<V: concurrent::Value> Default for Global<V> {
 #[cfg(not(feature = "smr-epoch"))]
 impl<V: concurrent::Value> Drop for Global<V> {
     fn drop(&mut self) {
-        self.retired
-            .iter_mut()
-            .map(|Cache(retired)| retired)
-            .flat_map(core::cell::RefCell::get_mut)
-            .for_each(|(prefix, raw)| {
-                unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeDrop) };
-            })
+        self.reclaim(stat::Counter::FreeDrop);
     }
 }
 
@@ -183,6 +199,8 @@ pub(crate) struct Local<'g, V> {
     #[cfg(not(feature = "smr-epoch"))]
     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
     #[cfg(not(feature = "smr-epoch"))]
+    membarrier: &'g AtomicBool,
+    #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
 }
 
@@ -197,12 +215,17 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
 #[cfg(not(feature = "smr-epoch"))]
 impl<'g, V: concurrent::Value> Local<'g, V> {
     #[inline]
+    pub(super) fn enable_membarrier(&self) {
+        self.membarrier.store(true, Ordering::Relaxed);
+    }
+
+    #[inline]
     pub(crate) fn guard<'l>(
         &'l mut self,
         prefix: ribbit::Packed<prefix::Be>,
     ) -> guard::Traverse<'g, 'l, V> {
         self.hazard.store_packed(prefix, Ordering::Relaxed);
-        membarrier::fast();
+        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
         guard::Traverse::new(self)
     }
 
@@ -249,7 +272,7 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
     fn flush(&mut self) {
         stat::max(stat::Max::RetireCache, self.retired.len() as u64);
 
-        membarrier::slow();
+        membarrier::slow(self.membarrier.load(Ordering::Relaxed));
 
         let hazards = self
             .hazards
