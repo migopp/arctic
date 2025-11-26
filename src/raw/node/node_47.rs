@@ -123,11 +123,10 @@ impl Header {
     fn get(&self, key: u8) -> Option<u8> {
         let i = key / 16;
         let j = key % 16;
-        let index = (unsafe { self.data.get_unchecked(i as usize) }
+        (unsafe { self.data.get_unchecked(i as usize) }
             .load(Ordering::Relaxed)
             .shr(j << 3) as u8)
-            .wrapping_sub(1);
-        (index < 47).then_some(index)
+            .checked_sub(1)
     }
 
     fn get_or_insert(&self, key: u8) -> Option<u8> {
@@ -153,7 +152,6 @@ impl Header {
                     self.ensure_meta_consistent(new);
                     return Some(len);
                 }
-                Err(conflict) if conflict.frozen() => return None,
                 Err(_) => continue,
             }
         }

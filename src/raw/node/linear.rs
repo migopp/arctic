@@ -80,7 +80,6 @@ where
                 Ordering::Relaxed,
             ) {
                 Ok(_) => break old.len(),
-                Err(conflict) if conflict.is_frozen() => return None,
                 Err(conflict) => old = conflict,
             }
         };
