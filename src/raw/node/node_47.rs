@@ -136,8 +136,15 @@ impl Header {
             }
 
             let old = self.meta_consistent();
-
             let len = old.len().value();
+
+            // NOTE: tricky edge case here, where the above `get`
+            // call returns `None` between another thread updating
+            // the metadata and the data array being updated.
+            if key == old.last() {
+                return len.checked_sub(1);
+            }
+
             if len == 47 || old.frozen() {
                 return None;
             }
