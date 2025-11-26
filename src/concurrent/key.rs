@@ -10,6 +10,7 @@ pub trait Key: raw::Key {
 }
 
 impl Key for Vec<u8> {
+    #[inline]
     #[expect(private_interfaces)]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
         hazard_dynamic(reader)
@@ -17,6 +18,7 @@ impl Key for Vec<u8> {
 }
 
 impl Key for String {
+    #[inline]
     #[expect(private_interfaces)]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
         hazard_dynamic(reader)
@@ -27,6 +29,7 @@ macro_rules! impl_integer {
     ($($integer:ty),* $(,)?) => {
         $(
             impl Key for $integer {
+                #[inline]
                 #[expect(private_interfaces)]
                 fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
                     hazard_integer(reader)

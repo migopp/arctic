@@ -123,6 +123,7 @@ impl Header {
         }
     }
 
+    #[inline]
     fn get(&self, key: u8) -> Option<u8> {
         let i = key / 16;
         let j = key % 16;
