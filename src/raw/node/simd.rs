@@ -14,6 +14,8 @@ use core::arch::x86_64::_mm_set1_epi8;
 use core::arch::x86_64::_mm_set_epi64x;
 use core::arch::x86_64::_mm_slli_epi16;
 use core::arch::x86_64::_mm_srli_epi16;
+use core::arch::x86_64::_mm_store_si128;
+use core::arch::x86_64::_mm_storeu_si128;
 use core::arch::x86_64::_mm_subs_epu8;
 use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
@@ -71,21 +73,27 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
     let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
     let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
 
-    validate!(shift <= 64);
+    let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
+    let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
 
-    let ks_hi_hi = ks_hi.unbounded_shr(64 - shift);
-    let is_hi_hi = is_hi.unbounded_shr(64 - shift);
+    let [lo, hi] = interleave(avx_to_u128(ks), avx_to_u128(is));
 
-    let ks_hi_lo = ks_hi.unbounded_shl(shift);
-    let is_hi_lo = is_hi.unbounded_shl(shift);
+    let mut buffer = Aligned([0u8; 32]);
 
-    let ks = unsafe { _mm_set_epi64x(ks_hi_hi as i64, (ks_hi_lo | ks_lo) as i64) };
-    let is = unsafe { _mm_set_epi64x(is_hi_hi as i64, (is_hi_lo | is_lo) as i64) };
+    // FIXME: assumes little-endian
+    unsafe {
+        _mm_store_si128(buffer.0.as_mut_ptr().cast(), u128_to_avx(lo));
+        _mm_storeu_si128(
+            buffer.0.as_mut_ptr().byte_add((shift >> 2) as usize).cast(),
+            u128_to_avx(hi),
+        );
+    }
 
-    let out = interleave(avx_to_u128(ks), avx_to_u128(is));
-    let out = core::array::from_fn(|i| out[i].to_le_bytes());
-    unsafe { core::mem::transmute::<[[u8; 16]; 2], [KeyIndex; 16]>(out) }
+    unsafe { core::mem::transmute::<[u8; 32], [KeyIndex; 16]>(buffer.0) }
 }
+
+#[repr(C, align(16))]
+struct Aligned([u8; 32]);
 
 #[inline(always)]
 pub(super) fn sub_one(array: u128) -> u128 {
