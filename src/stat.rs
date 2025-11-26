@@ -1,6 +1,8 @@
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
+use ribbit::Unpack as _;
+
 use crate::iter::Unsorted;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
@@ -41,17 +43,14 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                 depth.record(depth_ as u64);
             }
             edge::Child::Node(node) => {
-                let node = unsafe { node.into_ref_unchecked() };
-
-                let histogram = match node {
-                    node::Ref::Node3(_) => &mut node_3,
-                    node::Ref::Node15(_) => &mut node_15,
-                    node::Ref::Node47(_) => &mut node_47,
-                    node::Ref::Node256(_) => &mut node_256,
+                let histogram = match node.kind().unpack() {
+                    node::Kind::Node3 => &mut node_3,
+                    node::Kind::Node15 => &mut node_15,
+                    node::Kind::Node47 => &mut node_47,
+                    node::Kind::Node256 => &mut node_256,
                 };
 
-                let children = node
-                    .iter::<Unsorted, _, _>(Unbound, Unbound)
+                let children = unsafe { node.iter_unchecked::<Unsorted, _, _>(Unbound, Unbound) }
                     .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
                     .count();
 

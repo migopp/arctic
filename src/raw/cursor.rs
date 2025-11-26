@@ -10,7 +10,6 @@ use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
-use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::raw::Edge;
 use crate::raw::Key;
@@ -102,8 +101,7 @@ where
                     unsafe { self.key.next_unchecked() }
                 };
 
-                let node = unsafe { node.into_ref_unchecked() };
-                let next = node.get(byte)?;
+                let next = unsafe { node.get_unchecked(byte) }?;
                 self.push(save, len, node, next);
                 continue;
             }
@@ -152,8 +150,7 @@ where
                         unsafe { self.key.next_unchecked() }
                     };
 
-                    let node = unsafe { node.into_ref_unchecked() };
-                    if let Some(next) = node.get_or_insert(byte) {
+                    if let Some(next) = unsafe { node.get_or_insert_unchecked(byte) } {
                         self.push(save, old_len, node, next);
                         continue;
                     }
@@ -167,8 +164,7 @@ where
                 Err(_) => match old.child() {
                     Some(edge::Child::Node(_)) if old_meta.is_frozen() => return Insert::Frozen,
                     Some(edge::Child::Node(node)) => {
-                        let node = unsafe { node.into_ref_unchecked() };
-                        let (op, new) = node.replace(old_meta);
+                        let (op, new) = unsafe { node.replace_unchecked(old_meta) };
                         (Smo::Node(op), new)
                     }
                     None | Some(edge::Child::Value(_)) => {
@@ -217,7 +213,7 @@ where
             let meta = edge.meta();
 
             let old = match edge.child() {
-                Some(edge::Child::Node(old)) if old.is_ref(node) => old,
+                Some(edge::Child::Node(old)) if old == node => old,
                 // Already helped by another thread OR freeze was pushed down by
                 // a concurrent edge expansion operation
                 None | Some(edge::Child::Node(_)) => break None,
@@ -225,7 +221,7 @@ where
                 Some(edge::Child::Value(_)) => unreachable!(),
             };
 
-            let (op, new) = node.replace(meta);
+            let (op, new) = unsafe { node.replace_unchecked(meta) };
 
             match self.edge.compare_exchange_packed(
                 edge,
@@ -281,7 +277,7 @@ where
         &mut self,
         key: K::Read<'k>,
         len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
-        node: node::Ref<'g, K::Edge>,
+        node: ribbit::Packed<edge::Node<K::Edge>>,
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
@@ -295,7 +291,7 @@ where
     }
 
     #[cold]
-    fn pop(&mut self) -> Result<node::Ref<'g, K::Edge>, H::PopError> {
+    fn pop(&mut self) -> Result<ribbit::Packed<edge::Node<K::Edge>>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.bits -= segment.len.bits() + 8;
         self.key = segment.key;
@@ -332,8 +328,7 @@ where
                         unsafe { cursor.key.next_unchecked() }
                     };
 
-                    let node = unsafe { node.into_ref_unchecked() };
-                    cursor.edge = node.get(byte)?;
+                    cursor.edge = unsafe { node.get_unchecked(byte) }?;
                 }
                 edge::Child::Value(value) => {
                     return Some(value);
@@ -392,9 +387,8 @@ where
             // Full match
             if key_cursor.len() == len_edge {
                 if let Some(node) = edge.as_node() {
-                    let node = unsafe { node.into_ref_unchecked() };
                     if let Some(byte) = self.cursor.key.next() {
-                        let next = node.get(byte)?;
+                        let next = unsafe { node.get_unchecked(byte) }?;
                         self.cursor.push(save, len_edge, node, next);
                         continue;
                     }

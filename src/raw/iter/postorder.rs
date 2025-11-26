@@ -56,10 +56,9 @@ where
                         }
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
-                            let node = unsafe { node.into_ref_unchecked() };
-                            self.stack.push(RepeatIter::new(
-                                node.iter::<Unsorted, _, _>(Unbound, Unbound),
-                            ));
+                            self.stack.push(RepeatIter::new(unsafe {
+                                node.iter_unchecked::<Unsorted, _, _>(Unbound, Unbound)
+                            }));
                             continue 'vertical;
                         }
                     }

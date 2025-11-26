@@ -76,9 +76,10 @@ where
                 next: Some(value),
             },
             edge::Child::Node(node) => {
-                let node = unsafe { node.into_ref_unchecked() };
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, node.iter::<O, _, _>(lower_byte, upper_byte)));
+                stack.push((bits, unsafe {
+                    node.iter_unchecked::<O, _, _>(lower_byte, upper_byte)
+                }));
 
                 Self::Node(NodeIter {
                     lower,
@@ -199,10 +200,11 @@ where
                             }
                         },
                         edge::Child::Node(node) => {
-                            let node = unsafe { node.into_ref_unchecked() };
                             let lower = Default::default();
                             let upper = Default::default();
-                            self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
+                            self.stack.push((bits, unsafe {
+                                node.iter_unchecked::<O, _, _>(lower, upper)
+                            }));
                             continue 'vertical;
                         }
                     }
@@ -248,8 +250,9 @@ where
                         }
                     },
                     edge::Child::Node(node) => {
-                        let node = unsafe { node.into_ref_unchecked() };
-                        self.stack.push((bits, node.iter::<O, _, _>(lower, upper)));
+                        self.stack.push((bits, unsafe {
+                            node.iter_unchecked::<O, _, _>(lower, upper)
+                        }));
                         continue 'vertical;
                     }
                 }

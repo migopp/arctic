@@ -13,6 +13,7 @@ use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
 use crate::raw::node;
+use crate::raw::node::Node as _;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
 use crate::raw::node::Node3;
@@ -255,7 +256,7 @@ impl<C> Debug for Child<C> {
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
 pub(crate) struct Node<C> {
-    #[ribbit(size = 2)]
+    #[ribbit(size = 2, get(vis = "pub(crate)"))]
     kind: node::Kind,
 
     pub(crate) scan: bool,
@@ -311,42 +312,82 @@ where
     M: ribbit::Pack<Packed: Meta>,
 {
     #[inline]
-    pub(crate) fn is_ref(self, node: node::Ref<'_, M>) -> bool {
-        let ptr = match node {
-            node::Ref::Node3(node) => node as *const _ as u64,
-            node::Ref::Node15(node) => node as *const _ as u64,
-            node::Ref::Node47(node) => node as *const _ as u64,
-            node::Ref::Node256(node) => node as *const _ as u64,
-        };
-
-        self.value.get() & Node::<M>::MASK_PTR == ptr
-    }
-
-    #[inline]
-    pub(crate) unsafe fn into_ref_unchecked<'g>(self) -> node::Ref<'g, M> {
-        #[inline]
-        unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
-        where
-            M: ribbit::Pack<Packed: Meta>,
-            N: node::Node<M> + 'g,
-        {
-            let node = unsafe { (ptr as *const N).as_ref() };
-            validate!(node.is_some());
-            unsafe { node.unwrap_unchecked() }
-        }
-
+    pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            node::Ref::Node3(unsafe { as_ref::<_, Node3<M>>(ptr) })
+            unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
         } else if kind == node::Kind::NODE_15 {
-            node::Ref::Node15(unsafe { as_ref::<_, Node15<M>>(ptr) })
+            unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
         } else if kind == node::Kind::NODE_47 {
-            node::Ref::Node47(unsafe { as_ref::<_, Node47<M>>(ptr) })
+            unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            node::Ref::Node256(unsafe { as_ref::<_, Node256<M>>(ptr) })
+            unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let kind = self.kind();
+
+        if kind == node::Kind::NODE_3 {
+            unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
+        } else if kind == node::Kind::NODE_15 {
+            unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
+        } else if kind == node::Kind::NODE_47 {
+            unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn replace_unchecked<'g>(
+        self,
+        parent: ribbit::Packed<M>,
+    ) -> (node::Smo, ribbit::Packed<Edge<M>>) {
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let kind = self.kind();
+
+        if kind == node::Kind::NODE_3 {
+            unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
+        } else if kind == node::Kind::NODE_15 {
+            unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
+        } else if kind == node::Kind::NODE_47 {
+            unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn iter_unchecked<
+        'g,
+        O: crate::iter::Order,
+        L: node::Lower,
+        U: node::Upper,
+    >(
+        self,
+        lower: L,
+        upper: U,
+    ) -> node::NodeIter<'g, L, U, M> {
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let kind = self.kind();
+
+        if kind == node::Kind::NODE_3 {
+            unsafe { as_ref::<_, Node3<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+        } else if kind == node::Kind::NODE_15 {
+            unsafe { as_ref::<_, Node15<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+        } else if kind == node::Kind::NODE_47 {
+            unsafe { as_ref::<_, Node47<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+        } else {
+            validate_eq!(kind, node::Kind::NODE_256);
+            unsafe { as_ref::<_, Node256<M>>(ptr) }.iter::<O, _, _>(lower, upper)
         }
     }
 
@@ -371,6 +412,17 @@ where
             drop(Box::from_raw(ptr as *mut Node256<M>))
         }
     }
+}
+
+#[inline]
+unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
+where
+    M: ribbit::Pack<Packed: Meta>,
+    N: node::Node<M> + 'g,
+{
+    let node = unsafe { (ptr as *const N).as_ref() };
+    validate!(node.is_some());
+    unsafe { node.unwrap_unchecked() }
 }
 
 impl<M> Debug for NodePacked<M> {

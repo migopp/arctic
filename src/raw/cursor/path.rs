@@ -3,7 +3,6 @@ use core::convert::Infallible;
 use ribbit::Atomic;
 
 use crate::raw::edge;
-use crate::raw::node;
 use crate::raw::Edge;
 use crate::raw::Key;
 
@@ -19,7 +18,7 @@ pub(crate) struct Segment<'k, 'g, K: Key> {
     pub(super) len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
 
     /// Node underneath `edge`
-    pub(super) node: node::Ref<'g, K::Edge>,
+    pub(super) node: ribbit::Packed<edge::Node<K::Edge>>,
 }
 
 pub(crate) trait History<'k, 'g, K>
