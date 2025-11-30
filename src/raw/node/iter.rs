@@ -28,6 +28,7 @@ impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
+    #[inline]
     pub(crate) unsafe fn new(
         lower: L,
         upper: U,
@@ -48,12 +49,46 @@ impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
         }
     }
 
+    #[inline]
     pub(crate) fn lower(&self) -> &L {
         &self.lower
     }
 
+    #[inline]
     pub(crate) fn upper(&self) -> &U {
         &self.upper
+    }
+}
+
+impl<'g, L: Lower, U: Upper, M: ribbit::Pack> NodeIter<'g, L, U, M> {
+    #[inline]
+    pub(crate) fn try_into_single(self) -> Result<(bool, bool, u8, &'g Atomic<Edge<M>>), Self> {
+        self.keys
+            .try_into_single()
+            .map(|KeyIndex { key, index }| {
+                let lower = self.lower.check(key);
+                let upper = self.upper.check(key);
+
+                #[cfg(feature = "validate")]
+                validate!(
+                    (index as u16) < self.len,
+                    "index is {} but len is {}",
+                    index,
+                    self.len,
+                );
+
+                let edge = unsafe { self.edges.add(index as usize).as_ref() };
+                (lower, upper, key, edge)
+            })
+            .map_err(|keys| Self {
+                lower: self.lower,
+                upper: self.upper,
+                keys,
+                edges: self.edges,
+                #[cfg(feature = "validate")]
+                len: self.len,
+                _slice: PhantomData,
+            })
     }
 }
 
@@ -137,11 +172,23 @@ impl KeyIter {
     const TAG_15: usize = (node::Kind::Node15 as usize) << 62;
     const TAG_47: usize = (node::Kind::Node47 as usize) << 62;
 
+    #[inline]
     fn kind(&self) -> ribbit::Packed<node::Kind> {
         unsafe {
             // SAFETY: shifting u64 by 62 bits, so only 2 bits can remain
             ribbit::Packed::<node::Kind>::new_unchecked(u2::new_unchecked((self.raw >> 62) as u8))
         }
+    }
+
+    #[inline]
+    pub(super) fn try_into_single(self) -> Result<KeyIndex, Self> {
+        let kind = self.kind();
+        if kind == node::Kind::NODE_3 {
+            if let Some(index) = unsafe { self.node_3 }.try_into_single() {
+                return Ok(index);
+            }
+        }
+        Err(self)
     }
 
     #[inline]
@@ -178,6 +225,7 @@ impl KeyIter {
         iter
     }
 
+    #[inline]
     pub(super) fn sort_unstable(&mut self) {
         let kind = self.kind();
         if kind == node::Kind::NODE_3 {
@@ -187,6 +235,7 @@ impl KeyIter {
         }
     }
 
+    #[inline]
     unsafe fn as_node_15_unchecked(&self) -> NonNull<linear::KeyIter<15>> {
         validate_eq!(self.kind(), node::Kind::NODE_15);
         unsafe {
@@ -197,6 +246,7 @@ impl KeyIter {
         }
     }
 
+    #[inline]
     unsafe fn as_node_47_unchecked(&self) -> NonNull<linear::KeyIter<47>> {
         validate_eq!(self.kind(), node::Kind::NODE_47);
         unsafe {

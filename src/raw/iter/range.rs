@@ -169,7 +169,7 @@ where
             let bits = *bits;
 
             'horizontal: loop {
-                let Some((byte, edge)) = (if O::REVERSE {
+                let Some((mut byte, mut edge)) = (if O::REVERSE {
                     iter.next_back()
                 } else {
                     iter.next()
@@ -178,20 +178,52 @@ where
                     continue 'vertical;
                 };
 
-                let edge = edge.load_packed(Ordering::Acquire);
-                let Some(child) = edge.child() else {
-                    continue 'horizontal;
-                };
+                let mut bits = bits;
+                let mut check_lower = iter.lower().check(byte);
+                let mut check_upper = iter.upper().check(byte);
 
-                let key = edge.meta();
-                let bits = self.key.replace(bits, byte, key);
+                'compress: loop {
+                    let (meta, child) = {
+                        let edge = edge.load_packed(Ordering::Acquire);
+                        let Some(child) = edge.child() else {
+                            continue 'horizontal;
+                        };
+                        let meta = edge.meta();
+                        (meta, child)
+                    };
 
-                let check_lower = iter.lower().check(byte);
-                let check_upper = iter.upper().check(byte);
+                    bits = self.key.replace(bits, byte, meta);
 
-                if !check_lower && !check_upper {
+                    let lower = if check_lower {
+                        match self.lower.check(meta) {
+                            Some(lower) => lower,
+                            None if O::REVERSE => {
+                                self.stack.clear();
+                                return None;
+                            }
+                            None => continue 'horizontal,
+                        }
+                    } else {
+                        Default::default()
+                    };
+
+                    let upper = if check_upper {
+                        match self.upper.check(meta) {
+                            Some(upper) => upper,
+                            None if O::REVERSE => continue 'horizontal,
+                            None => {
+                                self.stack.clear();
+                                return None;
+                            }
+                        }
+                    } else {
+                        Default::default()
+                    };
+
                     match child {
-                        edge::Child::Value(value) if YIELD => return Some((&self.key, value)),
+                        edge::Child::Value(value) if YIELD => {
+                            return Some((&self.key, value));
+                        }
                         edge::Child::Value(value) => match apply(&self.key, value) {
                             ControlFlow::Continue(()) => continue 'horizontal,
                             ControlFlow::Break(()) => {
@@ -200,60 +232,23 @@ where
                             }
                         },
                         edge::Child::Node(node) => {
-                            let lower = Default::default();
-                            let upper = Default::default();
-                            self.stack.push((bits, unsafe {
-                                node.entries_unchecked::<O, _, _>(lower, upper)
-                            }));
-                            continue 'vertical;
+                            // Avoid pushing and popping iterators with only one child
+                            match unsafe { node.entries_unchecked::<O, _, _>(lower, upper) }
+                                .try_into_single()
+                            {
+                                Ok((check_lower_, check_upper_, byte_, edge_)) => {
+                                    check_lower = check_lower_;
+                                    check_upper = check_upper_;
+                                    byte = byte_;
+                                    edge = edge_;
+                                    continue 'compress;
+                                }
+                                Err(iter) => {
+                                    self.stack.push((bits, iter));
+                                    continue 'vertical;
+                                }
+                            }
                         }
-                    }
-                }
-
-                crate::cold();
-
-                let lower = if check_lower {
-                    match self.lower.check(key) {
-                        Some(lower) => lower,
-                        None if O::REVERSE => {
-                            self.stack.clear();
-                            return None;
-                        }
-                        None => continue 'horizontal,
-                    }
-                } else {
-                    Default::default()
-                };
-
-                let upper = if check_upper {
-                    match self.upper.check(key) {
-                        Some(upper) => upper,
-                        None if O::REVERSE => continue 'horizontal,
-                        None => {
-                            self.stack.clear();
-                            return None;
-                        }
-                    }
-                } else {
-                    Default::default()
-                };
-
-                match child {
-                    edge::Child::Value(value) if YIELD => {
-                        return Some((&self.key, value));
-                    }
-                    edge::Child::Value(value) => match apply(&self.key, value) {
-                        ControlFlow::Continue(()) => continue 'horizontal,
-                        ControlFlow::Break(()) => {
-                            self.stack.clear();
-                            return None;
-                        }
-                    },
-                    edge::Child::Node(node) => {
-                        self.stack.push((bits, unsafe {
-                            node.entries_unchecked::<O, _, _>(lower, upper)
-                        }));
-                        continue 'vertical;
                     }
                 }
             }

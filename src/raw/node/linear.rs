@@ -193,6 +193,13 @@ pub(super) struct KeyIter3 {
     tail: u8,
 }
 
+impl KeyIter3 {
+    #[inline]
+    pub(super) fn try_into_single(self) -> Option<node::iter::KeyIndex> {
+        (self.tail == 1).then_some(self.entries[0])
+    }
+}
+
 const _: [(); 8] = [(); core::mem::size_of::<KeyIter3>()];
 
 #[repr(C)]

@@ -207,6 +207,16 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn one_long_key() {
+        insert_all(["a".repeat(1000)]);
+    }
+
+    #[test]
+    fn two_long_keys() {
+        insert_all(["a".repeat(1000), "b".repeat(1000)]);
+    }
+
     fn insert_all<I, K>(iter: I) -> Map<K, u32>
     where
         I: IntoIterator<Item = K>,
