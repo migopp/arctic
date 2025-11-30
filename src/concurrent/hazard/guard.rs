@@ -5,6 +5,7 @@ use core::sync::atomic::Ordering;
 
 use crate::concurrent;
 use crate::concurrent::hazard;
+use crate::concurrent::hazard::Prefix as _;
 use crate::raw::edge;
 use crate::raw::Edge;
 
@@ -27,7 +28,7 @@ impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         self.local.hazard.store_packed(
-            hazard::prefix::Be::HAZARD_NULL,
+            ribbit::Packed::<hazard::prefix::Be>::HAZARD_NULL,
             core::sync::atomic::Ordering::Relaxed,
         );
     }

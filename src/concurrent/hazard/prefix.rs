@@ -6,6 +6,28 @@ use ribbit::traits::Integer as _;
 use ribbit::u120;
 use ribbit::u4;
 
+pub(crate) trait Prefix {
+    const HAZARD_NULL: Self;
+    const HAZARD_ROOT: Self;
+
+    /// Construct
+    fn into_prefix(self, value: bool, bits: Option<usize>) -> Self;
+
+    #[expect(clippy::wrong_self_convention)]
+    fn is_active(self) -> bool;
+
+    #[expect(clippy::wrong_self_convention)]
+    fn is_conflict(self, other: Self) -> bool;
+
+    fn bytes(&self) -> usize;
+
+    /// For measurement purposes only
+    fn age(self) -> u8;
+
+    /// For measurement purposes only
+    fn with_age(self, age: u8) -> Self;
+}
+
 // NOTE: this type is used for both **hazards**, which guard
 // parts of the tree, and prefixes of retired edges.
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
@@ -31,12 +53,6 @@ pub(crate) struct Be {
 }
 
 impl Be {
-    pub(super) const HAZARD_NULL: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(false, false, false, u4::new(0), u120::new(0));
-
-    pub(crate) const HAZARD_ROOT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(true, true, true, u4::new(0), u120::new(0));
-
     #[inline]
     pub(crate) fn new_hazard(prefix: u128, bits: usize) -> ribbit::Packed<Self> {
         validate_eq!(bits & 0b111, 0);
@@ -60,9 +76,12 @@ impl Be {
     }
 }
 
-impl BePacked {
+impl Prefix for BePacked {
+    const HAZARD_NULL: Self = Self::new(false, false, false, u4::new(0), u120::new(0));
+    const HAZARD_ROOT: Self = Self::new(true, true, true, u4::new(0), u120::new(0));
+
     /// Construct
-    pub(super) fn into_prefix(self, value: bool, bits: Option<usize>) -> Self {
+    fn into_prefix(self, value: bool, bits: Option<usize>) -> Self {
         match bits {
             Some(bits) if bits < (self.len().value() as usize) << 3 => unsafe {
                 let prefix = extract(self.value, bits);
@@ -74,12 +93,12 @@ impl BePacked {
         .with_value(value)
     }
 
-    pub(super) fn is_active(self) -> bool {
+    fn is_active(self) -> bool {
         // Protects either values or nodes
         self.value & 0b11 > 0
     }
 
-    pub(super) fn is_conflict(self, prefix: Self) -> bool {
+    fn is_conflict(self, prefix: Self) -> bool {
         validate!(self.is_active());
         validate!(prefix.node() ^ prefix.value());
 
@@ -96,24 +115,26 @@ impl BePacked {
         self.is_overlap(prefix)
     }
 
-    pub(super) fn bytes(&self) -> usize {
+    fn bytes(&self) -> usize {
         self.len().value() as usize
     }
 
     /// For measurement purposes only
-    pub(super) fn age(self) -> u8 {
+    fn age(self) -> u8 {
         self.prefix().value() as u8
     }
 
     /// For measurement purposes only
-    pub(super) fn with_age(self, age: u8) -> Self {
+    fn with_age(self, age: u8) -> Self {
         self.with_prefix(
             self.prefix()
                 .bitand(u120::from(u8::MAX).not())
                 .bitor(u120::from(age)),
         )
     }
+}
 
+impl BePacked {
     fn is_overlap(self, other: Self) -> bool {
         let len = self.len().min(other.len());
         let bits = (len.value() as usize) << 3;

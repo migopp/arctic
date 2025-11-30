@@ -1,6 +1,7 @@
 use ribbit::Atomic;
 
 use crate::concurrent::hazard;
+use crate::concurrent::hazard::Prefix as _;
 use crate::concurrent::Value;
 use crate::raw;
 pub(super) use crate::raw::cursor::path;
@@ -142,7 +143,7 @@ where
         Self {
             guard: smr.guard(
                 #[cfg(not(feature = "smr-epoch"))]
-                hazard::prefix::Be::HAZARD_ROOT,
+                ribbit::Packed::<hazard::prefix::Be>::HAZARD_ROOT,
             ),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }

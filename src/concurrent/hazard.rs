@@ -81,6 +81,7 @@
 pub(crate) mod guard;
 mod membarrier;
 pub(crate) mod prefix;
+pub(crate) use prefix::Prefix;
 
 use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
@@ -151,7 +152,11 @@ impl<V: concurrent::Value> Global<V> {
             #[cfg(not(feature = "smr-epoch"))]
             hazard: &self
                 .hazards
-                .get_or(|| Cache(ribbit::Atomic::new_packed(prefix::Be::HAZARD_NULL)))
+                .get_or(|| {
+                    Cache(ribbit::Atomic::new_packed(
+                        ribbit::Packed::<prefix::Be>::HAZARD_NULL,
+                    ))
+                })
                 .0,
             #[cfg(not(feature = "smr-epoch"))]
             retired: self.retired.get_or_default().0.borrow_mut(),
