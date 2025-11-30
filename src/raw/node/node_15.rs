@@ -95,7 +95,7 @@ impl linear::Header for ribbit::Packed<Header> {
                 key: keys[index],
                 index: index as u8,
             });
-            return node::KeyIter::from_node_15(linear::KeyIter::new_15(entries, len));
+            return node::KeyIter::new_15(linear::KeyIter::new_15(entries, len));
         }
 
         let mask_len = node::simd::mask_len(len);
@@ -106,6 +106,6 @@ impl linear::Header for ribbit::Packed<Header> {
 
         // TODO: SIMD sorting network?
         let entries = core::array::from_fn(|i| out[i]);
-        node::KeyIter::from_node_15(linear::KeyIter::new_15(entries, len))
+        node::KeyIter::new_15(linear::KeyIter::new_15(entries, len))
     }
 }

@@ -57,7 +57,7 @@ where
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
                             self.stack.push(RepeatIter::new(unsafe {
-                                node.iter_unchecked::<Unsorted, _, _>(Unbound, Unbound)
+                                node.entries_unchecked::<Unsorted, _, _>(Unbound, Unbound)
                             }));
                             continue 'vertical;
                         }

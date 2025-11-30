@@ -50,9 +50,10 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                     node::Kind::Node256 => &mut node_256,
                 };
 
-                let children = unsafe { node.iter_unchecked::<Unsorted, _, _>(Unbound, Unbound) }
-                    .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
-                    .count();
+                let children =
+                    unsafe { node.entries_unchecked::<Unsorted, _, _>(Unbound, Unbound) }
+                        .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                        .count();
 
                 histogram.record(children as u64);
             }

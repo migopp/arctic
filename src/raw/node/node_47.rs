@@ -239,7 +239,7 @@ impl Header {
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
-        node::KeyIter::from_node_47(linear::KeyIter::new_47(
+        node::KeyIter::new_47(linear::KeyIter::new_47(
             core::array::from_fn(|i| entries[i]),
             index,
         ))
@@ -269,7 +269,7 @@ impl Header {
 
         validate_eq!(index, len);
         let entries = core::array::from_fn(|i| entries[i]);
-        node::KeyIter::from_node_47(linear::KeyIter::new_47(entries, index))
+        node::KeyIter::new_47(linear::KeyIter::new_47(entries, index))
     }
 
     fn meta_consistent(&self) -> ribbit::Packed<Meta> {

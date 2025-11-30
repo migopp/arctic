@@ -39,7 +39,7 @@ where
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        node::KeyIter::from_node_256(KeyIter::new(lower, upper))
+        node::KeyIter::new_256(KeyIter::new(lower, upper))
     }
 
     #[inline]

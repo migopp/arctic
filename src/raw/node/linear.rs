@@ -93,7 +93,7 @@ where
 
         match old.get_or_insert(key) {
             Ok(index) => Some(index),
-            Err(None) => return None,
+            Err(None) => None,
             Err(Some(new)) => {
                 self.header.set_packed(new);
                 Some(old.len())

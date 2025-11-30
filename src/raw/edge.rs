@@ -366,7 +366,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn iter_unchecked<
+    pub(crate) unsafe fn entries_unchecked<
         'g,
         O: crate::iter::Order,
         L: node::Lower,
@@ -380,14 +380,14 @@ where
         let kind = self.kind();
 
         if kind == node::Kind::NODE_3 {
-            unsafe { as_ref::<_, Node3<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+            unsafe { as_ref::<_, Node3<M>>(ptr) }.entries::<O, _, _>(lower, upper)
         } else if kind == node::Kind::NODE_15 {
-            unsafe { as_ref::<_, Node15<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+            unsafe { as_ref::<_, Node15<M>>(ptr) }.entries::<O, _, _>(lower, upper)
         } else if kind == node::Kind::NODE_47 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+            unsafe { as_ref::<_, Node47<M>>(ptr) }.entries::<O, _, _>(lower, upper)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.iter::<O, _, _>(lower, upper)
+            unsafe { as_ref::<_, Node256<M>>(ptr) }.entries::<O, _, _>(lower, upper)
         }
     }
 

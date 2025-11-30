@@ -78,7 +78,7 @@ where
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
                 stack.push((bits, unsafe {
-                    node.iter_unchecked::<O, _, _>(lower_byte, upper_byte)
+                    node.entries_unchecked::<O, _, _>(lower_byte, upper_byte)
                 }));
 
                 Self::Node(NodeIter {
@@ -203,7 +203,7 @@ where
                             let lower = Default::default();
                             let upper = Default::default();
                             self.stack.push((bits, unsafe {
-                                node.iter_unchecked::<O, _, _>(lower, upper)
+                                node.entries_unchecked::<O, _, _>(lower, upper)
                             }));
                             continue 'vertical;
                         }
@@ -251,7 +251,7 @@ where
                     },
                     edge::Child::Node(node) => {
                         self.stack.push((bits, unsafe {
-                            node.iter_unchecked::<O, _, _>(lower, upper)
+                            node.entries_unchecked::<O, _, _>(lower, upper)
                         }));
                         continue 'vertical;
                     }

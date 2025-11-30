@@ -95,7 +95,7 @@ impl linear::Header for ribbit::Packed<Header> {
                 key: keys[index * 2],
                 index: index as u8,
             });
-            return node::KeyIter::from_node_3(linear::KeyIter3::new_3(entries, len));
+            return node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len));
         }
 
         let min = broadcast(lower.get());
@@ -121,7 +121,7 @@ impl linear::Header for ribbit::Packed<Header> {
             .to_le_bytes();
         let entries = unsafe { core::mem::transmute::<[u8; 8], [KeyIndex; 4]>(entries) };
         let entries = core::array::from_fn(|i| entries[i]);
-        node::KeyIter::from_node_3(linear::KeyIter3::new_3(entries, len))
+        node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len))
     }
 }
 

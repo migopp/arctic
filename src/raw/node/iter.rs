@@ -145,14 +145,14 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn from_node_3(node_3: linear::KeyIter3) -> Self {
+    pub(super) fn new_3(node_3: linear::KeyIter3) -> Self {
         let iter = Self { node_3 };
         validate_eq!(iter.kind(), node::Kind::NODE_3);
         iter
     }
 
     #[inline]
-    pub(super) fn from_node_15(node_15: linear::KeyIter<15>) -> Self {
+    pub(super) fn new_15(node_15: linear::KeyIter<15>) -> Self {
         let iter = Self {
             node_15: NonNull::from(Box::leak(Box::new(node_15)))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_15) }),
@@ -162,7 +162,7 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn from_node_47(node_47: linear::KeyIter<47>) -> Self {
+    pub(super) fn new_47(node_47: linear::KeyIter<47>) -> Self {
         let iter = Self {
             node_47: NonNull::from(Box::leak(Box::new(node_47)))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_47) }),
@@ -172,7 +172,7 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn from_node_256(node_256: node_256::KeyIter) -> Self {
+    pub(super) fn new_256(node_256: node_256::KeyIter) -> Self {
         let iter = Self { node_256 };
         validate_eq!(iter.kind(), node::Kind::NODE_256);
         iter
