@@ -14,7 +14,6 @@ use core::arch::x86_64::_mm_set1_epi8;
 use core::arch::x86_64::_mm_set_epi64x;
 use core::arch::x86_64::_mm_slli_epi16;
 use core::arch::x86_64::_mm_srli_epi16;
-use core::arch::x86_64::_mm_subs_epu8;
 use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
@@ -95,12 +94,6 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
     unsafe { core::mem::transmute::<[[u8; 16]; 2], [KeyIndex; 16]>(out) }
 }
 
-#[inline(always)]
-pub(super) fn sub_one(array: u128) -> u128 {
-    avx_to_u128(unsafe { _mm_subs_epu8(u128_to_avx(array), u128_to_avx(U8_1)) })
-}
-
-pub(super) const U8_1: u128 = 0x0101_0101_0101_0101_0101_0101_0101_0101u128;
 pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
 pub(super) const U8_SEQ: u128 = 0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128;
 
