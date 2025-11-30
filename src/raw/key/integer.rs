@@ -253,8 +253,11 @@ macro_rules! impl_unsigned_int {
 
                 #[inline]
                 fn shl_at_most_56(self, bits: u8) -> Self {
+                    validate!(bits <= 56);
+                    unsafe { core::hint::assert_unchecked(bits <= 56) };
+
                     if <$ty>::BITS <= 56 {
-                        <$ty>::unbounded_shl(self, bits as u32)
+                        self.unbounded_shl(bits as u32)
                     } else {
                         self << bits
                     }

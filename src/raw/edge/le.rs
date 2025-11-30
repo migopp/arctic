@@ -24,6 +24,9 @@ impl Le {
     #[inline]
     pub(crate) fn key_from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
         validate_eq!(len.value() & 0b111, 0);
+        unsafe {
+            core::hint::assert_unchecked(len.value() < 64);
+        }
         let mask = (1u64 << len.value()) - 1;
         ribbit::Packed::<Self>::new(
             unsafe { u56::new_unchecked(value & mask) },
