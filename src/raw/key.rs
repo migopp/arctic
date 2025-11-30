@@ -42,7 +42,14 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
-    unsafe fn next_unchecked(&mut self) -> u8;
+    unsafe fn next_unchecked(&mut self) -> u8 {
+        match self.next() {
+            Some(byte) => byte,
+            None if cfg!(feature = "validate") => unreachable!(),
+            None => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+
     fn read(
         &mut self,
         len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,

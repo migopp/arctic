@@ -59,13 +59,9 @@ fn hazard_integer<U: integer::Uint>(
 fn hazard_dynamic(
     reader: dynamic::Reader<'_>,
 ) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
-    match reader {
-        dynamic::Reader::Large(large) => {
-            let mut buffer = [0u8; 16];
-            let len = large.len().min(15);
-            buffer[..len].copy_from_slice(&large[..len]);
-            crate::concurrent::hazard::prefix::Be::new_hazard(u128::from_be_bytes(buffer), len << 3)
-        }
-        dynamic::Reader::Small(small) => hazard_integer(small),
-    }
+    let reader = reader.as_ref();
+    let mut buffer = [0u8; 16];
+    let len = reader.len().min(15);
+    buffer[..len].copy_from_slice(&reader[..len]);
+    crate::concurrent::hazard::prefix::Be::new_hazard(u128::from_be_bytes(buffer), len << 3)
 }

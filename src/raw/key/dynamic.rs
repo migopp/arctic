@@ -1,31 +1,24 @@
-use core::cmp;
 use core::fmt;
 
 use crate::raw::edge;
 use crate::raw::edge::Len as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::key;
-use crate::raw::key::integer;
 
-#[derive(Copy, Clone)]
-pub enum Reader<'k> {
-    // INVARIANT: `len > 8`
-    Large(&'k [u8]),
-    Small(integer::Reader<u64>),
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Reader<'k>(&'k [u8]);
+
+impl<'k> AsRef<[u8]> for Reader<'k> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.0
+    }
 }
 
 impl<'k> From<&'k [u8]> for Reader<'k> {
     #[inline]
     fn from(key: &'k [u8]) -> Self {
-        match key.len() {
-            9.. => Self::Large(key),
-            len => {
-                let mut buffer = [0u8; 8];
-                buffer[..len].copy_from_slice(key);
-                Self::Small(unsafe {
-                    integer::Reader::new_unchecked(u64::from_be_bytes(buffer), (len << 3) as u8)
-                })
-            }
-        }
+        Self(key)
     }
 }
 
@@ -46,7 +39,7 @@ impl<'k> From<&'k str> for Reader<'k> {
 impl Default for Reader<'_> {
     #[inline]
     fn default() -> Self {
-        Self::Small(integer::Reader::default())
+        Self(&[])
     }
 }
 
@@ -57,153 +50,55 @@ impl key::Read for Reader<'_> {
 
     #[inline]
     fn bits(&self) -> usize {
-        match self {
-            Reader::Large(large) => large.len() << 3,
-            Reader::Small(small) => key::Read::bits(small),
-        }
+        self.0.len() << 3
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        match self {
-            Self::Large(_) => Some(unsafe { self.next_unchecked() }),
-            Self::Small(small) => small.next(),
-        }
-    }
-
-    #[inline]
-    unsafe fn next_unchecked(&mut self) -> u8 {
-        match self {
-            Reader::Large(large) => {
-                validate!(large.len() > 8);
-
-                let len = large.len();
-                let byte = large[0];
-
-                *self = Self::Large(&large[1..]);
-                if len == 9 {
-                    *self = Self::Small(self.to_small());
-                }
-                byte
-            }
-            Reader::Small(small) => small.next_unchecked(),
-        }
+        self.0.split_off_first().copied()
     }
 
     #[inline]
     fn read(
         &mut self,
         len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
-    ) -> ribbit::Packed<Self::Edge> {
-        match self {
-            Reader::Large(large) => {
-                validate!(large.len() > 8);
-
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() };
-                let array = edge::Be::key_from_u64_truncate(buffer.to_be(), len);
-                let after = (large.len() << 3) - len.bits();
-
-                if after > 64 {
-                    let bytes = len.bits() >> 3;
-                    *self = Self::Large(&large[bytes..]);
-                    return array;
-                }
-
-                let buffer = unsafe {
-                    (&large[large.len() - 8] as *const u8)
-                        .cast::<u64>()
-                        .read_unaligned()
-                }
-                .to_be()
-                    << (64 - after);
-
-                *self = Self::Small(unsafe { integer::Reader::new_unchecked(buffer, after as u8) });
-                array
-            }
-            Reader::Small(small) => small.read(len),
+    ) -> ribbit::Packed<edge::Be> {
+        if len.bits() == 0 {
+            return ribbit::Packed::<edge::Be>::DEFAULT;
         }
+
+        let len = edge::Be::min_len(len, self.0.len() << 3);
+
+        let buffer = if self.0.len() >= 8 {
+            unsafe { self.0.as_ptr().cast::<u64>().read_unaligned() }.to_be()
+        } else {
+            let mut buffer = [0u8; 8];
+            buffer[..self.0.len()].copy_from_slice(self.0);
+            u64::from_be_bytes(buffer)
+        };
+
+        self.0 = &self.0[len.bits() >> 3..];
+        edge::Be::key_from_u64_truncate(buffer, len)
     }
 
     #[inline]
     fn prefix(self, bits: usize) -> Self {
-        match self {
-            Reader::Large(large) => Reader::from(&large[..bits >> 3]),
-            Reader::Small(small) => Reader::Small(small.prefix(bits)),
-        }
+        validate!(self.bits() >= bits);
+        Reader(&self.0[..bits >> 3])
     }
 
+    #[inline]
     fn suffix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
-
-        match self {
-            Self::Large(large) => Self::from(&large[bits >> 3..]),
-            Self::Small(small) => Self::Small(small.suffix(bits)),
-        }
+        Self(&self.0[bits >> 3..])
     }
 
+    #[inline]
     fn common_prefix(self, other: Self) -> Self {
-        if let (Self::Large(left), Self::Large(right)) = (self, other) {
-            let index = core::iter::zip(left, right)
-                .position(|(l, r)| l != r)
-                .unwrap_or_else(|| left.len().min(right.len()));
-            return Self::from(&left[..index]);
-        };
-
-        let left = self.to_small();
-        let right = other.to_small();
-        Self::Small(left.common_prefix(right))
-    }
-}
-
-impl Reader<'_> {
-    fn to_small(self) -> integer::Reader<u64> {
-        match self {
-            Reader::Small(small) => small,
-            Reader::Large(large) => {
-                // SAFETY: `large.len() > 8`
-                let buffer = unsafe { large.as_ptr().cast::<u64>().read_unaligned() }.to_be();
-                unsafe { integer::Reader::new_unchecked(buffer, 64) }
-            }
-        }
-    }
-}
-
-impl Eq for Reader<'_> {}
-impl PartialEq for Reader<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Large(left), Self::Large(right)) => left == right,
-            (Self::Small(left), Self::Small(right)) => left == right,
-            _ => false,
-        }
-    }
-}
-
-impl PartialOrd for Reader<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Reader<'_> {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        match (self, other) {
-            (Self::Large(left), Self::Large(right)) => left.cmp(right),
-            (Self::Small(left), Self::Small(right)) => left.cmp(right),
-            (left, right) => left
-                .to_small()
-                .cmp(&right.to_small())
-                .then_with(|| matches!(left, Self::Large(_)).cmp(&matches!(right, Self::Large(_)))),
-        }
-    }
-}
-
-impl fmt::Debug for Reader<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Reader::Large(large) => f.debug_list().entries(*large).finish(),
-            Reader::Small(small) => small.fmt(f),
-        }
+        let index = core::iter::zip(self.0, other.0)
+            .position(|(l, r)| l != r)
+            .unwrap_or_else(|| self.0.len().min(other.0.len()));
+        Self(&self.0[..index])
     }
 }
 
@@ -227,6 +122,7 @@ impl key::Write for Writer {
         self.0.len() << 3
     }
 
+    #[inline]
     fn replace(
         &mut self,
         start: Self::Len,
@@ -248,11 +144,9 @@ impl fmt::Debug for Writer {
 }
 
 impl<'k> From<Reader<'k>> for Writer {
-    fn from(iter: Reader<'k>) -> Self {
-        Self(match iter {
-            Reader::Large(large) => large.to_vec(),
-            Reader::Small(small) => small.with_bytes(|small| small.to_vec()),
-        })
+    #[inline]
+    fn from(reader: Reader<'k>) -> Self {
+        Self(reader.0.to_vec())
     }
 }
 
