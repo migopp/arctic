@@ -146,7 +146,7 @@ impl key::Read for Reader<'_> {
             let index = core::iter::zip(left, right)
                 .position(|(l, r)| l != r)
                 .unwrap_or_else(|| left.len().min(right.len()));
-            return Self::from(&left[index..]);
+            return Self::from(&left[..index]);
         };
 
         let left = self.to_small();
