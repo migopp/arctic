@@ -11,7 +11,7 @@ pub trait Key: raw::Key {
 }
 
 impl Key for Vec<u8> {
-    type Prefix = hazard::prefix::Be;
+    type Prefix = hazard::prefix::Le;
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
@@ -20,7 +20,7 @@ impl Key for Vec<u8> {
 }
 
 impl Key for String {
-    type Prefix = hazard::prefix::Be;
+    type Prefix = hazard::prefix::Le;
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
@@ -62,10 +62,10 @@ fn hazard_integer<U: integer::Uint>(
 #[inline]
 fn hazard_dynamic(
     reader: dynamic::Reader<'_>,
-) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
+) -> ribbit::Packed<crate::concurrent::hazard::prefix::Le> {
     let reader = reader.as_ref();
     let mut buffer = [0u8; 16];
     let len = reader.len().min(15);
     buffer[..len].copy_from_slice(&reader[..len]);
-    crate::concurrent::hazard::prefix::Be::new_hazard(u128::from_be_bytes(buffer), len << 3)
+    crate::concurrent::hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
 }

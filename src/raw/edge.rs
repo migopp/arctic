@@ -4,6 +4,7 @@ mod le;
 pub(crate) use be::Be;
 #[expect(unused)]
 pub(crate) use le::Le;
+use ribbit::u6;
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
@@ -218,10 +219,29 @@ pub(crate) trait Key: Copy + Eq + Ord {
 
     fn len(self) -> Self::Len;
     fn with_value(self, value: bool) -> Self::Meta;
+
+    #[cfg_attr(not(test), expect(unused))]
+    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
 }
 
 pub(crate) trait Len: Copy + Eq {
+    #[cfg_attr(not(test), expect(unused))]
+    fn new(bits: usize) -> Self;
     fn bits(self) -> usize;
+}
+
+impl Len for u6 {
+    #[inline]
+    fn new(bits: usize) -> Self {
+        validate_eq!(bits & 0b111, 0);
+        validate!(bits <= u8::MAX as usize);
+        u6::new(bits as u8)
+    }
+
+    #[inline]
+    fn bits(self) -> usize {
+        self.value() as usize
+    }
 }
 
 /// Edge-related structural modification operation. Does not require freezing.

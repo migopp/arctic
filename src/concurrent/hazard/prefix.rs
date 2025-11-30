@@ -197,7 +197,6 @@ pub struct Le {
     len: u4,
 }
 
-#[expect(unused)]
 impl Le {
     #[inline]
     pub(crate) fn new_hazard(prefix: u128, bits: usize) -> ribbit::Packed<Self> {
@@ -211,13 +210,11 @@ impl Le {
             bits
         };
 
-        ribbit::Packed::<Self>::new(
-            u120::new(Self::extract(prefix, bits)),
-            true,
-            true,
-            true,
-            u4::new(bits as u8),
-        )
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(
+                Self::extract(prefix, bits) | const { 0b111u128 << 120 } | ((bits as u128) << 120),
+            )
+        }
     }
 
     // Mask off everything except bottom `bits`
@@ -244,7 +241,7 @@ impl Prefix for LePacked {
                     !value,
                     value,
                     false,
-                    u4::new(bits as u8),
+                    u4::new((bits >> 3) as u8),
                 )
             }
             Some(_) | None => self.with_node(!value).with_value(value),

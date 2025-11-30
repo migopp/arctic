@@ -40,11 +40,6 @@ impl BePacked {
     pub(crate) fn raw(self) -> u64 {
         self.value
     }
-
-    #[cfg(test)]
-    pub(crate) fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
-        apply(&self.value.to_be_bytes()[..(self.len().value() >> 3) as usize])
-    }
 }
 
 impl IntoIterator for BePacked {
@@ -143,11 +138,9 @@ impl edge::Key for BePacked {
     fn with_value(self, value: bool) -> Self::Meta {
         self.with_value(value)
     }
-}
 
-impl edge::Len for u6 {
     #[inline]
-    fn bits(self) -> usize {
-        self.value() as usize
+    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
+        apply(&self.value.to_be_bytes()[..(self.len().value() >> 3) as usize])
     }
 }

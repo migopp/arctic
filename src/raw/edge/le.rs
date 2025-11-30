@@ -133,4 +133,9 @@ impl edge::Key for LePacked {
     fn with_value(self, value: bool) -> Self::Meta {
         self.with_value(value)
     }
+
+    #[inline]
+    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
+        apply(&self.value.to_le_bytes()[0..(self.len().value() >> 3) as usize])
+    }
 }

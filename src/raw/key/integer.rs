@@ -339,7 +339,7 @@ mod tests {
         take_all_u64(0x1234_5678_9ABC_DEF0u64, &[1, 1, 1, 1, 1, 1, 1, 1]);
     }
 
-    fn take_all_u64(key: u64, lens: &[u8]) {
+    fn take_all_u64(key: u64, lens: &[usize]) {
         take_all::<u64>(key.to_be_bytes().as_slice(), key, lens)
     }
 }

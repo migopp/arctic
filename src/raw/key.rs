@@ -178,7 +178,7 @@ impl Key for Vec<u8> {
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k [u8];
 
-    type Edge = edge::Be;
+    type Edge = edge::Le;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -220,7 +220,7 @@ impl Key for String {
     type Write = dynamic::Writer;
     type Borrow<'k> = &'k str;
 
-    type Edge = edge::Be;
+    type Edge = edge::Le;
 
     #[inline]
     fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
@@ -262,28 +262,34 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 mod tests {
     use ribbit::u6;
 
-    use crate::raw;
+    use crate::raw::edge;
+    use crate::raw::edge::Key as _;
     use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
     use crate::raw::Key;
 
-    pub(super) fn take_all<'k, K: Key<Edge = raw::edge::Be>>(
+    pub(super) fn take_all<'k, K: Key>(
         array: &[u8],
         key: impl Into<K::Borrow<'k>>,
-        lens: &[u8],
+        lens: &[usize],
     ) {
         let mut reader = K::Read::from(key.into());
 
         let mut index = 0;
 
-        for len in lens.iter().copied().map(|bytes| bytes << 3).map(u6::new) {
+        for len in lens
+            .iter()
+            .copied()
+            .map(|bytes| bytes << 3)
+            .map(<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len::new)
+        {
             assert_eq!(reader.bytes(), array.len() - index);
 
             let bytes = len.bits() >> 3;
 
             reader
                 .read(len)
-                .with_be_bytes(|actual| assert_eq!(actual, &array[index..][..bytes]));
+                .with_bytes(|actual| assert_eq!(actual, &array[index..][..bytes]));
 
             index += bytes;
         }

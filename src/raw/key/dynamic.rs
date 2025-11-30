@@ -46,7 +46,7 @@ impl Default for Reader<'_> {
 impl key::Read for Reader<'_> {
     const BITS: Option<usize> = None;
 
-    type Edge = edge::Be;
+    type Edge = edge::Le;
 
     #[inline]
     fn bits(&self) -> usize {
@@ -62,23 +62,23 @@ impl key::Read for Reader<'_> {
     fn read(
         &mut self,
         len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
-    ) -> ribbit::Packed<edge::Be> {
+    ) -> ribbit::Packed<edge::Le> {
         if len.bits() == 0 {
-            return ribbit::Packed::<edge::Be>::DEFAULT;
+            return ribbit::Packed::<edge::Le>::DEFAULT;
         }
 
-        let len = edge::Be::min_len(len, self.0.len() << 3);
+        let len = edge::Le::min_len(len, self.0.len() << 3);
 
         let buffer = if self.0.len() >= 8 {
-            unsafe { self.0.as_ptr().cast::<u64>().read_unaligned() }.to_be()
+            unsafe { self.0.as_ptr().cast::<u64>().read_unaligned() }
         } else {
             let mut buffer = [0u8; 8];
             buffer[..self.0.len()].copy_from_slice(self.0);
-            u64::from_be_bytes(buffer)
+            u64::from_le_bytes(buffer)
         };
 
         self.0 = &self.0[len.bits() >> 3..];
-        edge::Be::key_from_u64_truncate(buffer, len)
+        edge::Le::key_from_u64_truncate(buffer, len)
     }
 
     #[inline]
@@ -107,7 +107,7 @@ impl key::Read for Reader<'_> {
 pub struct Writer(pub(super) Vec<u8>);
 
 impl key::Write for Writer {
-    type Edge = edge::Be;
+    type Edge = edge::Le;
     type Len = usize;
 
     #[inline]
@@ -199,7 +199,7 @@ mod tests {
         take_all_array(b"abcdefghijklmnopqrstuvwxyz", &[1, 2, 3, 4, 5, 4, 3, 2, 1])
     }
 
-    fn take_all_array(key: &[u8], lens: &[u8]) {
+    fn take_all_array(key: &[u8], lens: &[usize]) {
         take_all::<Vec<u8>>(key, key, lens)
     }
 }
