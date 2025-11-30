@@ -2,90 +2,104 @@ use crate::concurrent::hazard;
 use crate::sequential::Value as _;
 
 pub unsafe trait Value: Sized + crate::sequential::Value {
-    type OwnedGuard<'g, 'l>: Sized
+    type OwnedGuard<'g, 'l, P>: Sized
     where
-        Self: 'g + 'l,
+        Self: 'g,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
-    type SharedGuard<'g, 'l>: Sized
+    type SharedGuard<'g, 'l, P>: Sized
     where
-        Self: 'g + 'l,
+        Self: 'g,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
-    type LinearizableGuard<'g, 'l>: Sized
+    type LinearizableGuard<'g, 'l, P>: Sized
     where
-        Self: 'g + 'l,
+        Self: 'g,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
-    unsafe fn guard_borrow<'g, 'l>(
-        smr: &'l hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_borrow<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: &'l hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
     ) -> Self::Borrow<'l>;
 
-    unsafe fn guard_owned<'g, 'l>(
-        smr: hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_owned<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
-    ) -> Self::OwnedGuard<'g, 'l>;
+    ) -> Self::OwnedGuard<'g, 'l, P>;
 
-    unsafe fn guard_shared<'g, 'l>(
-        smr: hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_shared<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
-    ) -> Self::SharedGuard<'g, 'l>;
+    ) -> Self::SharedGuard<'g, 'l, P>;
 
-    unsafe fn downgrade_guard<'g, 'l>(
-        smr: hazard::guard::Prefix<'g, 'l, Self>,
-    ) -> Self::LinearizableGuard<'g, 'l>;
+    unsafe fn downgrade_guard<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: hazard::guard::Prefix<'g, 'l, P, Self>,
+    ) -> Self::LinearizableGuard<'g, 'l, P>;
 
-    unsafe fn guard_linearizable<'g, 'l>(
-        smr: &Self::LinearizableGuard<'g, 'l>,
+    unsafe fn guard_linearizable<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: &Self::LinearizableGuard<'g, 'l, P>,
         raw: u64,
     ) -> Self::Borrow<'l>;
 
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
         Self: 'l;
+
+    fn borrow_owned<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        guard: &'a Self::OwnedGuard<'g, 'l, P>,
+    ) -> Self::Borrow<'a>;
+
+    fn borrow_shared<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        guard: &'a Self::SharedGuard<'g, 'l, P>,
+    ) -> Self::Borrow<'a>;
 }
 
 unsafe impl<T> Value for Box<T> {
-    type OwnedGuard<'g, 'l>
-        = hazard::guard::Value<'g, 'l, true, Self>
+    type OwnedGuard<'g, 'l, P>
+        = hazard::guard::Value<'g, 'l, true, P, Self>
     where
         Self: 'g + 'l,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
-    type SharedGuard<'g, 'l>
-        = hazard::guard::Value<'g, 'l, false, Self>
+    type SharedGuard<'g, 'l, P>
+        = hazard::guard::Value<'g, 'l, false, P, Self>
     where
         Self: 'g + 'l,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
-    type LinearizableGuard<'g, 'l>
-        = hazard::guard::Values<'g, 'l, Self>
+    type LinearizableGuard<'g, 'l, P>
+        = hazard::guard::Values<'g, 'l, P, Self>
     where
         Self: 'g + 'l,
+        P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
         'g: 'l;
 
     #[inline]
-    unsafe fn guard_owned<'g, 'l>(
-        smr: hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_owned<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
-    ) -> Self::OwnedGuard<'g, 'l> {
+    ) -> Self::OwnedGuard<'g, 'l, P> {
         let borrow = Self::borrow_from_raw(raw);
         unsafe { smr.guard_owned(borrow) }
     }
 
     #[inline]
-    unsafe fn guard_shared<'g, 'l>(
-        smr: hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_shared<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        smr: hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
-    ) -> Self::SharedGuard<'g, 'l> {
+    ) -> Self::SharedGuard<'g, 'l, P> {
         let borrow = Self::borrow_from_raw(raw);
         smr.guard_shared(borrow)
     }
 
     #[inline]
-    unsafe fn guard_borrow<'g, 'l, 'smr>(
-        _smr: &'smr hazard::guard::Traverse<'g, 'l, Self>,
+    unsafe fn guard_borrow<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        _smr: &'l hazard::guard::Traverse<'g, 'l, P, Self>,
         raw: u64,
     ) -> Self::Borrow<'l> {
         Self::borrow_from_raw(raw)
@@ -99,17 +113,31 @@ unsafe impl<T> Value for Box<T> {
         borrow as *const T as u64
     }
 
-    unsafe fn downgrade_guard<'g, 'l>(
-        _smr: hazard::guard::Prefix<'g, 'l, Self>,
-    ) -> Self::LinearizableGuard<'g, 'l> {
+    unsafe fn downgrade_guard<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        _smr: hazard::guard::Prefix<'g, 'l, P, Self>,
+    ) -> Self::LinearizableGuard<'g, 'l, P> {
         todo!()
     }
 
-    unsafe fn guard_linearizable<'g, 'l>(
-        _smr: &Self::LinearizableGuard<'g, 'l>,
+    unsafe fn guard_linearizable<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        _smr: &Self::LinearizableGuard<'g, 'l, P>,
         _raw: u64,
     ) -> Self::Borrow<'l> {
         todo!()
+    }
+
+    #[inline]
+    fn borrow_owned<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        guard: &'a Self::OwnedGuard<'g, 'l, P>,
+    ) -> Self::Borrow<'a> {
+        guard
+    }
+
+    #[inline]
+    fn borrow_shared<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+        guard: &'a Self::SharedGuard<'g, 'l, P>,
+    ) -> Self::Borrow<'a> {
+        guard
     }
 }
 
@@ -117,36 +145,48 @@ macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
             unsafe impl Value for $ty {
-                type OwnedGuard<'g, 'l>
+                type OwnedGuard<'g, 'l, P>
                     = Self
                 where
+                    P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
                     'g: 'l;
 
-                type SharedGuard<'g, 'l>
+                type SharedGuard<'g, 'l, P>
                     = Self
                 where
+                    P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
                     'g: 'l;
 
-                type LinearizableGuard<'g, 'l>
+                type LinearizableGuard<'g, 'l, P>
                     = ()
                 where
+                    P: 'g + ribbit::Pack<Packed: hazard::Prefix>,
                     'g: 'l;
 
                 #[inline]
-                unsafe fn guard_owned<'g, 'l>(_smr: hazard::guard::Traverse<'g, 'l, Self>, raw: u64) -> Self {
+                unsafe fn guard_owned<'g, 'l, P>(_smr: hazard::guard::Traverse<'g, 'l, P, Self>, raw: u64) -> Self
+                where
+                    P: ribbit::Pack<Packed: hazard::Prefix>,
+                {
                     raw as $ty
                 }
 
                 #[inline]
-                unsafe fn guard_shared<'g, 'l>(_smr: hazard::guard::Traverse<'g, 'l, Self>, raw: u64) -> Self {
+                unsafe fn guard_shared<'g, 'l, P>(_smr: hazard::guard::Traverse<'g, 'l, P, Self>, raw: u64) -> Self
+                where
+                    P: ribbit::Pack<Packed: hazard::Prefix>,
+                {
                     raw as $ty
                 }
 
                 #[inline]
-                unsafe fn guard_borrow<'g, 'l>(
-                    _smr: &'l hazard::guard::Traverse<'g, 'l, Self>,
+                unsafe fn guard_borrow<'g, 'l, P>(
+                    _smr: &'l hazard::guard::Traverse<'g, 'l, P, Self>,
                     raw: u64,
-                ) -> Self::Borrow<'l> {
+                ) -> Self::Borrow<'l>
+                where
+                    P: ribbit::Pack<Packed: hazard::Prefix>,
+                {
                     raw as $ty
                 }
 
@@ -155,16 +195,36 @@ macro_rules! impl_trivial {
                     borrow as u64
                 }
 
-                unsafe fn downgrade_guard<'g, 'l>(
-                    _smr: hazard::guard::Prefix<'g, 'l, Self>,
-                ) -> Self::LinearizableGuard<'g, 'l> {
+                unsafe fn downgrade_guard<'g, 'l, P>(
+                    _smr: hazard::guard::Prefix<'g, 'l, P, Self>,
+                ) -> Self::LinearizableGuard<'g, 'l, P>
+                where
+                    P: ribbit::Pack<Packed: hazard::Prefix>,
+                {
                 }
 
-                unsafe fn guard_linearizable<'g, 'l>(
+                unsafe fn guard_linearizable<'g, 'l, P>(
                     (): &(),
                     raw: u64,
-                ) -> Self::Borrow<'l> {
+                ) -> Self::Borrow<'l>
+                where
+                    P: ribbit::Pack<Packed: hazard::Prefix>,
+                {
                     raw as $ty
+                }
+
+                #[inline]
+                fn borrow_owned<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+                    guard: &'a Self,
+                ) -> Self::Borrow<'a> {
+                    *guard
+                }
+
+                #[inline]
+                fn borrow_shared<'g, 'l, 'a, P: ribbit::Pack<Packed: hazard::Prefix>>(
+                    guard: &'a Self,
+                ) -> Self::Borrow<'a> {
+                    *guard
                 }
             }
         )*

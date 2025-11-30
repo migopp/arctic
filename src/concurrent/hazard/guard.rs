@@ -9,17 +9,19 @@ use crate::concurrent::hazard::Prefix as _;
 use crate::raw::edge;
 use crate::raw::Edge;
 
-pub struct Traverse<'g, 'l, V: concurrent::Value> {
+pub struct Traverse<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> {
     _local: PhantomData<&'l mut &'g V>,
 
     #[cfg(feature = "smr-epoch")]
     guard: crossbeam_epoch::Guard,
 
     #[cfg(not(feature = "smr-epoch"))]
-    local: &'l mut hazard::Local<'g, V>,
+    local: &'l mut hazard::Local<'g, P, V>,
 }
 
-impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
+impl<P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> Drop
+    for Traverse<'_, '_, P, V>
+{
     #[inline]
     fn drop(&mut self) {
         if cfg!(feature = "smr-disable") {
@@ -28,14 +30,14 @@ impl<V: concurrent::Value> Drop for Traverse<'_, '_, V> {
 
         #[cfg(not(feature = "smr-epoch"))]
         self.local.hazard.store_packed(
-            ribbit::Packed::<hazard::prefix::Be>::HAZARD_NULL,
+            ribbit::Packed::<P>::HAZARD_NULL,
             core::sync::atomic::Ordering::Relaxed,
         );
     }
 }
 
-impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
-    pub(super) fn new(local: &'l mut hazard::Local<'g, V>) -> Self {
+impl<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> Traverse<'g, 'l, P, V> {
+    pub(super) fn new(local: &'l mut hazard::Local<'g, P, V>) -> Self {
         Self {
             _local: PhantomData,
 
@@ -70,7 +72,7 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     ///
     /// Caller must ensure that only one thread calls this for any given value.
     #[inline]
-    pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> Value<'g, 'l, true, V> {
+    pub(crate) unsafe fn guard_owned(self, value: V::Borrow<'l>) -> Value<'g, 'l, true, P, V> {
         if cfg!(feature = "smr-disable") {
             return Value {
                 inner: self,
@@ -81,10 +83,9 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
         #[cfg(not(feature = "smr-epoch"))]
         {
             let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
-            self.local.hazard.store_packed(
-                hazard.with_overlap(false).with_node(false).with_value(true),
-                Ordering::Relaxed,
-            );
+            self.local
+                .hazard
+                .store_packed(hazard.without_overlap().without_node(), Ordering::Relaxed);
         }
 
         Value {
@@ -94,7 +95,7 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     }
 
     #[inline]
-    pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> Value<'g, 'l, false, V> {
+    pub(crate) fn guard_shared(self, value: V::Borrow<'l>) -> Value<'g, 'l, false, P, V> {
         if cfg!(feature = "smr-disable") {
             return Value {
                 inner: self,
@@ -105,10 +106,9 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
         #[cfg(not(feature = "smr-epoch"))]
         {
             let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
-            self.local.hazard.store_packed(
-                hazard.with_overlap(false).with_node(false).with_value(true),
-                Ordering::Relaxed,
-            );
+            self.local
+                .hazard
+                .store_packed(hazard.without_overlap().without_node(), Ordering::Relaxed);
         }
 
         Value {
@@ -118,7 +118,7 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
     }
 
     #[inline]
-    pub(crate) fn guard_prefix(self) -> Prefix<'g, 'l, V> {
+    pub(crate) fn guard_prefix(self) -> Prefix<'g, 'l, P, V> {
         if cfg!(feature = "smr-disable") {
             return Prefix(self);
         }
@@ -128,14 +128,14 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
             let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
             self.local
                 .hazard
-                .store_packed(hazard.with_overlap(false), Ordering::Relaxed);
+                .store_packed(hazard.without_overlap(), Ordering::Relaxed);
         }
 
         Prefix(self)
     }
 
     #[inline]
-    pub(crate) fn guard_linearizable(self) -> Values<'g, 'l, V> {
+    pub(crate) fn guard_linearizable(self) -> Values<'g, 'l, P, V> {
         if cfg!(feature = "smr-disable") {
             return Values(self);
         }
@@ -145,37 +145,52 @@ impl<'g, 'l, V: concurrent::Value> Traverse<'g, 'l, V> {
             let hazard = self.local.hazard.load_packed(Ordering::Relaxed);
             self.local
                 .hazard
-                .store_packed(hazard.with_node(false), Ordering::Relaxed);
+                .store_packed(hazard.without_node(), Ordering::Relaxed);
         }
 
         Values(self)
     }
 }
 
-pub struct Prefix<'g, 'l, V: concurrent::Value>(Traverse<'g, 'l, V>);
+pub struct Prefix<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value>(
+    Traverse<'g, 'l, P, V>,
+);
 
-impl<'g, 'l, V: concurrent::Value> core::ops::Deref for Prefix<'g, 'l, V> {
-    type Target = Traverse<'g, 'l, V>;
+impl<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> core::ops::Deref
+    for Prefix<'g, 'l, P, V>
+{
+    type Target = Traverse<'g, 'l, P, V>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-pub struct Values<'g, 'l, V: concurrent::Value>(Traverse<'g, 'l, V>);
+pub struct Values<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value>(
+    Traverse<'g, 'l, P, V>,
+);
 
-impl<'g, 'l, V: concurrent::Value> core::ops::Deref for Values<'g, 'l, V> {
-    type Target = Traverse<'g, 'l, V>;
+impl<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> core::ops::Deref
+    for Values<'g, 'l, P, V>
+{
+    type Target = Traverse<'g, 'l, P, V>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-pub struct Value<'g, 'l, const OWNED: bool, V: concurrent::Value> {
-    inner: Traverse<'g, 'l, V>,
+pub struct Value<
+    'g,
+    'l,
+    const OWNED: bool,
+    P: ribbit::Pack<Packed: hazard::Prefix>,
+    V: concurrent::Value,
+> {
+    inner: Traverse<'g, 'l, P, V>,
     borrow: V::Borrow<'l>,
 }
 
-impl<'l, const OWNED: bool, V> fmt::Debug for Value<'_, 'l, OWNED, V>
+impl<'l, const OWNED: bool, P: ribbit::Pack<Packed: hazard::Prefix>, V> fmt::Debug
+    for Value<'_, 'l, OWNED, P, V>
 where
     V: concurrent::Value,
     V::Borrow<'l>: fmt::Debug,
@@ -185,7 +200,8 @@ where
     }
 }
 
-impl<'g, 'l, const OWNED: bool, V> core::ops::Deref for Value<'g, 'l, OWNED, V>
+impl<'g, 'l, const OWNED: bool, P: ribbit::Pack<Packed: hazard::Prefix>, V> core::ops::Deref
+    for Value<'g, 'l, OWNED, P, V>
 where
     V: concurrent::Value,
 {
@@ -197,7 +213,8 @@ where
     }
 }
 
-impl<'g, 'l, const OWNED: bool, V> Drop for Value<'g, 'l, OWNED, V>
+impl<'g, 'l, const OWNED: bool, P: ribbit::Pack<Packed: hazard::Prefix>, V> Drop
+    for Value<'g, 'l, OWNED, P, V>
 where
     V: concurrent::Value,
 {

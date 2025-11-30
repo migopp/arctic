@@ -6,7 +6,7 @@ use ribbit::traits::Integer as _;
 use ribbit::u120;
 use ribbit::u4;
 
-pub(crate) trait Prefix {
+pub trait Prefix: Send + Sync {
     const HAZARD_NULL: Self;
     const HAZARD_ROOT: Self;
 
@@ -21,6 +21,15 @@ pub(crate) trait Prefix {
 
     fn bytes(&self) -> usize;
 
+    #[expect(clippy::wrong_self_convention)]
+    fn is_node(self) -> bool;
+
+    #[expect(clippy::wrong_self_convention)]
+    fn is_value(self) -> bool;
+
+    fn without_overlap(self) -> Self;
+    fn without_node(self) -> Self;
+
     /// For measurement purposes only
     fn age(self) -> u8;
 
@@ -32,7 +41,7 @@ pub(crate) trait Prefix {
 // parts of the tree, and prefixes of retired edges.
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = "BePacked"), debug)]
-pub(crate) struct Be {
+pub struct Be {
     // Hazard: whether to protect nodes
     // Prefix: whether this is a node
     pub(super) node: bool,
@@ -81,6 +90,7 @@ impl Prefix for BePacked {
     const HAZARD_ROOT: Self = Self::new(true, true, true, u4::new(0), u120::new(0));
 
     /// Construct
+    #[inline]
     fn into_prefix(self, value: bool, bits: Option<usize>) -> Self {
         match bits {
             Some(bits) if bits < (self.len().value() as usize) << 3 => unsafe {
@@ -93,11 +103,13 @@ impl Prefix for BePacked {
         .with_value(value)
     }
 
+    #[inline]
     fn is_active(self) -> bool {
         // Protects either values or nodes
         self.value & 0b11 > 0
     }
 
+    #[inline]
     fn is_conflict(self, prefix: Self) -> bool {
         validate!(self.is_active());
         validate!(prefix.node() ^ prefix.value());
@@ -115,16 +127,39 @@ impl Prefix for BePacked {
         self.is_overlap(prefix)
     }
 
+    #[inline]
+    fn is_node(self) -> bool {
+        self.node()
+    }
+
+    #[inline]
+    fn is_value(self) -> bool {
+        self.value()
+    }
+
+    #[inline]
+    fn without_node(self) -> Self {
+        self.with_node(false)
+    }
+
+    #[inline]
+    fn without_overlap(self) -> Self {
+        self.with_overlap(false)
+    }
+
+    #[inline]
     fn bytes(&self) -> usize {
         self.len().value() as usize
     }
 
     /// For measurement purposes only
+    #[inline]
     fn age(self) -> u8 {
         self.prefix().value() as u8
     }
 
     /// For measurement purposes only
+    #[inline]
     fn with_age(self, age: u8) -> Self {
         self.with_prefix(
             self.prefix()
@@ -135,6 +170,7 @@ impl Prefix for BePacked {
 }
 
 impl BePacked {
+    #[inline]
     fn is_overlap(self, other: Self) -> bool {
         let len = self.len().min(other.len());
         let bits = (len.value() as usize) << 3;
@@ -143,6 +179,7 @@ impl BePacked {
 }
 
 // Mask off everything except top `bits`
+#[inline]
 fn extract(prefix: u128, bits: usize) -> u128 {
     validate_eq!(bits & 0b111, 0);
     validate!((bits >> 3) <= u4::MAX.value() as usize);

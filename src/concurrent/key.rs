@@ -5,22 +5,25 @@ use crate::raw::key::integer;
 use crate::raw::key::Read as _;
 
 pub trait Key: raw::Key {
-    #[expect(private_interfaces)]
-    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be>;
+    type Prefix: ribbit::Pack<Packed: hazard::Prefix>;
+
+    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix>;
 }
 
 impl Key for Vec<u8> {
+    type Prefix = hazard::prefix::Be;
+
     #[inline]
-    #[expect(private_interfaces)]
-    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
+    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
         hazard_dynamic(reader)
     }
 }
 
 impl Key for String {
+    type Prefix = hazard::prefix::Be;
+
     #[inline]
-    #[expect(private_interfaces)]
-    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
+    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
         hazard_dynamic(reader)
     }
 }
@@ -29,9 +32,10 @@ macro_rules! impl_integer {
     ($($integer:ty),* $(,)?) => {
         $(
             impl Key for $integer {
+                type Prefix = hazard::prefix::Be;
+
                 #[inline]
-                #[expect(private_interfaces)]
-                fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<hazard::prefix::Be> {
+                fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
                     hazard_integer(reader)
                 }
             }

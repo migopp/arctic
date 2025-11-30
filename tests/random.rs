@@ -2,6 +2,7 @@ use core::hash::Hasher as _;
 use std::sync::Barrier;
 
 use arctic::raw::Key;
+use arctic::Value as _;
 
 mod u64 {
     use arctic::raw::Key;
@@ -29,37 +30,21 @@ mod u64 {
     impl Workload for U64 {
         type Key = u64;
 
-        type Value<'a>
-            = u64
-        where
-            Self: 'a;
+        type Value = u64;
 
         fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
             index as u64
         }
 
-        fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
+        fn value(&self, index: usize) -> Self::Value {
             index as u64
         }
 
-        fn validate_owned<'a, 'g, 'l>(
+        fn validate<'a, 'g, 'l>(
             &'a self,
             index: usize,
             key: <Self::Key as Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
-        ) where
-            'a: 'g,
-            'g: 'l,
-        {
-            assert_eq!(index as u64, key);
-            assert_eq!(index as u64, value);
-        }
-
-        fn validate_shared<'a, 'g, 'l>(
-            &'a self,
-            index: usize,
-            key: <Self::Key as Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
+            value: u64,
         ) where
             'a: 'g,
             'g: 'l,
@@ -106,40 +91,27 @@ mod boxed {
     impl Workload for Boxed {
         type Key = u32;
 
-        type Value<'a> = Box<Entry>;
+        type Value = Box<Entry>;
 
         fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
             index as u32
         }
 
-        fn value<'a>(&'a self, index: usize) -> Self::Value<'a> {
+        fn value(&self, index: usize) -> Self::Value {
             Box::new(Entry::new(index))
         }
 
-        fn validate_owned<'a, 'g, 'l>(
+        fn validate<'a, 'g, 'l>(
             &'a self,
             index: usize,
             key: <Self::Key as Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
+            value: &Entry,
         ) where
             'a: 'g,
             'g: 'l,
         {
             assert_eq!(key, index as u32);
-            assert_eq!(**value, Entry::new(index));
-        }
-
-        fn validate_shared<'a, 'g, 'l>(
-            &'a self,
-            index: usize,
-            key: <Self::Key as Key>::Borrow<'a>,
-            value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
-        ) where
-            'a: 'g,
-            'g: 'l,
-        {
-            assert_eq!(key, index as u32);
-            assert_eq!(**value, Entry::new(index));
+            assert_eq!(*value, Entry::new(index));
         }
     }
 }
@@ -147,28 +119,17 @@ mod boxed {
 trait Workload: Sized + Sync {
     type Key: arctic::concurrent::Key + Sync;
 
-    type Value<'a>: arctic::Value + Send + Sync
-    where
-        Self: 'a;
+    type Value: arctic::Value + Send + Sync;
 
     fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a>;
 
-    fn value<'a>(&'a self, index: usize) -> Self::Value<'a>;
+    fn value(&self, index: usize) -> Self::Value;
 
-    fn validate_owned<'a, 'g, 'l>(
+    fn validate<'a, 'g, 'l>(
         &'a self,
         index: usize,
         key: <Self::Key as Key>::Borrow<'a>,
-        value: <Self::Value<'a> as arctic::Value>::OwnedGuard<'g, 'l>,
-    ) where
-        'a: 'g,
-        'g: 'l;
-
-    fn validate_shared<'a, 'g, 'l>(
-        &'a self,
-        index: usize,
-        key: <Self::Key as Key>::Borrow<'a>,
-        value: <Self::Value<'a> as arctic::Value>::SharedGuard<'g, 'l>,
+        value: <Self::Value as arctic::sequential::Value>::Borrow<'_>,
     ) where
         'a: 'g,
         'g: 'l;
@@ -221,15 +182,15 @@ fn test_map<'k, K: Workload>(
                 barrier.wait();
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
-                    let value = map.remove(*key);
-                    key_set.validate_owned(*index, *key, value.unwrap());
+                    let value = map.remove(*key).unwrap();
+                    key_set.validate(*index, *key, K::Value::borrow_owned(&value));
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().skip(chunk.len() / 2) {
                     let value = map.get(*key);
-                    key_set.validate_shared(*index, *key, value.unwrap());
+                    key_set.validate(*index, *key, K::Value::borrow_shared(&value.unwrap()));
                 }
             });
         }

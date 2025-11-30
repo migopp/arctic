@@ -17,7 +17,7 @@ use crate::raw::key::Read as _;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
-pub(crate) use value::Value;
+pub use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {

@@ -12,7 +12,7 @@ use crate::Key;
 /// Tree traversal state.
 pub(super) struct Point<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: hazard::guard::Traverse<'g, 'l, V>,
+    guard: hazard::guard::Traverse<'g, 'l, K::Prefix, V>,
 
     raw: crate::raw::cursor::Point<'k, 'g, K, H>,
 }
@@ -25,7 +25,7 @@ where
 {
     #[inline]
     pub(super) fn new(
-        smr: &'l mut hazard::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
     ) -> Point<'k, 'g, 'l, K, V, H>
@@ -54,7 +54,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, K::Prefix, V> {
         self.guard
     }
 
@@ -95,10 +95,10 @@ where
 {
     #[inline]
     pub(super) fn get(
-        smr: &'l mut hazard::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
-    ) -> Option<V::SharedGuard<'g, 'l>> {
+    ) -> Option<V::SharedGuard<'g, 'l, K::Prefix>> {
         let guard = smr.guard(
             #[cfg(not(feature = "smr-epoch"))]
             K::hazard(key),
@@ -110,7 +110,7 @@ where
 
 pub(super) struct Prefix<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: hazard::guard::Traverse<'g, 'l, V>,
+    guard: hazard::guard::Traverse<'g, 'l, K::Prefix, V>,
 
     raw: crate::raw::cursor::Prefix<'k, 'g, K, H>,
 }
@@ -122,7 +122,7 @@ where
     H: path::History<'k, 'g, K>,
 {
     pub(super) fn new(
-        smr: &'l mut hazard::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
     ) -> Option<Self> {
@@ -137,13 +137,13 @@ where
     }
 
     pub(super) fn new_root(
-        smr: &'l mut hazard::Local<'g, V>,
+        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
         root: &'g Atomic<Edge<K::Edge>>,
     ) -> Self {
         Self {
             guard: smr.guard(
                 #[cfg(not(feature = "smr-epoch"))]
-                ribbit::Packed::<hazard::prefix::Be>::HAZARD_ROOT,
+                ribbit::Packed::<K::Prefix>::HAZARD_ROOT,
             ),
             raw: unsafe { crate::raw::cursor::Prefix::new_root(root) },
         }
@@ -158,7 +158,7 @@ where
     }
 
     #[inline]
-    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, V> {
+    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, K::Prefix, V> {
         self.guard
     }
 

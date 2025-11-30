@@ -98,25 +98,24 @@ use crate::stat;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub(crate) struct Global<V: concurrent::Value> {
+pub(crate) struct Global<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> {
     _value: PhantomData<V>,
 
     #[cfg(feature = "smr-epoch")]
     collector: crossbeam_epoch::Collector,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
+    hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
+
     #[cfg(not(feature = "smr-epoch"))]
-    retired: thread_local::ThreadLocal<
-        Cache<core::cell::RefCell<Vec<(ribbit::Packed<prefix::Be>, u64)>>>,
-    >,
+    retired: thread_local::ThreadLocal<Cache<core::cell::RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
     #[cfg(not(feature = "smr-epoch"))]
     membarrier: AtomicBool,
     #[cfg(not(feature = "smr-epoch"))]
     reclaim_threshold: usize,
 }
 
-impl<V: concurrent::Value> Global<V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
     pub(crate) fn with_reclaim_threshold(_reclaim_threshold: usize) -> Self {
         Self {
             _value: PhantomData,
@@ -140,7 +139,7 @@ impl<V: concurrent::Value> Global<V> {
         *self.membarrier.get_mut() = membarrier;
     }
 
-    pub(crate) fn pin(&self) -> Local<V> {
+    pub(crate) fn pin(&self) -> Local<P, V> {
         Local {
             _value: PhantomData,
 
@@ -152,11 +151,7 @@ impl<V: concurrent::Value> Global<V> {
             #[cfg(not(feature = "smr-epoch"))]
             hazard: &self
                 .hazards
-                .get_or(|| {
-                    Cache(ribbit::Atomic::new_packed(
-                        ribbit::Packed::<prefix::Be>::HAZARD_NULL,
-                    ))
-                })
+                .get_or(|| Cache(ribbit::Atomic::new_packed(ribbit::Packed::<P>::HAZARD_NULL)))
                 .0,
             #[cfg(not(feature = "smr-epoch"))]
             retired: self.retired.get_or_default().0.borrow_mut(),
@@ -173,36 +168,36 @@ impl<V: concurrent::Value> Global<V> {
             .map(|Cache(retired)| retired)
             .flat_map(core::cell::RefCell::get_mut)
             .for_each(|(prefix, raw)| {
-                unsafe { deallocate_hazard::<V>(*prefix, *raw, counter) };
+                unsafe { deallocate_hazard::<P, V>(*prefix, *raw, counter) };
             })
     }
 }
 
-impl<V: concurrent::Value> Default for Global<V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Default for Global<P, V> {
     fn default() -> Self {
         Self::with_reclaim_threshold(64)
     }
 }
 
 #[cfg(not(feature = "smr-epoch"))]
-impl<V: concurrent::Value> Drop for Global<V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Drop for Global<P, V> {
     fn drop(&mut self) {
         self.reclaim(stat::Counter::FreeDrop);
     }
 }
 
-pub(crate) struct Local<'g, V> {
+pub(crate) struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
     _value: PhantomData<&'g V>,
 
     #[cfg(feature = "smr-epoch")]
     handle: crossbeam_epoch::LocalHandle,
 
     #[cfg(not(feature = "smr-epoch"))]
-    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<prefix::Be>>>,
+    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
     #[cfg(not(feature = "smr-epoch"))]
-    hazard: &'g ribbit::Atomic<prefix::Be>,
+    hazard: &'g ribbit::Atomic<P>,
     #[cfg(not(feature = "smr-epoch"))]
-    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<prefix::Be>, u64)>>,
+    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
     #[cfg(not(feature = "smr-epoch"))]
     membarrier: &'g AtomicBool,
     #[cfg(not(feature = "smr-epoch"))]
@@ -210,15 +205,15 @@ pub(crate) struct Local<'g, V> {
 }
 
 #[cfg(feature = "smr-epoch")]
-impl<'g, V: concurrent::Value> Local<'g, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
     #[inline]
-    pub(crate) fn guard<'l>(&'l mut self) -> guard::Traverse<'g, 'l, V> {
+    pub(crate) fn guard<'l>(&'l mut self) -> guard::Traverse<'g, 'l, P, V> {
         guard::Traverse::new(self)
     }
 }
 
 #[cfg(not(feature = "smr-epoch"))]
-impl<'g, V: concurrent::Value> Local<'g, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
     #[inline]
     pub(super) fn enable_membarrier(&self) {
         self.membarrier.store(true, Ordering::Relaxed);
@@ -227,8 +222,8 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
     #[inline]
     pub(crate) fn guard<'l>(
         &'l mut self,
-        prefix: ribbit::Packed<prefix::Be>,
-    ) -> guard::Traverse<'g, 'l, V> {
+        prefix: ribbit::Packed<P>,
+    ) -> guard::Traverse<'g, 'l, P, V> {
         self.hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
         guard::Traverse::new(self)
@@ -302,7 +297,7 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
                 stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
             }
             freed += 1;
-            unsafe { deallocate_hazard::<V>(*prefix, *raw, stat::Counter::FreeRetire) };
+            unsafe { deallocate_hazard::<P, V>(*prefix, *raw, stat::Counter::FreeRetire) };
             false
         });
 
@@ -311,12 +306,12 @@ impl<'g, V: concurrent::Value> Local<'g, V> {
 }
 
 #[cfg_attr(feature = "smr-epoch", expect(dead_code))]
-unsafe fn deallocate_hazard<V: concurrent::Value>(
-    prefix: ribbit::Packed<prefix::Be>,
+unsafe fn deallocate_hazard<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value>(
+    prefix: ribbit::Packed<P>,
     raw: u64,
     counter: stat::Counter,
 ) {
-    validate!(prefix.value() ^ prefix.node());
+    validate!(prefix.is_value() ^ prefix.is_node());
 
     if cfg!(feature = "stat") {
         if let Some(record) = match prefix.bytes() {
@@ -335,7 +330,7 @@ unsafe fn deallocate_hazard<V: concurrent::Value>(
         }
     }
 
-    if prefix.node() {
+    if prefix.is_node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
             crate::raw::edge::Node::<crate::raw::edge::Be>::new_unchecked(raw)
