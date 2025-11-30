@@ -22,7 +22,7 @@ pub(crate) enum RangeIter<
     B: raw::iter::Range<R>,
     O,
 > {
-    Root { key: W, next: Option<u64> },
+    Root { writer: W, next: Option<u64> },
     Node(NodeIter<'g, R, W, M, B, O>),
 }
 
@@ -36,7 +36,7 @@ where
 {
     fn default() -> Self {
         Self::Root {
-            key: W::default(),
+            writer: W::default(),
             next: None,
         }
     }
@@ -61,7 +61,7 @@ where
         let key = edge.meta();
         let bits = prefix.bits();
         let mut writer = W::from(prefix);
-        let bits = writer.write(W::len_from_bits(bits), key);
+        let len = writer.write(W::len_from_bits(bits), key);
 
         let mut lower = range.lower();
         let mut upper = range.upper();
@@ -72,12 +72,12 @@ where
 
         match child {
             edge::Child::Value(value) => Self::Root {
-                key: writer,
+                writer,
                 next: Some(value),
             },
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
-                stack.push((bits, unsafe {
+                stack.push((len, unsafe {
                     node.entries_unchecked::<O, _, _>(lower_byte, upper_byte)
                 }));
 
@@ -85,7 +85,7 @@ where
                     lower,
                     upper,
                     stack,
-                    key: writer,
+                    writer,
                     _order: PhantomData,
                 })
             }
@@ -95,10 +95,10 @@ where
     #[inline]
     pub(crate) fn for_each<F: FnMut(&W, u64) -> ControlFlow<()>>(self, mut apply: F) {
         match self {
-            RangeIter::Root { key, mut next } => {
+            RangeIter::Root { writer, mut next } => {
                 crate::cold();
                 if let Some(value) = next.take() {
-                    let _ = apply(&key, value);
+                    let _ = apply(&writer, value);
                 }
             }
             RangeIter::Node(mut iter) => iter.for_each(apply),
@@ -108,7 +108,7 @@ where
     #[inline]
     pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
         match self {
-            RangeIter::Root { key, next } => {
+            RangeIter::Root { writer: key, next } => {
                 crate::cold();
                 let value = next.take()?;
                 Some((key, value))
@@ -128,7 +128,7 @@ pub(crate) struct NodeIter<
 > {
     lower: B::Lower,
     upper: B::Upper,
-    key: W,
+    writer: W,
     stack: Vec<(
         W::Len,
         raw::node::NodeIter<
@@ -165,8 +165,8 @@ where
         mut apply: F,
     ) -> Option<(&W, u64)> {
         'vertical: loop {
-            let (bits, iter) = self.stack.last_mut()?;
-            let bits = *bits;
+            let (len, iter) = self.stack.last_mut()?;
+            let len = *len;
 
             'horizontal: loop {
                 let Some((mut byte, mut edge)) = (if O::REVERSE {
@@ -178,7 +178,7 @@ where
                     continue 'vertical;
                 };
 
-                let mut bits = bits;
+                let mut len = len;
                 let mut check_lower = iter.lower().check(byte);
                 let mut check_upper = iter.upper().check(byte);
 
@@ -192,7 +192,7 @@ where
                         (meta, child)
                     };
 
-                    bits = self.key.replace(bits, byte, meta);
+                    len = self.writer.replace(len, byte, meta);
 
                     let lower = if check_lower {
                         match self.lower.check(meta) {
@@ -222,9 +222,9 @@ where
 
                     match child {
                         edge::Child::Value(value) if YIELD => {
-                            return Some((&self.key, value));
+                            return Some((&self.writer, value));
                         }
-                        edge::Child::Value(value) => match apply(&self.key, value) {
+                        edge::Child::Value(value) => match apply(&self.writer, value) {
                             ControlFlow::Continue(()) => continue 'horizontal,
                             ControlFlow::Break(()) => {
                                 self.stack.clear();
@@ -244,7 +244,7 @@ where
                                     continue 'compress;
                                 }
                                 Err(iter) => {
-                                    self.stack.push((bits, iter));
+                                    self.stack.push((len, iter));
                                     continue 'vertical;
                                 }
                             }
