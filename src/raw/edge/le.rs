@@ -1,5 +1,8 @@
 #![expect(dead_code)]
 
+use core::ops::BitOr as _;
+use core::ops::BitXor;
+
 use ribbit::u56;
 use ribbit::u6;
 
@@ -19,13 +22,20 @@ impl Le {
     const MASK_KEY: u64 = !Self::MASK_META;
 
     #[inline]
-    pub(crate) fn key_from_u64_truncate(_value: u64, _len: u6) -> ribbit::Packed<Self> {
-        todo!()
+    pub(crate) fn key_from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
+        validate_eq!(len.value() & 0b111, 0);
+        let mask = (1u64 << len.value()) - 1;
+        ribbit::Packed::<Self>::new(
+            unsafe { u56::new_unchecked(value & mask) },
+            false,
+            false,
+            len,
+        )
     }
 
     #[inline]
-    pub(crate) fn min_len(_len: u6, _bits: usize) -> u6 {
-        todo!()
+    pub(crate) fn min_len(len: u6, bits: usize) -> u6 {
+        unsafe { u6::new_unchecked((len.value() as usize).min(bits) as u8) }
     }
 }
 
@@ -74,8 +84,31 @@ impl edge::Meta for LePacked {
     }
 
     #[inline]
-    fn expand(self, _new: Self::Key) -> Result<(Self, u8, Self), ()> {
-        todo!()
+    fn expand(self, new: Self::Key) -> Result<(Self, u8, Self), ()> {
+        if self.key() == new {
+            return Err(());
+        }
+
+        let len = self.len().min(new.len());
+
+        let len_start = unsafe {
+            u6::new_unchecked(
+                self.value
+                    .bitxor(new.value)
+                    .bitor(1u64 << len.value())
+                    .trailing_zeros() as u8
+                    & !0b111u8,
+            )
+        };
+
+        let len_middle = unsafe { u6::new_unchecked(len_start.value() + 8) };
+
+        Ok((
+            Le::key_from_u64_truncate(self.value, len_start).with_value(false),
+            (self.value >> len_start.value()) as u8,
+            Le::key_from_u64_truncate(self.value >> len_middle.value(), self.len() - len_middle)
+                .with_value(self.value()),
+        ))
     }
 
     #[inline]
