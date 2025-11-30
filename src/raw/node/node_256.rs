@@ -84,10 +84,13 @@ where
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub(crate) struct KeyIter {
+    #[cfg(target_endian = "big")]
+    _tag: Tag,
+
     head: u16,
     tail: u16,
 
-    // FIXME: handle big-endian
+    #[cfg(target_endian = "little")]
     _tag: Tag,
 }
 

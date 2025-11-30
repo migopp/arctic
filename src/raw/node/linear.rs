@@ -187,71 +187,89 @@ pub(crate) trait Header: ribbit::Unpack {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub(super) struct KeyIter<const N: usize> {
+pub(super) struct KeyIter3 {
     head: u8,
-    entries: [node::iter::KeyIndex; N],
+    entries: [node::iter::KeyIndex; 3],
     tail: u8,
 }
 
-const _: [(); 0] = [(); core::mem::offset_of!(KeyIter::<3>, head)];
-const _: [(); 8] = [(); core::mem::size_of::<KeyIter<3>>()];
+const _: [(); 8] = [(); core::mem::size_of::<KeyIter3>()];
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub(super) struct KeyIter<const N: usize> {
+    head: u8,
+    tail: u8,
+    entries: [node::iter::KeyIndex; N],
+}
+
 const _: [(); 32] = [(); core::mem::size_of::<KeyIter<15>>()];
+const _: [(); 96] = [(); core::mem::size_of::<KeyIter<47>>()];
 
-impl<const N: usize> KeyIter<N> {
-    #[inline]
-    pub(super) const fn new(entries: [node::iter::KeyIndex; N], len: u8) -> Self {
-        validate!(len as usize <= entries.len());
-        Self {
-            entries,
-            head: 0,
-            tail: len,
-        }
-    }
+macro_rules! impl_key_iter {
+    ($ty:ty, $len:expr, $new:ident) => {
+        impl $ty {
+            #[inline]
+            pub(super) const fn $new(entries: [node::iter::KeyIndex; $len], len: u8) -> Self {
+                validate!(len as usize <= entries.len());
+                Self {
+                    head: 0,
+                    tail: len,
+                    entries,
+                }
+            }
 
-    #[inline]
-    pub(super) fn sort_unstable(&mut self) {
-        validate_eq!(self.head, 0);
-        self.entries[..self.tail as usize].sort_unstable();
-    }
-}
-
-impl<const N: usize> Iterator for KeyIter<N> {
-    type Item = node::iter::KeyIndex;
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.head == self.tail {
-            return None;
+            #[inline]
+            #[allow(unused)]
+            pub(super) fn sort_unstable(&mut self) {
+                validate_eq!(self.head, 0);
+                self.entries[..self.tail as usize].sort_unstable();
+            }
         }
 
-        let next = self.entries.get(self.head as usize).copied()?;
-        self.head += 1;
-        Some(next)
-    }
+        impl Iterator for $ty {
+            type Item = node::iter::KeyIndex;
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.head == self.tail {
+                    return None;
+                }
 
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.tail - self.head) as usize;
-        (len, Some(len))
-    }
-}
+                let next = self.entries.get(self.head as usize).copied()?;
+                self.head += 1;
+                Some(next)
+            }
 
-impl<const N: usize> DoubleEndedIterator for KeyIter<N> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.head == self.tail {
-            return None;
+            #[inline]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                let len = (self.tail - self.head) as usize;
+                (len, Some(len))
+            }
         }
 
-        self.tail -= 1;
-        self.entries.get(self.tail as usize).copied()
-    }
+        impl DoubleEndedIterator for $ty {
+            #[inline]
+            fn next_back(&mut self) -> Option<Self::Item> {
+                if self.head == self.tail {
+                    return None;
+                }
+
+                self.tail -= 1;
+                self.entries.get(self.tail as usize).copied()
+            }
+        }
+
+        impl ExactSizeIterator for $ty {
+            #[inline]
+            fn len(&self) -> usize {
+                let (lower, upper) = self.size_hint();
+                validate_eq!(upper, Some(lower));
+                lower
+            }
+        }
+    };
 }
 
-impl<const N: usize> ExactSizeIterator for KeyIter<N> {
-    #[inline]
-    fn len(&self) -> usize {
-        let (lower, upper) = self.size_hint();
-        validate_eq!(upper, Some(lower));
-        lower
-    }
-}
+impl_key_iter!(KeyIter3, 3, new_3);
+impl_key_iter!(KeyIter<15>, 15, new_15);
+impl_key_iter!(KeyIter<47>, 47, new_47);

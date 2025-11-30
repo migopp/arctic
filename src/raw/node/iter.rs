@@ -111,7 +111,7 @@ impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
 
 #[repr(C)]
 pub(crate) union KeyIter {
-    node_3: linear::KeyIter<3>,
+    node_3: linear::KeyIter3,
     node_15: NonNull<linear::KeyIter<15>>,
     node_47: NonNull<linear::KeyIter<47>>,
     node_256: node_256::KeyIter,
@@ -131,7 +131,7 @@ impl KeyIndex {
 
 impl KeyIter {
     pub(crate) const ROOT: Self = Self {
-        node_3: linear::KeyIter::new([KeyIndex::DEFAULT; 3], 1),
+        node_3: linear::KeyIter3::new_3([KeyIndex::DEFAULT; 3], 1),
     };
 
     const TAG_15: usize = (node::Kind::Node15 as usize) << 62;
@@ -145,7 +145,7 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn from_node_3(node_3: linear::KeyIter<3>) -> Self {
+    pub(super) fn from_node_3(node_3: linear::KeyIter3) -> Self {
         let iter = Self { node_3 };
         validate_eq!(iter.kind(), node::Kind::NODE_3);
         iter
