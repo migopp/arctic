@@ -1,5 +1,6 @@
 use core::fmt::Debug;
 use core::ops::Shr;
+use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use ribbit::u6;
@@ -98,10 +99,18 @@ where
 }
 
 #[repr(C, align(16))]
-#[derive(Default)]
 struct Header {
     data: [Atomic<u128>; 16],
     meta: Atomic<Meta>,
+}
+
+impl Default for Header {
+    fn default() -> Self {
+        Self {
+            data: [const { Atomic::new_packed(0x7F7F_7F7F_7F7F_7F7F_7F7F_7F7F_7F7F_7F7F) }; 16],
+            meta: Atomic::new_packed(Meta::DEFAULT),
+        }
+    }
 }
 
 const _: [(); 272] = [(); core::mem::size_of::<Header>()];
@@ -125,12 +134,14 @@ impl Header {
 
     #[inline]
     fn get(&self, key: u8) -> Option<u8> {
-        let i = key / 16;
-        let j = key % 16;
-        (unsafe { self.data.get_unchecked(i as usize) }
-            .load(Ordering::Relaxed)
-            .shr(j << 3) as u8)
-            .checked_sub(1)
+        let (row, col) = Self::key_to_row_col(key);
+        let data = unsafe { self.data_unchecked(row) };
+        validate!(col < 64);
+        unsafe {
+            core::hint::assert_unchecked(col < 64);
+        }
+        let index = data.load(Ordering::Relaxed).shr(col) as u8;
+        (index < 47).then_some(index)
     }
 
     fn get_or_insert(&self, key: u8) -> Option<u8> {
@@ -146,7 +157,9 @@ impl Header {
             // call returns `None` between another thread updating
             // the metadata and the data array being updated.
             if key == old.last() {
-                return len.checked_sub(1);
+                let index = len.checked_sub(1);
+                validate!(index.is_some());
+                return index;
             }
 
             if len == 47 || old.frozen() {
@@ -170,27 +183,28 @@ impl Header {
 
     fn insert(&mut self, key: u8) -> Option<u8> {
         let old_meta = self.meta.get_packed();
-        let old_len = old_meta.len().value();
+        let len = old_meta.len().value();
 
         validate!(!old_meta.frozen());
-        validate!(old_len <= 47);
+        validate!(len <= 47);
 
-        if old_len == 47 {
+        if len == 47 {
             return None;
         }
 
-        let new_len = old_len + 1;
-        let new_meta = old_meta.with_len(u6::new(new_len)).with_last(key);
+        let new_meta = old_meta.with_len(u6::new(len + 1)).with_last(key);
         self.meta.set_packed(new_meta);
 
-        let i = key / 16;
-        let j = key % 16;
+        let (row, col) = Self::key_to_row_col(key);
 
-        let data = unsafe { self.data.get_unchecked_mut(i as usize) };
-        let old_data = data.get();
-        let new_data = old_data | ((new_len as u128) << (j << 3));
-        data.set(new_data);
-        Some(old_len)
+        let data = unsafe { self.data_unchecked_mut(row) };
+
+        let old_data = *data.get_mut();
+        let hole = !(0xFFu64 << col);
+        let new_data = old_data & hole | ((len as u64) << col);
+
+        *data.get_mut() = new_data;
+        Some(len)
     }
 
     fn keys_range<L: node::iter::Lower, U: node::iter::Upper>(
@@ -212,9 +226,9 @@ impl Header {
 
         for k in i..=j {
             let indices = self.data[k as usize].load(Ordering::Relaxed);
-            let valid = node::simd::mask_range(indices, 1, len)
+            let valid = node::simd::mask_lt(indices, len as i8)
                 & node::simd::mask_range(keys, lower.get(), upper.get());
-            let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
+            let chunk = node::simd::compress(keys, indices, valid);
             unsafe {
                 entries
                     .as_mut_ptr()
@@ -241,8 +255,8 @@ impl Header {
 
         for i in 0..16 {
             let indices = self.data[i].load(Ordering::Relaxed);
-            let valid = node::simd::mask_range(indices, 1, len);
-            let chunk = node::simd::compress(keys, node::simd::sub_one(indices), valid);
+            let valid = node::simd::mask_lt(indices, len as i8);
+            let chunk = node::simd::compress(keys, indices, valid);
             unsafe {
                 entries
                     .as_mut_ptr()
@@ -267,30 +281,64 @@ impl Header {
     fn ensure_meta_consistent(&self, meta: ribbit::Packed<Meta>) {
         let len = meta.len().value();
         validate!((15..=47).contains(&len));
+        let index = len - 1;
 
         let key = meta.last();
-        let i = key / 16;
-        let j = key % 16;
+        let (row, col) = Self::key_to_row_col(key);
 
-        let data = unsafe { self.data.get_unchecked(i as usize) };
+        let data = unsafe { self.data_unchecked(row) };
         let old = data.load(Ordering::Relaxed);
 
-        if (old >> (j << 3)) as u8 == len {
+        if (old >> col) as u8 == index {
             stat::increment(stat::Counter::Node47Consistent);
             return;
         }
 
-        match data.compare_exchange(
-            old,
-            old | ((len as u128) << (j << 3)),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
+        let hole = !(0xFFu64 << col);
+        let new = old & hole | ((index as u64) << col);
+
+        match data.compare_exchange(old, new, Ordering::Relaxed, Ordering::Relaxed) {
             Ok(_) => {
                 stat::increment(stat::Counter::Node47CasSuccess);
             }
             Err(_) => stat::increment(stat::Counter::Node47CasFailure),
         }
+    }
+
+    unsafe fn data_unchecked(&self, row: u8) -> &AtomicU64 {
+        let data = unsafe {
+            self.data
+                .as_ptr()
+                .cast::<AtomicU64>()
+                .add(row as usize)
+                .as_ref()
+        };
+        if cfg!(feature = "validate") {
+            data.unwrap()
+        } else {
+            unsafe { data.unwrap_unchecked() }
+        }
+    }
+
+    unsafe fn data_unchecked_mut(&mut self, row: u8) -> &mut AtomicU64 {
+        let data = unsafe {
+            self.data
+                .as_mut_ptr()
+                .cast::<AtomicU64>()
+                .add(row as usize)
+                .as_mut()
+        };
+        if cfg!(feature = "validate") {
+            data.unwrap()
+        } else {
+            unsafe { data.unwrap_unchecked() }
+        }
+    }
+
+    fn key_to_row_col(key: u8) -> (u8, u8) {
+        let row = key / 8;
+        let col = (key % 8) * 8;
+        (row, col)
     }
 }
 
