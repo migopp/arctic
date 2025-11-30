@@ -228,12 +228,13 @@ impl Header {
             let indices = self.data[k as usize].load(Ordering::Relaxed);
             let valid = node::simd::mask_lt(indices, len as i8)
                 & node::simd::mask_range(keys, lower.get(), upper.get());
-            let chunk = node::simd::compress(keys, indices, valid);
             unsafe {
-                entries
-                    .as_mut_ptr()
-                    .add(index as usize)
-                    .copy_from_nonoverlapping(chunk.as_ptr(), 16)
+                node::simd::compress_into(
+                    keys,
+                    indices,
+                    valid,
+                    entries[index as usize..].as_mut_ptr(),
+                )
             };
             index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
@@ -256,12 +257,13 @@ impl Header {
         for i in 0..16 {
             let indices = self.data[i].load(Ordering::Relaxed);
             let valid = node::simd::mask_lt(indices, len as i8);
-            let chunk = node::simd::compress(keys, indices, valid);
             unsafe {
-                entries
-                    .as_mut_ptr()
-                    .add(index as usize)
-                    .copy_from_nonoverlapping(chunk.as_ptr(), 16)
+                node::simd::compress_into(
+                    keys,
+                    indices,
+                    valid,
+                    entries[index as usize..].as_mut_ptr(),
+                )
             };
             index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
