@@ -134,6 +134,7 @@ impl<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> Trav
         Prefix(self)
     }
 
+    #[expect(unused)]
     #[inline]
     pub(crate) fn guard_linearizable(self) -> Values<'g, 'l, P, V> {
         if cfg!(feature = "smr-disable") {

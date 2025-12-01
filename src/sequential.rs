@@ -45,7 +45,6 @@ impl<K: Key, V: Value> Map<K, V> {
             .map(|value| unsafe { V::borrow_from_raw(value) })
     }
 
-    #[expect(unused_variables)]
     #[inline]
     pub fn insert(&mut self, _key: K::Borrow<'_>, _value: V) -> Option<V> {
         todo!()
@@ -96,6 +95,7 @@ impl<K: Key, V: Value> Map<K, V> {
         // }
     }
 
+    #[expect(unused)]
     fn insert_help(mut _reader: K::Read<'_>, _value: V) -> ribbit::Packed<Edge<K::Edge>> {
         todo!()
         // let prefix = reader.read(<ribbit::Packed<K::Edge> as edge::Meta>::MAX_LEN);

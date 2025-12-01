@@ -424,6 +424,7 @@ where
         // }
     }
 
+    #[expect(unused)]
     #[cold]
     fn upgrade(&mut self) {
         let root = match self.history {

@@ -78,14 +78,6 @@ where
 
         Ok(())
     }
-
-    #[cold]
-    pub(super) fn wait_for_scan(
-        &self,
-        counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<K::Edge>>, ()> {
-        self.raw.wait_for_scan(counter)
-    }
 }
 
 impl<'k, 'g, 'l, K, V> Point<'k, 'g, 'l, K, V, path::Discard>
@@ -162,6 +154,7 @@ where
         self.guard
     }
 
+    #[expect(unused)]
     pub(super) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
         self.raw.traverse()
     }

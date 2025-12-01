@@ -796,6 +796,7 @@ where
     //     })
     // }
 
+    #[expect(dead_code)]
     fn lock_prefix<'k>(
         cursor: &mut cursor::Prefix<'k, 'g, '_, K, V, cursor::path::Hybrid<'k, 'g, K>>,
     ) -> Option<()> {
@@ -832,6 +833,7 @@ where
         }
     }
 
+    #[expect(dead_code)]
     #[inline]
     fn unlock_prefix<'k>(
         cursor: &mut cursor::Prefix<'k, 'g, '_, K, V, cursor::path::Hybrid<'k, 'g, K>>,

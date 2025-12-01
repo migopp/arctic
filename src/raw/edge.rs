@@ -2,7 +2,6 @@ mod be;
 mod le;
 
 pub(crate) use be::Be;
-#[expect(unused)]
 pub(crate) use le::Le;
 use ribbit::u6;
 
