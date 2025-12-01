@@ -192,7 +192,7 @@ impl Smo {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 2, eq, debug)]
+#[ribbit(size = 2, eq, debug, packed(rename = "KindPacked"))]
 pub(crate) enum Kind {
     Node3 = 0,
     Node15 = 1,
@@ -211,4 +211,10 @@ impl Kind {
     pub(crate) const NODE_15: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node15();
     pub(crate) const NODE_47: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node47();
     pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
+}
+
+impl KindPacked {
+    pub(crate) fn raw(self) -> u8 {
+        self.value.value()
+    }
 }

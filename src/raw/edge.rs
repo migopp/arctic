@@ -333,16 +333,32 @@ impl<M> NodePacked<M>
 where
     M: ribbit::Pack<Packed: Meta>,
 {
-    #[inline]
+    #[inline(never)]
     pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
-        if kind == node::Kind::NODE_3 {
-            unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
-        } else if kind == node::Kind::NODE_47 {
+        // if kind == node::Kind::NODE_3 {
+        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
+        // } else if kind == node::Kind::NODE_15 {
+        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
+        // } else if kind == node::Kind::NODE_47 {
+        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        if hi == 0 {
+            if lo == 0 {
+                unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
+            } else {
+                unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
+            }
+        } else if lo == 0 {
             unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
@@ -355,11 +371,27 @@ where
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
-        if kind == node::Kind::NODE_3 {
-            unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
-        } else if kind == node::Kind::NODE_47 {
+        // if kind == node::Kind::NODE_3 {
+        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
+        // } else if kind == node::Kind::NODE_15 {
+        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
+        // } else if kind == node::Kind::NODE_47 {
+        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        if hi == 0 {
+            if lo == 0 {
+                unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
+            } else {
+                unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
+            }
+        } else if lo == 0 {
             unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
@@ -375,11 +407,27 @@ where
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
-        if kind == node::Kind::NODE_3 {
-            unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
-        } else if kind == node::Kind::NODE_47 {
+        // if kind == node::Kind::NODE_3 {
+        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
+        // } else if kind == node::Kind::NODE_15 {
+        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
+        // } else if kind == node::Kind::NODE_47 {
+        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        if hi == 0 {
+            if lo == 0 {
+                unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
+            } else {
+                unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
+            }
+        } else if lo == 0 {
             unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
@@ -396,11 +444,27 @@ where
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
-        if kind == node::Kind::NODE_3 {
-            unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
-        } else if kind == node::Kind::NODE_47 {
+        // if kind == node::Kind::NODE_3 {
+        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
+        // } else if kind == node::Kind::NODE_15 {
+        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
+        // } else if kind == node::Kind::NODE_47 {
+        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.entries(lower, upper)
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        if hi == 0 {
+            if lo == 0 {
+                unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
+            } else {
+                unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
+            }
+        } else if lo == 0 {
             unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
@@ -418,11 +482,27 @@ where
         let ptr = self.value.get() & Node::<M>::MASK_PTR;
         let kind = self.kind();
 
-        if kind == node::Kind::NODE_3 {
-            drop(Box::from_raw(ptr as *mut Node3<M>))
-        } else if kind == node::Kind::NODE_15 {
-            drop(Box::from_raw(ptr as *mut Node15<M>))
-        } else if kind == node::Kind::NODE_47 {
+        // if kind == node::Kind::NODE_3 {
+        //     drop(Box::from_raw(ptr as *mut Node3<M>))
+        // } else if kind == node::Kind::NODE_15 {
+        //     drop(Box::from_raw(ptr as *mut Node15<M>))
+        // } else if kind == node::Kind::NODE_47 {
+        //     drop(Box::from_raw(ptr as *mut Node47<M>))
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     drop(Box::from_raw(ptr as *mut Node256<M>))
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        if hi == 0 {
+            if lo == 0 {
+                drop(Box::from_raw(ptr as *mut Node3<M>))
+            } else {
+                drop(Box::from_raw(ptr as *mut Node15<M>))
+            }
+        } else if lo == 0 {
             drop(Box::from_raw(ptr as *mut Node47<M>))
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
