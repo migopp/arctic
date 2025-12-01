@@ -113,23 +113,10 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
         )
     };
 
-    let mut out = unsafe { _mm256_set_m128i(_mm_unpackhi_epi8(ks, is), _mm_unpacklo_epi8(ks, is)) };
+    let mut out = unsafe { _mm256_set_m128i(_mm_unpackhi_epi8(is, ks), _mm_unpacklo_epi8(is, ks)) };
+    out = bitonic_sort(out);
 
     unsafe {
-        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
-
-        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
-        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
-
-        out = bitonic_step::<SHUFFLE_4, BLEND_4>(out);
-        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
-        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
-
-        out = bitonic_step::<SHUFFLE_8, BLEND_8>(out);
-        out = bitonic_step::<SHUFFLE_4, BLEND_4>(out);
-        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
-        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
-
         out = _mm256_shuffle_epi8(
             out,
             _mm256_setr_epi8(
@@ -142,88 +129,111 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
     }
 }
 
-const SHUFFLE_1: u64 = 0x6745_2301;
-const BLEND_1: i32 = 0b1010_1010;
-
-const SHUFFLE_2: u64 = 0x5476_1032;
-const BLEND_2: i32 = 0b1100_1100;
-
-const SHUFFLE_4: u64 = 0x3210_7654;
-const BLEND_4: i32 = 0b1111_0000;
-
-// Dummy values--shuffling across lanes requires different intrinsic
-const SHUFFLE_8: u64 = 0xFFFF_FFFF;
-const BLEND_8: i32 = 0b1111_1111;
-
 /// https://en.wikipedia.org/wiki/Bitonic_sorter
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_step<const SHUFFLE: u64, const BLEND: i32>(input: __m256i) -> __m256i {
-    const fn extract(shuffle: u64, index: u8) -> i8 {
-        // `% 16` to repeat across lanes, `/ 2` for u16 granularity, `/ 4` for bit width
-        let shift = (index % 16 / 2) * 4;
-        let select = (shuffle >> shift) & 0b1111;
-        // Mix bit from top/bottom u16 back in
-        ((select << 1) | (index as u64 & 1)) as i8
-    }
+fn bitonic_sort(mut input: __m256i) -> __m256i {
+    const RECOMBINE_1: u64 = 0x6745_2301;
+    const SORT_1: u64 = RECOMBINE_1;
+    const BLEND_1: i32 = 0b1010_1010;
 
-    let shuffle = unsafe {
-        _mm256_setr_epi8(
-            const { extract(SHUFFLE, 0) },
-            const { extract(SHUFFLE, 1) },
-            const { extract(SHUFFLE, 2) },
-            const { extract(SHUFFLE, 3) },
-            const { extract(SHUFFLE, 4) },
-            const { extract(SHUFFLE, 5) },
-            const { extract(SHUFFLE, 6) },
-            const { extract(SHUFFLE, 7) },
-            const { extract(SHUFFLE, 8) },
-            const { extract(SHUFFLE, 9) },
-            const { extract(SHUFFLE, 10) },
-            const { extract(SHUFFLE, 11) },
-            const { extract(SHUFFLE, 12) },
-            const { extract(SHUFFLE, 13) },
-            const { extract(SHUFFLE, 14) },
-            const { extract(SHUFFLE, 15) },
-            const { extract(SHUFFLE, 16) },
-            const { extract(SHUFFLE, 17) },
-            const { extract(SHUFFLE, 18) },
-            const { extract(SHUFFLE, 19) },
-            const { extract(SHUFFLE, 20) },
-            const { extract(SHUFFLE, 21) },
-            const { extract(SHUFFLE, 22) },
-            const { extract(SHUFFLE, 23) },
-            const { extract(SHUFFLE, 24) },
-            const { extract(SHUFFLE, 25) },
-            const { extract(SHUFFLE, 26) },
-            const { extract(SHUFFLE, 27) },
-            const { extract(SHUFFLE, 28) },
-            const { extract(SHUFFLE, 29) },
-            const { extract(SHUFFLE, 30) },
-            const { extract(SHUFFLE, 31) },
-        )
-    };
+    const RECOMBINE_2: u64 = 0x4567_0123;
+    const SORT_2: u64 = 0x5476_1032;
+    const BLEND_2: i32 = 0b1100_1100;
 
-    let swap = if SHUFFLE == SHUFFLE_8 {
-        unsafe { _mm256_permute2x128_si256::<0b0000_0001>(input, input) }
-    } else {
-        unsafe { _mm256_shuffle_epi8(input, shuffle) }
-    };
+    const RECOMBINE_4: u64 = 0x0123_4567;
+    const SORT_4: u64 = 0x3210_7654;
+    const BLEND_4: i32 = 0b1111_0000;
 
-    let min = unsafe { _mm256_min_epu16(input, swap) };
-    let max = unsafe { _mm256_max_epu16(input, swap) };
+    const RECOMBINE_8: u64 = 0x0123_4567;
+    const BLEND_8: i32 = 0b1111_1111;
 
-    if BLEND == BLEND_8 {
-        unsafe {
-            _mm256_set_m128i(
-                _mm256_extracti128_si256::<1>(max),
-                _mm256_extracti128_si256::<0>(min),
-            )
+    #[inline(always)]
+    fn bitonic_step<const SHUFFLE: u64, const BLEND: i32>(input: __m256i) -> __m256i {
+        const fn extract(shuffle: u64, index: u8) -> i8 {
+            // `% 16` to repeat across lanes, `/ 2` for u16 granularity, `* 4` for bit width
+            let shift = (index % 16 / 2) * 4;
+            let select = (shuffle >> shift) & 0b1111;
+            // Mix bit from top/bottom u16 back in
+            ((select << 1) | (index as u64 & 1)) as i8
         }
-    } else {
-        unsafe { _mm256_blend_epi16::<BLEND>(min, max) }
+
+        // Shuffling across lanes requires different intrinsic
+        let swap = if BLEND == BLEND_8 {
+            unsafe { _mm256_permute2x128_si256::<0b0000_0001>(input, input) }
+        } else {
+            input
+        };
+
+        let shuffle = unsafe {
+            _mm256_shuffle_epi8(
+                swap,
+                _mm256_setr_epi8(
+                    const { extract(SHUFFLE, 0) },
+                    const { extract(SHUFFLE, 1) },
+                    const { extract(SHUFFLE, 2) },
+                    const { extract(SHUFFLE, 3) },
+                    const { extract(SHUFFLE, 4) },
+                    const { extract(SHUFFLE, 5) },
+                    const { extract(SHUFFLE, 6) },
+                    const { extract(SHUFFLE, 7) },
+                    const { extract(SHUFFLE, 8) },
+                    const { extract(SHUFFLE, 9) },
+                    const { extract(SHUFFLE, 10) },
+                    const { extract(SHUFFLE, 11) },
+                    const { extract(SHUFFLE, 12) },
+                    const { extract(SHUFFLE, 13) },
+                    const { extract(SHUFFLE, 14) },
+                    const { extract(SHUFFLE, 15) },
+                    const { extract(SHUFFLE, 16) },
+                    const { extract(SHUFFLE, 17) },
+                    const { extract(SHUFFLE, 18) },
+                    const { extract(SHUFFLE, 19) },
+                    const { extract(SHUFFLE, 20) },
+                    const { extract(SHUFFLE, 21) },
+                    const { extract(SHUFFLE, 22) },
+                    const { extract(SHUFFLE, 23) },
+                    const { extract(SHUFFLE, 24) },
+                    const { extract(SHUFFLE, 25) },
+                    const { extract(SHUFFLE, 26) },
+                    const { extract(SHUFFLE, 27) },
+                    const { extract(SHUFFLE, 28) },
+                    const { extract(SHUFFLE, 29) },
+                    const { extract(SHUFFLE, 30) },
+                    const { extract(SHUFFLE, 31) },
+                ),
+            )
+        };
+
+        let min = unsafe { _mm256_min_epu16(input, shuffle) };
+        let max = unsafe { _mm256_max_epu16(input, shuffle) };
+
+        if BLEND == BLEND_8 {
+            unsafe {
+                _mm256_set_m128i(
+                    _mm256_extracti128_si256::<1>(max),
+                    _mm256_extracti128_si256::<0>(min),
+                )
+            }
+        } else {
+            unsafe { _mm256_blend_epi16::<BLEND>(min, max) }
+        }
     }
+
+    input = bitonic_step::<RECOMBINE_1, BLEND_1>(input);
+
+    input = bitonic_step::<RECOMBINE_2, BLEND_2>(input);
+    input = bitonic_step::<SORT_1, BLEND_1>(input);
+
+    input = bitonic_step::<RECOMBINE_4, BLEND_4>(input);
+    input = bitonic_step::<SORT_2, BLEND_2>(input);
+    input = bitonic_step::<SORT_1, BLEND_1>(input);
+
+    input = bitonic_step::<RECOMBINE_8, BLEND_8>(input);
+    input = bitonic_step::<SORT_4, BLEND_4>(input);
+    input = bitonic_step::<SORT_2, BLEND_2>(input);
+    bitonic_step::<SORT_1, BLEND_1>(input)
 }
 
 #[inline(always)]
@@ -308,6 +318,13 @@ const fn u128_to_avx(value: u128) -> __m128i {
 
 #[cfg(test)]
 mod tests {
+    use core::arch::x86_64::__m256i;
+    use core::arch::x86_64::_mm256_loadu_si256;
+    use core::arch::x86_64::_mm256_set_epi16;
+    use core::arch::x86_64::_mm256_setr_epi16;
+
+    use crate::raw::node::simd::bitonic_sort;
+
     #[test]
     fn zero() {
         test_eq(0x00_00_00_00, 0, 0)
@@ -343,5 +360,74 @@ mod tests {
             super::mask_byte_to_bit(super::mask_eq(array, key)).trailing_zeros() as u8,
             expected
         );
+    }
+
+    #[test]
+    fn sort_zero() {
+        use core::arch::x86_64::_mm256_set1_epi16;
+        let input = unsafe { _mm256_set1_epi16(0) };
+        assert_sort(input, input)
+    }
+
+    #[test]
+    fn sort_ordered() {
+        let input =
+            unsafe { _mm256_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) };
+        assert_sort(input, input)
+    }
+
+    #[test]
+    fn sort_reverse() {
+        let input =
+            unsafe { _mm256_set_epi16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) };
+        let output =
+            unsafe { _mm256_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) };
+        assert_sort(input, output)
+    }
+
+    #[test]
+    fn sort_regression() {
+        let input = unsafe { _mm256_setr_epi16(3, 4, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5) };
+        let output = unsafe { _mm256_setr_epi16(2, 3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5) };
+        assert_sort(input, output)
+    }
+
+    // Example from https://inria.hal.science/hal-01512970v1/document
+    #[test]
+    fn sort_8() {
+        let input = unsafe { _mm256_setr_epi16(6, 7, 8, 5, 2, 1, 4, 5, 9, 9, 9, 9, 9, 9, 9, 9) };
+        let output = unsafe { _mm256_setr_epi16(1, 2, 4, 5, 5, 6, 7, 8, 9, 9, 9, 9, 9, 9, 9, 9) };
+        assert_sort(input, output)
+    }
+
+    #[test]
+    fn sort_random() {
+        use core::hash::Hasher as _;
+
+        let mut hasher =
+            rapidhash::fast::RapidHasher::new(rapidhash::fast::RapidHasher::DEFAULT_SEED);
+        let mut buffer = [0u16; 16];
+
+        for i in 0..1_000_000 {
+            #[expect(clippy::needless_range_loop)]
+            for j in 0..16 {
+                hasher.write_usize(i * 16 + j);
+                // https://en.wikipedia.org/wiki/Sorting_network#Zero-one_principle
+                buffer[j] = (hasher.finish() % 2) as u16;
+            }
+
+            let input = unsafe { _mm256_loadu_si256(buffer.as_ptr().cast()) };
+            buffer.sort_unstable();
+            let output = unsafe { _mm256_loadu_si256(buffer.as_ptr().cast()) };
+            assert_sort(input, output)
+        }
+    }
+
+    fn assert_sort(input: __m256i, expected: __m256i) {
+        let actual = bitonic_sort(input);
+        assert_eq!(
+            unsafe { core::mem::transmute::<__m256i, [u16; 16]>(actual) },
+            unsafe { core::mem::transmute::<__m256i, [u16; 16]>(expected) },
+        )
     }
 }

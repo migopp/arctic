@@ -3,7 +3,6 @@ use ribbit::u4;
 
 use crate::raw::edge;
 use crate::raw::node;
-use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 use crate::raw::node::Node3;
 use crate::raw::node::Node47;
