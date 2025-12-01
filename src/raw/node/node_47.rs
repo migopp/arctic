@@ -240,6 +240,7 @@ impl Header {
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
+        iter.head = 0;
         iter.tail = index;
         node::KeyIter::new_47(iter)
     }
@@ -268,6 +269,7 @@ impl Header {
         }
 
         validate_eq!(index, len);
+        iter.head = 0;
         iter.tail = len;
         node::KeyIter::new_47(iter)
     }

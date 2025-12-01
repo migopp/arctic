@@ -205,9 +205,9 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn new_15(node_15: linear::KeyIter<15>) -> Self {
+    pub(super) fn new_15(node_15: Box<linear::KeyIter<15>>) -> Self {
         let iter = Self {
-            node_15: NonNull::from(Box::leak(Box::new(node_15)))
+            node_15: NonNull::from(Box::leak(node_15))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_15) }),
         };
         validate_eq!(iter.kind(), node::Kind::NODE_15);

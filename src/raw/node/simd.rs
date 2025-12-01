@@ -8,6 +8,7 @@ use core::arch::x86_64::_mm256_permute2x128_si256;
 use core::arch::x86_64::_mm256_set_m128i;
 use core::arch::x86_64::_mm256_setr_epi8;
 use core::arch::x86_64::_mm256_shuffle_epi8;
+use core::arch::x86_64::_mm256_store_si256;
 use core::arch::x86_64::_mm_adds_epu8;
 use core::arch::x86_64::_mm_and_si128;
 use core::arch::x86_64::_mm_blend_epi16;
@@ -107,7 +108,7 @@ pub(super) fn compress_4(keys: u64, mask: u64) -> [KeyIndex; 4] {
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress_15(keys: u128, mask: u128) -> [KeyIndex; 16] {
+pub(super) unsafe fn compress_15(keys: u128, mask: u128, out: *mut KeyIndex) {
     let (ks_lo, ks_hi) = split(keys);
     let (is_lo, is_hi) = split(U8_SEQ);
     let (mask_lo, mask_hi) = split(mask);
@@ -143,9 +144,40 @@ pub(super) fn compress_15(keys: u128, mask: u128) -> [KeyIndex; 16] {
         )
     };
 
-    let mut out = unsafe { _mm256_set_m128i(_mm_unpackhi_epi8(is, ks), _mm_unpacklo_epi8(is, ks)) };
-    out = bitonic_sort_16(out);
-    unsafe { core::mem::transmute::<__m256i, [KeyIndex; 16]>(out) }
+    unsafe {
+        let sorted = bitonic_sort_16(_mm256_set_m128i(
+            _mm_unpackhi_epi8(is, ks),
+            _mm_unpacklo_epi8(is, ks),
+        ));
+
+        _mm256_store_si256(out.cast(), sorted);
+    };
+}
+
+#[inline(always)]
+pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: *mut KeyIndex) {
+    let (ks_lo, ks_hi) = split(keys);
+    let (is_lo, is_hi) = split(indices);
+    let (mask_lo, mask_hi) = split(mask);
+    let shift = mask_lo.count_ones();
+
+    let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
+    let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
+    let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
+    let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
+
+    let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
+    let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
+    let [lo, hi] = interleave(avx_to_u128(is), avx_to_u128(ks));
+
+    // FIXME: assumes little-endian
+    unsafe {
+        _mm_storeu_si128(buffer.cast(), u128_to_avx(lo));
+        _mm_storeu_si128(
+            buffer.byte_add((shift >> 2) as usize).cast(),
+            u128_to_avx(hi),
+        );
+    }
 }
 
 /// https://en.wikipedia.org/wiki/Bitonic_sorter
@@ -314,32 +346,6 @@ fn bitonic_sort_16(mut input: __m256i) -> __m256i {
     input = bitonic_step::<SORT_4, BLEND_4>(input);
     input = bitonic_step::<SORT_2, BLEND_2>(input);
     bitonic_step::<SORT_1, BLEND_1>(input)
-}
-
-#[inline(always)]
-pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: *mut KeyIndex) {
-    let (ks_lo, ks_hi) = split(keys);
-    let (is_lo, is_hi) = split(indices);
-    let (mask_lo, mask_hi) = split(mask);
-    let shift = mask_lo.count_ones();
-
-    let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
-    let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
-    let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
-    let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
-
-    let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
-    let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
-    let [lo, hi] = interleave(avx_to_u128(is), avx_to_u128(ks));
-
-    // FIXME: assumes little-endian
-    unsafe {
-        _mm_storeu_si128(buffer.cast(), u128_to_avx(lo));
-        _mm_storeu_si128(
-            buffer.byte_add((shift >> 2) as usize).cast(),
-            u128_to_avx(hi),
-        );
-    }
 }
 
 pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;

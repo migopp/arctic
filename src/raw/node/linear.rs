@@ -202,20 +202,20 @@ impl KeyIter3 {
 
 const _: [(); 8] = [(); core::mem::size_of::<KeyIter3>()];
 
-#[repr(C)]
+#[repr(C, align(32))]
 #[derive(Copy, Clone, Debug)]
 pub(super) struct KeyIter<const N: usize> {
-    head: u8,
-    pub(super) tail: u8,
     pub(super) entries: [node::iter::KeyIndex; N],
+    pub(super) head: u8,
+    pub(super) tail: u8,
 }
 
-impl Default for KeyIter<63> {
+impl<const N: usize> Default for KeyIter<N> {
     fn default() -> Self {
         Self {
             head: 0,
             tail: 0,
-            entries: [node::iter::KeyIndex { key: 0, index: 0 }; 63],
+            entries: [node::iter::KeyIndex { key: 0, index: 0 }; N],
         }
     }
 }
@@ -224,18 +224,20 @@ const _: [(); 32] = [(); core::mem::size_of::<KeyIter<15>>()];
 const _: [(); 128] = [(); core::mem::size_of::<KeyIter<63>>()];
 
 macro_rules! impl_key_iter {
-    ($ty:ty, $len:expr, $new:ident) => {
-        impl $ty {
-            #[inline]
-            pub(super) const fn $new(entries: [node::iter::KeyIndex; $len], len: u8) -> Self {
-                validate!(len as usize <= entries.len());
-                Self {
-                    head: 0,
-                    tail: len,
-                    entries,
+    ($ty:ty, $len:expr $(, $new:ident)?) => {
+        $(
+            impl $ty {
+                #[inline]
+                pub(super) const fn $new(entries: [node::iter::KeyIndex; $len], len: u8) -> Self {
+                    validate!(len as usize <= entries.len());
+                    Self {
+                        head: 0,
+                        tail: len,
+                        entries,
+                    }
                 }
             }
-        }
+        )?
 
         impl Iterator for $ty {
             type Item = node::iter::KeyIndex;
@@ -281,5 +283,5 @@ macro_rules! impl_key_iter {
 }
 
 impl_key_iter!(KeyIter3, 3, new_3);
-impl_key_iter!(KeyIter<15>, 15, new_15);
-impl_key_iter!(KeyIter<63>, 63, new_47);
+impl_key_iter!(KeyIter<15>, 15);
+impl_key_iter!(KeyIter<63>, 63);
