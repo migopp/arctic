@@ -25,6 +25,9 @@ pub trait Key {
     fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self;
 
     fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
+
+    // Key length in bytes
+    fn len(borrow: Self::Borrow<'_>) -> usize;
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
@@ -166,6 +169,11 @@ macro_rules! impl_unsigned_int {
                 unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
                     writer.into_key_unchecked()
                 }
+
+                #[inline]
+                fn len(_: Self::Borrow<'_>) -> usize {
+                    <$ty as integer::Uint>::BYTES as usize
+                }
             }
         )*
     };
@@ -198,6 +206,11 @@ impl Key for Vec<u8> {
     #[inline]
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
         writer.0
+    }
+
+    #[inline]
+    fn len(slice: Self::Borrow<'_>) -> usize {
+        slice.len()
     }
 }
 
@@ -248,6 +261,11 @@ impl Key for String {
         } else {
             unsafe { String::from_utf8_unchecked(writer.0) }
         }
+    }
+
+    #[inline]
+    fn len(string: Self::Borrow<'_>) -> usize {
+        string.len()
     }
 }
 
