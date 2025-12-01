@@ -100,12 +100,10 @@ pub(super) fn compress_4(keys: u64, mask: u64) -> (u8, [KeyIndex; 4]) {
     let is = unsafe { _pext_u64(0x0000_0002_0001_0000, mask) };
 
     let bits = mask.count_ones();
-    let len = (bits >> 4) as u8;
-
     let out = (u64::MAX << bits) | (ks << 8) | is;
-    let out = bitonic_sort_4(out, len);
+    let out = bitonic_sort_4(out, bits);
     let out = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) };
-    (len, out)
+    ((bits >> 4) as u8, out)
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -149,10 +147,10 @@ pub(super) unsafe fn compress_15(keys: u128, mask: u128, out: *mut KeyIndex) {
     };
 
     unsafe {
-        let sorted = bitonic_sort_16(_mm256_set_m128i(
-            _mm_unpackhi_epi8(is, ks),
-            _mm_unpacklo_epi8(is, ks),
-        ));
+        let sorted = bitonic_sort_16(
+            _mm256_set_m128i(_mm_unpackhi_epi8(is, ks), _mm_unpacklo_epi8(is, ks)),
+            shift_hi + shift_lo,
+        );
 
         _mm256_store_si256(out.cast(), sorted);
     };
@@ -188,7 +186,7 @@ pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: 
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_sort_4(input: u64, len: u8) -> u64 {
+fn bitonic_sort_4(input: u64, bits: u32) -> u64 {
     const RECOMBINE_1: u64 = 0x2301;
     const SORT_1: u64 = RECOMBINE_1;
     const BLEND_1: i32 = 0b1010;
@@ -236,14 +234,14 @@ fn bitonic_sort_4(input: u64, len: u8) -> u64 {
         unsafe { _mm_blend_epi16::<BLEND>(min, max) }
     }
 
-    if len <= 1 {
+    if bits <= 8 {
         return input;
     }
 
     let mut input = unsafe { _mm_set_epi64x(0, input as i64) };
 
     input = bitonic_step::<RECOMBINE_1, BLEND_1>(input);
-    input = if len == 2 {
+    input = if bits == 16 {
         input
     } else {
         input = bitonic_step::<RECOMBINE_2, BLEND_2>(input);
@@ -257,7 +255,7 @@ fn bitonic_sort_4(input: u64, len: u8) -> u64 {
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_sort_16(mut input: __m256i) -> __m256i {
+fn bitonic_sort_16(mut input: __m256i, bits: u32) -> __m256i {
     const RECOMBINE_1: u64 = 0x6745_2301;
     const SORT_1: u64 = RECOMBINE_1;
     const BLEND_1: i32 = 0b1010_1010;
@@ -354,10 +352,14 @@ fn bitonic_sort_16(mut input: __m256i) -> __m256i {
     input = bitonic_step::<SORT_2, BLEND_2>(input);
     input = bitonic_step::<SORT_1, BLEND_1>(input);
 
-    input = bitonic_step::<RECOMBINE_8, BLEND_8>(input);
-    input = bitonic_step::<SORT_4, BLEND_4>(input);
-    input = bitonic_step::<SORT_2, BLEND_2>(input);
-    bitonic_step::<SORT_1, BLEND_1>(input)
+    if bits <= 128 {
+        input
+    } else {
+        input = bitonic_step::<RECOMBINE_8, BLEND_8>(input);
+        input = bitonic_step::<SORT_4, BLEND_4>(input);
+        input = bitonic_step::<SORT_2, BLEND_2>(input);
+        bitonic_step::<SORT_1, BLEND_1>(input)
+    }
 }
 
 pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
@@ -522,7 +524,7 @@ mod tests {
     }
 
     fn assert_sort(input: __m256i, expected: __m256i) {
-        let actual = bitonic_sort_16(input);
+        let actual = bitonic_sort_16(input, 256);
         assert_eq!(
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(actual) },
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(expected) },
