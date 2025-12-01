@@ -260,8 +260,6 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 
 #[cfg(test)]
 mod tests {
-    use ribbit::u6;
-
     use crate::raw::edge;
     use crate::raw::edge::Key as _;
     use crate::raw::edge::Len as _;

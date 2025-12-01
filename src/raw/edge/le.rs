@@ -115,8 +115,19 @@ impl edge::Meta for LePacked {
     }
 
     #[inline]
-    fn compress(self, _byte: u8, _child: Self) -> Option<Self> {
-        todo!()
+    fn compress(self, byte: u8, child: Self) -> Option<Self> {
+        let parent_bits = self.len().value();
+        let child_bits = child.len().value();
+        let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;
+        Some(
+            Le::key_from_u64_truncate(
+                self.value
+                    .bitor((byte as u64) << parent_bits)
+                    .bitor(child.value << (parent_bits + 8)),
+                len,
+            )
+            .with_value(child.value()),
+        )
     }
 }
 
