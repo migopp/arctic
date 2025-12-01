@@ -216,9 +216,7 @@ where
                 Some(edge::Child::Node(old)) if old == node => old,
                 // Already helped by another thread OR freeze was pushed down by
                 // a concurrent edge expansion operation
-                None | Some(edge::Child::Node(_)) => break None,
-                // Should be impossible to freeze value
-                Some(edge::Child::Value(_)) => unreachable!(),
+                None | Some(_) => break None,
             };
 
             let (op, new) = unsafe { node.replace_unchecked(meta) };
