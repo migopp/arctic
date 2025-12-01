@@ -154,10 +154,10 @@ pub(crate) union KeyIter {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) struct KeyIndex {
-    pub(super) key: u8,
     pub(super) index: u8,
+    pub(super) key: u8,
 }
 
 impl KeyIndex {
@@ -229,14 +229,6 @@ impl KeyIter {
         let iter = Self { node_256 };
         validate_eq!(iter.kind(), node::Kind::NODE_256);
         iter
-    }
-
-    #[inline]
-    pub(super) fn sort_unstable(&mut self) {
-        let kind = self.kind();
-        if kind == node::Kind::NODE_3 {
-            unsafe { &mut self.node_3 }.sort_unstable();
-        }
     }
 
     #[inline]

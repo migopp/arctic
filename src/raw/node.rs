@@ -42,11 +42,7 @@ where
         lower: L,
         upper: U,
     ) -> NodeIter<L, U, M> {
-        let mut keys = self.keys(lower, upper);
-        if O::SORTED {
-            keys.sort_unstable();
-        }
-        unsafe { NodeIter::new(lower, upper, keys, self.edges()) }
+        unsafe { NodeIter::new(lower, upper, self.keys(lower, upper), self.edges()) }
     }
 
     fn edges(&self) -> &[Atomic<Edge<M>>];

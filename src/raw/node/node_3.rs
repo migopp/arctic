@@ -3,7 +3,6 @@ use ribbit::u48;
 
 use crate::raw::edge;
 use crate::raw::node;
-use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 
 use super::Node15;
@@ -89,38 +88,16 @@ impl linear::Header for ribbit::Packed<Header> {
     ) -> node::KeyIter {
         let len = self.len().value();
 
-        if lower.get() == 0 && upper.get() == 255 {
-            let keys = self.value.to_le_bytes();
-            let entries: [KeyIndex; 3] = core::array::from_fn(|index| KeyIndex {
-                key: keys[index * 2],
-                index: index as u8,
-            });
-            return node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len));
-        }
-
-        let min = broadcast(lower.get());
-        let max = broadcast(upper.get());
-
-        const LOWER: u64 = 0x0000_00FF_00FF_00FF;
-        const OVERFLOW: u64 = 0x0000_0100_0100_0100;
-        const INDICES: u64 = 0x0000_0200_0100_0000;
-
-        // Set overflow bit if byte is < min or > max
-        let mask_lt_min = min + (self.value ^ LOWER);
-        let mask_gt_max = self.value + (max ^ LOWER);
-
-        // Set lowest bit if byte is within range
-        let mask_range_bit = (!(mask_lt_min | mask_gt_max) & OVERFLOW) >> 8;
-        // Broadcast to 16 bits (keys and indices)
-        let mask_range = mask_range_bit * 0xFFFF;
-
         let mask_len = (1u64 << (len << 4)) - 1;
-        let mask_valid = mask_range & mask_len;
+        let mask_valid = if lower.get() == 0 && upper.get() == 255 {
+            mask_len
+        } else {
+            mask_len & node::simd::mask_range_4(self.value, lower.get(), upper.get())
+        };
+        let len = (mask_valid.count_ones() >> 4) as u8;
+        let out = node::simd::compress_4(self.value, mask_valid);
 
-        let entries = unsafe { core::arch::x86_64::_pext_u64(self.value | INDICES, mask_valid) }
-            .to_le_bytes();
-        let entries = unsafe { core::mem::transmute::<[u8; 8], [KeyIndex; 4]>(entries) };
-        let entries = core::array::from_fn(|i| entries[i]);
+        let entries = core::array::from_fn(|i| out[i]);
         node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len))
     }
 }

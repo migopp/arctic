@@ -225,13 +225,6 @@ macro_rules! impl_key_iter {
                     entries,
                 }
             }
-
-            #[inline]
-            #[allow(unused)]
-            pub(super) fn sort_unstable(&mut self) {
-                validate_eq!(self.head, 0);
-                self.entries[..self.tail as usize].sort_unstable();
-            }
         }
 
         impl Iterator for $ty {

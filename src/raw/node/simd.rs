@@ -10,17 +10,23 @@ use core::arch::x86_64::_mm256_setr_epi8;
 use core::arch::x86_64::_mm256_shuffle_epi8;
 use core::arch::x86_64::_mm_adds_epu8;
 use core::arch::x86_64::_mm_and_si128;
+use core::arch::x86_64::_mm_blend_epi16;
+use core::arch::x86_64::_mm_cmpeq_epi16;
 use core::arch::x86_64::_mm_cmpeq_epi8;
 use core::arch::x86_64::_mm_cmplt_epi8;
 use core::arch::x86_64::_mm_cvtsi128_si64x;
 use core::arch::x86_64::_mm_extract_epi64;
+use core::arch::x86_64::_mm_max_epu16;
 use core::arch::x86_64::_mm_max_epu8;
+use core::arch::x86_64::_mm_min_epu16;
 use core::arch::x86_64::_mm_min_epu8;
 use core::arch::x86_64::_mm_movemask_epi8;
 use core::arch::x86_64::_mm_mullo_epi16;
 use core::arch::x86_64::_mm_set1_epi16;
 use core::arch::x86_64::_mm_set1_epi8;
 use core::arch::x86_64::_mm_set_epi64x;
+use core::arch::x86_64::_mm_setr_epi8;
+use core::arch::x86_64::_mm_shuffle_epi8;
 use core::arch::x86_64::_mm_slli_epi16;
 use core::arch::x86_64::_mm_srli_epi16;
 use core::arch::x86_64::_mm_storeu_si128;
@@ -61,6 +67,20 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
 }
 
+#[inline(always)]
+pub(super) fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
+    let array = u128_to_avx(array as u128);
+
+    let min = unsafe { _mm_set1_epi16(min as i16) };
+    let max = unsafe { _mm_set1_epi16(max as i16) };
+
+    let clamp_min = unsafe { _mm_max_epu16(array, min) };
+    let clamp = unsafe { _mm_min_epu16(clamp_min, max) };
+    let valid = unsafe { _mm_cmpeq_epi16(array, clamp) };
+
+    (unsafe { _mm_cvtsi128_si64x(valid) } as u64)
+}
+
 /// Output has 8 bits set for each byte in `array` below `len`
 #[inline(always)]
 pub(super) fn mask_len(len: u8) -> u128 {
@@ -71,6 +91,16 @@ pub(super) fn mask_len(len: u8) -> u128 {
 #[inline(always)]
 pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
     unsafe { _mm_movemask_epi8(u128_to_avx(mask)) as u16 }
+}
+
+#[inline(always)]
+pub(super) fn compress_4(keys: u64, mask: u64) -> [KeyIndex; 4] {
+    let ks = unsafe { _pext_u64(keys, mask) };
+    let is = unsafe { _pext_u64(0x0000_0002_0001_0000, mask) };
+
+    let mut out = !mask | (ks << 8) | is;
+    out = bitonic_sort_4(out);
+    unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) }
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -114,26 +144,76 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
     };
 
     let mut out = unsafe { _mm256_set_m128i(_mm_unpackhi_epi8(is, ks), _mm_unpacklo_epi8(is, ks)) };
-    out = bitonic_sort(out);
-
-    unsafe {
-        out = _mm256_shuffle_epi8(
-            out,
-            _mm256_setr_epi8(
-                0x1, 0x0, 0x3, 0x2, 0x5, 0x4, 0x7, 0x6, 0x9, 0x8, 0xB, 0xA, 0xD, 0xC, 0xF, 0xE,
-                0x1, 0x0, 0x3, 0x2, 0x5, 0x4, 0x7, 0x6, 0x9, 0x8, 0xB, 0xA, 0xD, 0xC, 0xF, 0xE,
-            ),
-        );
-
-        core::mem::transmute::<__m256i, [KeyIndex; 16]>(out)
-    }
+    out = bitonic_sort_16(out);
+    unsafe { core::mem::transmute::<__m256i, [KeyIndex; 16]>(out) }
 }
 
 /// https://en.wikipedia.org/wiki/Bitonic_sorter
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_sort(mut input: __m256i) -> __m256i {
+fn bitonic_sort_4(input: u64) -> u64 {
+    const RECOMBINE_1: u64 = 0x2301;
+    const SORT_1: u64 = RECOMBINE_1;
+    const BLEND_1: i32 = 0b1010;
+
+    const RECOMBINE_2: u64 = 0x0123;
+    const BLEND_2: i32 = 0b1100_1100;
+
+    #[inline(always)]
+    fn bitonic_step<const SHUFFLE: u64, const BLEND: i32>(input: __m128i) -> __m128i {
+        const fn extract(shuffle: u64, index: u8) -> i8 {
+            // `% 8` to repeat across lanes, `/ 2` for u16 granularity, `* 4` for bit width
+            let shift = (index % 8 / 2) * 4;
+            let select = (shuffle >> shift) & 0b1111;
+            // Mix bit from top/bottom u16 back in
+            ((select << 1) | (index as u64 & 1)) as i8
+        }
+
+        let shuffle = unsafe {
+            _mm_shuffle_epi8(
+                input,
+                _mm_setr_epi8(
+                    const { extract(SHUFFLE, 0) },
+                    const { extract(SHUFFLE, 1) },
+                    const { extract(SHUFFLE, 2) },
+                    const { extract(SHUFFLE, 3) },
+                    const { extract(SHUFFLE, 4) },
+                    const { extract(SHUFFLE, 5) },
+                    const { extract(SHUFFLE, 6) },
+                    const { extract(SHUFFLE, 7) },
+                    const { extract(SHUFFLE, 8) },
+                    const { extract(SHUFFLE, 9) },
+                    const { extract(SHUFFLE, 10) },
+                    const { extract(SHUFFLE, 11) },
+                    const { extract(SHUFFLE, 12) },
+                    const { extract(SHUFFLE, 13) },
+                    const { extract(SHUFFLE, 14) },
+                    const { extract(SHUFFLE, 15) },
+                ),
+            )
+        };
+
+        let min = unsafe { _mm_min_epu16(input, shuffle) };
+        let max = unsafe { _mm_max_epu16(input, shuffle) };
+
+        unsafe { _mm_blend_epi16::<BLEND>(min, max) }
+    }
+
+    let mut input = unsafe { _mm_set_epi64x(0, input as i64) };
+    input = bitonic_step::<RECOMBINE_1, BLEND_1>(input);
+
+    input = bitonic_step::<RECOMBINE_2, BLEND_2>(input);
+    input = bitonic_step::<SORT_1, BLEND_1>(input);
+
+    (unsafe { _mm_cvtsi128_si64x(input) } as u64)
+}
+
+/// https://en.wikipedia.org/wiki/Bitonic_sorter
+/// https://github.com/Geolm/simd_bitonic
+/// https://hal.inria.fr/hal-01512970v1/document
+#[inline(always)]
+fn bitonic_sort_16(mut input: __m256i) -> __m256i {
     const RECOMBINE_1: u64 = 0x6745_2301;
     const SORT_1: u64 = RECOMBINE_1;
     const BLEND_1: i32 = 0b1010_1010;
@@ -250,7 +330,7 @@ pub(super) unsafe fn compress_into(keys: u128, indices: u128, mask: u128, buffer
 
     let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
     let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
-    let [lo, hi] = interleave(avx_to_u128(ks), avx_to_u128(is));
+    let [lo, hi] = interleave(avx_to_u128(is), avx_to_u128(ks));
 
     // FIXME: assumes little-endian
     unsafe {
@@ -323,7 +403,7 @@ mod tests {
     use core::arch::x86_64::_mm256_set_epi16;
     use core::arch::x86_64::_mm256_setr_epi16;
 
-    use crate::raw::node::simd::bitonic_sort;
+    use crate::raw::node::simd::bitonic_sort_16;
 
     #[test]
     fn zero() {
@@ -424,7 +504,7 @@ mod tests {
     }
 
     fn assert_sort(input: __m256i, expected: __m256i) {
-        let actual = bitonic_sort(input);
+        let actual = bitonic_sort_16(input);
         assert_eq!(
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(actual) },
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(expected) },
