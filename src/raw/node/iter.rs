@@ -154,7 +154,7 @@ pub(crate) union KeyIter {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct KeyIndex {
     pub(super) key: u8,
     pub(super) index: u8,
@@ -162,6 +162,12 @@ pub(crate) struct KeyIndex {
 
 impl KeyIndex {
     pub(crate) const DEFAULT: Self = Self { key: 0, index: 0 };
+}
+
+impl core::fmt::Debug for KeyIndex {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#.02X}:{:#.02X}", self.key, self.index)
+    }
 }
 
 impl KeyIter {
@@ -230,8 +236,6 @@ impl KeyIter {
         let kind = self.kind();
         if kind == node::Kind::NODE_3 {
             unsafe { &mut self.node_3 }.sort_unstable();
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { self.as_node_15_unchecked().as_mut() }.sort_unstable();
         }
     }
 

@@ -1,4 +1,13 @@
 use core::arch::x86_64::__m128i;
+use core::arch::x86_64::__m256i;
+use core::arch::x86_64::_mm256_blend_epi16;
+use core::arch::x86_64::_mm256_extracti128_si256;
+use core::arch::x86_64::_mm256_max_epu16;
+use core::arch::x86_64::_mm256_min_epu16;
+use core::arch::x86_64::_mm256_permute2x128_si256;
+use core::arch::x86_64::_mm256_set_m128i;
+use core::arch::x86_64::_mm256_setr_epi8;
+use core::arch::x86_64::_mm256_shuffle_epi8;
 use core::arch::x86_64::_mm_adds_epu8;
 use core::arch::x86_64::_mm_and_si128;
 use core::arch::x86_64::_mm_cmpeq_epi8;
@@ -72,27 +81,149 @@ pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] 
     let (ks_lo, ks_hi) = split(keys);
     let (is_lo, is_hi) = split(indices);
     let (mask_lo, mask_hi) = split(mask);
-    let shift = mask_lo.count_ones();
+    let shift_lo = mask_lo.count_ones();
+    let shift_hi = mask_hi.count_ones();
 
     let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
     let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
     let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
     let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
 
-    validate!(shift <= 64);
+    validate!(shift_lo <= 64);
+    validate!(shift_hi < 64);
 
-    let ks_hi_hi = ks_hi.unbounded_shr(64 - shift);
-    let is_hi_hi = is_hi.unbounded_shr(64 - shift);
+    let ks_hi_hi = ks_hi.unbounded_shr(64 - shift_lo);
+    let is_hi_hi = is_hi.unbounded_shr(64 - shift_lo);
+    let fill_hi = !((1u64 << shift_hi.saturating_sub(64 - shift_lo)) - 1);
 
-    let ks_hi_lo = ks_hi.unbounded_shl(shift);
-    let is_hi_lo = is_hi.unbounded_shl(shift);
+    let ks_hi_lo = ks_hi.unbounded_shl(shift_lo);
+    let is_hi_lo = is_hi.unbounded_shl(shift_lo);
+    let fill_lo = !1u64.unbounded_shl(shift_hi + shift_lo).wrapping_sub(1);
 
-    let ks = unsafe { _mm_set_epi64x(ks_hi_hi as i64, (ks_hi_lo | ks_lo) as i64) };
-    let is = unsafe { _mm_set_epi64x(is_hi_hi as i64, (is_hi_lo | is_lo) as i64) };
+    let ks = unsafe {
+        _mm_set_epi64x(
+            (fill_hi | ks_hi_hi) as i64,
+            (fill_lo | ks_hi_lo | ks_lo) as i64,
+        )
+    };
+    let is = unsafe {
+        _mm_set_epi64x(
+            (fill_hi | is_hi_hi) as i64,
+            (fill_lo | is_hi_lo | is_lo) as i64,
+        )
+    };
 
-    let out = interleave(avx_to_u128(ks), avx_to_u128(is));
-    let out = core::array::from_fn(|i| out[i].to_le_bytes());
-    unsafe { core::mem::transmute::<[[u8; 16]; 2], [KeyIndex; 16]>(out) }
+    let mut out = unsafe { _mm256_set_m128i(_mm_unpackhi_epi8(ks, is), _mm_unpacklo_epi8(ks, is)) };
+
+    unsafe {
+        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
+
+        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
+        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
+
+        out = bitonic_step::<SHUFFLE_4, BLEND_4>(out);
+        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
+        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
+
+        out = bitonic_step::<SHUFFLE_8, BLEND_8>(out);
+        out = bitonic_step::<SHUFFLE_4, BLEND_4>(out);
+        out = bitonic_step::<SHUFFLE_2, BLEND_2>(out);
+        out = bitonic_step::<SHUFFLE_1, BLEND_1>(out);
+
+        out = _mm256_shuffle_epi8(
+            out,
+            _mm256_setr_epi8(
+                0x1, 0x0, 0x3, 0x2, 0x5, 0x4, 0x7, 0x6, 0x9, 0x8, 0xB, 0xA, 0xD, 0xC, 0xF, 0xE,
+                0x1, 0x0, 0x3, 0x2, 0x5, 0x4, 0x7, 0x6, 0x9, 0x8, 0xB, 0xA, 0xD, 0xC, 0xF, 0xE,
+            ),
+        );
+
+        core::mem::transmute::<__m256i, [KeyIndex; 16]>(out)
+    }
+}
+
+const SHUFFLE_1: u64 = 0x6745_2301;
+const BLEND_1: i32 = 0b1010_1010;
+
+const SHUFFLE_2: u64 = 0x5476_1032;
+const BLEND_2: i32 = 0b1100_1100;
+
+const SHUFFLE_4: u64 = 0x3210_7654;
+const BLEND_4: i32 = 0b1111_0000;
+
+// Dummy values--shuffling across lanes requires different intrinsic
+const SHUFFLE_8: u64 = 0xFFFF_FFFF;
+const BLEND_8: i32 = 0b1111_1111;
+
+/// https://en.wikipedia.org/wiki/Bitonic_sorter
+/// https://github.com/Geolm/simd_bitonic
+/// https://hal.inria.fr/hal-01512970v1/document
+#[inline(always)]
+fn bitonic_step<const SHUFFLE: u64, const BLEND: i32>(input: __m256i) -> __m256i {
+    const fn extract(shuffle: u64, index: u8) -> i8 {
+        // `% 16` to repeat across lanes, `/ 2` for u16 granularity, `/ 4` for bit width
+        let shift = (index % 16 / 2) * 4;
+        let select = (shuffle >> shift) & 0b1111;
+        // Mix bit from top/bottom u16 back in
+        ((select << 1) | (index as u64 & 1)) as i8
+    }
+
+    let shuffle = unsafe {
+        _mm256_setr_epi8(
+            const { extract(SHUFFLE, 0) },
+            const { extract(SHUFFLE, 1) },
+            const { extract(SHUFFLE, 2) },
+            const { extract(SHUFFLE, 3) },
+            const { extract(SHUFFLE, 4) },
+            const { extract(SHUFFLE, 5) },
+            const { extract(SHUFFLE, 6) },
+            const { extract(SHUFFLE, 7) },
+            const { extract(SHUFFLE, 8) },
+            const { extract(SHUFFLE, 9) },
+            const { extract(SHUFFLE, 10) },
+            const { extract(SHUFFLE, 11) },
+            const { extract(SHUFFLE, 12) },
+            const { extract(SHUFFLE, 13) },
+            const { extract(SHUFFLE, 14) },
+            const { extract(SHUFFLE, 15) },
+            const { extract(SHUFFLE, 16) },
+            const { extract(SHUFFLE, 17) },
+            const { extract(SHUFFLE, 18) },
+            const { extract(SHUFFLE, 19) },
+            const { extract(SHUFFLE, 20) },
+            const { extract(SHUFFLE, 21) },
+            const { extract(SHUFFLE, 22) },
+            const { extract(SHUFFLE, 23) },
+            const { extract(SHUFFLE, 24) },
+            const { extract(SHUFFLE, 25) },
+            const { extract(SHUFFLE, 26) },
+            const { extract(SHUFFLE, 27) },
+            const { extract(SHUFFLE, 28) },
+            const { extract(SHUFFLE, 29) },
+            const { extract(SHUFFLE, 30) },
+            const { extract(SHUFFLE, 31) },
+        )
+    };
+
+    let swap = if SHUFFLE == SHUFFLE_8 {
+        unsafe { _mm256_permute2x128_si256::<0b0000_0001>(input, input) }
+    } else {
+        unsafe { _mm256_shuffle_epi8(input, shuffle) }
+    };
+
+    let min = unsafe { _mm256_min_epu16(input, swap) };
+    let max = unsafe { _mm256_max_epu16(input, swap) };
+
+    if BLEND == BLEND_8 {
+        unsafe {
+            _mm256_set_m128i(
+                _mm256_extracti128_si256::<1>(max),
+                _mm256_extracti128_si256::<0>(min),
+            )
+        }
+    } else {
+        unsafe { _mm256_blend_epi16::<BLEND>(min, max) }
+    }
 }
 
 #[inline(always)]
