@@ -2,7 +2,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::iter::Unsorted;
 use crate::raw::edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
@@ -57,7 +56,7 @@ where
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
                             self.stack.push(RepeatIter::new(unsafe {
-                                node.entries_unchecked::<Unsorted, _, _>(Unbound, Unbound)
+                                node.entries_unchecked::<_, _>(Unbound, Unbound)
                             }));
                             continue 'vertical;
                         }

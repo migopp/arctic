@@ -15,7 +15,6 @@ macro_rules! validate_eq {
 }
 
 pub mod concurrent;
-pub mod iter;
 pub mod raw;
 pub mod sequential;
 pub mod stat;
@@ -72,10 +71,7 @@ mod tests {
         let key = 1u64;
         map.upsert(key, 2u32);
         let range = map.range(1u64, 1u64).unwrap();
-        assert_eq!(
-            range.entries::<crate::iter::Sorted>().collect::<Vec<_>>(),
-            vec![(1, 2)]
-        );
+        assert_eq!(range.entries::<false>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
 
     #[test]
@@ -104,7 +100,7 @@ mod tests {
         let mut map = map.pin();
         let range = map.range(256u64, 511u64).unwrap();
         assert_eq!(
-            range.entries::<crate::iter::Sorted>().collect::<Vec<_>>(),
+            range.entries::<false>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))
@@ -123,10 +119,10 @@ mod tests {
         }
 
         drop(pin);
-        assert_eq!(map.as_sequential().iter::<crate::iter::Sorted>().count(), 1);
+        assert_eq!(map.as_sequential().iter::<false>().count(), 1);
 
         map.as_sequential()
-            .iter::<crate::iter::Sorted>()
+            .iter::<false>()
             .for_each(|(key, value)| {
                 assert_eq!(key, 1);
                 assert_eq!(value, 3);
@@ -185,9 +181,7 @@ mod tests {
         let range = pin.range(2, 4).unwrap();
 
         assert_eq!(
-            range
-                .entries::<core::iter::Rev<crate::iter::Sorted>>()
-                .collect::<Vec<_>>(),
+            range.entries::<true>().collect::<Vec<_>>(),
             vec![(4, 4), (3, 3), (2, 2)]
         );
     }
@@ -242,7 +236,7 @@ mod tests {
 
         drop(pin);
 
-        let mut iter = map.as_sequential().iter::<crate::iter::Sorted>();
+        let mut iter = map.as_sequential().iter::<false>();
         let mut count = 0;
         while iter.lend().is_some() {
             count += 1;
@@ -255,7 +249,7 @@ mod tests {
 
         // Sequential iteration
         map.as_sequential()
-            .iter::<crate::iter::Sorted>()
+            .iter::<false>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -274,7 +268,7 @@ mod tests {
             .prefix(K::Read::from(first.borrow()).common_prefix(K::Read::from(last.borrow())))
             .unwrap();
         prefix
-            .entries::<core::iter::Rev<crate::iter::Sorted>>()
+            .entries::<true>()
             .zip(keys.iter().rev())
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -285,7 +279,7 @@ mod tests {
         // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow(), last.borrow()).unwrap();
         range
-            .entries::<crate::iter::Sorted>()
+            .entries::<false>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -296,12 +290,7 @@ mod tests {
         // Concurrent iteration, linearizable
         let mut buffer = Vec::new();
         let mut range = pin
-            .range_optimistic::<crate::iter::Sorted>(
-                &mut buffer,
-                usize::MAX,
-                first.borrow(),
-                last.borrow(),
-            )
+            .range_optimistic::<false>(&mut buffer, usize::MAX, first.borrow(), last.borrow())
             .unwrap();
         range.drain().zip(&keys).for_each(|((lk, lv), (rk, rv))| {
             assert_eq!(lk, *rk);

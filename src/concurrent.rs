@@ -13,7 +13,6 @@ use core::sync::atomic::Ordering;
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 
-use crate::iter::Order;
 use crate::raw::cursor::Insert;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
@@ -631,14 +630,14 @@ where
         iter::Prefix::new(cursor, min..)
     }
 
-    pub fn prefix_optimistic<'k, 'l, O: Order>(
+    pub fn prefix_optimistic<'k, 'l, const REVERSE: bool>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.prefix(prefix)?;
-        match Self::scan_optimistic::<_, O>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<REVERSE, _>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -656,7 +655,7 @@ where
     //     Self::scan_pessimistic::<iter::Prefix, S>(buffer, guard)
     // }
 
-    pub fn range_optimistic<'k, 'l, O: Order>(
+    pub fn range_optimistic<'k, 'l, const REVERSE: bool>(
         &'l mut self,
         buffer: &'l mut Vec<(K::Write, u64)>,
         limit: usize,
@@ -665,7 +664,7 @@ where
     ) -> Option<LinearizableGuard<'g, 'l, K, V>> {
         let guard = self.range(min, max)?;
 
-        match Self::scan_optimistic::<_, O>(buffer, &guard, limit) {
+        match Self::scan_optimistic::<REVERSE, _>(buffer, &guard, limit) {
             Ok(()) => Some(LinearizableGuard {
                 guard: guard.guard_value(),
                 buffer,
@@ -709,16 +708,15 @@ where
     //     }
     // }
 
-    fn scan_optimistic<'k, R, O>(
+    fn scan_optimistic<'k, const REVERSE: bool, R>(
         buffer: &mut Vec<(K::Write, u64)>,
         guard: &iter::Prefix<'k, 'g, '_, K, V, R>,
         limit: usize,
     ) -> Result<(), ()>
     where
         R: crate::raw::iter::Range<K::Read<'k>>,
-        O: Order,
     {
-        guard.entries::<O>().for_each_raw(|key, value| {
+        guard.entries::<REVERSE>().for_each_raw(|key, value| {
             buffer.push((key.clone(), value));
             ControlFlow::Continue(())
         });
@@ -727,41 +725,45 @@ where
             let mut dirty = false;
             let mut len = 0;
 
-            guard.entries::<O>().for_each_raw(|new_key, new_value| {
-                let index = len;
-                len += 1;
+            guard
+                .entries::<REVERSE>()
+                .for_each_raw(|new_key, new_value| {
+                    let index = len;
+                    len += 1;
 
-                let old = match buffer.get_mut(index) {
-                    // Fast path: no change
-                    Some((old_key, old_value)) if old_key == new_key && *old_value == new_value => {
-                        return ControlFlow::Continue(());
-                    }
-                    old => old,
-                };
+                    let old = match buffer.get_mut(index) {
+                        // Fast path: no change
+                        Some((old_key, old_value))
+                            if old_key == new_key && *old_value == new_value =>
+                        {
+                            return ControlFlow::Continue(());
+                        }
+                        old => old,
+                    };
 
-                crate::cold();
-                dirty = true;
+                    crate::cold();
+                    dirty = true;
 
-                match old {
-                    Some((old_key, old_value)) if old_key == new_key => {
-                        *old_value = new_value;
-                    }
-                    Some((old_key, _)) if *old_key < *new_key => {
-                        let high = buffer[len..]
-                            .iter()
-                            .position(|(key, _)| key >= new_key)
-                            .map(|offset| len + offset)
-                            .unwrap_or(buffer.len());
-                        buffer.drain(index..high);
-                        len = index;
-                    }
-                    None | Some(_) => {
-                        buffer.insert(index, (new_key.clone(), new_value));
-                    }
-                };
+                    match old {
+                        Some((old_key, old_value)) if old_key == new_key => {
+                            *old_value = new_value;
+                        }
+                        Some((old_key, _)) if *old_key < *new_key => {
+                            let high = buffer[len..]
+                                .iter()
+                                .position(|(key, _)| key >= new_key)
+                                .map(|offset| len + offset)
+                                .unwrap_or(buffer.len());
+                            buffer.drain(index..high);
+                            len = index;
+                        }
+                        None | Some(_) => {
+                            buffer.insert(index, (new_key.clone(), new_value));
+                        }
+                    };
 
-                ControlFlow::Continue(())
-            });
+                    ControlFlow::Continue(())
+                });
 
             if len == buffer.len() && !dirty {
                 stat::record(stat::Record::RangeConflict, retry as u64);

@@ -3,7 +3,6 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Unpack as _;
 
-use crate::iter::Unsorted;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -50,10 +49,9 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
                     node::Kind::Node256 => &mut node_256,
                 };
 
-                let children =
-                    unsafe { node.entries_unchecked::<Unsorted, _, _>(Unbound, Unbound) }
-                        .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
-                        .count();
+                let children = unsafe { node.entries_unchecked(Unbound, Unbound) }
+                    .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                    .count();
 
                 histogram.record(children as u64);
             }

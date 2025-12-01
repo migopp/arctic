@@ -37,11 +37,7 @@ where
 
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
-    fn entries<O: crate::iter::Order, L: iter::Lower, U: iter::Upper>(
-        &self,
-        lower: L,
-        upper: U,
-    ) -> NodeIter<L, U, M> {
+    fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<L, U, M> {
         unsafe { NodeIter::new(lower, upper, self.keys(lower, upper), self.edges()) }
     }
 
@@ -119,7 +115,7 @@ where
         self.freeze();
 
         let len = self
-            .entries::<crate::iter::Unsorted, _, _>(Unbound, Unbound)
+            .entries(Unbound, Unbound)
             .map(|(key, edge)| (key, edge.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {

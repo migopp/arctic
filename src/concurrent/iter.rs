@@ -6,7 +6,6 @@ use crate::concurrent::cursor;
 use crate::concurrent::hazard;
 use crate::concurrent::Key;
 use crate::concurrent::Value;
-use crate::iter::Order;
 use crate::raw;
 use crate::raw::key;
 use crate::raw::key::Read as _;
@@ -55,10 +54,7 @@ where
     R: crate::raw::iter::Range<K::Read<'k>>,
 {
     #[inline]
-    pub fn entries<O>(&self) -> EntryIter<'k, 'g, '_, K, V, R, O>
-    where
-        O: Order,
-    {
+    pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'g, '_, REVERSE, K, V, R> {
         EntryIter {
             guard: &self.guard,
             iter: unsafe {
@@ -68,10 +64,7 @@ where
     }
 
     #[inline]
-    pub fn values<O>(&self) -> ValueIter<'k, 'g, '_, K, V, R, O>
-    where
-        O: Order,
-    {
+    pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'g, '_, REVERSE, K, V, R> {
         ValueIter {
             guard: &self.guard,
             iter: unsafe {
@@ -87,18 +80,25 @@ where
 
 /// Iterator over keys and values
 #[expect(private_bounds)]
-pub struct EntryIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
+pub struct EntryIter<
+    'k,
+    'g,
+    'l,
+    const REVERSE: bool,
+    K: Key,
+    V: Value,
+    R: raw::iter::Range<K::Read<'k>>,
+> {
     guard: &'l hazard::guard::Prefix<'g, 'l, K::Prefix, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, K::Write, K::Edge, R, O>,
+    iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, K::Write, K::Edge, R>,
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R, O> EntryIter<'k, 'g, 'l, K, V, R, O>
+impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> EntryIter<'k, 'g, 'l, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
@@ -124,12 +124,11 @@ where
     }
 }
 
-impl<'k, 'g, 'l, K, V, R, O> Iterator for EntryIter<'k, 'g, 'l, K, V, R, O>
+impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> Iterator for EntryIter<'k, 'g, 'l, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    O: Order,
 {
     type Item = (K, V::Borrow<'l>);
 
@@ -145,18 +144,25 @@ where
 
 /// Iterator over values only
 #[expect(private_bounds)]
-pub struct ValueIter<'k, 'g, 'l, K: Key, V: Value, R: raw::iter::Range<K::Read<'k>>, O> {
+pub struct ValueIter<
+    'k,
+    'g,
+    'l,
+    const REVERSE: bool,
+    K: Key,
+    V: Value,
+    R: raw::iter::Range<K::Read<'k>>,
+> {
     guard: &'l hazard::guard::Prefix<'g, 'l, K::Prefix, V>,
-    iter: crate::raw::iter::RangeIter<'g, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R, O>,
+    iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R>,
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R, O> ValueIter<'k, 'g, 'l, K, V, R, O>
+impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> ValueIter<'k, 'g, 'l, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<V::Borrow<'l>> {
@@ -172,12 +178,11 @@ where
     }
 }
 
-impl<'k, 'g, 'l, K, V, R, O> Iterator for ValueIter<'k, 'g, 'l, K, V, R, O>
+impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> Iterator for ValueIter<'k, 'g, 'l, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    O: Order,
 {
     type Item = V::Borrow<'l>;
 

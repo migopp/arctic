@@ -2,18 +2,12 @@ mod value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
-use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::iter::Order;
 use crate::raw;
-use crate::raw::edge;
-use crate::raw::edge::Key as _;
-use crate::raw::edge::Meta as _;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
-use crate::raw::key::Read as _;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
@@ -129,7 +123,7 @@ impl<K: Key, V: Value> Map<K, V> {
         todo!()
     }
 
-    pub fn iter<O: Order>(&self) -> Iter<'_, K, V, O> {
+    pub fn iter<const REVERSE: bool>(&self) -> Iter<'_, REVERSE, K, V> {
         Iter {
             _value: PhantomData,
             iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
@@ -137,16 +131,15 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 }
 
-pub struct Iter<'g, K: Key, V, O: Order> {
+pub struct Iter<'g, const REVERSE: bool, K: Key, V> {
     _value: PhantomData<V>,
-    iter: RangeIter<'g, K::Read<'g>, K::Write, K::Edge, core::ops::RangeFull, O>,
+    iter: RangeIter<'g, REVERSE, K::Read<'g>, K::Write, K::Edge, core::ops::RangeFull>,
 }
 
-impl<'g, K, V, O> Iter<'g, K, V, O>
+impl<'g, const REVERSE: bool, K, V> Iter<'g, REVERSE, K, V>
 where
     K: Key,
     V: Value,
-    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
@@ -159,11 +152,10 @@ where
     }
 }
 
-impl<'g, K, V, O> Iterator for Iter<'g, K, V, O>
+impl<'g, const REVERSE: bool, K, V> Iterator for Iter<'g, REVERSE, K, V>
 where
     K: Key,
     V: Value + 'g,
-    O: crate::iter::Order,
 {
     type Item = (K, V::Borrow<'g>);
 

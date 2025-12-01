@@ -1,10 +1,8 @@
-use core::marker::PhantomData;
 use core::ops::ControlFlow;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::iter::Order;
 use crate::raw;
 use crate::raw::edge;
 use crate::raw::iter::Lower as _;
@@ -16,17 +14,17 @@ use crate::raw::Edge;
 
 pub(crate) enum RangeIter<
     'g,
+    const REVERSE: bool,
     R: key::Read,
     W: key::Write,
     M: ribbit::Pack<Packed: edge::Meta>,
     B: raw::iter::Range<R>,
-    O,
 > {
     Root { writer: W, next: Option<u64> },
-    Node(NodeIter<'g, R, W, M, B, O>),
+    Node(NodeIter<'g, REVERSE, R, W, M, B>),
 }
 
-impl<'g, R, W, M, B, O> Default for RangeIter<'g, R, W, M, B, O>
+impl<'g, const REVERSE: bool, R, W, M, B> Default for RangeIter<'g, REVERSE, R, W, M, B>
 where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
@@ -42,14 +40,13 @@ where
     }
 }
 
-impl<'g, R, W, M, B, O> RangeIter<'g, R, W, M, B, O>
+impl<'g, const REVERSE: bool, R, W, M, B> RangeIter<'g, REVERSE, R, W, M, B>
 where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
     W: From<R>,
     M: ribbit::Pack<Packed: edge::Meta>,
     B: raw::iter::Range<R>,
-    O: Order,
 {
     pub(crate) unsafe fn new_unchecked(root: &'g Atomic<Edge<M>>, prefix: R, range: B) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
@@ -78,7 +75,7 @@ where
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
                 stack.push((len, unsafe {
-                    node.entries_unchecked::<O, _, _>(lower_byte, upper_byte)
+                    node.entries_unchecked(lower_byte, upper_byte)
                 }));
 
                 Self::Node(NodeIter {
@@ -86,7 +83,6 @@ where
                     upper,
                     stack,
                     writer,
-                    _order: PhantomData,
                 })
             }
         }
@@ -120,11 +116,11 @@ where
 
 pub(crate) struct NodeIter<
     'g,
+    const REVERSE: bool,
     R: key::Read,
     W: key::Write,
     M: ribbit::Pack<Packed: edge::Meta> + 'g,
     B: raw::iter::Range<R>,
-    O,
 > {
     lower: B::Lower,
     upper: B::Upper,
@@ -138,16 +134,14 @@ pub(crate) struct NodeIter<
             M,
         >,
     )>,
-    _order: PhantomData<O>,
 }
 
-impl<'g, R, W, M, B, O> NodeIter<'g, R, W, M, B, O>
+impl<'g, const REVERSE: bool, R, W, M, B> NodeIter<'g, REVERSE, R, W, M, B>
 where
     R: key::Read<Edge = M>,
     W: key::Write<Edge = M>,
     M: ribbit::Pack<Packed: edge::Meta> + 'g,
     B: raw::iter::Range<R>,
-    O: Order,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -169,7 +163,7 @@ where
             let len = *len;
 
             'horizontal: loop {
-                let Some((mut byte, mut edge)) = (if O::REVERSE {
+                let Some((mut byte, mut edge)) = (if REVERSE {
                     iter.next_back()
                 } else {
                     iter.next()
@@ -197,7 +191,7 @@ where
                     let lower = if check_lower {
                         match self.lower.check(meta) {
                             Some(lower) => lower,
-                            None if O::REVERSE => {
+                            None if REVERSE => {
                                 self.stack.clear();
                                 return None;
                             }
@@ -210,7 +204,7 @@ where
                     let upper = if check_upper {
                         match self.upper.check(meta) {
                             Some(upper) => upper,
-                            None if O::REVERSE => continue 'horizontal,
+                            None if REVERSE => continue 'horizontal,
                             None => {
                                 self.stack.clear();
                                 return None;
@@ -233,8 +227,7 @@ where
                         },
                         edge::Child::Node(node) => {
                             // Avoid pushing and popping iterators with only one child
-                            match unsafe { node.entries_unchecked::<O, _, _>(lower, upper) }
-                                .try_into_single()
+                            match unsafe { node.entries_unchecked(lower, upper) }.try_into_single()
                             {
                                 Ok((check_lower_, check_upper_, byte_, edge_)) => {
                                     check_lower = check_lower_;
