@@ -229,7 +229,7 @@ impl Header {
             let valid = node::simd::mask_lt(indices, len as i8)
                 & node::simd::mask_range(keys, lower.get(), upper.get());
             unsafe {
-                node::simd::compress_into(
+                node::simd::compress_47(
                     keys,
                     indices,
                     valid,
@@ -258,7 +258,7 @@ impl Header {
             let indices = self.data[i].load(Ordering::Relaxed);
             let valid = node::simd::mask_lt(indices, len as i8);
             unsafe {
-                node::simd::compress_into(
+                node::simd::compress_47(
                     keys,
                     indices,
                     valid,

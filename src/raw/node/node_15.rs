@@ -95,7 +95,7 @@ impl linear::Header for ribbit::Packed<Header> {
             mask_len & node::simd::mask_range(self.value, lower.get(), upper.get())
         };
         let len = node::simd::mask_byte_to_bit(mask_valid).count_ones() as u8;
-        let out = node::simd::compress(self.value, node::simd::U8_SEQ, mask_valid);
+        let out = node::simd::compress_15(self.value, mask_valid);
 
         // TODO: SIMD sorting network?
         let entries = core::array::from_fn(|i| out[i]);

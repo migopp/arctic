@@ -107,9 +107,9 @@ pub(super) fn compress_4(keys: u64, mask: u64) -> [KeyIndex; 4] {
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress(keys: u128, indices: u128, mask: u128) -> [KeyIndex; 16] {
+pub(super) fn compress_15(keys: u128, mask: u128) -> [KeyIndex; 16] {
     let (ks_lo, ks_hi) = split(keys);
-    let (is_lo, is_hi) = split(indices);
+    let (is_lo, is_hi) = split(U8_SEQ);
     let (mask_lo, mask_hi) = split(mask);
     let shift_lo = mask_lo.count_ones();
     let shift_hi = mask_hi.count_ones();
@@ -317,7 +317,7 @@ fn bitonic_sort_16(mut input: __m256i) -> __m256i {
 }
 
 #[inline(always)]
-pub(super) unsafe fn compress_into(keys: u128, indices: u128, mask: u128, buffer: *mut KeyIndex) {
+pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: *mut KeyIndex) {
     let (ks_lo, ks_hi) = split(keys);
     let (is_lo, is_hi) = split(indices);
     let (mask_lo, mask_hi) = split(mask);
