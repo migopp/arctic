@@ -190,7 +190,7 @@ fn bitonic_sort_4(input: u64) -> u64 {
     const BLEND_1: i32 = 0b1010;
 
     const RECOMBINE_2: u64 = 0x0123;
-    const BLEND_2: i32 = 0b1100_1100;
+    const BLEND_2: i32 = 0b1100;
 
     #[inline(always)]
     fn bitonic_step<const SHUFFLE: u64, const BLEND: i32>(input: __m128i) -> __m128i {
