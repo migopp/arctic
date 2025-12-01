@@ -220,7 +220,7 @@ impl Header {
         let j = upper.get() / 16;
 
         let len = self.meta_consistent().len().value();
-        let mut entries = [KeyIndex::DEFAULT; 64];
+        let mut iter = Box::new(linear::KeyIter::default());
         let mut index = 0;
         let mut keys = node::simd::add(node::simd::U8_SEQ, node::simd::mul(node::simd::U8_16, i));
 
@@ -233,24 +233,22 @@ impl Header {
                     keys,
                     indices,
                     valid,
-                    entries[index as usize..].as_mut_ptr(),
+                    iter.entries[index as usize..].as_mut_ptr(),
                 )
             };
             index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
             keys = node::simd::add(keys, node::simd::U8_16);
         }
 
-        node::KeyIter::new_47(linear::KeyIter::new_47(
-            core::array::from_fn(|i| entries[i]),
-            index,
-        ))
+        iter.tail = index;
+        node::KeyIter::new_47(iter)
     }
 
     #[inline]
     fn keys(&self) -> node::KeyIter {
         let len = self.meta_consistent().len().value();
 
-        let mut entries = [KeyIndex::DEFAULT; 64];
+        let mut iter = Box::new(linear::KeyIter::default());
         let mut index = 0;
         let mut keys = node::simd::U8_SEQ;
 
@@ -262,7 +260,7 @@ impl Header {
                     keys,
                     indices,
                     valid,
-                    entries[index as usize..].as_mut_ptr(),
+                    iter.entries[index as usize..].as_mut_ptr(),
                 )
             };
             index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
@@ -270,8 +268,8 @@ impl Header {
         }
 
         validate_eq!(index, len);
-        let entries = core::array::from_fn(|i| entries[i]);
-        node::KeyIter::new_47(linear::KeyIter::new_47(entries, index))
+        iter.tail = len;
+        node::KeyIter::new_47(iter)
     }
 
     fn meta_consistent(&self) -> ribbit::Packed<Meta> {
