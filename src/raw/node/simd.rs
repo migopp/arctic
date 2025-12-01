@@ -99,9 +99,10 @@ pub(super) fn compress_4(keys: u64, mask: u64) -> (u8, [KeyIndex; 4]) {
     let ks = unsafe { _pext_u64(keys, mask) };
     let is = unsafe { _pext_u64(0x0000_0002_0001_0000, mask) };
 
-    let len = (mask.count_ones() >> 4) as u8;
+    let bits = mask.count_ones();
+    let len = (bits >> 4) as u8;
 
-    let out = !mask | (ks << 8) | is;
+    let out = (u64::MAX << bits) | (ks << 8) | is;
     let out = bitonic_sort_4(out, len);
     let out = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) };
     (len, out)
@@ -128,11 +129,11 @@ pub(super) unsafe fn compress_15(keys: u128, mask: u128, out: *mut KeyIndex) {
 
     let ks_hi_hi = ks_hi.unbounded_shr(64 - shift_lo);
     let is_hi_hi = is_hi.unbounded_shr(64 - shift_lo);
-    let fill_hi = !((1u64 << shift_hi.saturating_sub(64 - shift_lo)) - 1);
+    let fill_hi = u64::MAX << shift_hi.saturating_sub(64 - shift_lo);
 
     let ks_hi_lo = ks_hi.unbounded_shl(shift_lo);
     let is_hi_lo = is_hi.unbounded_shl(shift_lo);
-    let fill_lo = !1u64.unbounded_shl(shift_hi + shift_lo).wrapping_sub(1);
+    let fill_lo = u64::MAX.unbounded_shl(shift_hi + shift_lo);
 
     let ks = unsafe {
         _mm_set_epi64x(
