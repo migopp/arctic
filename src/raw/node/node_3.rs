@@ -94,8 +94,7 @@ impl linear::Header for ribbit::Packed<Header> {
         } else {
             mask_len & node::simd::mask_range_4(self.value, lower.get(), upper.get())
         };
-        let len = (mask_valid.count_ones() >> 4) as u8;
-        let out = node::simd::compress_4(self.value, mask_valid);
+        let (len, out) = node::simd::compress_4(self.value, mask_valid);
 
         let entries = core::array::from_fn(|i| out[i]);
         node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len))

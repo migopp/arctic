@@ -95,13 +95,16 @@ pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
 }
 
 #[inline(always)]
-pub(super) fn compress_4(keys: u64, mask: u64) -> [KeyIndex; 4] {
+pub(super) fn compress_4(keys: u64, mask: u64) -> (u8, [KeyIndex; 4]) {
     let ks = unsafe { _pext_u64(keys, mask) };
     let is = unsafe { _pext_u64(0x0000_0002_0001_0000, mask) };
 
-    let mut out = !mask | (ks << 8) | is;
-    out = bitonic_sort_4(out);
-    unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) }
+    let len = (mask.count_ones() >> 4) as u8;
+
+    let out = !mask | (ks << 8) | is;
+    let out = bitonic_sort_4(out, len);
+    let out = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) };
+    (len, out)
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -184,7 +187,7 @@ pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: 
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_sort_4(input: u64) -> u64 {
+fn bitonic_sort_4(input: u64, len: u8) -> u64 {
     const RECOMBINE_1: u64 = 0x2301;
     const SORT_1: u64 = RECOMBINE_1;
     const BLEND_1: i32 = 0b1010;
@@ -232,11 +235,19 @@ fn bitonic_sort_4(input: u64) -> u64 {
         unsafe { _mm_blend_epi16::<BLEND>(min, max) }
     }
 
-    let mut input = unsafe { _mm_set_epi64x(0, input as i64) };
-    input = bitonic_step::<RECOMBINE_1, BLEND_1>(input);
+    if len <= 1 {
+        return input;
+    }
 
-    input = bitonic_step::<RECOMBINE_2, BLEND_2>(input);
-    input = bitonic_step::<SORT_1, BLEND_1>(input);
+    let mut input = unsafe { _mm_set_epi64x(0, input as i64) };
+
+    input = bitonic_step::<RECOMBINE_1, BLEND_1>(input);
+    input = if len == 2 {
+        input
+    } else {
+        input = bitonic_step::<RECOMBINE_2, BLEND_2>(input);
+        bitonic_step::<SORT_1, BLEND_1>(input)
+    };
 
     (unsafe { _mm_cvtsi128_si64x(input) } as u64)
 }
