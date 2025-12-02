@@ -135,25 +135,20 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
     upper: U,
     out: &mut crate::raw::node::linear::KeyIter<15>,
 ) {
-    let len = len.value() + 1;
-    let mask_len = mask_len(len);
-    let indices = const { U8_SEQ << 8 };
+    let mask_len = mask_len(len.value());
 
     let (bits, ks, is) = if lower.get() == 0 && upper.get() == 255 {
-        let keys = keys << 8;
         let fill = !mask_len;
         (
-            (len as u32) << 3,
+            (len.value() as u32) << 3,
             u128_to_avx(keys | fill),
-            u128_to_avx(indices | fill),
+            u128_to_avx(U8_SEQ | fill),
         )
     } else {
-        // HACK: include zeroth dummy index even if not in range
-        let mask_range = mask_range(keys, lower.get(), upper.get()) << 8 | 0xFFu128;
-        let keys = keys << 8;
+        let mask_range = mask_range(keys, lower.get(), upper.get());
 
         let (ks_lo, ks_hi) = split(keys);
-        let (is_lo, is_hi) = split(indices);
+        let (is_lo, is_hi) = split(U8_SEQ);
         let (mask_lo, mask_hi) = split(mask_len & mask_range);
         let shift_lo = mask_lo.count_ones();
         let shift_hi = mask_hi.count_ones();
@@ -164,9 +159,12 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
         let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
         let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
 
+        validate!(shift_lo <= 64);
+        validate!(shift_hi < 64);
+
         let ks_hi_hi = ks_hi.unbounded_shr(64 - shift_lo);
         let is_hi_hi = is_hi.unbounded_shr(64 - shift_lo);
-        let fill_hi = u64::MAX.unbounded_shl(shift_hi.saturating_sub(64 - shift_lo));
+        let fill_hi = u64::MAX << shift_hi.saturating_sub(64 - shift_lo);
 
         let ks_hi_lo = ks_hi.unbounded_shl(shift_lo);
         let is_hi_lo = is_hi.unbounded_shl(shift_lo);
@@ -196,7 +194,7 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
 
         _mm256_store_si256(out as *mut _ as _, sorted);
         out.head = 0;
-        out.tail = (bits >> 3) as u8 - 1;
+        out.tail = (bits >> 3) as u8;
     };
 }
 
