@@ -35,6 +35,8 @@ use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
 
+use ribbit::u2;
+
 use crate::raw::node::iter::KeyIndex;
 
 /// Output has 8 bits set for each byte in `array` that is equal to `byte`.
@@ -69,7 +71,7 @@ pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
 }
 
 #[inline(always)]
-pub(super) fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
+fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
     let array = u128_to_avx(array as u128);
 
     let min = unsafe { _mm_set1_epi16(min as i16) };
@@ -95,15 +97,30 @@ pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
 }
 
 #[inline(always)]
-pub(super) fn compress_4(keys: u64, mask: u64) -> (u8, [KeyIndex; 4]) {
-    let ks = unsafe { _pext_u64(keys, mask) };
-    let is = unsafe { _pext_u64(0x0000_0002_0001_0000, mask) };
+pub(super) fn compress_4<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u64,
+    len: u2,
+    lower: L,
+    upper: U,
+) -> (u8, [KeyIndex; 4]) {
+    const INDICES: u64 = 0x0002_0001_0000;
 
-    let bits = mask.count_ones();
-    let out = (u64::MAX << bits) | (ks << 8) | is;
-    let out = bitonic_sort_4(out, bits);
-    let out = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(out) };
-    ((bits >> 4) as u8, out)
+    let mut bits = len.value() << 4;
+    let mut entries = (keys << 8) | INDICES;
+
+    if !(lower.get() == 0 && upper.get() == 255) {
+        let mask_len = !(u64::MAX << bits);
+        let mask_range = mask_range_4(keys, lower.get(), upper.get());
+        let mask_valid = mask_len & mask_range;
+
+        entries = unsafe { _pext_u64(entries, mask_valid) };
+        bits = mask_valid.count_ones() as u8;
+    };
+
+    let entries = entries | (u64::MAX << bits);
+    let entries = bitonic_sort_4(entries, bits);
+    let entries = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(entries) };
+    (bits >> 4, entries)
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -186,7 +203,7 @@ pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: 
 /// https://github.com/Geolm/simd_bitonic
 /// https://hal.inria.fr/hal-01512970v1/document
 #[inline(always)]
-fn bitonic_sort_4(input: u64, bits: u32) -> u64 {
+fn bitonic_sort_4(input: u64, bits: u8) -> u64 {
     const RECOMBINE_1: u64 = 0x2301;
     const SORT_1: u64 = RECOMBINE_1;
     const BLEND_1: i32 = 0b1010;

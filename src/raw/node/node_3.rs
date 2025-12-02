@@ -1,4 +1,4 @@
-use ribbit::u4;
+use ribbit::u2;
 use ribbit::u48;
 
 use crate::raw::edge;
@@ -19,12 +19,12 @@ pub(crate) struct Header {
     #[ribbit(offset = 48)]
     frozen: bool,
     #[ribbit(offset = 56)]
-    len: u4,
+    len: u2,
 }
 
 impl Header {
     const DEFAULT: ribbit::Packed<Self> =
-        ribbit::Packed::<Self>::new(u48::new(0), false, u4::new(0));
+        ribbit::Packed::<Self>::new(u48::new(0), false, u2::new(0));
 }
 
 impl Default for HeaderPacked {
@@ -76,7 +76,7 @@ impl linear::Header for ribbit::Packed<Header> {
             _ => Err(Some(Self::new(
                 u48::new(self.keys().value() | ((key as u64) << (len << 4))),
                 false,
-                u4::new(len + 1),
+                u2::new(len + 1),
             ))),
         }
     }
@@ -86,16 +86,8 @@ impl linear::Header for ribbit::Packed<Header> {
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        let len = self.len().value();
-
-        let mask_len = (1u64 << (len << 4)) - 1;
-        let mask_valid = if lower.get() == 0 && upper.get() == 255 {
-            mask_len
-        } else {
-            mask_len & node::simd::mask_range_4(self.value, lower.get(), upper.get())
-        };
-        let (len, out) = node::simd::compress_4(self.value, mask_valid);
-
+        let len = self.len();
+        let (len, out) = node::simd::compress_4(self.value, len, lower, upper);
         let entries = core::array::from_fn(|i| out[i]);
         node::KeyIter::new_3(linear::KeyIter3::new_3(entries, len))
     }
