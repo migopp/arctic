@@ -86,23 +86,9 @@ impl linear::Header for ribbit::Packed<Header> {
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        let len = self.len().value();
-
-        let mask_len = node::simd::mask_len(len);
-        let mask_valid = if lower.get() == 0 && upper.get() == 255 {
-            mask_len
-        } else {
-            mask_len & node::simd::mask_range(self.value, lower.get(), upper.get())
-        };
-        let len = node::simd::mask_byte_to_bit(mask_valid).count_ones() as u8;
-
+        let len = self.len();
         let mut iter = Box::new(linear::KeyIter::default());
-        unsafe {
-            node::simd::compress_15(self.value, mask_valid, iter.as_mut() as *mut _ as _);
-        }
-
-        iter.head = 0;
-        iter.tail = len;
+        node::simd::compress_15(self.value, len, lower, upper, &mut iter);
         node::KeyIter::new_15(iter)
     }
 }

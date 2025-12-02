@@ -36,6 +36,7 @@ use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
 
 use ribbit::u2;
+use ribbit::u4;
 
 use crate::raw::node::iter::KeyIndex;
 
@@ -86,7 +87,7 @@ fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
 
 /// Output has 8 bits set for each byte in `array` below `len`
 #[inline(always)]
-pub(super) fn mask_len(len: u8) -> u128 {
+fn mask_len(len: u8) -> u128 {
     avx_to_u128(unsafe { _mm_cmplt_epi8(u128_to_avx(U8_SEQ), _mm_set1_epi8(len as i8)) })
 }
 
@@ -127,49 +128,73 @@ pub(super) fn compress_4<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) unsafe fn compress_15(keys: u128, mask: u128, out: *mut KeyIndex) {
-    let (ks_lo, ks_hi) = split(keys);
-    let (is_lo, is_hi) = split(U8_SEQ);
-    let (mask_lo, mask_hi) = split(mask);
-    let shift_lo = mask_lo.count_ones();
-    let shift_hi = mask_hi.count_ones();
+pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u128,
+    len: u4,
+    lower: L,
+    upper: U,
+    out: &mut crate::raw::node::linear::KeyIter<15>,
+) {
+    let mask_len = mask_len(len.value());
 
-    let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
-    let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
-    let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
-    let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
-
-    validate!(shift_lo <= 64);
-    validate!(shift_hi < 64);
-
-    let ks_hi_hi = ks_hi.unbounded_shr(64 - shift_lo);
-    let is_hi_hi = is_hi.unbounded_shr(64 - shift_lo);
-    let fill_hi = u64::MAX << shift_hi.saturating_sub(64 - shift_lo);
-
-    let ks_hi_lo = ks_hi.unbounded_shl(shift_lo);
-    let is_hi_lo = is_hi.unbounded_shl(shift_lo);
-    let fill_lo = u64::MAX.unbounded_shl(shift_hi + shift_lo);
-
-    let ks = unsafe {
-        _mm_set_epi64x(
-            (fill_hi | ks_hi_hi) as i64,
-            (fill_lo | ks_hi_lo | ks_lo) as i64,
+    let (bits, ks, is) = if lower.get() == 0 && upper.get() == 255 {
+        let fill = !mask_len;
+        (
+            (len.value() as u32) << 3,
+            u128_to_avx(keys | fill),
+            u128_to_avx(U8_SEQ | fill),
         )
-    };
-    let is = unsafe {
-        _mm_set_epi64x(
-            (fill_hi | is_hi_hi) as i64,
-            (fill_lo | is_hi_lo | is_lo) as i64,
-        )
+    } else {
+        let mask_range = mask_range(keys, lower.get(), upper.get());
+
+        let (ks_lo, ks_hi) = split(keys);
+        let (is_lo, is_hi) = split(U8_SEQ);
+        let (mask_lo, mask_hi) = split(mask_len & mask_range);
+        let shift_lo = mask_lo.count_ones();
+        let shift_hi = mask_hi.count_ones();
+
+        let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
+        let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
+
+        let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
+        let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
+
+        validate!(shift_lo <= 64);
+        validate!(shift_hi < 64);
+
+        let ks_hi_hi = ks_hi.unbounded_shr(64 - shift_lo);
+        let is_hi_hi = is_hi.unbounded_shr(64 - shift_lo);
+        let fill_hi = u64::MAX << shift_hi.saturating_sub(64 - shift_lo);
+
+        let ks_hi_lo = ks_hi.unbounded_shl(shift_lo);
+        let is_hi_lo = is_hi.unbounded_shl(shift_lo);
+        let fill_lo = u64::MAX.unbounded_shl(shift_hi + shift_lo);
+
+        let ks = unsafe {
+            _mm_set_epi64x(
+                (fill_hi | ks_hi_hi) as i64,
+                (fill_lo | ks_hi_lo | ks_lo) as i64,
+            )
+        };
+        let is = unsafe {
+            _mm_set_epi64x(
+                (fill_hi | is_hi_hi) as i64,
+                (fill_lo | is_hi_lo | is_lo) as i64,
+            )
+        };
+
+        (shift_lo + shift_hi, ks, is)
     };
 
     unsafe {
         let sorted = bitonic_sort_16(
             _mm256_set_m128i(_mm_unpackhi_epi8(is, ks), _mm_unpacklo_epi8(is, ks)),
-            shift_hi + shift_lo,
+            bits,
         );
 
-        _mm256_store_si256(out.cast(), sorted);
+        _mm256_store_si256(out as *mut _ as _, sorted);
+        out.head = 0;
+        out.tail = (bits >> 3) as u8;
     };
 }
 
