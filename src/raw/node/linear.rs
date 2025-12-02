@@ -202,7 +202,7 @@ impl KeyIter3 {
 
 const _: [(); 8] = [(); core::mem::size_of::<KeyIter3>()];
 
-#[repr(C, align(32))]
+#[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub(super) struct KeyIter<const N: usize> {
     pub(super) entries: [node::iter::KeyIndex; N],

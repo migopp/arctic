@@ -8,7 +8,7 @@ use core::arch::x86_64::_mm256_permute2x128_si256;
 use core::arch::x86_64::_mm256_set_m128i;
 use core::arch::x86_64::_mm256_setr_epi8;
 use core::arch::x86_64::_mm256_shuffle_epi8;
-use core::arch::x86_64::_mm256_store_si256;
+use core::arch::x86_64::_mm256_storeu_si256;
 use core::arch::x86_64::_mm_adds_epu8;
 use core::arch::x86_64::_mm_and_si128;
 use core::arch::x86_64::_mm_blend_epi16;
@@ -192,7 +192,7 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
             bits,
         );
 
-        _mm256_store_si256(out as *mut _ as _, sorted);
+        _mm256_storeu_si256(out as *mut _ as _, sorted);
         out.head = 0;
         out.tail = (bits >> 3) as u8;
     };
