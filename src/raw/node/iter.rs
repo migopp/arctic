@@ -148,7 +148,7 @@ impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
 pub(crate) union KeyIter {
     node_3: linear::KeyIter3,
     node_15: NonNull<linear::KeyIter<15>>,
-    node_47: NonNull<linear::KeyIter<47>>,
+    node_47: NonNull<linear::KeyIter<63>>,
     node_256: node_256::KeyIter,
     raw: u64,
 }
@@ -215,7 +215,7 @@ impl KeyIter {
     }
 
     #[inline]
-    pub(super) fn new_47(node_47: Box<linear::KeyIter<47>>) -> Self {
+    pub(super) fn new_47(node_47: Box<linear::KeyIter<63>>) -> Self {
         let iter = Self {
             node_47: NonNull::from(Box::leak(node_47))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_47) }),
@@ -243,7 +243,7 @@ impl KeyIter {
     }
 
     #[inline]
-    unsafe fn as_node_47_unchecked(&self) -> NonNull<linear::KeyIter<47>> {
+    unsafe fn as_node_47_unchecked(&self) -> NonNull<linear::KeyIter<63>> {
         validate_eq!(self.kind(), node::Kind::NODE_47);
         unsafe {
             self.node_47.map_addr(|addr| {

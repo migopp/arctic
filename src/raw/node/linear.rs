@@ -221,7 +221,7 @@ impl<const N: usize> Default for KeyIter<N> {
 }
 
 const _: [(); 32] = [(); core::mem::size_of::<KeyIter<15>>()];
-const _: [(); 96] = [(); core::mem::size_of::<KeyIter<47>>()];
+const _: [(); 128] = [(); core::mem::size_of::<KeyIter<63>>()];
 
 macro_rules! impl_key_iter {
     ($ty:ty, $len:expr $(, $new:ident)?) => {
@@ -284,4 +284,4 @@ macro_rules! impl_key_iter {
 
 impl_key_iter!(KeyIter3, 3, new_3);
 impl_key_iter!(KeyIter<15>, 15);
-impl_key_iter!(KeyIter<47>, 47);
+impl_key_iter!(KeyIter<63>, 63);

@@ -58,19 +58,11 @@ pub(super) fn mask_lt(array: u128, byte: i8) -> u128 {
 
 /// Output has 8 bits set for each byte in `array` that is within `min..=max` (unsigned).
 #[inline(always)]
-pub(super) fn mask_range<L: crate::raw::node::iter::Lower, U: crate::raw::node::iter::Upper>(
-    array: u128,
-    lower: L,
-    upper: U,
-) -> u128 {
-    if lower.get() == 0 && upper.get() == 255 {
-        return u128::MAX;
-    }
-
+pub(super) fn mask_range(array: u128, min: u8, max: u8) -> u128 {
     let array = u128_to_avx(array);
 
-    let min = unsafe { _mm_set1_epi8(lower.get() as i8) };
-    let max = unsafe { _mm_set1_epi8(upper.get() as i8) };
+    let min = unsafe { _mm_set1_epi8(min as i8) };
+    let max = unsafe { _mm_set1_epi8(max as i8) };
 
     // https://stackoverflow.com/a/28383095
     let clamp_min = unsafe { _mm_max_epu8(array, min) };
@@ -153,7 +145,7 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
             u128_to_avx(U8_SEQ | fill),
         )
     } else {
-        let mask_range = mask_range(keys, lower, upper);
+        let mask_range = mask_range(keys, lower.get(), upper.get());
 
         let (ks_lo, ks_hi) = split(keys);
         let (is_lo, is_hi) = split(U8_SEQ);
