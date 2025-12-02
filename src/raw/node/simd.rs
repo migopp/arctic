@@ -519,18 +519,12 @@ mod tests {
 
     #[test]
     fn sort_random() {
-        use core::hash::Hasher as _;
-
-        let mut hasher =
-            rapidhash::fast::RapidHasher::new(rapidhash::fast::RapidHasher::DEFAULT_SEED);
         let mut buffer = [0u16; 16];
 
-        for i in 0..1_000_000 {
-            #[expect(clippy::needless_range_loop)]
-            for j in 0..16 {
-                hasher.write_usize(i * 16 + j);
+        for i in 0..=u16::MAX {
+            for (j, value) in buffer.iter_mut().enumerate() {
                 // https://en.wikipedia.org/wiki/Sorting_network#Zero-one_principle
-                buffer[j] = (hasher.finish() % 2) as u16;
+                *value = (i >> j) & 1;
             }
 
             let input = unsafe { _mm256_loadu_si256(buffer.as_ptr().cast()) };
