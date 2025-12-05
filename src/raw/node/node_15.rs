@@ -67,17 +67,22 @@ impl linear::Header for ribbit::Packed<Header> {
 
     #[inline]
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
+        let index = node::simd::get_16(self.value, key);
         let len = self.len().value();
-        validate!(len <= Self::LEN as u8);
-        match self.get(key) {
-            Some(index) => Ok(index),
-            _ if len == Self::LEN as u8 || self.is_frozen() => Err(None),
-            _ => Err(Some(Self::new(
-                u120::new(self.keys().value() | ((key as u128) << (len * 8))),
-                false,
-                u4::new(len + 1),
-            ))),
+
+        if index < len {
+            return Ok(index);
         }
+
+        if len >= Self::LEN as u8 || self.is_frozen() {
+            return Err(None);
+        }
+
+        let key = (key as u128) << (len << 3);
+        let value = (self.value | key) + (1u128 << 121);
+
+        // SAFETY: `len < Self::LEN`
+        Err(Some(unsafe { Self::new_unchecked(value) }))
     }
 
     fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
