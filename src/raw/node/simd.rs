@@ -124,6 +124,20 @@ pub(super) fn compress_3<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
     lower: L,
     upper: U,
 ) -> KeyIter3 {
+    if cfg!(feature = "opt-no-node3-iter") {
+        compress_3_fallback(keys, len, lower, upper)
+    } else {
+        compress_3_simd(keys, len, lower, upper)
+    }
+}
+
+#[inline(always)]
+fn compress_3_simd<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u64,
+    len: u2,
+    lower: L,
+    upper: U,
+) -> KeyIter3 {
     const INDICES: u64 = 0x0002_0001_0000;
 
     let mut bits = len.value() << 4;
@@ -143,6 +157,33 @@ pub(super) fn compress_3<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
     let mut iter = unsafe { core::mem::transmute::<u64, KeyIter3>(entries << 8) };
     iter.tail = bits >> 4;
     iter
+}
+
+#[inline(always)]
+fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u64,
+    len: u2,
+    lower: L,
+    upper: U,
+) -> KeyIter3 {
+    let mut buffer = [0u16; 3];
+
+    let len = keys
+        .to_le_bytes()
+        .into_iter()
+        .step_by(2)
+        .take(len.value() as usize)
+        .enumerate()
+        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
+        .zip(&mut buffer)
+        .map(|((index, key), out)| {
+            *out = (index as u16) | (key as u16) << 8;
+        })
+        .count();
+
+    buffer[..len].sort_unstable();
+    let buffer = unsafe { core::mem::transmute::<[u16; 3], [KeyIndex; 3]>(buffer) };
+    KeyIter3::new_3(buffer, len as u8)
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -487,6 +528,9 @@ mod tests {
     use core::arch::x86_64::_mm256_setr_epi16;
     use core::hash::Hasher as _;
 
+    use ribbit::traits::Integer as _;
+    use ribbit::u2;
+
     use crate::raw::node::simd::bitonic_sort_16;
 
     #[test]
@@ -511,7 +555,43 @@ mod tests {
 
             assert_eq!(
                 simd, fallback,
-                "SIMD {simd} does not match fallback {fallback} for array {array:x?} and key {key:x?}",
+                "SIMD does not match fallback for array {array:#x?} and key {key:#x?}",
+            );
+        }
+    }
+
+    #[test]
+    fn compress_3() {
+        const COUNT: usize = 100_000;
+
+        let mut hasher = rapidhash::fast::RapidHasher::default_const();
+
+        for i in 0..COUNT {
+            hasher.write_usize(i);
+            let data = hasher.finish();
+
+            let keys = data & 0x00FF_00FF_00FF;
+            let len = u2::masked_new(data >> 8);
+            let mut low = (data >> 24) as u8;
+            let mut high = (data >> 40) as u8;
+            if low > high {
+                core::mem::swap(&mut low, &mut high);
+            }
+
+            let mut simd = super::compress_3_simd(keys, len, Some(low), Some(high));
+            for (index, entry) in simd.entries.iter_mut().enumerate() {
+                if entry.key == 0xFF && entry.index == 0xFF {
+                    assert!(index >= simd.tail as usize);
+                    entry.key = 0;
+                    entry.index = 0;
+                }
+            }
+
+            let fallback = super::compress_3_fallback(keys, len, Some(low), Some(high));
+
+            assert_eq!(
+                simd, fallback,
+                "SIMD does not match fallback for keys {keys:#x?}, len {len}, low {low:#x?}, high {high:#x?}",
             );
         }
     }

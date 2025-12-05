@@ -186,10 +186,10 @@ pub(crate) trait Header: ribbit::Unpack {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(super) struct KeyIter3 {
     head: u8,
-    entries: [node::iter::KeyIndex; 3],
+    pub(super) entries: [node::iter::KeyIndex; 3],
     pub(super) tail: u8,
 }
 
