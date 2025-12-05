@@ -41,16 +41,16 @@ use ribbit::u4;
 use crate::raw::node::iter::KeyIndex;
 
 #[inline]
-pub(super) fn get_16(array: u128, key: u8) -> u8 {
+pub(super) fn get_15(array: u128, key: u8) -> u8 {
     if cfg!(feature = "opt-no-node15-get") {
-        get_16_fallback(array, key)
+        get_15_fallback(array, key)
     } else {
-        get_16_simd(array, key)
+        get_15_simd(array, key)
     }
 }
 
 #[inline]
-fn get_16_simd(array: u128, key: u8) -> u8 {
+fn get_15_simd(array: u128, key: u8) -> u8 {
     let array = u128_to_avx(array);
     let key = unsafe { _mm_set1_epi8(key as i8) };
     let mask = unsafe { _mm_cmpeq_epi8(array, key) };
@@ -58,7 +58,7 @@ fn get_16_simd(array: u128, key: u8) -> u8 {
 }
 
 #[inline]
-fn get_16_fallback(array: u128, key: u8) -> u8 {
+fn get_15_fallback(array: u128, key: u8) -> u8 {
     array
         .to_le_bytes()
         .into_iter()
@@ -504,8 +504,8 @@ mod tests {
             let key = hasher.finish() as u8;
 
             let array = (high as u128) << 64 | (low as u128);
-            let simd = super::get_16_simd(array, key);
-            let fallback = super::get_16_fallback(array, key);
+            let simd = super::get_15_simd(array, key);
+            let fallback = super::get_15_fallback(array, key);
 
             assert_eq!(
                 simd, fallback,

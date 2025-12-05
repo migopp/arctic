@@ -61,13 +61,13 @@ impl linear::Header for ribbit::Packed<Header> {
 
     #[inline]
     fn get(self, key: u8) -> Option<u8> {
-        let index = node::simd::get_16(self.value, key);
+        let index = node::simd::get_15(self.value, key);
         (index < self.len().value()).then_some(index)
     }
 
     #[inline]
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
-        let index = node::simd::get_16(self.value, key);
+        let index = node::simd::get_15(self.value, key);
         let len = self.len().value();
 
         if index < len {
