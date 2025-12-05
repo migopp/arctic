@@ -63,13 +63,13 @@ impl linear::Header for ribbit::Packed<Header> {
 
     #[inline]
     fn get(self, key: u8) -> Option<u8> {
-        let index = get(self.value, key);
+        let index = get_3(self.value, key);
         (index < self.len().value()).then_some(index)
     }
 
     #[inline]
     fn get_or_insert(self, key: u8) -> Result<u8, Option<Self>> {
-        let index = get(self.value, key);
+        let index = get_3(self.value, key);
         let len = self.len().value();
 
         if index < len {
@@ -101,11 +101,11 @@ impl linear::Header for ribbit::Packed<Header> {
 }
 
 #[inline]
-fn get(array: u64, key: u8) -> u8 {
+fn get_3(array: u64, key: u8) -> u8 {
     if cfg!(feature = "opt-no-node3-get") {
-        get_fallback(array, key)
+        get_3_fallback(array, key)
     } else {
-        get_swar(array, key)
+        get_3_swar(array, key)
     }
 }
 
@@ -114,7 +114,7 @@ fn get(array: u64, key: u8) -> u8 {
 /// https://lemire.me/blog/2022/01/21/swar-explained-parsing-eight-digits/
 /// https://lamport.azurewebsites.net/pubs/multiple-byte.pdf
 #[inline]
-fn get_swar(array: u64, key: u8) -> u8 {
+fn get_3_swar(array: u64, key: u8) -> u8 {
     const LOWER: u64 = 0x0000_00FF_00FF_00FF;
     const OVERFLOW: u64 = 0x0000_0100_0100_0100;
 
@@ -133,7 +133,7 @@ fn get_swar(array: u64, key: u8) -> u8 {
 }
 
 #[inline]
-fn get_fallback(array: u64, key: u8) -> u8 {
+fn get_3_fallback(array: u64, key: u8) -> u8 {
     array
         .to_le_bytes()
         .into_iter()
@@ -150,7 +150,7 @@ mod tests {
     use crate::raw::node::node_3;
 
     #[test]
-    fn get() {
+    fn get_3() {
         const COUNT: usize = 100_000;
 
         let mut hasher = rapidhash::fast::RapidHasher::default_const();
@@ -161,8 +161,8 @@ mod tests {
             let array = hash & 0x00FF_00FF_00FF;
             let key = (hash >> 8) as u8;
 
-            let swar = node_3::get_swar(array, key);
-            let fallback = node_3::get_fallback(array, key);
+            let swar = node_3::get_3_swar(array, key);
+            let fallback = node_3::get_3_fallback(array, key);
 
             assert_eq!(
                 swar, fallback,
