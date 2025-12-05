@@ -103,6 +103,8 @@ pub(crate) struct Global<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> 
 
     #[cfg(feature = "smr-epoch")]
     collector: crossbeam_epoch::Collector,
+    #[cfg(feature = "smr-epoch")]
+    _prefix: PhantomData<P>,
 
     #[cfg(not(feature = "smr-epoch"))]
     hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
@@ -122,6 +124,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
 
             #[cfg(feature = "smr-epoch")]
             collector: crossbeam_epoch::Collector::default(),
+            #[cfg(feature = "smr-epoch")]
+            _prefix: PhantomData,
 
             #[cfg(not(feature = "smr-epoch"))]
             hazards: thread_local::ThreadLocal::with_capacity(128),
@@ -136,7 +140,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
 
     #[inline]
     pub(crate) fn set_membarrier(&mut self, membarrier: bool) {
-        *self.membarrier.get_mut() = membarrier;
+        #[cfg(not(feature = "smr-epoch"))]
+        {
+            *self.membarrier.get_mut() = membarrier;
+        }
     }
 
     pub(crate) fn pin(&self) -> Local<P, V> {
@@ -145,6 +152,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
 
             #[cfg(feature = "smr-epoch")]
             handle: self.collector.register(),
+            #[cfg(feature = "smr-epoch")]
+            _prefix: PhantomData,
 
             #[cfg(not(feature = "smr-epoch"))]
             hazards: &self.hazards,
@@ -163,13 +172,16 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
     }
 
     pub(crate) fn reclaim(&mut self, counter: stat::Counter) {
-        self.retired
-            .iter_mut()
-            .map(|Cache(retired)| retired)
-            .flat_map(core::cell::RefCell::get_mut)
-            .for_each(|(prefix, raw)| {
-                unsafe { deallocate_hazard::<P, V>(*prefix, *raw, counter) };
-            })
+        #[cfg(not(feature = "smr-epoch"))]
+        {
+            self.retired
+                .iter_mut()
+                .map(|Cache(retired)| retired)
+                .flat_map(core::cell::RefCell::get_mut)
+                .for_each(|(prefix, raw)| {
+                    unsafe { deallocate_hazard::<P, V>(*prefix, *raw, counter) };
+                })
+        }
     }
 }
 
@@ -191,6 +203,8 @@ pub(crate) struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
 
     #[cfg(feature = "smr-epoch")]
     handle: crossbeam_epoch::LocalHandle,
+    #[cfg(feature = "smr-epoch")]
+    _prefix: PhantomData<&'g P>,
 
     #[cfg(not(feature = "smr-epoch"))]
     hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
@@ -210,6 +224,9 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> 
     pub(crate) fn guard<'l>(&'l mut self) -> guard::Traverse<'g, 'l, P, V> {
         guard::Traverse::new(self)
     }
+
+    #[inline]
+    pub(super) fn enable_membarrier(&self) {}
 }
 
 #[cfg(not(feature = "smr-epoch"))]

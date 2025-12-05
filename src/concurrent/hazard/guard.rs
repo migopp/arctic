@@ -14,6 +14,8 @@ pub struct Traverse<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurre
 
     #[cfg(feature = "smr-epoch")]
     guard: crossbeam_epoch::Guard,
+    #[cfg(feature = "smr-epoch")]
+    _prefix: PhantomData<&'g P>,
 
     #[cfg(not(feature = "smr-epoch"))]
     local: &'l mut hazard::Local<'g, P, V>,
@@ -43,6 +45,8 @@ impl<'g, 'l, P: ribbit::Pack<Packed: hazard::Prefix>, V: concurrent::Value> Trav
 
             #[cfg(feature = "smr-epoch")]
             guard: local.handle.pin(),
+            #[cfg(feature = "smr-epoch")]
+            _prefix: PhantomData,
 
             #[cfg(not(feature = "smr-epoch"))]
             local,
