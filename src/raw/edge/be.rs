@@ -143,4 +143,9 @@ impl edge::Key for BePacked {
     fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
         apply(&self.value.to_be_bytes()[..(self.len().value() >> 3) as usize])
     }
+
+    #[inline]
+    fn prefix(self, len: Self::Len) -> Self {
+        Be::key_from_u64_truncate(self.value, len)
+    }
 }

@@ -330,12 +330,12 @@ impl Drop for KeyIter {
     }
 }
 
-pub(crate) trait Lower: Copy + Default {
+pub(crate) trait Lower: Copy + Default + core::fmt::Debug {
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;
 }
 
-pub(crate) trait Upper: Copy + Default {
+pub(crate) trait Upper: Copy + Default + core::fmt::Debug {
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;
 }

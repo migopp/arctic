@@ -211,6 +211,23 @@ mod tests {
         insert_all(["a".repeat(1000), "b".repeat(1000)]);
     }
 
+    #[test]
+    fn regression_u128() {
+        const fn key(low: i64) -> u128 {
+            const FLIP: u64 = 1u64.rotate_right(1);
+            let high = (-1i64) as u64 ^ FLIP;
+            ((high as u128) << 64) | (((low as u64) ^ FLIP) as u128)
+        }
+
+        let map = insert_all((0..10i64).map(key));
+
+        let mut pin = map.pin();
+        let prefix = pin.range(key(5), key(i64::MAX)).unwrap();
+
+        let values = prefix.values::<false>().collect::<Vec<_>>();
+        assert_eq!(values, (5..10).collect::<Vec<u32>>());
+    }
+
     fn insert_all<I, K>(iter: I) -> Map<K, u32>
     where
         I: IntoIterator<Item = K>,

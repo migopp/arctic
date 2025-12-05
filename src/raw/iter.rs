@@ -13,10 +13,10 @@ use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct Include<T>(pub(crate) T);
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub(crate) struct Unbound;
 
 pub(crate) trait Range<R: key::Read>: Clone {
@@ -110,13 +110,13 @@ impl<R: key::Read> Range<R> for core::ops::RangeFull {
     }
 }
 
-trait Lower<R: key::Read> {
+trait Lower<R: key::Read>: core::fmt::Debug {
     type Bound: raw::node::Lower;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
 }
 
-trait Upper<R: key::Read> {
+trait Upper<R: key::Read>: core::fmt::Debug {
     type Bound: raw::node::Upper;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
@@ -135,9 +135,9 @@ impl<R: key::Read> Lower<R> for Include<R> {
         }
 
         match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => None,
+            cmp::Ordering::Less => Some(None),
             cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => Some(None),
+            cmp::Ordering::Greater => None,
         }
     }
 }
@@ -155,9 +155,9 @@ impl<R: key::Read> Upper<R> for Include<R> {
         }
 
         match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => Some(None),
+            cmp::Ordering::Less => None,
             cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => None,
+            cmp::Ordering::Greater => Some(None),
         }
     }
 }

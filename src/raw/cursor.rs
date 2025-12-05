@@ -377,13 +377,8 @@ where
             let len_edge = key_edge.len();
             let key_cursor = self.cursor.key.read(len_edge);
 
-            // Mismatch
-            if key_cursor != key_edge {
-                return None;
-            }
-
             // Full match
-            if key_cursor.len() == len_edge {
+            if key_edge == key_cursor {
                 if let Some(node) = edge.as_node() {
                     if let Some(byte) = self.cursor.key.next() {
                         let next = unsafe { node.get_unchecked(byte) }?;
@@ -393,8 +388,7 @@ where
                 }
             }
 
-            // Partial match or fallthrough
-            if edge.is_null() {
+            if edge.is_null() || key_cursor != key_edge.prefix(key_cursor.len()) {
                 return None;
             } else {
                 self.cursor.key = save;
