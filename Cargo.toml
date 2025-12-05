@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["opt-node3-get", "opt-node15-get", "opt-membarrier"]
+default = ["opt-node15-get", "opt-membarrier"]
 stat = ["dep:serde", "dep:base64", "dep:hdrhistogram"]
-opt-node3-get = []
+opt-no-node3-get = []
 opt-node15-get = []
 opt-membarrier = ["dep:libc"]
 opt-no-path = []

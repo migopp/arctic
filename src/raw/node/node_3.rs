@@ -102,10 +102,10 @@ impl linear::Header for ribbit::Packed<Header> {
 
 #[inline]
 fn get(array: u64, key: u8) -> u8 {
-    if cfg!(feature = "opt-node3-get") {
-        get_swar(array, key)
-    } else {
+    if cfg!(feature = "opt-no-node3-get") {
         get_fallback(array, key)
+    } else {
+        get_swar(array, key)
     }
 }
 
