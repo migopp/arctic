@@ -98,7 +98,7 @@ fn get(array: u64, key: u8) -> u8 {
     if cfg!(feature = "opt-node3-get") {
         get_swar(array, key)
     } else {
-        get_naive(array, key)
+        get_fallback(array, key)
     }
 }
 
@@ -111,8 +111,12 @@ fn get_swar(array: u64, key: u8) -> u8 {
     const LOWER: u64 = 0x0000_00FF_00FF_00FF;
     const OVERFLOW: u64 = 0x0000_0100_0100_0100;
 
+    let key = key as u64;
+    // LLVM is smart enough to turn this into an `imul`
+    let key = key | (key << 16) | (key << 32);
+
     // Convert key bytes to zero
-    let key_to_zero = array ^ broadcast(key);
+    let key_to_zero = array ^ key;
 
     // Set overflow bit for byte if byte is non-zero
     let equal_zero = key_to_zero + LOWER;
@@ -122,50 +126,41 @@ fn get_swar(array: u64, key: u8) -> u8 {
 }
 
 #[inline]
-const fn broadcast(byte: u8) -> u64 {
-    let byte = byte as u64;
-
-    // LLVM is smart enough to turn this into an `imul`
-    byte | (byte << 16) | (byte << 32)
-}
-
-#[inline]
-fn get_naive(array: u64, key: u8) -> u8 {
+fn get_fallback(array: u64, key: u8) -> u8 {
     array
         .to_le_bytes()
         .into_iter()
         .step_by(2)
         .position(|byte| byte == key)
         .map(|index| index as u8)
-        .unwrap_or(u8::MAX)
+        .unwrap_or(3)
 }
 
 #[cfg(test)]
 mod tests {
+    use core::hash::Hasher as _;
+
     use crate::raw::node::node_3;
 
     #[test]
-    fn zero() {
-        test_get(0x0000_0000_0000_0000, 0, 0)
-    }
+    fn get() {
+        const COUNT: usize = 100_000;
 
-    #[test]
-    fn zero_high() {
-        test_get(0x0000_0000_0012_0034, 0, 2)
-    }
+        let mut hasher = rapidhash::fast::RapidHasher::default_const();
 
-    #[test]
-    fn nonzero_middle() {
-        test_get(0x00_0011_0012_0013, 0x12, 1)
-    }
+        for i in 0..COUNT {
+            hasher.write_usize(i);
+            let hash = hasher.finish();
+            let array = hash & 0x00FF_00FF_00FF;
+            let key = (hash >> 8) as u8;
 
-    #[test]
-    fn duplicate() {
-        test_get(0x0000_0011_0011_0012, 0x11, 1)
-    }
+            let swar = node_3::get_swar(array, key);
+            let fallback = node_3::get_fallback(array, key);
 
-    fn test_get(array: u64, key: u8, expected: u8) {
-        assert_eq!(node_3::get_naive(array, key), expected);
-        assert_eq!(node_3::get_swar(array, key), expected);
+            assert_eq!(
+                swar, fallback,
+                "SWAR {swar} does not match fallback {fallback} for array {array:x?} and key {key:x?}",
+            );
+        }
     }
 }
