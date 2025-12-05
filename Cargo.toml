@@ -9,6 +9,7 @@ stat = ["dep:serde", "dep:base64", "dep:hdrhistogram"]
 opt-no-node3-get = []
 opt-no-node3-iter = []
 opt-no-node15-get = []
+opt-no-node15-iter = []
 opt-membarrier = ["dep:libc"]
 opt-no-path = []
 

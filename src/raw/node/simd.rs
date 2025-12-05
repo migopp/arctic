@@ -39,6 +39,7 @@ use ribbit::u2;
 use ribbit::u4;
 
 use crate::raw::node::iter::KeyIndex;
+use crate::raw::node::linear::KeyIter;
 use crate::raw::node::linear::KeyIter3;
 
 #[inline]
@@ -186,11 +187,26 @@ fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
     KeyIter3::new_3(buffer, len as u8)
 }
 
+#[inline(always)]
+pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u128,
+    len: u4,
+    lower: L,
+    upper: U,
+    out: &mut crate::raw::node::linear::KeyIter<15>,
+) {
+    if cfg!(feature = "opt-no-node15-iter") {
+        compress_15_fallback(keys, len, lower, upper, out);
+    } else {
+        compress_15_simd(keys, len, lower, upper, out);
+    }
+}
+
 // https://talkchess.com/viewtopic.php?t=78804
 // https://stackoverflow.com/questions/72098296/how-to-create-a-left-packed-vector-of-indices-of-the-0s-in-one-simd-vector
 // http://const.me/articles/simd/simd.pdf
 #[inline(always)]
-pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+pub(super) fn compress_15_simd<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
     keys: u128,
     len: u4,
     lower: L,
@@ -258,6 +274,33 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
         out.head = 0;
         out.tail = (bits >> 3) as u8;
     };
+}
+
+#[inline(always)]
+pub(super) fn compress_15_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u128,
+    len: u4,
+    lower: L,
+    upper: U,
+    out: &mut crate::raw::node::linear::KeyIter<15>,
+) {
+    let mut buffer = [0u16; 16];
+
+    let len = keys
+        .to_le_bytes()
+        .into_iter()
+        .take(len.value() as usize)
+        .enumerate()
+        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
+        .zip(&mut buffer)
+        .map(|((index, key), out)| {
+            *out = (index as u16) | (key as u16) << 8;
+        })
+        .count();
+
+    buffer[..len].sort_unstable();
+    *out = unsafe { core::mem::transmute::<[u16; 16], KeyIter<15>>(buffer) };
+    out.tail = len as u8;
 }
 
 #[inline(always)]
@@ -456,7 +499,7 @@ fn bitonic_sort_16(mut input: __m256i, bits: u32) -> __m256i {
     input = bitonic_step::<SORT_2, BLEND_2>(input);
     input = bitonic_step::<SORT_1, BLEND_1>(input);
 
-    if bits <= 128 {
+    if bits <= 64 {
         input
     } else {
         input = bitonic_step::<RECOMBINE_8, BLEND_8>(input);
@@ -530,7 +573,9 @@ mod tests {
 
     use ribbit::traits::Integer as _;
     use ribbit::u2;
+    use ribbit::u4;
 
+    use crate::raw::node::linear::KeyIter;
     use crate::raw::node::simd::bitonic_sort_16;
 
     #[test]
@@ -592,6 +637,50 @@ mod tests {
             assert_eq!(
                 simd, fallback,
                 "SIMD does not match fallback for keys {keys:#x?}, len {len}, low {low:#x?}, high {high:#x?}",
+            );
+        }
+    }
+
+    #[test]
+    fn compress_15() {
+        const COUNT: usize = 100_000;
+
+        let mut hasher = rapidhash::fast::RapidHasher::default_const();
+
+        for i in 0..COUNT {
+            hasher.write_usize(i);
+            let low = hasher.finish();
+            hasher.write_usize(i);
+            let high = hasher.finish();
+
+            let keys = (low as u128) | (high as u128) << 64;
+
+            hasher.write_usize(i);
+            let data = hasher.finish();
+
+            let len = u4::masked_new(data);
+            let mut low = (data >> 8) as u8;
+            let mut high = (data >> 16) as u8;
+            if low > high {
+                core::mem::swap(&mut low, &mut high);
+            }
+
+            let mut simd = KeyIter::default();
+            super::compress_15_simd(keys, len, Some(low), Some(high), &mut simd);
+            for (index, entry) in simd.entries.iter_mut().enumerate() {
+                if entry.key == 0xFF && entry.index == 0xFF {
+                    assert!(index >= simd.tail as usize);
+                    entry.key = 0;
+                    entry.index = 0;
+                }
+            }
+
+            let mut fallback = KeyIter::default();
+            super::compress_15_fallback(keys, len, Some(low), Some(high), &mut fallback);
+
+            assert_eq!(
+                simd, fallback,
+                "SIMD does not match fallback for {i}: keys {keys:#x?}, len {len}, low {low:#x?}, high {high:#x?}",
             );
         }
     }
