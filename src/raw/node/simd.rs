@@ -490,7 +490,7 @@ mod tests {
     use crate::raw::node::simd::bitonic_sort_16;
 
     #[test]
-    fn get_16() {
+    fn get_15() {
         const COUNT: usize = 100_000;
 
         let mut hasher = rapidhash::fast::RapidHasher::default_const();
