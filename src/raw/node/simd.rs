@@ -40,12 +40,31 @@ use ribbit::u4;
 
 use crate::raw::node::iter::KeyIndex;
 
-/// Output has 8 bits set for each byte in `array` that is equal to `byte`.
-#[inline(always)]
-pub(super) fn mask_eq(array: u128, byte: u8) -> u128 {
+#[inline]
+pub(super) fn get_16(array: u128, key: u8) -> u8 {
+    if cfg!(feature = "opt-no-node15-get") {
+        get_16_fallback(array, key)
+    } else {
+        get_16_simd(array, key)
+    }
+}
+
+#[inline]
+fn get_16_simd(array: u128, key: u8) -> u8 {
     let array = u128_to_avx(array);
-    let byte = unsafe { _mm_set1_epi8(byte as i8) };
-    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, byte) })
+    let key = unsafe { _mm_set1_epi8(key as i8) };
+    let mask = unsafe { _mm_cmpeq_epi8(array, key) };
+    unsafe { _mm_movemask_epi8(mask) }.trailing_zeros() as u8
+}
+
+#[inline]
+fn get_16_fallback(array: u128, key: u8) -> u8 {
+    array
+        .to_le_bytes()
+        .into_iter()
+        .position(|byte| byte == key)
+        .map(|index| index as u8)
+        .unwrap_or(32)
 }
 
 /// Output has 8 bits set for each byte in `array` that is less than `byte` (signed).
@@ -464,44 +483,35 @@ mod tests {
     use core::arch::x86_64::_mm256_loadu_si256;
     use core::arch::x86_64::_mm256_set_epi16;
     use core::arch::x86_64::_mm256_setr_epi16;
+    use core::hash::Hasher as _;
 
     use crate::raw::node::simd::bitonic_sort_16;
 
     #[test]
-    fn zero() {
-        test_eq(0x00_00_00_00, 0, 0)
-    }
+    fn get_16() {
+        const COUNT: usize = 100_000;
 
-    #[test]
-    fn zero_high() {
-        test_eq(0x00_00_12_34, 0, 2)
-    }
+        let mut hasher = rapidhash::fast::RapidHasher::default_const();
 
-    #[test]
-    fn nonzero_middle() {
-        test_eq(0x00_11_12_13, 0x12, 1)
-    }
+        for i in 0..COUNT {
+            hasher.write_usize(i);
+            let low = hasher.finish();
 
-    #[test]
-    fn duplicate() {
-        test_eq(0x00_11_11_12, 0x11, 1)
-    }
+            hasher.write_usize(i);
+            let high = hasher.finish();
 
-    #[test]
-    fn lsb() {
-        test_eq(u128::MAX, 0xFF, 0)
-    }
+            hasher.write_usize(i);
+            let key = hasher.finish() as u8;
 
-    #[test]
-    fn msb() {
-        test_eq(0x0F << 120, 0x0F, 15)
-    }
+            let array = (high as u128) << 64 | (low as u128);
+            let simd = super::get_16_simd(array, key);
+            let fallback = super::get_16_fallback(array, key);
 
-    fn test_eq(array: u128, key: u8, expected: u8) {
-        assert_eq!(
-            super::mask_byte_to_bit(super::mask_eq(array, key)).trailing_zeros() as u8,
-            expected
-        );
+            assert_eq!(
+                simd, fallback,
+                "SIMD {simd} does not match fallback {fallback} for array {array:x?} and key {key:x?}",
+            );
+        }
     }
 
     #[test]

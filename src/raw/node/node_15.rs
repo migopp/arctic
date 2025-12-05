@@ -61,8 +61,7 @@ impl linear::Header for ribbit::Packed<Header> {
 
     #[inline]
     fn get(self, key: u8) -> Option<u8> {
-        let index = node::simd::mask_byte_to_bit(node::simd::mask_eq(self.value, key))
-            .trailing_zeros() as u8;
+        let index = node::simd::get_16(self.value, key);
         (index < self.len().value()).then_some(index)
     }
 
