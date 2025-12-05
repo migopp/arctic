@@ -190,7 +190,7 @@ pub(crate) trait Header: ribbit::Unpack {
 pub(super) struct KeyIter3 {
     head: u8,
     entries: [node::iter::KeyIndex; 3],
-    tail: u8,
+    pub(super) tail: u8,
 }
 
 impl KeyIter3 {

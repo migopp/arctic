@@ -39,6 +39,7 @@ use ribbit::u2;
 use ribbit::u4;
 
 use crate::raw::node::iter::KeyIndex;
+use crate::raw::node::linear::KeyIter3;
 
 #[inline]
 pub(super) fn get_15(array: u128, key: u8) -> u8 {
@@ -117,12 +118,12 @@ pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
 }
 
 #[inline(always)]
-pub(super) fn compress_4<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+pub(super) fn compress_3<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
     keys: u64,
     len: u2,
     lower: L,
     upper: U,
-) -> (u8, [KeyIndex; 4]) {
+) -> KeyIter3 {
     const INDICES: u64 = 0x0002_0001_0000;
 
     let mut bits = len.value() << 4;
@@ -139,8 +140,9 @@ pub(super) fn compress_4<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
 
     let entries = entries | (u64::MAX << bits);
     let entries = bitonic_sort_4(entries, bits);
-    let entries = unsafe { core::mem::transmute::<u64, [KeyIndex; 4]>(entries) };
-    (bits >> 4, entries)
+    let mut iter = unsafe { core::mem::transmute::<u64, KeyIter3>(entries << 8) };
+    iter.tail = bits >> 4;
+    iter
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
