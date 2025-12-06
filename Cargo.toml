@@ -9,6 +9,7 @@ stat = ["dep:serde", "dep:base64", "dep:hdrhistogram"]
 opt-node3-get = []
 opt-node15-get = []
 opt-membarrier = ["dep:libc"]
+opt-no-path = []
 
 smr-disable = []
 smr-epoch = ["dep:crossbeam-epoch"]

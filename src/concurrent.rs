@@ -285,14 +285,17 @@ where
         let value = value.into_raw();
         let mut map = &mut *self;
 
-        // Cursed workaround for:
-        // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius, K::Prefix>> {
-            if let Ok(old) = unsafe { map.upsert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
-            {
-                polonius_return!(old);
-            }
-        });
+        if !cfg!(feature = "opt-no-path") {
+            // Cursed workaround for:
+            // https://github.com/rust-lang/rust/issues/54663
+            polonius!(|map| -> Option<V::OwnedGuard<'g, 'polonius, K::Prefix>> {
+                if let Ok(old) =
+                    unsafe { map.upsert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
+                {
+                    polonius_return!(old);
+                }
+            });
+        }
 
         unsafe { map.insert_with_pessimistic(key, &mut |_| value, &mut |_| ()) }
     }
