@@ -77,14 +77,10 @@ where
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
             let save = self.key;
-            let key = meta.key();
-            let len = key.len();
-
-            if self.key.read(len) != key {
-                return None;
-            }
 
             // Fast path: traversal
+            let len = self.key.read_exact(meta)?;
+
             if let Some(node) = edge.as_node() {
                 if node.scan() {
                     match self.wait_for_scan(stat::Counter::ScanUpdate) {
@@ -307,13 +303,8 @@ where
         let mut cursor = Self::new(root, key);
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
-            // eprintln!("{:x?}", edge);
-            let key = edge.meta().key();
-            let len = key.len();
 
-            if cursor.key.read(len) != key {
-                return None;
-            }
+            let _ = cursor.key.read_exact(edge.meta())?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {

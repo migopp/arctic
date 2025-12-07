@@ -43,7 +43,24 @@ macro_rules! impl_integer {
     }
 }
 
-impl_integer!(u16, u32, u64, u128);
+impl_integer!(u16, u32, u128);
+
+#[cfg(feature = "opt-no-int")]
+impl Key for u64 {
+    type Prefix = hazard::prefix::Le;
+
+    #[inline]
+    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
+        let len = reader.bytes();
+        let reader = reader.buffer;
+        let mut buffer = [0u8; 16];
+        buffer[..len].copy_from_slice(&reader[..len]);
+        crate::concurrent::hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+    }
+}
+
+#[cfg(not(feature = "opt-no-int"))]
+impl_integer!(u64);
 
 #[inline]
 fn hazard_integer<U: integer::Uint>(

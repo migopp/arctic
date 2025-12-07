@@ -58,6 +58,16 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
         len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key;
 
+    #[inline]
+    fn read_exact(
+        &mut self,
+        edge: <Self::Edge as ribbit::Pack>::Packed,
+    ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
+        let key = edge::Meta::key(edge);
+        let len = edge::Key::len(key);
+        (self.read(len) == key).then_some(len)
+    }
+
     // Prefix operations for prefix and range iteration
     fn prefix(self, bits: usize) -> Self;
     fn suffix(self, bits: usize) -> Self;
@@ -179,7 +189,44 @@ macro_rules! impl_unsigned_int {
     };
 }
 
-impl_unsigned_int!(u16, u32, u64, u128);
+impl_unsigned_int!(u16, u32, u128);
+
+#[cfg(feature = "opt-no-int")]
+impl Key for u64 {
+    type Read<'k> = integer::Slow;
+    type Write = dynamic::Writer;
+    type Borrow<'k> = Self;
+
+    type Edge = edge::Le;
+
+    #[inline]
+    fn borrow(&self) -> Self {
+        *self
+    }
+
+    #[inline]
+    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+        borrow
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+        todo!()
+    }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        todo!()
+    }
+
+    #[inline]
+    fn len(_: Self::Borrow<'_>) -> usize {
+        <u64 as integer::Uint>::BYTES as usize
+    }
+}
+
+#[cfg(not(feature = "opt-no-int"))]
+impl_unsigned_int!(u64);
 
 impl Key for Vec<u8> {
     type Read<'k> = dynamic::Reader<'k>;

@@ -126,6 +126,7 @@ impl<U: Uint> key::Read for Reader<U> {
         }
     }
 
+    #[inline]
     fn suffix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
 
@@ -135,6 +136,7 @@ impl<U: Uint> key::Read for Reader<U> {
         }
     }
 
+    #[inline]
     fn common_prefix(self, other: Self) -> Self {
         let max = self.bits.min(other.bits);
         let bits = (self.buffer ^ other.buffer).leading_zeros().min(max) & !0b111;
@@ -148,6 +150,100 @@ impl<U: Uint> key::Read for Reader<U> {
 impl<U: Uint> core::fmt::Debug for Reader<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.with_bytes(|bytes| f.debug_list().entries(bytes).finish())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Slow {
+    pub(crate) buffer: [u8; 8],
+    bits: u8,
+}
+
+#[expect(private_bounds)]
+impl Slow {
+    #[inline]
+    pub unsafe fn new_unchecked(buffer: u64, bits: u8) -> Self {
+        validate!(bits <= 64);
+        validate_eq!(bits & 0b111, 0);
+        validate_eq!(buffer & !u64::MAX.unbounded_shl(bits as u32), buffer);
+        let buffer = buffer.to_be_bytes();
+        Self { buffer, bits }
+    }
+}
+
+impl key::Read for Slow {
+    const BITS: Option<usize> = Some(64);
+
+    type Edge = edge::Le;
+
+    #[inline]
+    fn bits(&self) -> usize {
+        self.bits as usize
+    }
+
+    #[inline]
+    fn next(&mut self) -> Option<u8> {
+        (self.bits > 0).then(|| unsafe { self.next_unchecked() })
+    }
+
+    #[inline]
+    unsafe fn next_unchecked(&mut self) -> u8 {
+        let byte = self.buffer[0];
+        self.buffer.copy_within(1.., 0);
+        self.bits -= 8;
+        byte
+    }
+
+    #[inline]
+    fn read(
+        &mut self,
+        _len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
+        todo!()
+    }
+
+    fn read_exact(
+        &mut self,
+        edge: <Self::Edge as ribbit::Pack>::Packed,
+    ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
+        todo!()
+    }
+
+    #[inline]
+    fn prefix(self, _bits: usize) -> Self {
+        todo!()
+    }
+
+    #[inline]
+    fn suffix(self, _bits: usize) -> Self {
+        todo!()
+    }
+
+    fn common_prefix(self, other: Self) -> Self {
+        todo!()
+        // let len = (self.bits.min(other.bits) >> 3) as usize;
+        // let mismatch = self.buffer[..len]
+        //     .iter()
+        //     .zip(&other.buffer[..len])
+        //     .position(|(l, r)| l != r)
+        //     .unwrap_or(len)
+    }
+}
+
+impl From<u64> for Slow {
+    fn from(value: u64) -> Self {
+        unsafe { Slow::new_unchecked(value, 64) }
+    }
+}
+
+impl From<Slow> for crate::raw::key::dynamic::Writer {
+    fn from(slow: Slow) -> Self {
+        crate::raw::key::dynamic::Writer(
+            slow.buffer
+                .into_iter()
+                .take((slow.bits >> 3) as usize)
+                .collect(),
+        )
     }
 }
 
