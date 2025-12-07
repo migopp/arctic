@@ -1,5 +1,7 @@
 use core::fmt;
 
+use ribbit::u6;
+
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -156,10 +158,9 @@ impl<U: Uint> core::fmt::Debug for Reader<U> {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Slow {
     pub(crate) buffer: [u8; 8],
-    bits: u8,
+    len: usize,
 }
 
-#[expect(private_bounds)]
 impl Slow {
     #[inline]
     pub unsafe fn new_unchecked(buffer: u64, bits: u8) -> Self {
@@ -167,7 +168,10 @@ impl Slow {
         validate_eq!(bits & 0b111, 0);
         validate_eq!(buffer & !u64::MAX.unbounded_shl(bits as u32), buffer);
         let buffer = buffer.to_be_bytes();
-        Self { buffer, bits }
+        Self {
+            buffer,
+            len: (bits as usize) >> 3,
+        }
     }
 }
 
@@ -178,55 +182,92 @@ impl key::Read for Slow {
 
     #[inline]
     fn bits(&self) -> usize {
-        self.bits as usize
+        self.len << 3
     }
 
     #[inline]
     fn next(&mut self) -> Option<u8> {
-        (self.bits > 0).then(|| unsafe { self.next_unchecked() })
+        (self.len > 0).then(|| unsafe { self.next_unchecked() })
     }
 
     #[inline]
     unsafe fn next_unchecked(&mut self) -> u8 {
         let byte = self.buffer[0];
         self.buffer.copy_within(1.., 0);
-        self.bits -= 8;
+        self.len -= 1;
         byte
     }
 
     #[inline]
     fn read(
         &mut self,
-        _len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
-        todo!()
+        let len = self.len.min((len.value() >> 3) as usize);
+        let key = edge::Le::key_from_u64_truncate(
+            u64::from_le_bytes(self.buffer),
+            u6::new((len << 3) as u8),
+        );
+        self.buffer.copy_within(len.., 0);
+        self.len -= len;
+        key
     }
 
+    #[inline]
     fn read_exact(
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
     ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
-        todo!()
+        let len = self.len.min((edge.len().value() >> 3) as usize);
+        match self
+            .buffer
+            .into_iter()
+            .zip(edge.raw().to_le_bytes())
+            .take(len)
+            .position(|(l, r)| l != r)
+        {
+            None => {
+                self.buffer.copy_within(len.., 0);
+                self.len -= len;
+                Some(u6::new((len << 3) as u8))
+            }
+            Some(_) => None,
+        }
     }
 
     #[inline]
-    fn prefix(self, _bits: usize) -> Self {
-        todo!()
+    fn prefix(self, bits: usize) -> Self {
+        let mut buffer = [0u8; 8];
+        let len = bits >> 3;
+        buffer[..len].copy_from_slice(&self.buffer[..len]);
+        Self { buffer, len }
     }
 
     #[inline]
-    fn suffix(self, _bits: usize) -> Self {
-        todo!()
+    fn suffix(self, bits: usize) -> Self {
+        let mut buffer = [0u8; 8];
+        let len = bits >> 3;
+        buffer[..self.len - len].copy_from_slice(&self.buffer[len..]);
+        Self {
+            buffer,
+            len: self.len - len,
+        }
     }
 
+    #[inline]
     fn common_prefix(self, other: Self) -> Self {
-        todo!()
-        // let len = (self.bits.min(other.bits) >> 3) as usize;
-        // let mismatch = self.buffer[..len]
-        //     .iter()
-        //     .zip(&other.buffer[..len])
-        //     .position(|(l, r)| l != r)
-        //     .unwrap_or(len)
+        let len = self.len.min(other.len);
+        let len_prefix = self.buffer[..len]
+            .iter()
+            .zip(&other.buffer[..len])
+            .position(|(l, r)| l != r)
+            .unwrap_or(len);
+        let mut buffer = [0u8; 8];
+        buffer[..len_prefix].copy_from_slice(&self.buffer[..len_prefix]);
+        Self {
+            buffer,
+            len: len_prefix,
+        }
     }
 }
 
@@ -238,12 +279,7 @@ impl From<u64> for Slow {
 
 impl From<Slow> for crate::raw::key::dynamic::Writer {
     fn from(slow: Slow) -> Self {
-        crate::raw::key::dynamic::Writer(
-            slow.buffer
-                .into_iter()
-                .take((slow.bits >> 3) as usize)
-                .collect(),
-        )
+        crate::raw::key::dynamic::Writer(slow.buffer.into_iter().take(slow.len).collect())
     }
 }
 

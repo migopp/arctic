@@ -211,12 +211,14 @@ impl Key for u64 {
 
     #[inline]
     unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-        todo!()
+        let buffer: &[u8; 8] = writer.0.as_slice().try_into().unwrap();
+        u64::from_be_bytes(*buffer)
     }
 
     #[inline]
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-        todo!()
+        let buffer: [u8; 8] = writer.0.try_into().unwrap();
+        u64::from_be_bytes(buffer)
     }
 
     #[inline]

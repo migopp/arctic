@@ -1,5 +1,3 @@
-#![expect(dead_code)]
-
 use core::ops::BitOr as _;
 use core::ops::BitXor;
 
