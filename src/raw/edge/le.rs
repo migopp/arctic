@@ -97,8 +97,8 @@ impl edge::Meta for LePacked {
         }
 
         if cfg!(feature = "opt-no-expand") {
-            let len = (self.len().value().min(new.len().value()) >> 3) as usize;
-            let len = self
+            let len = (new.len().value() >> 3) as usize;
+            let len_parent = self
                 .value
                 .to_le_bytes()
                 .into_iter()
@@ -109,15 +109,18 @@ impl edge::Meta for LePacked {
 
             let bytes = self.value.to_le_bytes();
             let mut parent = [0u8; 8];
-            parent[..len].copy_from_slice(&bytes[..len]);
-            let parent =
-                Le::key_from_u64_truncate(u64::from_le_bytes(parent), u6::new((len << 3) as u8));
+            parent[..len_parent].copy_from_slice(&bytes[..len_parent]);
+            let parent = Le::key_from_u64_truncate(
+                u64::from_le_bytes(parent),
+                u6::new((len_parent << 3) as u8),
+            );
 
-            let middle = bytes[len];
+            let middle = bytes[len_parent];
 
-            let len_child = 8 - len - 1;
+            let len_total = (self.len().value() as usize) >> 3;
+            let len_child = len_total - len_parent - 1;
             let mut child = [0u8; 8];
-            child[..len_child].copy_from_slice(&bytes[len + 1..]);
+            child[..len_child].copy_from_slice(&bytes[len_parent + 1..len_total]);
             let child = Le::key_from_u64_truncate(
                 u64::from_le_bytes(child),
                 u6::new((len_child << 3) as u8),
@@ -126,23 +129,23 @@ impl edge::Meta for LePacked {
             return Ok((parent, middle, child));
         }
 
-        let len = self.len().min(new.len());
+        validate!(self.len() >= new.len());
 
-        let len_start = unsafe {
+        let len_parent = unsafe {
             u6::new_unchecked(
                 self.value
                     .bitxor(new.value)
-                    .bitor(1u64 << len.value())
+                    .bitor(1u64 << new.len().value())
                     .trailing_zeros() as u8
                     & !0b111u8,
             )
         };
 
-        let len_middle = unsafe { u6::new_unchecked(len_start.value() + 8) };
+        let len_middle = unsafe { u6::new_unchecked(len_parent.value() + 8) };
 
         Ok((
-            Le::key_from_u64_truncate(self.value, len_start).with_value(false),
-            (self.value >> len_start.value()) as u8,
+            Le::key_from_u64_truncate(self.value, len_parent).with_value(false),
+            (self.value >> len_parent.value()) as u8,
             Le::key_from_u64_truncate(self.value >> len_middle.value(), self.len() - len_middle)
                 .with_meta(self),
         ))

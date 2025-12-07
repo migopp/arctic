@@ -90,21 +90,21 @@ impl edge::Meta for BePacked {
             return Err(());
         }
 
-        let len = self.len().min(new.len());
+        validate!(self.len() >= new.len());
 
-        let len_start = unsafe {
+        let len_parent = unsafe {
             u6::new_unchecked(
                 self.value
                     .bitxor(new.value)
-                    .bitor(1u64.rotate_right(1) >> len.value())
+                    .bitor(1u64.rotate_right(1) >> new.len().value())
                     .leading_zeros() as u8
                     & !0b111u8,
             )
         };
 
-        let len_middle = unsafe { u6::new_unchecked(len_start.value() + 8) };
+        let len_middle = unsafe { u6::new_unchecked(len_parent.value() + 8) };
         Ok((
-            Be::key_from_u64_truncate(self.value, len_start).with_value(false),
+            Be::key_from_u64_truncate(self.value, len_parent).with_value(false),
             self.value.rotate_left(len_middle.value() as u32) as u8,
             Be::key_from_u64_truncate(self.value << len_middle.value(), self.len() - len_middle)
                 .with_meta(self),
