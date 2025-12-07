@@ -46,6 +46,10 @@ impl LePacked {
     pub(crate) fn raw(self) -> u64 {
         self.value
     }
+
+    fn with_meta(self, meta: Self) -> Self {
+        unsafe { Self::new_unchecked(self.value | (meta.value & Le::MASK_META)) }
+    }
 }
 
 impl IntoIterator for LePacked {
@@ -110,12 +114,14 @@ impl edge::Meta for LePacked {
             Le::key_from_u64_truncate(self.value, len_start).with_value(false),
             (self.value >> len_start.value()) as u8,
             Le::key_from_u64_truncate(self.value >> len_middle.value(), self.len() - len_middle)
-                .with_value(self.value()),
+                .with_meta(self),
         ))
     }
 
     #[inline]
     fn compress(self, byte: u8, child: Self) -> Option<Self> {
+        validate!(self.frozen());
+
         let parent_bits = self.len().value();
         let child_bits = child.len().value();
         let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;
