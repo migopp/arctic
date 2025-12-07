@@ -213,32 +213,9 @@ impl Header {
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        let i = lower.get() / 16;
-        let j = upper.get() / 16;
-
         let len = self.meta_consistent().len().value();
         let mut iter = Box::new(linear::KeyIter::default());
-        let mut index = 0;
-        let mut keys = node::simd::add(node::simd::U8_SEQ, node::simd::mul(node::simd::U8_16, i));
-
-        for k in i..=j {
-            let indices = self.data[k as usize].load(Ordering::Relaxed);
-            let valid = node::simd::mask_lt(indices, len as i8)
-                & node::simd::mask_range(keys, lower, upper);
-            unsafe {
-                node::simd::compress_47(
-                    keys,
-                    indices,
-                    valid,
-                    iter.entries[index as usize..].as_mut_ptr(),
-                )
-            };
-            index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
-            keys = node::simd::add(keys, node::simd::U8_16);
-        }
-
-        iter.head = 0;
-        iter.tail = index;
+        node::simd::compress_47(&self.data, lower, upper, len, &mut iter);
         node::KeyIter::new_47(iter)
     }
 

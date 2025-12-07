@@ -164,6 +164,18 @@ impl KeyIndex {
     pub(crate) const DEFAULT: Self = Self { key: 0, index: 0 };
 }
 
+impl PartialOrd for KeyIndex {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for KeyIndex {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.cmp(&other.key).then(self.index.cmp(&other.index))
+    }
+}
+
 impl core::fmt::Debug for KeyIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#.02X}:{:#.02X}", self.key, self.index)

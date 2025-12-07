@@ -34,9 +34,11 @@ use core::arch::x86_64::_mm_storeu_si128;
 use core::arch::x86_64::_mm_unpackhi_epi8;
 use core::arch::x86_64::_mm_unpacklo_epi8;
 use core::arch::x86_64::_pext_u64;
+use core::sync::atomic::Ordering;
 
 use ribbit::u2;
 use ribbit::u4;
+use ribbit::Atomic;
 
 use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear::KeyIter;
@@ -292,49 +294,115 @@ pub(super) fn compress_15_fallback<L: crate::raw::node::Lower, U: crate::raw::no
     upper: U,
     out: &mut crate::raw::node::linear::KeyIter<15>,
 ) {
-    let mut buffer = [0u16; 16];
-
     let len = keys
         .to_le_bytes()
         .into_iter()
         .take(len.value() as usize)
         .enumerate()
         .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
-        .zip(&mut buffer)
+        .zip(&mut out.entries)
         .map(|((index, key), out)| {
-            *out = (index as u16) | (key as u16) << 8;
+            out.key = key;
+            out.index = index as u8;
         })
         .count();
 
-    buffer[..len].sort_unstable();
-    *out = unsafe { core::mem::transmute::<[u16; 16], KeyIter<15>>(buffer) };
+    out.entries[..len].sort_unstable();
+    out.head = 0;
     out.tail = len as u8;
 }
 
 #[inline(always)]
-pub(super) unsafe fn compress_47(keys: u128, indices: u128, mask: u128, buffer: *mut KeyIndex) {
-    let (ks_lo, ks_hi) = split(keys);
-    let (is_lo, is_hi) = split(indices);
-    let (mask_lo, mask_hi) = split(mask);
-    let shift = mask_lo.count_ones();
-
-    let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
-    let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
-    let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
-    let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
-
-    let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
-    let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
-    let [lo, hi] = interleave(avx_to_u128(is), avx_to_u128(ks));
-
-    // FIXME: assumes little-endian
-    unsafe {
-        _mm_storeu_si128(buffer.cast(), u128_to_avx(lo));
-        _mm_storeu_si128(
-            buffer.byte_add((shift >> 2) as usize).cast(),
-            u128_to_avx(hi),
-        );
+pub(super) fn compress_47<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    indices: &[Atomic<u128>; 16],
+    lower: L,
+    upper: U,
+    len: u8,
+    out: &mut KeyIter<63>,
+) {
+    if cfg!(feature = "opt-no-node47-iter") {
+        compress_47_fallback(indices, lower, upper, len, out);
+    } else {
+        compress_47_simd(indices, lower, upper, len, out);
     }
+}
+
+#[inline(always)]
+pub(super) fn compress_47_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    indices: &[Atomic<u128>; 16],
+    lower: L,
+    upper: U,
+    len: u8,
+    out: &mut KeyIter<63>,
+) {
+    let i = lower.get() / 16;
+    let j = upper.get() / 16;
+
+    let len = indices[i as usize..=j as usize]
+        .iter()
+        .flat_map(|chunk| chunk.load(Ordering::Relaxed).to_le_bytes())
+        .zip((i * 16)..)
+        .filter(|(index, key)| (*index < len && *key >= lower.get() && *key <= upper.get()))
+        .zip(&mut out.entries)
+        .map(|((index, key), out)| {
+            out.index = index;
+            out.key = key;
+        })
+        .count();
+
+    out.head = 0;
+    out.tail = len as u8;
+}
+
+#[inline(always)]
+pub(super) fn compress_47_simd<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    indices: &[Atomic<u128>; 16],
+    lower: L,
+    upper: U,
+    len: u8,
+    out: &mut KeyIter<63>,
+) {
+    let i = lower.get() / 16;
+    let j = upper.get() / 16;
+
+    let mut index = 0;
+    let mut keys = add(U8_SEQ, mul(U8_16, i));
+
+    for k in i..=j {
+        let indices = indices[k as usize].load(Ordering::Relaxed);
+        let valid = mask_lt(indices, len as i8) & mask_range(keys, lower, upper);
+
+        let (ks_lo, ks_hi) = split(keys);
+        let (is_lo, is_hi) = split(indices);
+        let (mask_lo, mask_hi) = split(valid);
+        let shift = mask_lo.count_ones();
+
+        let ks_lo = unsafe { _pext_u64(ks_lo, mask_lo) };
+        let ks_hi = unsafe { _pext_u64(ks_hi, mask_hi) };
+        let is_lo = unsafe { _pext_u64(is_lo, mask_lo) };
+        let is_hi = unsafe { _pext_u64(is_hi, mask_hi) };
+
+        let ks = unsafe { _mm_set_epi64x(ks_hi as i64, ks_lo as i64) };
+        let is = unsafe { _mm_set_epi64x(is_hi as i64, is_lo as i64) };
+
+        let lo = unsafe { _mm_unpacklo_epi8(is, ks) };
+        let hi = unsafe { _mm_unpackhi_epi8(is, ks) };
+
+        // FIXME: assumes little-endian
+        unsafe {
+            let ptr = (out as *mut KeyIter<63>)
+                .cast::<__m128i>()
+                .byte_add((index as usize) << 1);
+            _mm_storeu_si128(ptr, lo);
+            _mm_storeu_si128(ptr.byte_add((shift >> 2) as usize), hi);
+        }
+
+        index += mask_byte_to_bit(valid).count_ones() as u8;
+        keys = add(keys, U8_16);
+    }
+
+    out.head = 0;
+    out.tail = index;
 }
 
 /// https://en.wikipedia.org/wiki/Bitonic_sorter
@@ -540,17 +608,6 @@ pub(super) fn mul(a: u128, b: u8) -> u128 {
 #[inline(always)]
 pub(super) fn add(a: u128, b: u128) -> u128 {
     avx_to_u128(unsafe { _mm_adds_epu8(u128_to_avx(a), u128_to_avx(b)) })
-}
-
-#[inline(always)]
-fn interleave(lo: u128, hi: u128) -> [u128; 2] {
-    let lo = u128_to_avx(lo);
-    let hi = u128_to_avx(hi);
-
-    let out_lo = avx_to_u128(unsafe { _mm_unpacklo_epi8(lo, hi) });
-    let out_hi = avx_to_u128(unsafe { _mm_unpackhi_epi8(lo, hi) });
-
-    [out_lo, out_hi]
 }
 
 #[inline(always)]
