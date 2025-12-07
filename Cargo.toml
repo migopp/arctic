@@ -12,6 +12,7 @@ opt-no-node15-get = []
 opt-no-node15-iter = []
 opt-no-node47-iter = []
 opt-no-int = []
+opt-no-expand = []
 opt-membarrier = ["dep:libc"]
 opt-no-path = []
 

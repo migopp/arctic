@@ -96,6 +96,36 @@ impl edge::Meta for LePacked {
             return Err(());
         }
 
+        if cfg!(feature = "opt-no-expand") {
+            let len = (self.len().value().min(new.len().value()) >> 3) as usize;
+            let len = self
+                .value
+                .to_le_bytes()
+                .into_iter()
+                .zip(new.value.to_le_bytes())
+                .take(len)
+                .position(|(l, r)| l != r)
+                .unwrap_or(len);
+
+            let bytes = self.value.to_le_bytes();
+            let mut parent = [0u8; 8];
+            parent[..len].copy_from_slice(&bytes[..len]);
+            let parent =
+                Le::key_from_u64_truncate(u64::from_le_bytes(parent), u6::new((len << 3) as u8));
+
+            let middle = bytes[len];
+
+            let len_child = 8 - len - 1;
+            let mut child = [0u8; 8];
+            child[..len_child].copy_from_slice(&bytes[len + 1..]);
+            let child = Le::key_from_u64_truncate(
+                u64::from_le_bytes(child),
+                u6::new((len_child << 3) as u8),
+            );
+
+            return Ok((parent, middle, child));
+        }
+
         let len = self.len().min(new.len());
 
         let len_start = unsafe {
