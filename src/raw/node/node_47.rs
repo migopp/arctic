@@ -7,6 +7,7 @@ use ribbit::u6;
 use ribbit::Atomic;
 
 use crate::raw::edge;
+use crate::raw::iter::Unbound;
 use crate::raw::node;
 use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
@@ -52,7 +53,7 @@ where
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        self.header.keys_range(lower, upper)
+        self.header.keys(lower, upper)
     }
 
     #[inline]
@@ -207,15 +208,11 @@ impl Header {
         Some(len)
     }
 
-    fn keys_range<L: node::iter::Lower, U: node::iter::Upper>(
+    fn keys<L: node::iter::Lower, U: node::iter::Upper>(
         &self,
         lower: L,
         upper: U,
     ) -> node::KeyIter {
-        if lower.get() == 0 && upper.get() == 255 {
-            return self.keys();
-        }
-
         let i = lower.get() / 16;
         let j = upper.get() / 16;
 
@@ -227,7 +224,7 @@ impl Header {
         for k in i..=j {
             let indices = self.data[k as usize].load(Ordering::Relaxed);
             let valid = node::simd::mask_lt(indices, len as i8)
-                & node::simd::mask_range(keys, lower.get(), upper.get());
+                & node::simd::mask_range(keys, lower, upper);
             unsafe {
                 node::simd::compress_47(
                     keys,
@@ -242,35 +239,6 @@ impl Header {
 
         iter.head = 0;
         iter.tail = index;
-        node::KeyIter::new_47(iter)
-    }
-
-    #[inline]
-    fn keys(&self) -> node::KeyIter {
-        let len = self.meta_consistent().len().value();
-
-        let mut iter = Box::new(linear::KeyIter::default());
-        let mut index = 0;
-        let mut keys = node::simd::U8_SEQ;
-
-        for i in 0..16 {
-            let indices = self.data[i].load(Ordering::Relaxed);
-            let valid = node::simd::mask_lt(indices, len as i8);
-            unsafe {
-                node::simd::compress_47(
-                    keys,
-                    indices,
-                    valid,
-                    iter.entries[index as usize..].as_mut_ptr(),
-                )
-            };
-            index += node::simd::mask_byte_to_bit(valid).count_ones() as u8;
-            keys = node::simd::add(keys, node::simd::U8_16);
-        }
-
-        validate_eq!(index, len);
-        iter.head = 0;
-        iter.tail = len;
         node::KeyIter::new_47(iter)
     }
 
@@ -347,7 +315,7 @@ impl Header {
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta.load_packed(Ordering::Relaxed);
-        let iter = self.keys();
+        let iter = self.keys(Unbound, Unbound);
 
         let len = meta.len().value();
         let mut keys = [0u8; 47];

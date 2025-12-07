@@ -331,16 +331,20 @@ impl Drop for KeyIter {
 }
 
 pub(crate) trait Lower: Copy + Default + core::fmt::Debug {
+    const UNBOUND: bool = false;
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;
 }
 
 pub(crate) trait Upper: Copy + Default + core::fmt::Debug {
+    const UNBOUND: bool = false;
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;
 }
 
 impl Lower for Unbound {
+    const UNBOUND: bool = true;
+
     #[inline]
     fn get(self) -> u8 {
         0
@@ -352,6 +356,8 @@ impl Lower for Unbound {
 }
 
 impl Upper for Unbound {
+    const UNBOUND: bool = true;
+
     #[inline]
     fn get(self) -> u8 {
         255
