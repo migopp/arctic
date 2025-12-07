@@ -122,7 +122,8 @@ impl edge::Meta for LePacked {
             let child = Le::key_from_u64_truncate(
                 u64::from_le_bytes(child),
                 u6::new((len_child << 3) as u8),
-            );
+            )
+            .with_meta(self);
 
             return Ok((parent, middle, child));
         }
