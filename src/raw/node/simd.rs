@@ -788,13 +788,13 @@ mod tests {
         assert_sort(input, output)
     }
 
+    // https://en.wikipedia.org/wiki/Sorting_network#Zero-one_principle
     #[test]
-    fn sort_random() {
+    fn sort_exhaustive_zero_one() {
         let mut buffer = [0u16; 16];
 
         for i in 0..=u16::MAX {
             for (j, value) in buffer.iter_mut().enumerate() {
-                // https://en.wikipedia.org/wiki/Sorting_network#Zero-one_principle
                 *value = (i >> j) & 1;
             }
 
@@ -806,7 +806,7 @@ mod tests {
     }
 
     fn assert_sort(input: __m256i, expected: __m256i) {
-        let actual = bitonic_sort_16(input, 256);
+        let actual = bitonic_sort_16(input, 128);
         assert_eq!(
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(actual) },
             unsafe { core::mem::transmute::<__m256i, [u16; 16]>(expected) },
