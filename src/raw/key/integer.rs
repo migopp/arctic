@@ -214,7 +214,7 @@ impl key::Read for Slow {
     }
 
     #[inline]
-    fn read_exact(
+    fn match_exact(
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
     ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {

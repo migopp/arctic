@@ -79,7 +79,7 @@ where
             let save = self.key;
 
             // Fast path: traversal
-            let len = self.key.read_exact(meta)?;
+            let len = self.key.match_exact(meta)?;
 
             if let Some(node) = edge.as_node() {
                 if node.scan() {
@@ -124,12 +124,10 @@ where
             let old_meta = old.meta();
             let mut save = self.key;
 
-            let old_key = old_meta.key();
-            let old_len = old_key.len();
-            let key = self.key.read(old_len);
+            let (key, exact) = self.key.match_inexact(old_meta);
 
             // Fast path: traverse
-            if key == old_key {
+            if exact {
                 if let Some(node) = old.as_node() {
                     if node.scan() {
                         match self.wait_for_scan(stat::Counter::ScanInsert) {
@@ -147,7 +145,7 @@ where
                     };
 
                     if let Some(next) = unsafe { node.get_or_insert_unchecked(byte) } {
-                        self.push(save, old_len, node, next);
+                        self.push(save, key.len(), node, next);
                         continue;
                     }
                 }
@@ -304,7 +302,7 @@ where
         loop {
             let edge = cursor.edge.load_packed(Ordering::Relaxed);
 
-            let _ = cursor.key.read_exact(edge.meta())?;
+            let _ = cursor.key.match_exact(edge.meta())?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {
@@ -364,22 +362,20 @@ where
             let meta = edge.meta();
             let save = self.cursor.key;
 
-            let key_edge = meta.key();
-            let len_edge = key_edge.len();
-            let key_cursor = self.cursor.key.read(len_edge);
+            let (key, exact) = self.cursor.key.match_inexact(meta);
 
             // Full match
-            if key_edge == key_cursor {
+            if exact {
                 if let Some(node) = edge.as_node() {
                     if let Some(byte) = self.cursor.key.next() {
                         let next = unsafe { node.get_unchecked(byte) }?;
-                        self.cursor.push(save, len_edge, node, next);
+                        self.cursor.push(save, key.len(), node, next);
                         continue;
                     }
                 }
             }
 
-            if edge.is_null() || key_cursor != key_edge.prefix(key_cursor.len()) {
+            if edge.is_null() || meta.key().prefix(key.len()) != key {
                 return None;
             } else {
                 self.cursor.key = save;

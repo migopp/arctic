@@ -59,13 +59,27 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key;
 
     #[inline]
-    fn read_exact(
+    fn match_exact(
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
     ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
         let key = edge::Meta::key(edge);
         let len = edge::Key::len(key);
         (self.read(len) == key).then_some(len)
+    }
+
+    #[inline]
+    fn match_inexact(
+        &mut self,
+        edge: <Self::Edge as ribbit::Pack>::Packed,
+    ) -> (
+        <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key,
+        bool,
+    ) {
+        let key = edge::Meta::key(edge);
+        let len = edge::Key::len(key);
+        let read = self.read(len);
+        (read, read == key)
     }
 
     // Prefix operations for prefix and range iteration
