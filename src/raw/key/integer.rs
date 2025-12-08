@@ -218,21 +218,35 @@ impl key::Read for Slow {
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
     ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
+        let (key, exact) = self.match_inexact(edge);
+        exact.then_some(key.len())
+    }
+
+    #[inline]
+    fn match_inexact(
+        &mut self,
+        edge: <Self::Edge as ribbit::Pack>::Packed,
+    ) -> (
+        <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key,
+        bool,
+    ) {
         let len = self.len.min((edge.len().value() >> 3) as usize);
-        match self
+        let len_prefix = self
             .buffer
             .into_iter()
             .zip(edge.raw().to_le_bytes())
             .take(len)
             .position(|(l, r)| l != r)
-        {
-            None => {
-                self.buffer.copy_within(len.., 0);
-                self.len -= len;
-                Some(u6::new((len << 3) as u8))
-            }
-            Some(_) => None,
-        }
+            .unwrap_or(len);
+
+        let key = edge::Le::key_from_u64_truncate(
+            u64::from_le_bytes(self.buffer),
+            u6::new((len << 3) as u8),
+        );
+
+        self.buffer.copy_within(len.., 0);
+        self.len -= len;
+        (key, len == len_prefix)
     }
 
     #[inline]
