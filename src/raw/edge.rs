@@ -15,6 +15,7 @@ use core::sync::atomic::Ordering;
 use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
+use crate::raw::key;
 use crate::raw::node;
 use crate::raw::node::Node as _;
 use crate::raw::node::Node15;
@@ -50,6 +51,46 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
                 Ok(_) => break,
                 Err(conflict) => old = conflict,
             }
+        }
+    }
+
+    pub(crate) fn new_path<R>(mut reader: R, value: u64) -> ribbit::Packed<Self>
+    where
+        R: key::Read<Edge = M>,
+    {
+        let key = reader.read(<<R::Edge as ribbit::Pack>::Packed as Meta>::MAX_LEN);
+        let Some(mut byte) = reader.next() else {
+            return Self::new_value(key, value);
+        };
+
+        let mut tail = Box::new(Node3::default());
+        let head = ribbit::Packed::<Self>::new(
+            key.with_value(false),
+            Node::new_ptr(NonNull::from(&*tail)).value.get(),
+        );
+
+        loop {
+            let edge = tail.insert(byte);
+            let edge = if cfg!(feature = "validate") {
+                edge.expect("Node3 fits one edge")
+            } else {
+                unsafe { edge.unwrap_unchecked() }
+            };
+
+            let key = reader.read(<<R::Edge as ribbit::Pack>::Packed as Meta>::MAX_LEN);
+
+            let Some(next_byte) = reader.next() else {
+                edge.set_packed(Self::new_value(key, value));
+                return head;
+            };
+            byte = next_byte;
+
+            let next_node = Box::new(Node3::default());
+            edge.set_packed(ribbit::Packed::<Self>::new(
+                key.with_value(false),
+                Node::new_ptr(NonNull::from(&*next_node)).value.get(),
+            ));
+            tail = next_node;
         }
     }
 
@@ -316,6 +357,14 @@ where
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
                 kind | ptr.addr().get() as u64,
+            ))
+        }
+    }
+
+    fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
+                Node3::<M>::KIND as u64 | ptr.addr().get() as u64,
             ))
         }
     }
