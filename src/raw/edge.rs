@@ -63,14 +63,12 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             return Self::new_value(key, value);
         };
 
-        let mut tail = Box::new(Node3::default());
-        let head = ribbit::Packed::<Self>::new(
-            key.with_value(false),
-            Node::new_ptr(NonNull::from(&*tail)).value.get(),
-        );
+        let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
+        let head =
+            ribbit::Packed::<Self>::new(key.with_value(false), Node::new_ptr(tail).value.get());
 
         loop {
-            let edge = tail.insert(byte);
+            let edge = unsafe { tail.as_mut().insert(byte) };
             let edge = if cfg!(feature = "validate") {
                 edge.expect("Node3 fits one edge")
             } else {
@@ -85,10 +83,10 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             };
             byte = next_byte;
 
-            let next_node = Box::new(Node3::default());
+            let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
             edge.set_packed(ribbit::Packed::<Self>::new(
                 key.with_value(false),
-                Node::new_ptr(NonNull::from(&*next_node)).value.get(),
+                Node::new_ptr(next_node).value.get(),
             ));
             tail = next_node;
         }
@@ -557,6 +555,61 @@ where
         } else {
             validate_eq!(kind, node::Kind::NODE_256);
             drop(Box::from_raw(ptr as *mut Node256<M>))
+        }
+    }
+
+    /// # SAFETY
+    ///
+    /// Caller must ensure there are no other references to this node.
+    pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
+        stat::increment(counter);
+
+        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let kind = self.kind();
+
+        // if kind == node::Kind::NODE_3 {
+        //     drop(Box::from_raw(ptr as *mut Node3<M>))
+        // } else if kind == node::Kind::NODE_15 {
+        //     drop(Box::from_raw(ptr as *mut Node15<M>))
+        // } else if kind == node::Kind::NODE_47 {
+        //     drop(Box::from_raw(ptr as *mut Node47<M>))
+        // } else {
+        //     validate_eq!(kind, node::Kind::NODE_256);
+        //     drop(Box::from_raw(ptr as *mut Node256<M>))
+        // }
+
+        let hi = kind.raw() >> 1;
+        let lo = kind.raw() & 0b1;
+
+        unsafe {
+            if hi == 0 {
+                if lo == 0 {
+                    let mut node = Box::from_raw(ptr as *mut Node3<M>);
+                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                        child.deallocate_recursive_unchecked(counter);
+                    }
+                    drop(node);
+                } else {
+                    let mut node = Box::from_raw(ptr as *mut Node15<M>);
+                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                        child.deallocate_recursive_unchecked(counter);
+                    }
+                    drop(node);
+                }
+            } else if lo == 0 {
+                let mut node = Box::from_raw(ptr as *mut Node47<M>);
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            } else {
+                validate_eq!(kind, node::Kind::NODE_256);
+                let mut node = Box::from_raw(ptr as *mut Node256<M>);
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            }
         }
     }
 }

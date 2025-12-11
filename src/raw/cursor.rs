@@ -118,7 +118,7 @@ where
     /// Return CAS operands to either insert the value or structurally update
     /// the tree on the way to inserting the value.
     #[inline]
-    pub(crate) fn traverse_or_insert(&mut self) -> Insert<K::Edge> {
+    pub(crate) fn traverse_or_insert(&mut self, value: u64) -> Insert<K::Edge> {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -154,37 +154,35 @@ where
             // Revert key to before the current edge
             self.key = save;
 
+            if old_meta.is_frozen() {
+                return Insert::Frozen;
+            }
+
             let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
-                    Some(edge::Child::Node(_)) if old_meta.is_frozen() => return Insert::Frozen,
+                    // Some(edge::Child::Node(_)) if old_meta.is_frozen() => return Insert::Frozen,
                     Some(edge::Child::Node(node)) => {
                         let (op, new) = unsafe { node.replace_unchecked(old_meta) };
                         (Smo::Node(op), new)
                     }
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
-                        let key =
-                            save.read(<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::MAX_LEN);
-
-                        if save.bits() == 0 {
-                            return Insert::Value { old, key };
-                        }
-
-                        if old_meta.is_frozen() {
-                            return Insert::Frozen;
-                        }
-
-                        (
-                            Smo::Edge(edge::Smo::Create),
-                            Edge::new_node::<Node3<K::Edge>, _, _>(key, [], []),
-                        )
+                        (Smo::Edge(edge::Smo::Create), Edge::new_path(save, value))
                     }
                 },
-                Ok(_) if old_meta.is_frozen() => return Insert::Frozen,
-                Ok((start, middle, end)) => (
-                    Smo::Edge(edge::Smo::Expand),
-                    Edge::new_node::<Node3<K::Edge>, _, _>(start, [middle], [old.with_meta(end)]),
-                ),
+                // Ok(_) if old_meta.is_frozen() => return Insert::Frozen,
+                Ok((start, middle, end)) => {
+                    let _ = save.read(start.len());
+                    let byte = unsafe { save.next_unchecked() };
+                    (
+                        Smo::Edge(edge::Smo::Expand),
+                        Edge::new_node::<Node3<K::Edge>, _, _>(
+                            start,
+                            [byte, middle],
+                            [Edge::new_path(save, value), old.with_meta(end)],
+                        ),
+                    )
+                }
             };
 
             return Insert::Smo { op, old, new };

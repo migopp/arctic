@@ -64,8 +64,8 @@ where
     }
 
     #[inline]
-    pub(super) fn traverse_or_insert(&mut self) -> raw::cursor::Insert<K::Edge> {
-        self.raw.traverse_or_insert()
+    pub(super) fn traverse_or_insert(&mut self, value: u64) -> raw::cursor::Insert<K::Edge> {
+        self.raw.traverse_or_insert(value)
     }
 
     #[cold]

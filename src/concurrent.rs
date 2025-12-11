@@ -381,9 +381,11 @@ where
     {
         let reader = K::Read::from(key);
         let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        // FXIME
+        let value = allocate(None);
 
         loop {
-            match cursor.traverse_or_insert() {
+            match cursor.traverse_or_insert(value) {
                 Insert::Value { old, key } if !old.meta().is_frozen() => {
                     let old_value = old.as_value().map(|raw| unsafe { V::borrow_from_raw(raw) });
                     let new_value = allocate(old_value);
@@ -415,20 +417,37 @@ where
                         Ordering::AcqRel,
                         Ordering::Acquire,
                     ) {
-                        Ok(_) => {
+                        Ok(old) => {
                             stat::increment(op);
                             if op.is_retire() {
                                 unsafe {
                                     cursor.retire(old);
                                 }
+                            } else if matches!(
+                                op,
+                                crate::raw::Smo::Edge(crate::raw::edge::Smo::Create)
+                            ) {
+                                return Ok(old.as_value().map(|value| unsafe {
+                                    V::guard_owned(cursor.into_guard(), value)
+                                }));
+                            } else {
+                                return Ok(None);
                             }
                         }
                         Err(_) => {
                             // Does not go through SMR because `new` is still thread-local
                             if op.is_allocate() {
                                 if let Some(edge::Child::Node(node)) = new.child() {
-                                    unsafe {
-                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                    if matches!(op, crate::raw::Smo::Edge(_)) {
+                                        unsafe {
+                                            node.deallocate_recursive_unchecked(
+                                                stat::Counter::FreeConflict,
+                                            );
+                                        }
+                                    } else {
+                                        unsafe {
+                                            node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                        }
                                     }
                                 }
                             }
@@ -506,83 +525,84 @@ where
     unsafe fn get_or_insert_with_impl<'k, H, F>(
         &mut self,
         key: K::Borrow<'k>,
-        with: &mut Thunk<F>,
+        _with: &mut Thunk<F>,
     ) -> Result<(V::SharedGuard<'g, '_, K::Prefix>, bool), H::PopError>
     where
         H: cursor::path::History<'k, 'g, K>,
         F: FnOnce() -> u64,
     {
         let reader = K::Read::from(key);
-        let mut cursor =
+        let mut _cursor =
             cursor::Point::<'k, 'g, '_, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
-            match cursor.traverse_or_insert() {
-                Insert::Value { old, key } => match old.as_value() {
-                    Some(value) => {
-                        // Deallocate `with` if we evaluated it
-                        match with {
-                            Thunk::Unevaluated(_) => (),
-                            Thunk::Evaluated(value) => drop(unsafe { V::from_raw(*value) }),
-                        }
-
-                        return Ok((unsafe { V::guard_shared(cursor.into_guard(), value) }, true));
-                    }
-                    // Fall through to freeze
-                    None if old.meta().is_frozen() => (),
-                    None => {
-                        let new_value = with.evaluate();
-                        let new = Edge::new_value(key, new_value);
-
-                        if cursor
-                            .edge()
-                            .compare_exchange_packed(old, new, Ordering::AcqRel, Ordering::Relaxed)
-                            .is_ok()
-                        {
-                            return Ok((
-                                unsafe { V::guard_shared(cursor.into_guard(), new_value) },
-                                false,
-                            ));
-                        }
-
-                        continue;
-                    }
-                },
-                Insert::Smo { op, old, new } => {
-                    validate!(!old.meta().is_frozen());
-
-                    match cursor.edge().compare_exchange_packed(
-                        old,
-                        new,
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    ) {
-                        Ok(_) => {
-                            stat::increment(op);
-                            if op.is_retire() {
-                                unsafe {
-                                    cursor.retire(old);
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            // Does not go through SMR because `new` is still thread-local
-                            if op.is_allocate() {
-                                if let Some(edge::Child::Node(node)) = new.child() {
-                                    unsafe {
-                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    continue;
-                }
-                Insert::Frozen => (),
-            }
-
-            cursor.freeze()?;
+            todo!()
+            // match cursor.traverse_or_insert() {
+            //     Insert::Value { old, key } => match old.as_value() {
+            //         Some(value) => {
+            //             // Deallocate `with` if we evaluated it
+            //             match with {
+            //                 Thunk::Unevaluated(_) => (),
+            //                 Thunk::Evaluated(value) => drop(unsafe { V::from_raw(*value) }),
+            //             }
+            //
+            //             return Ok((unsafe { V::guard_shared(cursor.into_guard(), value) }, true));
+            //         }
+            //         // Fall through to freeze
+            //         None if old.meta().is_frozen() => (),
+            //         None => {
+            //             let new_value = with.evaluate();
+            //             let new = Edge::new_value(key, new_value);
+            //
+            //             if cursor
+            //                 .edge()
+            //                 .compare_exchange_packed(old, new, Ordering::AcqRel, Ordering::Relaxed)
+            //                 .is_ok()
+            //             {
+            //                 return Ok((
+            //                     unsafe { V::guard_shared(cursor.into_guard(), new_value) },
+            //                     false,
+            //                 ));
+            //             }
+            //
+            //             continue;
+            //         }
+            //     },
+            //     Insert::Smo { op, old, new } => {
+            //         validate!(!old.meta().is_frozen());
+            //
+            //         match cursor.edge().compare_exchange_packed(
+            //             old,
+            //             new,
+            //             Ordering::AcqRel,
+            //             Ordering::Acquire,
+            //         ) {
+            //             Ok(_) => {
+            //                 stat::increment(op);
+            //                 if op.is_retire() {
+            //                     unsafe {
+            //                         cursor.retire(old);
+            //                     }
+            //                 }
+            //             }
+            //             Err(_) => {
+            //                 // Does not go through SMR because `new` is still thread-local
+            //                 if op.is_allocate() {
+            //                     if let Some(edge::Child::Node(node)) = new.child() {
+            //                         unsafe {
+            //                             node.deallocate_unchecked(stat::Counter::FreeConflict);
+            //                         }
+            //                     }
+            //                 }
+            //             }
+            //         }
+            //
+            //         continue;
+            //     }
+            //     Insert::Frozen => (),
+            // }
+            //
+            // cursor.freeze()?;
         }
     }
 
