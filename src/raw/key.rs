@@ -45,6 +45,8 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
+
+    #[inline]
     unsafe fn next_unchecked(&mut self) -> u8 {
         match self.next() {
             Some(byte) => byte,
