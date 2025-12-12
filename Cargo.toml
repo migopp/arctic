@@ -32,5 +32,7 @@ serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
 [dev-dependencies]
+proptest = "1.9.0"
+proptest-state-machine = "0.6.0"
 rand = "0.9"
 rapidhash = "4.0.0"

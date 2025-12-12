@@ -1,6 +1,6 @@
 macro_rules! validate {
     ($($tt:tt)*) => {
-        if cfg!(any(feature = "validate", debug_assertions)) {
+        if cfg!(any(feature = "validate", debug_assertions, test)) {
             assert!($($tt)*);
         }
     };
@@ -8,7 +8,7 @@ macro_rules! validate {
 
 macro_rules! validate_eq {
     ($($tt:tt)*) => {
-        if cfg!(any(feature = "validate", debug_assertions)) {
+        if cfg!(any(feature = "validate", debug_assertions, test)) {
             assert_eq!($($tt)*);
         }
     };

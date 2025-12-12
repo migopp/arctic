@@ -8,6 +8,8 @@ pub unsafe trait Value {
     where
         Self: 'l;
 
+    fn borrow<'l>(&'l self) -> Self::Borrow<'l>;
+
     // type BorrowMut<'l>
     // where
     //     Self: 'l;
@@ -47,6 +49,11 @@ unsafe impl<T> Value for Box<T> {
         Self: 'l;
 
     #[inline]
+    fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
+        self
+    }
+
+    #[inline]
     unsafe fn from_raw(raw: u64) -> Self {
         Box::from_raw(raw as *mut T)
     }
@@ -71,6 +78,11 @@ macro_rules! impl_trivial {
         $(
             unsafe impl Value for $ty {
                 type Borrow<'l> = Self;
+
+                #[inline]
+                fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
+                    *self
+                }
 
                 #[inline]
                 unsafe fn from_raw(raw: u64) -> Self {
