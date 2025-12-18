@@ -6,9 +6,6 @@ pub(crate) use le::Le;
 use ribbit::u6;
 
 use core::fmt::Debug;
-use core::marker::PhantomData;
-use core::num::NonZeroU32;
-use core::num::NonZeroU64;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
@@ -18,10 +15,7 @@ use ribbit::OptionExt as _;
 use crate::raw::key;
 use crate::raw::node;
 use crate::raw::node::Node as _;
-use crate::raw::node::Node15;
-use crate::raw::node::Node256;
 use crate::raw::node::Node3;
-use crate::raw::node::Node47;
 use crate::stat;
 
 #[derive(Copy, Clone, Default, ribbit::Pack)]
@@ -64,8 +58,10 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         };
 
         let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
-        let head =
-            ribbit::Packed::<Self>::new(key.with_value(false), Ptr::new_ptr(tail).value.get());
+        let head = ribbit::Packed::<Self>::new(
+            key.with_value(false),
+            node::Ptr::new_ptr(tail).raw().get(),
+        );
 
         loop {
             let edge = unsafe { tail.as_mut().insert(byte) };
@@ -86,7 +82,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
             edge.set_packed(ribbit::Packed::<Self>::new(
                 key.with_value(false),
-                Ptr::new_ptr(next_node).value.get(),
+                node::Ptr::new_ptr(next_node).raw().get(),
             ));
             tail = next_node;
         }
@@ -128,7 +124,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(meta, Ptr::new(node).value.get())
+        ribbit::Packed::<Self>::new(meta, node::Ptr::new(node).raw().get())
     }
 
     pub(crate) fn new_value(
@@ -146,12 +142,12 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Ptr<M>>> {
+    pub(crate) fn as_node(self) -> Option<ribbit::Packed<node::Ptr<M>>> {
         if self.meta().is_value() {
             return None;
         }
 
-        unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(self.data()) }
+        unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(self.data()) }
     }
 
     #[inline]
@@ -170,14 +166,14 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
         if self.meta().is_value() {
             Some(Child::Value(data))
         } else {
-            unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(data) }.map(Child::Node)
+            unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(data) }.map(Child::Node)
         }
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<Ptr<M>>) -> Self {
+    pub(crate) fn with_node(self, node: ribbit::Packed<node::Ptr<M>>) -> Self {
         validate!(!self.meta().is_value());
-        self.with_data(node.value.get())
+        self.with_data(node.raw().get())
     }
 
     #[inline]
@@ -302,7 +298,7 @@ impl Smo {
 }
 
 pub(crate) enum Child<C> {
-    Node(ribbit::Packed<Ptr<C>>),
+    Node(ribbit::Packed<node::Ptr<C>>),
     Value(u64),
 }
 
@@ -312,325 +308,5 @@ impl<C> Debug for Child<C> {
             Self::Node(node) => f.debug_tuple("Node").field(node).finish(),
             Self::Value(value) => f.debug_tuple("Value").field(value).finish(),
         }
-    }
-}
-
-#[derive(ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
-pub(crate) struct Ptr<C> {
-    #[ribbit(size = 2, get(vis = "pub(crate)"))]
-    kind: node::Kind,
-
-    pub(crate) scan: bool,
-
-    #[ribbit(with(skip))]
-    _placeholder: NonZeroU32,
-
-    _compressed: PhantomData<C>,
-}
-
-impl<C> Copy for Ptr<C> {}
-impl<C> Clone for Ptr<C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<M> Ptr<M> {
-    const MASK_TAG: u64 = 0b111;
-    const MASK_PTR: u64 = !Self::MASK_TAG;
-}
-
-impl<M> Ptr<M>
-where
-    M: ribbit::Pack<Packed: Meta>,
-{
-    #[inline]
-    fn new<N: node::Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
-        let ptr = NonNull::from(Box::leak(node));
-        let kind = N::KIND as u64;
-
-        validate_eq!(ptr.addr().get() as u64 & Self::MASK_TAG, 0);
-
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                kind | ptr.addr().get() as u64,
-            ))
-        }
-    }
-
-    fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                Node3::<M>::KIND as u64 | ptr.addr().get() as u64,
-            ))
-        }
-    }
-
-    pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
-        let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
-        if cfg!(feature = "validate") {
-            node.unwrap()
-        } else {
-            unsafe { node.unwrap_unchecked() }
-        }
-    }
-}
-
-impl<M> PtrPacked<M>
-where
-    M: ribbit::Pack<Packed: Meta>,
-{
-    #[inline(never)]
-    pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
-        }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
-        }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn replace_unchecked(
-        self,
-        parent: ribbit::Packed<M>,
-    ) -> (node::Smo, ribbit::Packed<Edge<M>>) {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
-        }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn entries_unchecked<'g, L: node::Lower, U: node::Upper>(
-        self,
-        lower: L,
-        upper: U,
-    ) -> node::NodeIter<'g, L, U, M> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.entries(lower, upper)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.entries(lower, upper)
-        }
-    }
-
-    /// # SAFETY
-    ///
-    /// Caller must ensure there are no other references to this node.
-    #[inline]
-    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
-        stat::increment(counter);
-
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     drop(Box::from_raw(ptr as *mut Node3<M>))
-        // } else if kind == node::Kind::NODE_15 {
-        //     drop(Box::from_raw(ptr as *mut Node15<M>))
-        // } else if kind == node::Kind::NODE_47 {
-        //     drop(Box::from_raw(ptr as *mut Node47<M>))
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     drop(Box::from_raw(ptr as *mut Node256<M>))
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                drop(Box::from_raw(ptr as *mut Node3<M>))
-            } else {
-                drop(Box::from_raw(ptr as *mut Node15<M>))
-            }
-        } else if lo == 0 {
-            drop(Box::from_raw(ptr as *mut Node47<M>))
-        } else {
-            validate_eq!(kind, node::Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256<M>))
-        }
-    }
-
-    /// # SAFETY
-    ///
-    /// Caller must ensure there are no other references to this node.
-    pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
-        stat::increment(counter);
-
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     drop(Box::from_raw(ptr as *mut Node3<M>))
-        // } else if kind == node::Kind::NODE_15 {
-        //     drop(Box::from_raw(ptr as *mut Node15<M>))
-        // } else if kind == node::Kind::NODE_47 {
-        //     drop(Box::from_raw(ptr as *mut Node47<M>))
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     drop(Box::from_raw(ptr as *mut Node256<M>))
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        unsafe {
-            if hi == 0 {
-                if lo == 0 {
-                    let mut node = Box::from_raw(ptr as *mut Node3<M>);
-                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                        child.deallocate_recursive_unchecked(counter);
-                    }
-                    drop(node);
-                } else {
-                    let mut node = Box::from_raw(ptr as *mut Node15<M>);
-                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                        child.deallocate_recursive_unchecked(counter);
-                    }
-                    drop(node);
-                }
-            } else if lo == 0 {
-                let mut node = Box::from_raw(ptr as *mut Node47<M>);
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            } else {
-                validate_eq!(kind, node::Kind::NODE_256);
-                let mut node = Box::from_raw(ptr as *mut Node256<M>);
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            }
-        }
-    }
-}
-
-#[inline]
-unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
-where
-    M: ribbit::Pack<Packed: Meta>,
-    N: node::Node<M> + 'g,
-{
-    let node = unsafe { (ptr as *const N).as_ref() };
-    validate!(node.is_some());
-    unsafe { node.unwrap_unchecked() }
-}
-
-impl<M> Debug for PtrPacked<M> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Node")
-            .field("kind", &self.kind())
-            .field("scan", &self.scan())
-            .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
-            .finish()
     }
 }

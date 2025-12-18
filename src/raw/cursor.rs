@@ -10,6 +10,7 @@ use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
+use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::raw::Edge;
 use crate::raw::Key;
@@ -267,7 +268,7 @@ where
         &mut self,
         key: K::Read<'k>,
         len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
-        node: ribbit::Packed<edge::Ptr<K::Edge>>,
+        node: ribbit::Packed<node::Ptr<K::Edge>>,
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
@@ -281,7 +282,7 @@ where
     }
 
     #[cold]
-    fn pop(&mut self) -> Result<ribbit::Packed<edge::Ptr<K::Edge>>, H::PopError> {
+    fn pop(&mut self) -> Result<ribbit::Packed<node::Ptr<K::Edge>>, H::PopError> {
         let segment = self.history.pop()?.expect("Root edge can never be frozen");
         self.bits -= segment.len.bits() + 8;
         self.key = segment.key;

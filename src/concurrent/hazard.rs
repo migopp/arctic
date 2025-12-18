@@ -350,7 +350,7 @@ unsafe fn deallocate_hazard<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Valu
     if prefix.is_node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
-            crate::raw::edge::Ptr::<crate::raw::edge::Be>::new_unchecked(raw)
+            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw)
                 .deallocate_unchecked(counter);
         }
     } else {
