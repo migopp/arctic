@@ -32,20 +32,20 @@ pub(crate) struct Point<'k, 'g, K: Key, H> {
     history: H,
 }
 
-pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
-    Value {
-        old: ribbit::Packed<Edge<E>>,
-        key: <E::Packed as edge::Meta>::Key,
-    },
-
-    /// Structural modification required
-    Smo {
-        op: Smo,
-        old: ribbit::Packed<Edge<E>>,
-        new: ribbit::Packed<Edge<E>>,
-    },
-    Frozen,
-}
+// pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
+//     Value {
+//         old: ribbit::Packed<Edge<E>>,
+//         key: <E::Packed as edge::Meta>::Key,
+//     },
+//
+//     /// Structural modification required
+//     Smo {
+//         op: Smo,
+//         old: ribbit::Packed<Edge<E>>,
+//         new: ribbit::Packed<Edge<E>>,
+//     },
+//     Frozen,
+// }
 
 impl<'k, 'g, K, H> Point<'k, 'g, K, H>
 where
@@ -119,7 +119,17 @@ where
     /// Return CAS operands to either insert the value or structurally update
     /// the tree on the way to inserting the value.
     #[inline]
-    pub(crate) fn traverse_or_insert(&mut self, value: u64) -> Insert<K::Edge> {
+    pub(crate) fn traverse_or_upsert(
+        &mut self,
+        value: u64,
+    ) -> Result<
+        (
+            Smo,
+            ribbit::Packed<Edge<K::Edge>>,
+            ribbit::Packed<Edge<K::Edge>>,
+        ),
+        (),
+    > {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
@@ -133,7 +143,7 @@ where
                     if node.scan() {
                         match self.wait_for_scan(stat::Counter::ScanInsert) {
                             Ok(_) => continue,
-                            Err(()) => return Insert::Frozen,
+                            Err(()) => return Err(()),
                         }
                     }
 
@@ -156,7 +166,7 @@ where
             self.key = save;
 
             if old_meta.is_frozen() {
-                return Insert::Frozen;
+                return Err(());
             }
 
             let (op, new) = match old_meta.expand(key) {
@@ -181,7 +191,7 @@ where
                 }
             };
 
-            return Insert::Smo { op, old, new };
+            return Ok((op, old, new));
         }
     }
 

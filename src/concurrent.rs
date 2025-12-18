@@ -13,7 +13,6 @@ use core::sync::atomic::Ordering;
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 
-use crate::raw::cursor::Insert;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
@@ -372,7 +371,8 @@ where
         &mut self,
         key: K::Borrow<'k>,
         allocate: &mut A,
-        deallocate: &mut D,
+        // FIXME
+        _deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_, K::Prefix>>, H::PopError>
     where
         H: cursor::path::History<'k, 'g, K>,
@@ -385,30 +385,8 @@ where
         let value = allocate(None);
 
         loop {
-            match cursor.traverse_or_insert(value) {
-                Insert::Value { old, key } if !old.meta().is_frozen() => {
-                    let old_value = old.as_value().map(|raw| unsafe { V::borrow_from_raw(raw) });
-                    let new_value = allocate(old_value);
-
-                    if cursor
-                        .edge()
-                        .compare_exchange_packed(
-                            old,
-                            Edge::new_value(key, new_value),
-                            Ordering::AcqRel,
-                            Ordering::Relaxed,
-                        )
-                        .is_err()
-                    {
-                        deallocate(new_value);
-                        continue;
-                    }
-
-                    return Ok(old
-                        .as_value()
-                        .map(|value| unsafe { V::guard_owned(cursor.into_guard(), value) }));
-                }
-                Insert::Smo { op, old, new } => {
+            match cursor.traverse_or_upsert(value) {
+                Ok((op, old, new)) => {
                     validate!(!old.meta().is_frozen());
 
                     match cursor.edge().compare_exchange_packed(
@@ -451,7 +429,7 @@ where
                         }
                     }
                 }
-                Insert::Frozen | Insert::Value { .. } => cursor.freeze()?,
+                Err(()) => cursor.freeze()?,
             }
         }
     }
