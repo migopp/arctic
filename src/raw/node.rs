@@ -211,6 +211,7 @@ where
         }
     }
 
+    #[inline]
     pub(super) fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
@@ -219,6 +220,7 @@ where
         }
     }
 
+    #[inline]
     pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
         let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
         if cfg!(feature = "validate") {
@@ -233,74 +235,29 @@ impl<M> PtrPacked<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
+    #[inline]
     pub(super) fn raw(self) -> NonZeroU64 {
         self.value
     }
 
-    #[inline(never)]
+    #[inline]
     pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.get(key)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.get(key)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.get(key)
-        } else {
-            validate_eq!(kind, Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.get(key)
-        }
+        self.dispatch(
+            |node| node.get(key),
+            |node| node.get(key),
+            |node| node.get(key),
+            |node| node.get(key),
+        )
     }
 
     #[inline]
     pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.get_or_insert(key)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.get_or_insert(key)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.get_or_insert(key)
-        } else {
-            validate_eq!(kind, Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.get_or_insert(key)
-        }
+        self.dispatch(
+            |node| node.get_or_insert(key),
+            |node| node.get_or_insert(key),
+            |node| node.get_or_insert(key),
+            |node| node.get_or_insert(key),
+        )
     }
 
     #[inline]
@@ -308,35 +265,12 @@ where
         self,
         parent: ribbit::Packed<M>,
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.replace::<3>(parent)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.replace::<15>(parent)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.replace::<47>(parent)
-        } else {
-            validate_eq!(kind, Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.replace::<256>(parent)
-        }
+        self.dispatch(
+            |node| node.replace::<3>(parent),
+            |node| node.replace::<15>(parent),
+            |node| node.replace::<47>(parent),
+            |node| node.replace::<256>(parent),
+        )
     }
 
     #[inline]
@@ -345,73 +279,25 @@ where
         lower: L,
         upper: U,
     ) -> NodeIter<'g, L, U, M> {
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
-        // } else if kind == node::Kind::NODE_15 {
-        //     unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
-        // } else if kind == node::Kind::NODE_47 {
-        //     unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     unsafe { as_ref::<_, Node256<M>>(ptr) }.entries(lower, upper)
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                unsafe { as_ref::<_, Node3<M>>(ptr) }.entries(lower, upper)
-            } else {
-                unsafe { as_ref::<_, Node15<M>>(ptr) }.entries(lower, upper)
-            }
-        } else if lo == 0 {
-            unsafe { as_ref::<_, Node47<M>>(ptr) }.entries(lower, upper)
-        } else {
-            validate_eq!(kind, Kind::NODE_256);
-            unsafe { as_ref::<_, Node256<M>>(ptr) }.entries(lower, upper)
-        }
+        self.dispatch(
+            |node| node.entries(lower, upper),
+            |node| node.entries(lower, upper),
+            |node| node.entries(lower, upper),
+            |node| node.entries(lower, upper),
+        )
     }
 
     /// # SAFETY
     ///
     /// Caller must ensure there are no other references to this node.
-    #[inline]
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
-
-        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
-
-        // if kind == node::Kind::NODE_3 {
-        //     drop(Box::from_raw(ptr as *mut Node3<M>))
-        // } else if kind == node::Kind::NODE_15 {
-        //     drop(Box::from_raw(ptr as *mut Node15<M>))
-        // } else if kind == node::Kind::NODE_47 {
-        //     drop(Box::from_raw(ptr as *mut Node47<M>))
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     drop(Box::from_raw(ptr as *mut Node256<M>))
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        if hi == 0 {
-            if lo == 0 {
-                drop(Box::from_raw(ptr as *mut Node3<M>))
-            } else {
-                drop(Box::from_raw(ptr as *mut Node15<M>))
-            }
-        } else if lo == 0 {
-            drop(Box::from_raw(ptr as *mut Node47<M>))
-        } else {
-            validate_eq!(kind, Kind::NODE_256);
-            drop(Box::from_raw(ptr as *mut Node256<M>))
-        }
+        self.dispatch(
+            |node| drop(Box::from_raw((node as *const Node3<_>).cast_mut())),
+            |node| drop(Box::from_raw((node as *const Node15<_>).cast_mut())),
+            |node| drop(Box::from_raw((node as *const Node47<_>).cast_mut())),
+            |node| drop(Box::from_raw((node as *const Node256<_>).cast_mut())),
+        )
     }
 
     /// # SAFETY
@@ -420,65 +306,80 @@ where
     pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
+        self.dispatch(
+            |node| {
+                let mut node = Box::from_raw((node as *const Node3<_>).cast_mut());
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            },
+            |node| {
+                let mut node = Box::from_raw((node as *const Node15<_>).cast_mut());
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            },
+            |node| {
+                let mut node = Box::from_raw((node as *const Node47<_>).cast_mut());
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            },
+            |node| {
+                let mut node = Box::from_raw((node as *const Node256<_>).cast_mut());
+                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+                    child.deallocate_recursive_unchecked(counter);
+                }
+                drop(node);
+            },
+        );
+    }
+
+    #[inline(always)]
+    fn dispatch<'g, N3, N15, N47, N256, T>(
+        self,
+        node_3: N3,
+        node_15: N15,
+        node_47: N47,
+        node_256: N256,
+    ) -> T
+    where
+        N3: FnOnce(&'g Node3<M>) -> T,
+        N15: FnOnce(&'g Node15<M>) -> T,
+        N47: FnOnce(&'g Node47<M>) -> T,
+        N256: FnOnce(&'g Node256<M>) -> T,
+        M: 'g,
+    {
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind();
+        let kind = self.kind().raw();
+        let hi = kind & 0b10;
+        let lo = kind & 0b01;
 
-        // if kind == node::Kind::NODE_3 {
-        //     drop(Box::from_raw(ptr as *mut Node3<M>))
-        // } else if kind == node::Kind::NODE_15 {
-        //     drop(Box::from_raw(ptr as *mut Node15<M>))
-        // } else if kind == node::Kind::NODE_47 {
-        //     drop(Box::from_raw(ptr as *mut Node47<M>))
-        // } else {
-        //     validate_eq!(kind, node::Kind::NODE_256);
-        //     drop(Box::from_raw(ptr as *mut Node256<M>))
-        // }
-
-        let hi = kind.raw() >> 1;
-        let lo = kind.raw() & 0b1;
-
-        unsafe {
-            if hi == 0 {
-                if lo == 0 {
-                    let mut node = Box::from_raw(ptr as *mut Node3<M>);
-                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                        child.deallocate_recursive_unchecked(counter);
-                    }
-                    drop(node);
-                } else {
-                    let mut node = Box::from_raw(ptr as *mut Node15<M>);
-                    if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                        child.deallocate_recursive_unchecked(counter);
-                    }
-                    drop(node);
-                }
-            } else if lo == 0 {
-                let mut node = Box::from_raw(ptr as *mut Node47<M>);
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
+        if hi == 0 {
+            if lo == 0 {
+                node_3(unsafe { Self::as_ref(ptr) })
             } else {
-                validate_eq!(kind, Kind::NODE_256);
-                let mut node = Box::from_raw(ptr as *mut Node256<M>);
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
+                node_15(unsafe { Self::as_ref(ptr) })
             }
+        } else if lo == 0 {
+            node_47(unsafe { Self::as_ref(ptr) })
+        } else {
+            node_256(unsafe { Self::as_ref(ptr) })
         }
     }
-}
 
-#[inline]
-unsafe fn as_ref<'g, M, N>(ptr: u64) -> &'g N
-where
-    M: ribbit::Pack<Packed: edge::Meta>,
-    N: Node<M> + 'g,
-{
-    let node = unsafe { (ptr as *const N).as_ref() };
-    validate!(node.is_some());
-    unsafe { node.unwrap_unchecked() }
+    #[inline(always)]
+    unsafe fn as_ref<'g, N>(ptr: u64) -> &'g N
+    where
+        N: Node<M> + 'g,
+    {
+        let node = unsafe { (ptr as *const N).as_ref() };
+        validate!(node.is_some());
+        unsafe { node.unwrap_unchecked() }
+    }
 }
 
 impl<M> Debug for PtrPacked<M> {
