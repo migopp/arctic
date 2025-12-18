@@ -65,7 +65,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
 
         let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
         let head =
-            ribbit::Packed::<Self>::new(key.with_value(false), Node::new_ptr(tail).value.get());
+            ribbit::Packed::<Self>::new(key.with_value(false), Ptr::new_ptr(tail).value.get());
 
         loop {
             let edge = unsafe { tail.as_mut().insert(byte) };
@@ -86,7 +86,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
             edge.set_packed(ribbit::Packed::<Self>::new(
                 key.with_value(false),
-                Node::new_ptr(next_node).value.get(),
+                Ptr::new_ptr(next_node).value.get(),
             ));
             tail = next_node;
         }
@@ -128,7 +128,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
                 .set_packed(edge);
         }
 
-        ribbit::Packed::<Self>::new(meta, Node::new(node).value.get())
+        ribbit::Packed::<Self>::new(meta, Ptr::new(node).value.get())
     }
 
     pub(crate) fn new_value(
@@ -146,12 +146,12 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Node<M>>> {
+    pub(crate) fn as_node(self) -> Option<ribbit::Packed<Ptr<M>>> {
         if self.meta().is_value() {
             return None;
         }
 
-        unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(self.data()) }
+        unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(self.data()) }
     }
 
     #[inline]
@@ -170,12 +170,12 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
         if self.meta().is_value() {
             Some(Child::Value(data))
         } else {
-            unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(data) }.map(Child::Node)
+            unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(data) }.map(Child::Node)
         }
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<Node<M>>) -> Self {
+    pub(crate) fn with_node(self, node: ribbit::Packed<Ptr<M>>) -> Self {
         validate!(!self.meta().is_value());
         self.with_data(node.value.get())
     }
@@ -302,7 +302,7 @@ impl Smo {
 }
 
 pub(crate) enum Child<C> {
-    Node(ribbit::Packed<Node<C>>),
+    Node(ribbit::Packed<Ptr<C>>),
     Value(u64),
 }
 
@@ -316,8 +316,8 @@ impl<C> Debug for Child<C> {
 }
 
 #[derive(ribbit::Pack)]
-#[ribbit(size = 64, packed(rename = NodePacked), eq, nonzero)]
-pub(crate) struct Node<C> {
+#[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
+pub(crate) struct Ptr<C> {
     #[ribbit(size = 2, get(vis = "pub(crate)"))]
     kind: node::Kind,
 
@@ -329,19 +329,19 @@ pub(crate) struct Node<C> {
     _compressed: PhantomData<C>,
 }
 
-impl<C> Copy for Node<C> {}
-impl<C> Clone for Node<C> {
+impl<C> Copy for Ptr<C> {}
+impl<C> Clone for Ptr<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<M> Node<M> {
+impl<M> Ptr<M> {
     const MASK_TAG: u64 = 0b111;
     const MASK_PTR: u64 = !Self::MASK_TAG;
 }
 
-impl<M> Node<M>
+impl<M> Ptr<M>
 where
     M: ribbit::Pack<Packed: Meta>,
 {
@@ -368,7 +368,7 @@ where
     }
 
     pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
-        let node = unsafe { ribbit::Packed::<Option<Node<M>>>::new_unchecked(raw) };
+        let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
         if cfg!(feature = "validate") {
             node.unwrap()
         } else {
@@ -377,13 +377,13 @@ where
     }
 }
 
-impl<M> NodePacked<M>
+impl<M> PtrPacked<M>
 where
     M: ribbit::Pack<Packed: Meta>,
 {
     #[inline(never)]
     pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -416,7 +416,7 @@ where
 
     #[inline]
     pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -452,7 +452,7 @@ where
         self,
         parent: ribbit::Packed<M>,
     ) -> (node::Smo, ribbit::Packed<Edge<M>>) {
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -489,7 +489,7 @@ where
         lower: L,
         upper: U,
     ) -> node::NodeIter<'g, L, U, M> {
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -527,7 +527,7 @@ where
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -564,7 +564,7 @@ where
     pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        let ptr = self.value.get() & Node::<M>::MASK_PTR;
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let kind = self.kind();
 
         // if kind == node::Kind::NODE_3 {
@@ -625,12 +625,12 @@ where
     unsafe { node.unwrap_unchecked() }
 }
 
-impl<M> Debug for NodePacked<M> {
+impl<M> Debug for PtrPacked<M> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
             .field("kind", &self.kind())
             .field("scan", &self.scan())
-            .field("ptr", &(self.value.get() & Node::<M>::MASK_PTR))
+            .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
     }
 }

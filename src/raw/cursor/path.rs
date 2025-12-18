@@ -18,7 +18,7 @@ pub(crate) struct Segment<'k, 'g, K: Key> {
     pub(super) len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
 
     /// Node underneath `edge`
-    pub(super) node: ribbit::Packed<edge::Node<K::Edge>>,
+    pub(super) node: ribbit::Packed<edge::Ptr<K::Edge>>,
 }
 
 pub(crate) trait History<'k, 'g, K>
