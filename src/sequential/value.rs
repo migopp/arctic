@@ -73,7 +73,7 @@ unsafe impl<T> Value for Box<T> {
     }
 }
 
-macro_rules! impl_trivial {
+macro_rules! impl_integer {
     ($($ty:ty),*) => {
         $(
             unsafe impl Value for $ty {
@@ -103,4 +103,4 @@ macro_rules! impl_trivial {
     };
 }
 
-impl_trivial!(u64, u32);
+impl_integer!(u64, u32, u16, u8, i64, i32, i16, i8);
