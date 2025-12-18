@@ -297,7 +297,7 @@ where
             });
         }
 
-        unsafe { map.insert_with_pessimistic(key, &mut |_| value, &mut |_| ()) }
+        unsafe { map.upsert_with_pessimistic(key, &mut |_| value, &mut |_| ()) }
     }
 
     #[inline]
@@ -324,7 +324,7 @@ where
         });
 
         unsafe {
-            map.insert_with_pessimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
+            map.upsert_with_pessimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
                 drop(V::from_raw(raw))
             })
         }
@@ -345,7 +345,7 @@ where
     }
 
     #[cold]
-    unsafe fn insert_with_pessimistic<A, D>(
+    unsafe fn upsert_with_pessimistic<A, D>(
         &mut self,
         key: K::Borrow<'_>,
         allocate: &mut A,
