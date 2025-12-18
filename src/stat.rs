@@ -159,18 +159,6 @@ impl From<Smo> for Counter {
     }
 }
 
-impl From<edge::Smo> for Counter {
-    fn from(op: edge::Smo) -> Self {
-        Self::Op(Smo::Edge(op))
-    }
-}
-
-impl From<node::Smo> for Counter {
-    fn from(op: node::Smo) -> Self {
-        Self::Op(Smo::Node(op))
-    }
-}
-
 #[cfg(feature = "stat")]
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Thread {

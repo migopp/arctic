@@ -23,23 +23,41 @@ pub(crate) use node::Node;
 /// Structural modification operation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Smo {
-    Node(node::Smo),
-    Edge(edge::Smo),
+    #[expect(dead_code)]
+    CompressNode,
+    ReplaceNode,
+    ExpandNode,
+    DeleteNode,
+    CompressEdge,
+
+    CreateNode,
+    ExpandEdge,
 }
 
 impl Smo {
-    /// Whether this structural modification operation allocates a new node.
     #[inline]
     pub fn is_allocate(self) -> bool {
-        match self {
-            Self::Node(node) => node.is_allocate(),
-            Self::Edge(edge) => edge.is_allocate(),
-        }
+        matches!(
+            self,
+            Self::CompressNode | Self::ReplaceNode | Self::ExpandNode
+        )
+    }
+
+    #[inline]
+    pub fn is_allocate_recursive(self) -> bool {
+        matches!(self, Self::CreateNode | Self::ExpandEdge)
     }
 
     /// Whether this operation retires an old node.
     #[inline]
     pub fn is_retire(self) -> bool {
-        matches!(self, Self::Node(_))
+        matches!(
+            self,
+            Self::CompressNode
+                | Self::ReplaceNode
+                | Self::ExpandNode
+                | Self::DeleteNode
+                | Self::CompressEdge
+        )
     }
 }

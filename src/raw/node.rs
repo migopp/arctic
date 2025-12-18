@@ -29,6 +29,7 @@ use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::Edge;
+use crate::raw::Smo;
 use crate::stat;
 use linear::Linear;
 
@@ -147,12 +148,12 @@ where
             .count();
 
         if len == 0 {
-            return (Smo::Destroy, Edge::DEFAULT);
+            return (Smo::DeleteNode, Edge::DEFAULT);
         } else if len == 1 {
             let key = keys[0];
             let edge = edges[0];
             if let Some(meta) = meta.compress(key, edge.meta()) {
-                return (Smo::Compress, edge.with_meta(meta));
+                return (Smo::CompressEdge, edge.with_meta(meta));
             }
         }
 
@@ -160,12 +161,12 @@ where
         let edges = edges.into_iter().take(len);
 
         if len == Self::LEN {
-            (Smo::Grow, unsafe {
+            (Smo::ExpandNode, unsafe {
                 Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges)
             })
         } else {
             // Catch-all:
-            (Smo::Replace, unsafe {
+            (Smo::ReplaceNode, unsafe {
                 Edge::new_node_unchecked::<Self, _, _>(meta, keys, edges)
             })
         }
@@ -394,37 +395,6 @@ impl<M> Debug for PtrPacked<M> {
             .field("scan", &self.scan())
             .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
-    }
-}
-
-/// Node-related structural modification operation. Requires freezing.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Smo {
-    /// Node shrink (smaller size)
-    #[expect(dead_code)]
-    Shrink,
-
-    /// Node replacement (same size)
-    Replace,
-
-    /// Node growth (larger size)
-    Grow,
-
-    /// Node elimination
-    Destroy,
-
-    /// Path compression
-    Compress,
-}
-
-impl Smo {
-    /// Whether this operation allocates a new node.
-    #[inline]
-    pub(crate) fn is_allocate(self) -> bool {
-        match self {
-            Self::Destroy | Self::Compress => false,
-            Self::Grow | Self::Replace | Self::Shrink => true,
-        }
     }
 }
 

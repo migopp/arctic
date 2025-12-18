@@ -292,24 +292,6 @@ impl Len for u6 {
     }
 }
 
-/// Edge-related structural modification operation. Does not require freezing.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Smo {
-    /// Node creation
-    Create,
-
-    /// Path expansion
-    Expand,
-}
-
-impl Smo {
-    /// Whether this operation allocates a new node.
-    #[inline]
-    pub(crate) fn is_allocate(self) -> bool {
-        true
-    }
-}
-
 pub(crate) enum Child<C> {
     Node(ribbit::Packed<node::Ptr<C>>),
     Value(u64),

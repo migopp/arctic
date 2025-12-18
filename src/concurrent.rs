@@ -423,10 +423,7 @@ where
                                 unsafe {
                                     cursor.retire(old);
                                 }
-                            } else if matches!(
-                                op,
-                                crate::raw::Smo::Edge(crate::raw::edge::Smo::Create)
-                            ) {
+                            } else if matches!(op, crate::raw::Smo::CreateNode) {
                                 return Ok(old.as_value().map(|value| unsafe {
                                     V::guard_owned(cursor.into_guard(), value)
                                 }));
@@ -438,16 +435,16 @@ where
                             // Does not go through SMR because `new` is still thread-local
                             if op.is_allocate() {
                                 if let Some(edge::Child::Node(node)) = new.child() {
-                                    if matches!(op, crate::raw::Smo::Edge(_)) {
-                                        unsafe {
-                                            node.deallocate_recursive_unchecked(
-                                                stat::Counter::FreeConflict,
-                                            );
-                                        }
-                                    } else {
-                                        unsafe {
-                                            node.deallocate_unchecked(stat::Counter::FreeConflict);
-                                        }
+                                    unsafe {
+                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                    }
+                                }
+                            } else if op.is_allocate_recursive() {
+                                if let Some(edge::Child::Node(node)) = new.child() {
+                                    unsafe {
+                                        node.deallocate_recursive_unchecked(
+                                            stat::Counter::FreeConflict,
+                                        );
                                     }
                                 }
                             }

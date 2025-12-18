@@ -161,20 +161,17 @@ where
 
             let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
-                    Some(edge::Child::Node(node)) => {
-                        let (op, new) = unsafe { node.replace_unchecked(old_meta) };
-                        (Smo::Node(op), new)
-                    }
+                    Some(edge::Child::Node(node)) => unsafe { node.replace_unchecked(old_meta) },
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
-                        (Smo::Edge(edge::Smo::Create), Edge::new_path(save, value))
+                        (Smo::CreateNode, Edge::new_path(save, value))
                     }
                 },
                 Ok((start, middle, end)) => {
                     let _ = save.read(start.len());
                     let byte = unsafe { save.next_unchecked() };
                     (
-                        Smo::Edge(edge::Smo::Expand),
+                        Smo::ExpandEdge,
                         Edge::new_node::<Node3<K::Edge>, _, _>(
                             start,
                             [byte, middle],
