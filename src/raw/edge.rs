@@ -48,15 +48,28 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         }
     }
 
+    #[inline]
     pub(crate) fn new_path<R>(mut reader: R, value: u64) -> ribbit::Packed<Self>
     where
         R: key::Read<Edge = M>,
     {
         let key = reader.read(<<R::Edge as ribbit::Pack>::Packed as Meta>::MAX_LEN);
-        let Some(mut byte) = reader.next() else {
+        let Some(byte) = reader.next() else {
             return Self::new_value(key, value);
         };
+        Self::new_path_cold(reader, key, byte, value)
+    }
 
+    #[cold]
+    fn new_path_cold<R>(
+        mut reader: R,
+        key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
+        mut byte: u8,
+        value: u64,
+    ) -> ribbit::Packed<Self>
+    where
+        R: key::Read<Edge = M>,
+    {
         let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
         let head = ribbit::Packed::<Self>::new(
             key.with_value(false),

@@ -161,7 +161,6 @@ where
 
             let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
-                    // Some(edge::Child::Node(_)) if old_meta.is_frozen() => return Insert::Frozen,
                     Some(edge::Child::Node(node)) => {
                         let (op, new) = unsafe { node.replace_unchecked(old_meta) };
                         (Smo::Node(op), new)
@@ -171,7 +170,6 @@ where
                         (Smo::Edge(edge::Smo::Create), Edge::new_path(save, value))
                     }
                 },
-                // Ok(_) if old_meta.is_frozen() => return Insert::Frozen,
                 Ok((start, middle, end)) => {
                     let _ = save.read(start.len());
                     let byte = unsafe { save.next_unchecked() };
