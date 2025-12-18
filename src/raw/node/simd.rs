@@ -54,14 +54,6 @@ pub(super) fn get_15(array: u128, key: u8) -> u8 {
 }
 
 #[inline]
-fn get_15_simd(array: u128, key: u8) -> u8 {
-    let array = u128_to_avx(array);
-    let key = unsafe { _mm_set1_epi8(key as i8) };
-    let mask = unsafe { _mm_cmpeq_epi8(array, key) };
-    unsafe { _mm_movemask_epi8(mask) }.trailing_zeros() as u8
-}
-
-#[inline]
 fn get_15_fallback(array: u128, key: u8) -> u8 {
     array
         .to_le_bytes()
@@ -71,61 +63,12 @@ fn get_15_fallback(array: u128, key: u8) -> u8 {
         .unwrap_or(32)
 }
 
-/// Output has 8 bits set for each byte in `array` that is less than `byte` (signed).
-#[inline(always)]
-pub(super) fn mask_lt(array: u128, byte: i8) -> u128 {
+#[inline]
+fn get_15_simd(array: u128, key: u8) -> u8 {
     let array = u128_to_avx(array);
-    let byte = unsafe { _mm_set1_epi8(byte) };
-    avx_to_u128(unsafe { _mm_cmplt_epi8(array, byte) })
-}
-
-/// Output has 8 bits set for each byte in `array` that is within `min..=max` (unsigned).
-#[inline(always)]
-pub(super) fn mask_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
-    array: u128,
-    lower: L,
-    upper: U,
-) -> u128 {
-    if L::UNBOUND && U::UNBOUND {
-        return u128::MAX;
-    }
-
-    let array = u128_to_avx(array);
-
-    let min = unsafe { _mm_set1_epi8(lower.get() as i8) };
-    let max = unsafe { _mm_set1_epi8(upper.get() as i8) };
-
-    // https://stackoverflow.com/a/28383095
-    let clamp_min = unsafe { _mm_max_epu8(array, min) };
-    let clamp = unsafe { _mm_min_epu8(clamp_min, max) };
-
-    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
-}
-
-#[inline(always)]
-fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
-    let array = u128_to_avx(array as u128);
-
-    let min = unsafe { _mm_set1_epi16(min as i16) };
-    let max = unsafe { _mm_set1_epi16(max as i16) };
-
-    let clamp_min = unsafe { _mm_max_epu16(array, min) };
-    let clamp = unsafe { _mm_min_epu16(clamp_min, max) };
-    let valid = unsafe { _mm_cmpeq_epi16(array, clamp) };
-
-    (unsafe { _mm_cvtsi128_si64x(valid) } as u64)
-}
-
-/// Output has 8 bits set for each byte in `array` below `len`
-#[inline(always)]
-fn mask_len(len: u8) -> u128 {
-    avx_to_u128(unsafe { _mm_cmplt_epi8(u128_to_avx(U8_SEQ), _mm_set1_epi8(len as i8)) })
-}
-
-/// Convert byte mask to bit mask
-#[inline(always)]
-pub(super) fn mask_byte_to_bit(mask: u128) -> u16 {
-    unsafe { _mm_movemask_epi8(u128_to_avx(mask)) as u16 }
+    let key = unsafe { _mm_set1_epi8(key as i8) };
+    let mask = unsafe { _mm_cmpeq_epi8(array, key) };
+    unsafe { _mm_movemask_epi8(mask) }.trailing_zeros() as u8
 }
 
 #[inline(always)]
@@ -140,6 +83,33 @@ pub(super) fn compress_3<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
     } else {
         compress_3_simd(keys, len, lower, upper)
     }
+}
+
+#[inline(always)]
+fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u64,
+    len: u2,
+    lower: L,
+    upper: U,
+) -> KeyIter3 {
+    let mut buffer = [0u16; 3];
+
+    let len = keys
+        .to_le_bytes()
+        .into_iter()
+        .step_by(2)
+        .take(len.value() as usize)
+        .enumerate()
+        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
+        .zip(&mut buffer)
+        .map(|((index, key), out)| {
+            *out = (index as u16) | (key as u16) << 8;
+        })
+        .count();
+
+    buffer[..len].sort_unstable();
+    let buffer = unsafe { core::mem::transmute::<[u16; 3], [KeyIndex; 3]>(buffer) };
+    KeyIter3::new_3(buffer, len as u8)
 }
 
 #[inline(always)]
@@ -171,33 +141,6 @@ fn compress_3_simd<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
 }
 
 #[inline(always)]
-fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
-    keys: u64,
-    len: u2,
-    lower: L,
-    upper: U,
-) -> KeyIter3 {
-    let mut buffer = [0u16; 3];
-
-    let len = keys
-        .to_le_bytes()
-        .into_iter()
-        .step_by(2)
-        .take(len.value() as usize)
-        .enumerate()
-        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
-        .zip(&mut buffer)
-        .map(|((index, key), out)| {
-            *out = (index as u16) | (key as u16) << 8;
-        })
-        .count();
-
-    buffer[..len].sort_unstable();
-    let buffer = unsafe { core::mem::transmute::<[u16; 3], [KeyIndex; 3]>(buffer) };
-    KeyIter3::new_3(buffer, len as u8)
-}
-
-#[inline(always)]
 pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
     keys: u128,
     len: u4,
@@ -210,6 +153,32 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
     } else {
         compress_15_simd(keys, len, lower, upper, out);
     }
+}
+
+#[inline(always)]
+pub(super) fn compress_15_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    keys: u128,
+    len: u4,
+    lower: L,
+    upper: U,
+    out: &mut crate::raw::node::linear::KeyIter<15>,
+) {
+    let len = keys
+        .to_le_bytes()
+        .into_iter()
+        .take(len.value() as usize)
+        .enumerate()
+        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
+        .zip(&mut out.entries)
+        .map(|((index, key), out)| {
+            out.key = key;
+            out.index = index as u8;
+        })
+        .count();
+
+    out.entries[..len].sort_unstable();
+    out.head = 0;
+    out.tail = len as u8;
 }
 
 // https://talkchess.com/viewtopic.php?t=78804
@@ -284,32 +253,6 @@ pub(super) fn compress_15_simd<L: crate::raw::node::Lower, U: crate::raw::node::
         out.head = 0;
         out.tail = (bits >> 3) as u8;
     };
-}
-
-#[inline(always)]
-pub(super) fn compress_15_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
-    keys: u128,
-    len: u4,
-    lower: L,
-    upper: U,
-    out: &mut crate::raw::node::linear::KeyIter<15>,
-) {
-    let len = keys
-        .to_le_bytes()
-        .into_iter()
-        .take(len.value() as usize)
-        .enumerate()
-        .filter(|(_, key)| *key >= lower.get() && *key <= upper.get())
-        .zip(&mut out.entries)
-        .map(|((index, key), out)| {
-            out.key = key;
-            out.index = index as u8;
-        })
-        .count();
-
-    out.entries[..len].sort_unstable();
-    out.head = 0;
-    out.tail = len as u8;
 }
 
 #[inline(always)]
@@ -585,12 +528,69 @@ fn bitonic_sort_16(mut input: __m256i, bits: u32) -> __m256i {
     }
 }
 
-pub(super) const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
-pub(super) const U8_SEQ: u128 = 0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128;
+/// Output has 8 bits set for each byte in `array` that is less than `byte` (signed).
+#[inline(always)]
+fn mask_lt(array: u128, byte: i8) -> u128 {
+    let array = u128_to_avx(array);
+    let byte = unsafe { _mm_set1_epi8(byte) };
+    avx_to_u128(unsafe { _mm_cmplt_epi8(array, byte) })
+}
+
+/// Output has 8 bits set for each byte in `array` that is within `min..=max` (unsigned).
+#[inline(always)]
+fn mask_range<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
+    array: u128,
+    lower: L,
+    upper: U,
+) -> u128 {
+    if L::UNBOUND && U::UNBOUND {
+        return u128::MAX;
+    }
+
+    let array = u128_to_avx(array);
+
+    let min = unsafe { _mm_set1_epi8(lower.get() as i8) };
+    let max = unsafe { _mm_set1_epi8(upper.get() as i8) };
+
+    // https://stackoverflow.com/a/28383095
+    let clamp_min = unsafe { _mm_max_epu8(array, min) };
+    let clamp = unsafe { _mm_min_epu8(clamp_min, max) };
+
+    avx_to_u128(unsafe { _mm_cmpeq_epi8(array, clamp) })
+}
+
+#[inline(always)]
+fn mask_range_4(array: u64, min: u8, max: u8) -> u64 {
+    let array = u128_to_avx(array as u128);
+
+    let min = unsafe { _mm_set1_epi16(min as i16) };
+    let max = unsafe { _mm_set1_epi16(max as i16) };
+
+    let clamp_min = unsafe { _mm_max_epu16(array, min) };
+    let clamp = unsafe { _mm_min_epu16(clamp_min, max) };
+    let valid = unsafe { _mm_cmpeq_epi16(array, clamp) };
+
+    (unsafe { _mm_cvtsi128_si64x(valid) } as u64)
+}
+
+/// Output has 8 bits set for each byte in `array` below `len`
+#[inline(always)]
+fn mask_len(len: u8) -> u128 {
+    avx_to_u128(unsafe { _mm_cmplt_epi8(u128_to_avx(U8_SEQ), _mm_set1_epi8(len as i8)) })
+}
+
+/// Convert byte mask to bit mask
+#[inline(always)]
+fn mask_byte_to_bit(mask: u128) -> u16 {
+    unsafe { _mm_movemask_epi8(u128_to_avx(mask)) as u16 }
+}
+
+const U8_16: u128 = 0x1010_1010_1010_1010_1010_1010_1010_1010u128;
+const U8_SEQ: u128 = 0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128;
 
 // https://stackoverflow.com/a/29155682
 #[inline(always)]
-pub(super) fn mul(a: u128, b: u8) -> u128 {
+fn mul(a: u128, b: u8) -> u128 {
     let a = u128_to_avx(a);
     let b = unsafe { _mm_set1_epi8(b as i8) };
 
@@ -606,7 +606,7 @@ pub(super) fn mul(a: u128, b: u8) -> u128 {
 }
 
 #[inline(always)]
-pub(super) fn add(a: u128, b: u128) -> u128 {
+fn add(a: u128, b: u128) -> u128 {
     avx_to_u128(unsafe { _mm_adds_epu8(u128_to_avx(a), u128_to_avx(b)) })
 }
 
