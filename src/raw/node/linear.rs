@@ -101,17 +101,7 @@ where
         }
     }
 
-    fn freeze(&self) {
-        Linear::freeze(self);
-    }
-}
-
-impl<const LEN: usize, H, M> Linear<LEN, H, M>
-where
-    H: ribbit::Pack<Packed: Header>,
-    M: ribbit::Pack<Packed: edge::Meta>,
-{
-    fn freeze(&self) {
+    fn freeze_header(&self) -> usize {
         let mut header = self.header.load_packed(Ordering::Relaxed);
 
         while !header.is_frozen() {
@@ -126,10 +116,7 @@ where
             }
         }
 
-        self.edges
-            .iter()
-            .take(header.len() as usize)
-            .for_each(Edge::freeze);
+        header.len() as usize
     }
 }
 

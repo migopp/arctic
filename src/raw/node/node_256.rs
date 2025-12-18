@@ -67,8 +67,9 @@ where
         Some(key)
     }
 
-    fn freeze(&self) {
-        self.0.iter().for_each(Edge::freeze);
+    #[inline]
+    fn freeze_header(&self) -> usize {
+        Self::LEN
     }
 }
 

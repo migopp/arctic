@@ -100,7 +100,12 @@ where
         })
     }
 
-    fn freeze(&self);
+    fn freeze(&self) {
+        let len = self.freeze_header();
+        self.edges().iter().take(len).for_each(Edge::freeze)
+    }
+
+    fn freeze_header(&self) -> usize;
 
     fn replace<const LEN_: usize>(
         &self,

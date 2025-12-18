@@ -81,9 +81,9 @@ where
         self.header.insert(key)
     }
 
-    fn freeze(&self) {
-        self.header.freeze();
-        self.edges.iter().for_each(Edge::freeze);
+    #[inline]
+    fn freeze_header(&self) -> usize {
+        self.header.freeze() as usize
     }
 }
 
@@ -117,7 +117,7 @@ impl Default for Header {
 const _: [(); 272] = [(); core::mem::size_of::<Header>()];
 
 impl Header {
-    fn freeze(&self) {
+    fn freeze(&self) -> u8 {
         let mut old = self.meta.load_packed(Ordering::Relaxed);
         while !old.frozen() {
             self.ensure_meta_consistent(old);
@@ -131,6 +131,7 @@ impl Header {
                 Err(conflict) => old = conflict,
             }
         }
+        old.len().value()
     }
 
     #[inline]
