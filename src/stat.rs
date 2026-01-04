@@ -144,7 +144,6 @@ pub(crate) enum Max {
 
 pub(crate) enum Record {
     Flush,
-    RangeConflict,
     FreezePop,
     ReclaimDepth,
     ReclaimAge0,
@@ -174,7 +173,6 @@ pub struct Thread {
     free_reclaim: u64,
     free_drop: u64,
     hazard_match: u64,
-    range_retry: Histogram,
     scan_insert: u64,
     scan_update: u64,
     scan_scan: u64,
@@ -287,7 +285,6 @@ pub(crate) fn record(_record: Record, _value: u64) {
         THREAD.with_borrow_mut(|thread| {
             let old = match _record {
                 Record::Flush => &mut thread.flush,
-                Record::RangeConflict => &mut thread.range_retry,
                 Record::FreezePop => &mut thread.freeze_pop,
                 Record::ReclaimDepth => &mut thread.reclaim_depth,
                 Record::ReclaimAge0 => &mut thread.reclaim_age_0,

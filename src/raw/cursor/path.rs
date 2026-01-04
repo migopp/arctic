@@ -78,35 +78,3 @@ where
         Ok(self.path.pop())
     }
 }
-
-pub(crate) enum Hybrid<'k, 'g, K: Key> {
-    Discard { root: &'g Atomic<Edge<K::Edge>> },
-    Retain(Retain<'k, 'g, K>),
-}
-
-impl<'k, 'g, K> History<'k, 'g, K> for Hybrid<'k, 'g, K>
-where
-    K: Key,
-{
-    type PopError = ();
-
-    fn new(root: &'g Atomic<Edge<K::Edge>>, _key: K::Read<'k>) -> Self {
-        Self::Discard { root }
-    }
-
-    #[inline]
-    fn push(&mut self, segment: Segment<'k, 'g, K>) {
-        match self {
-            Self::Discard { .. } => (),
-            Self::Retain(retain) => retain.push(segment),
-        }
-    }
-
-    #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'k, 'g, K>>, Self::PopError> {
-        match self {
-            Self::Discard { .. } => Err(()),
-            Self::Retain(retain) => Ok(retain.pop().unwrap()),
-        }
-    }
-}

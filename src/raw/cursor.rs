@@ -2,7 +2,6 @@ pub(crate) mod path;
 
 use core::sync::atomic::Ordering;
 
-use path::History as _;
 use ribbit::Atomic;
 
 use crate::raw::edge;
@@ -83,13 +82,6 @@ where
             let len = self.key.match_exact(meta)?;
 
             if let Some(node) = edge.as_node() {
-                if node.scan() {
-                    match self.wait_for_scan(stat::Counter::ScanUpdate) {
-                        Ok(_) => continue,
-                        Err(()) => return Some(Err(())),
-                    }
-                }
-
                 let byte = if cfg!(feature = "validate") {
                     self.key
                         .next()
@@ -140,13 +132,6 @@ where
             // Fast path: traverse
             if exact {
                 if let Some(node) = old.as_node() {
-                    if node.scan() {
-                        match self.wait_for_scan(stat::Counter::ScanInsert) {
-                            Ok(_) => continue,
-                            Err(()) => return Err(()),
-                        }
-                    }
-
                     let byte = if cfg!(feature = "validate") {
                         self.key
                             .next()
@@ -210,19 +195,19 @@ where
 
             let meta = edge.meta();
 
-            let old = match edge.child() {
-                Some(edge::Child::Node(old)) if old == node => old,
+            match edge.child() {
+                Some(edge::Child::Node(old)) if old == node => (),
                 // Already helped by another thread OR freeze was pushed down by
                 // a concurrent edge expansion operation
                 None | Some(_) => break None,
-            };
+            }
 
             let (op, new) = unsafe { node.replace_unchecked(meta) };
 
             match self.edge.compare_exchange_packed(
                 edge,
                 // FIXME: shouldn't need to unwrap here
-                new.with_node(unsafe { new.as_node().unwrap_unchecked() }.with_scan(old.scan())),
+                new.with_node(unsafe { new.as_node().unwrap_unchecked() }),
                 Ordering::AcqRel,
                 Ordering::Relaxed,
             ) {
@@ -245,27 +230,6 @@ where
 
         stat::record(stat::Record::FreezePop, pop);
         Ok(edge)
-    }
-
-    #[cold]
-    pub(crate) fn wait_for_scan(
-        &self,
-        counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<K::Edge>>, ()> {
-        stat::increment(counter);
-
-        loop {
-            core::hint::spin_loop();
-            let edge = self.edge.load_packed(Ordering::Acquire);
-
-            match edge.child() {
-                None => return Ok(edge),
-                Some(edge::Child::Value(_)) => unreachable!(),
-                Some(edge::Child::Node(node)) if !node.scan() => return Ok(edge),
-                Some(edge::Child::Node(_)) if edge.meta().is_frozen() => return Err(()),
-                Some(edge::Child::Node(_)) => continue,
-            }
-        }
     }
 
     #[inline]
@@ -386,41 +350,6 @@ where
                 return Some(edge);
             }
         }
-    }
-}
-
-impl<'k, 'g, K> Prefix<'k, 'g, K, path::Hybrid<'k, 'g, K>>
-where
-    K: Key,
-{
-    #[cold]
-    pub(crate) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
-        todo!()
-        // match self.cursor.freeze() {
-        //     Ok(()) => return self.traverse(),
-        //     Err(()) => (),
-        // }
-        //
-        // self.upgrade();
-        // self.traverse()?;
-        // match self.cursor.freeze() {
-        //     Ok(()) => self.traverse(),
-        //     Err(()) => unreachable!(),
-        // }
-    }
-
-    #[expect(unused)]
-    #[cold]
-    fn upgrade(&mut self) {
-        let root = match self.history {
-            path::Hybrid::Discard { root } => root,
-            path::Hybrid::Retain { .. } => return,
-        };
-
-        self.edge = root;
-        self.key = self.prefix;
-        self.bits = 0;
-        self.history = path::Hybrid::Retain(path::Retain::new(root, self.key));
     }
 }
 

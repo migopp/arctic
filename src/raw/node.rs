@@ -179,8 +179,6 @@ pub(crate) struct Ptr<C> {
     #[ribbit(size = 2, get(vis = "pub(crate)"))]
     kind: Kind,
 
-    pub(crate) scan: bool,
-
     #[ribbit(with(skip))]
     _placeholder: NonZeroU32,
 
@@ -392,7 +390,6 @@ impl<M> Debug for PtrPacked<M> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
             .field("kind", &self.kind())
-            .field("scan", &self.scan())
             .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
     }

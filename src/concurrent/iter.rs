@@ -72,10 +72,6 @@ where
             },
         }
     }
-
-    pub(crate) fn guard_value(self) -> V::LinearizableGuard<'g, 'l, K::Prefix> {
-        unsafe { V::downgrade_guard(self.guard) }
-    }
 }
 
 /// Iterator over keys and values

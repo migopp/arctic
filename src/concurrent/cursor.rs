@@ -7,7 +7,6 @@ use crate::raw;
 pub(super) use crate::raw::cursor::path;
 use crate::raw::Edge;
 use crate::raw::Smo;
-use crate::stat;
 use crate::Key;
 
 /// Tree traversal state.
@@ -168,23 +167,5 @@ where
     #[expect(unused)]
     pub(super) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
         self.raw.traverse()
-    }
-
-    pub(super) fn wait_for_scan(
-        &mut self,
-        counter: stat::Counter,
-    ) -> Result<ribbit::Packed<Edge<K::Edge>>, ()> {
-        self.raw.wait_for_scan(counter)
-    }
-}
-
-impl<'k, 'g, 'l, K, V> Prefix<'k, 'g, 'l, K, V, path::Hybrid<'k, 'g, K>>
-where
-    K: Key,
-    V: Value,
-{
-    #[cold]
-    pub(super) fn freeze(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
-        self.raw.freeze()
     }
 }
