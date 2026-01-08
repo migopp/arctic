@@ -173,6 +173,51 @@ where
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
+#[ribbit(size = 2, eq, debug, packed(rename = "KindPacked"))]
+pub(crate) enum Kind {
+    Node3 = 0,
+    Node15 = 1,
+    Node47 = 2,
+    Node256 = 3,
+}
+
+impl Default for Kind {
+    fn default() -> Self {
+        Self::Node3
+    }
+}
+
+// We use a manual if-else chain instead of a match here because LLVM generates
+// a jump table for the latter. In our experiments, we observe that a jump table
+// in hot loops causes significant slowdowns: the jump table causes more branch
+// mispredictions, and the mispredicted branches cause excess cache coherence
+// traffic for cache lines that would otherwise be untouched.
+//
+// We use a macro instead of a function because there is no way to express mutually
+// exclusive closures as parameters. We sometimes need $node3, $node15, $node47, and
+// $node256 to borrow the same data mutably.
+macro_rules! dispatch {
+    ($kind:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
+        let kind = $kind.value.value();
+        let hi = kind & 0b10;
+        let lo = kind & 0b01;
+
+        if hi == 0 {
+            if lo == 0 {
+                $node3
+            } else {
+                $node15
+            }
+        } else if lo == 0 {
+            $node47
+        } else {
+            $node256
+        }
+    }};
+}
+pub(super) use dispatch;
+
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
 pub(crate) struct Ptr<M> {
@@ -358,21 +403,13 @@ where
         M: 'g,
     {
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
-        let kind = self.kind().raw();
-        let hi = kind & 0b10;
-        let lo = kind & 0b01;
-
-        if hi == 0 {
-            if lo == 0 {
-                node_3(unsafe { Self::as_ref(ptr) })
-            } else {
-                node_15(unsafe { Self::as_ref(ptr) })
-            }
-        } else if lo == 0 {
-            node_47(unsafe { Self::as_ref(ptr) })
-        } else {
-            node_256(unsafe { Self::as_ref(ptr) })
-        }
+        dispatch!(
+            self.kind(),
+            node_3(unsafe { Self::as_ref(ptr) }),
+            node_15(unsafe { Self::as_ref(ptr) }),
+            node_47(unsafe { Self::as_ref(ptr) }),
+            node_256(unsafe { Self::as_ref(ptr) }),
+        )
     }
 
     #[inline(always)]
@@ -392,33 +429,5 @@ impl<M> Debug for PtrPacked<M> {
             .field("kind", &self.kind())
             .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 2, eq, debug, packed(rename = "KindPacked"))]
-pub(crate) enum Kind {
-    Node3 = 0,
-    Node15 = 1,
-    Node47 = 2,
-    Node256 = 3,
-}
-
-impl Default for Kind {
-    fn default() -> Self {
-        Self::Node3
-    }
-}
-
-impl Kind {
-    pub(crate) const NODE_3: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node3();
-    pub(crate) const NODE_15: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node15();
-    pub(crate) const NODE_47: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node47();
-    pub(crate) const NODE_256: ribbit::Packed<Kind> = ribbit::Packed::<Kind>::new_node256();
-}
-
-impl KindPacked {
-    pub(crate) fn raw(self) -> u8 {
-        self.value.value()
     }
 }

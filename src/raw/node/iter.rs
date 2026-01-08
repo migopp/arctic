@@ -4,6 +4,7 @@ use core::ptr::NonNull;
 
 use ribbit::u2;
 use ribbit::Atomic;
+use ribbit::Pack as _;
 
 use crate::raw::iter::Unbound;
 use crate::raw::node;
@@ -201,7 +202,7 @@ impl KeyIter {
     #[inline]
     pub(super) fn try_into_single(self) -> Result<KeyIndex, Self> {
         let kind = self.kind();
-        if kind == node::Kind::NODE_3 {
+        if kind == node::Kind::Node3.pack() {
             if let Some(index) = unsafe { self.node_3 }.try_into_single() {
                 return Ok(index);
             }
@@ -212,7 +213,7 @@ impl KeyIter {
     #[inline]
     pub(super) fn new_3(node_3: linear::KeyIter3) -> Self {
         let iter = Self { node_3 };
-        validate_eq!(iter.kind(), node::Kind::NODE_3);
+        validate_eq!(iter.kind(), node::Kind::Node3.pack());
         iter
     }
 
@@ -222,7 +223,7 @@ impl KeyIter {
             node_15: NonNull::from(Box::leak(node_15))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_15) }),
         };
-        validate_eq!(iter.kind(), node::Kind::NODE_15);
+        validate_eq!(iter.kind(), node::Kind::Node15.pack());
         iter
     }
 
@@ -232,20 +233,20 @@ impl KeyIter {
             node_47: NonNull::from(Box::leak(node_47))
                 .map_addr(|addr| unsafe { NonZeroUsize::new_unchecked(addr.get() | Self::TAG_47) }),
         };
-        validate_eq!(iter.kind(), node::Kind::NODE_47);
+        validate_eq!(iter.kind(), node::Kind::Node47.pack());
         iter
     }
 
     #[inline]
     pub(super) fn new_256(node_256: node_256::KeyIter) -> Self {
         let iter = Self { node_256 };
-        validate_eq!(iter.kind(), node::Kind::NODE_256);
+        validate_eq!(iter.kind(), node::Kind::Node256.pack());
         iter
     }
 
     #[inline]
     unsafe fn as_node_15_unchecked(&self) -> NonNull<linear::KeyIter<15>> {
-        validate_eq!(self.kind(), node::Kind::NODE_15);
+        validate_eq!(self.kind(), node::Kind::Node15.pack());
         unsafe {
             self.node_15.map_addr(|addr| {
                 validate_eq!(addr.get() & Self::TAG_15, Self::TAG_15);
@@ -256,7 +257,7 @@ impl KeyIter {
 
     #[inline]
     unsafe fn as_node_47_unchecked(&self) -> NonNull<linear::KeyIter<63>> {
-        validate_eq!(self.kind(), node::Kind::NODE_47);
+        validate_eq!(self.kind(), node::Kind::Node47.pack());
         unsafe {
             self.node_47.map_addr(|addr| {
                 validate_eq!(addr.get() & Self::TAG_47, Self::TAG_47);
@@ -271,53 +272,41 @@ impl Iterator for KeyIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let kind = self.kind();
-        if kind == node::Kind::NODE_256 {
+        node::dispatch!(
+            self.kind(),
+            unsafe { &mut self.node_3 }.next(),
+            unsafe { self.as_node_15_unchecked().as_mut() }.next(),
+            unsafe { self.as_node_47_unchecked().as_mut() }.next(),
             unsafe { &mut self.node_256 }
                 .next()
-                .map(|key| KeyIndex { key, index: key })
-        } else if kind == node::Kind::NODE_3 {
-            unsafe { &mut self.node_3 }.next()
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { self.as_node_15_unchecked().as_mut() }.next()
-        } else {
-            validate_eq!(kind, node::Kind::NODE_47);
-            unsafe { self.as_node_47_unchecked().as_mut() }.next()
-        }
+                .map(|key| KeyIndex { key, index: key }),
+        )
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let kind = self.kind();
-        if kind == node::Kind::NODE_256 {
-            unsafe { &self.node_256 }.size_hint()
-        } else if kind == node::Kind::NODE_3 {
-            unsafe { &self.node_3 }.size_hint()
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { self.as_node_15_unchecked().as_ref() }.size_hint()
-        } else {
-            validate_eq!(kind, node::Kind::NODE_47);
-            unsafe { self.as_node_47_unchecked().as_ref() }.size_hint()
-        }
+        node::dispatch!(
+            self.kind(),
+            unsafe { &self.node_3 }.size_hint(),
+            unsafe { self.as_node_15_unchecked().as_ref() }.size_hint(),
+            unsafe { self.as_node_47_unchecked().as_ref() }.size_hint(),
+            unsafe { &self.node_256 }.size_hint(),
+        )
     }
 }
 
 impl DoubleEndedIterator for KeyIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let kind = self.kind();
-        if kind == node::Kind::NODE_256 {
+        node::dispatch!(
+            self.kind(),
+            unsafe { &mut self.node_3 }.next_back(),
+            unsafe { self.as_node_15_unchecked().as_mut() }.next_back(),
+            unsafe { self.as_node_47_unchecked().as_mut() }.next_back(),
             unsafe { &mut self.node_256 }
                 .next_back()
-                .map(|key| KeyIndex { key, index: key })
-        } else if kind == node::Kind::NODE_3 {
-            unsafe { &mut self.node_3 }.next_back()
-        } else if kind == node::Kind::NODE_15 {
-            unsafe { self.as_node_15_unchecked().as_mut() }.next_back()
-        } else {
-            validate_eq!(kind, node::Kind::NODE_47);
-            unsafe { self.as_node_47_unchecked().as_mut() }.next_back()
-        }
+                .map(|key| KeyIndex { key, index: key }),
+        )
     }
 }
 
@@ -332,13 +321,13 @@ impl ExactSizeIterator for KeyIter {
 
 impl Drop for KeyIter {
     fn drop(&mut self) {
-        let kind = self.kind();
-
-        if kind == node::Kind::NODE_15 {
-            drop(unsafe { Box::from_raw(self.as_node_15_unchecked().as_ptr()) });
-        } else if kind == node::Kind::NODE_47 {
-            drop(unsafe { Box::from_raw(self.as_node_47_unchecked().as_ptr()) });
-        }
+        node::dispatch!(
+            self.kind(),
+            (),
+            drop(unsafe { Box::from_raw(self.as_node_15_unchecked().as_ptr()) }),
+            drop(unsafe { Box::from_raw(self.as_node_47_unchecked().as_ptr()) }),
+            (),
+        )
     }
 }
 
