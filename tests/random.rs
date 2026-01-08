@@ -32,7 +32,7 @@ mod u64 {
 
         type Value = u64;
 
-        fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
+        fn key(&self, index: usize) -> Self::Key {
             index as u64
         }
 
@@ -98,7 +98,7 @@ mod boxed {
 
         type Value = Box<Entry>;
 
-        fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a> {
+        fn key(&self, index: usize) -> Self::Key {
             index as u32
         }
 
@@ -121,12 +121,73 @@ mod boxed {
     }
 }
 
+mod vec {
+    use core::hash::Hasher as _;
+
+    use arctic::raw::Key;
+
+    use super::test_map;
+    use super::Workload;
+
+    struct Bytes;
+
+    #[test]
+    fn many() {
+        test_map(&Bytes, 100, 10_000_000, false);
+    }
+
+    #[test]
+    fn two() {
+        test_map(&Bytes, 2, 1_000_000, false);
+    }
+
+    #[test]
+    fn one() {
+        test_map(&Bytes, 1, 1_000_000, false);
+    }
+
+    impl Workload for Bytes {
+        type Key = Vec<u8>;
+        type Value = u64;
+
+        fn key(&self, index: usize) -> Self::Key {
+            let mut hasher = rapidhash::fast::RapidHasher::default_const();
+            hasher.write_usize(index);
+            let len = hasher.finish() % 16 + 16;
+            let mut buffer = Vec::new();
+            for i in 0..len {
+                hasher.write_u64(i);
+                buffer.push(hasher.finish() as u8);
+            }
+            buffer.push(0);
+            buffer
+        }
+
+        fn value(&self, index: usize) -> Self::Value {
+            index as u64
+        }
+
+        fn validate<'a, 'g, 'l>(
+            &'a self,
+            index: usize,
+            key: <Self::Key as Key>::Borrow<'a>,
+            value: u64,
+        ) where
+            'a: 'g,
+            'g: 'l,
+        {
+            assert_eq!(key, self.key(index));
+            assert_eq!(value, index as u64);
+        }
+    }
+}
+
 trait Workload: Sized + Sync {
     type Key: arctic::concurrent::Key + Sync;
 
     type Value: arctic::Value + Send + Sync;
 
-    fn key<'a>(&'a self, index: usize) -> <Self::Key as Key>::Borrow<'a>;
+    fn key(&self, index: usize) -> Self::Key;
 
     fn value(&self, index: usize) -> Self::Value;
 
@@ -142,7 +203,7 @@ trait Workload: Sized + Sync {
 
 fn test_map<'k, K: Workload>(key_set: &'k K, thread_count: usize, key_count: usize, hash: bool)
 where
-    for<'a> <K::Key as Key>::Borrow<'a>: Sync,
+    for<'a> <K::Key as Key>::Borrow<'a>: Sync + core::fmt::Debug,
 {
     assert_eq!(key_count % thread_count, 0);
 
@@ -178,22 +239,26 @@ where
 
                 for (index, key) in chunk {
                     let value = key_set.value(*index);
-                    let old = map.upsert(*key, value);
+                    let old = map.upsert(key.borrow(), value);
                     assert!(old.is_none());
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
-                    let value = map.remove(*key).unwrap();
-                    key_set.validate(*index, *key, K::Value::borrow_owned(&value));
+                    let value = map.remove(key.borrow()).unwrap();
+                    key_set.validate(*index, key.borrow(), K::Value::borrow_owned(&value));
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().skip(chunk.len() / 2) {
-                    let value = map.get(*key);
-                    key_set.validate(*index, *key, K::Value::borrow_shared(&value.unwrap()));
+                    let value = map.get(key.borrow());
+                    key_set.validate(
+                        *index,
+                        key.borrow(),
+                        K::Value::borrow_shared(&value.unwrap()),
+                    );
                 }
             });
         }
