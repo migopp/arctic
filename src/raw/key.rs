@@ -344,7 +344,6 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 #[cfg(test)]
 mod tests {
     use crate::raw::edge;
-    use crate::raw::edge::Key as _;
     use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
     use crate::raw::Key;
@@ -355,8 +354,8 @@ mod tests {
         lens: &[usize],
     ) {
         let mut reader = K::Read::from(key.into());
-
         let mut index = 0;
+        let mut actual = Vec::new();
 
         for len in lens
             .iter()
@@ -368,9 +367,9 @@ mod tests {
 
             let bytes = len.bits() >> 3;
 
-            reader
-                .read(len)
-                .with_bytes(|actual| assert_eq!(actual, &array[index..][..bytes]));
+            actual.clear();
+            actual.extend(reader.read(len));
+            assert_eq!(actual, &array[index..][..bytes]);
 
             index += bytes;
         }

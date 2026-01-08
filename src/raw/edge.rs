@@ -260,16 +260,13 @@ pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug {
     fn compress(self, byte: u8, child: Self) -> Option<Self>;
 }
 
-pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug {
+pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u8> {
     type Meta;
     type Len: Len;
 
     fn len(self) -> Self::Len;
     fn with_value(self, value: bool) -> Self::Meta;
     fn prefix(self, len: Self::Len) -> Self;
-
-    #[cfg_attr(not(test), expect(unused))]
-    fn with_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
 }
 
 pub(crate) trait Len: Copy + Eq {
