@@ -12,17 +12,17 @@ mod u64 {
 
     #[test]
     fn many() {
-        test_map(&U64, 128, 1_000_000, false);
+        test_map(&U64, 100, 10_000_000, false);
     }
 
     #[test]
     fn two() {
-        test_map(&U64, 2, 1_000_000, true);
+        test_map(&U64, 2, 10_000_000, true);
     }
 
     #[test]
     fn one() {
-        test_map(&U64, 1, 1_000_000, true);
+        test_map(&U64, 1, 10_000_000, true);
     }
 
     struct U64;
@@ -64,13 +64,18 @@ mod boxed {
     struct Boxed;
 
     #[test]
+    fn many() {
+        test_map(&Boxed, 100, 10_000_000, false);
+    }
+
+    #[test]
     fn two() {
-        test_map(&Boxed, 2, 1_000_000, false);
+        test_map(&Boxed, 2, 10_000_000, false);
     }
 
     #[test]
     fn one() {
-        test_map(&Boxed, 1, 1_000_000, false);
+        test_map(&Boxed, 1, 10_000_000, false);
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -135,17 +140,15 @@ trait Workload: Sized + Sync {
         'g: 'l;
 }
 
-fn test_map<'k, K: Workload>(
-    key_set: &'k K,
-    thread_count: usize,
-    key_count_per_thread: usize,
-    hash: bool,
-) where
+fn test_map<'k, K: Workload>(key_set: &'k K, thread_count: usize, key_count: usize, hash: bool)
+where
     for<'a> <K::Key as Key>::Borrow<'a>: Sync,
 {
+    assert_eq!(key_count % thread_count, 0);
+
     let barrier = &Barrier::new(thread_count);
     let items = if hash {
-        let mut indices = (0..key_count_per_thread * thread_count)
+        let mut indices = (0..key_count)
             .map(|index| {
                 let mut hasher = rapidhash::fast::RapidHasher::default_const();
                 hasher.write_usize(index);
@@ -159,7 +162,7 @@ fn test_map<'k, K: Workload>(
             .map(|index| (index, key_set.key(index)))
             .collect::<Vec<_>>()
     } else {
-        (0..key_count_per_thread * thread_count)
+        (0..key_count)
             .map(|index| (index, key_set.key(index)))
             .collect::<Vec<_>>()
     };
@@ -167,7 +170,7 @@ fn test_map<'k, K: Workload>(
     let map = &arctic::concurrent::Map::<K::Key, _>::default();
 
     std::thread::scope(|scope| {
-        for chunk in items.chunks_exact(key_count_per_thread) {
+        for chunk in items.chunks_exact(key_count / thread_count) {
             scope.spawn(move || {
                 let mut map = map.pin();
 
