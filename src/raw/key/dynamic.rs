@@ -112,14 +112,14 @@ impl key::Write for Writer {
 
     #[inline]
     fn len_from_bits(bits: usize) -> Self::Len {
-        bits
+        bits >> 3
     }
 
     #[inline]
-    fn write(&mut self, bits: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
-        validate_eq!(bits, self.0.len() << 3);
+    fn write(&mut self, len: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
+        validate_eq!(len, self.0.len());
         self.0.extend(edge);
-        self.0.len() << 3
+        self.0.len()
     }
 
     #[inline]
@@ -129,11 +129,11 @@ impl key::Write for Writer {
         node: u8,
         edge: ribbit::Packed<Self::Edge>,
     ) -> Self::Len {
-        validate!(start <= (self.0.len() << 3));
-        self.0.truncate(start >> 3);
+        validate!(start <= self.0.len());
+        self.0.truncate(start);
         self.0.push(node);
         self.0.extend(edge);
-        self.0.len() << 3
+        self.0.len()
     }
 }
 
