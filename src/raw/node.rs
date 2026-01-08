@@ -281,7 +281,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
+    pub(crate) unsafe fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
         let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
         if cfg!(feature = "validate") {
             node.unwrap()
