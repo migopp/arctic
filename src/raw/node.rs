@@ -199,20 +199,31 @@ impl Default for Kind {
 // $node256 to borrow the same data mutably.
 macro_rules! dispatch {
     ($kind:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
-        let kind = $kind.value.value();
-        let hi = kind & 0b10;
-        let lo = kind & 0b01;
-
-        if hi == 0 {
-            if lo == 0 {
-                $node3
-            } else {
-                $node15
+        if cfg!(feature = "opt-no-dispatch") {
+            use crate::raw::node::Kind;
+            use ribbit::Unpack as _;
+            match $kind.unpack() {
+                Kind::Node3 => $node3,
+                Kind::Node15 => $node15,
+                Kind::Node47 => $node47,
+                Kind::Node256 => $node256,
             }
-        } else if lo == 0 {
-            $node47
         } else {
-            $node256
+            let kind = $kind.value.value();
+            let hi = kind & 0b10;
+            let lo = kind & 0b01;
+
+            if hi == 0 {
+                if lo == 0 {
+                    $node3
+                } else {
+                    $node15
+                }
+            } else if lo == 0 {
+                $node47
+            } else {
+                $node256
+            }
         }
     }};
 }

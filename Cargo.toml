@@ -15,6 +15,7 @@ opt-no-int = []
 opt-no-expand = []
 opt-membarrier = ["dep:libc"]
 opt-no-path = []
+opt-no-dispatch = []
 
 smr-disable = []
 smr-epoch = ["dep:crossbeam-epoch"]
