@@ -7,6 +7,7 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 use ribbit::OptionExt as _;
+use ribbit::Pack as _;
 
 mod iter;
 mod linear;
@@ -303,20 +304,20 @@ where
     #[inline]
     pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         self.dispatch(
-            |node| node.get(key),
-            |node| node.get(key),
-            |node| node.get(key),
-            |node| node.get(key),
+            |node| unsafe { node.as_ref() }.get(key),
+            |node| unsafe { node.as_ref() }.get(key),
+            |node| unsafe { node.as_ref() }.get(key),
+            |node| unsafe { node.as_ref() }.get(key),
         )
     }
 
     #[inline]
     pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         self.dispatch(
-            |node| node.get_or_insert(key),
-            |node| node.get_or_insert(key),
-            |node| node.get_or_insert(key),
-            |node| node.get_or_insert(key),
+            |node| unsafe { node.as_ref() }.get_or_insert(key),
+            |node| unsafe { node.as_ref() }.get_or_insert(key),
+            |node| unsafe { node.as_ref() }.get_or_insert(key),
+            |node| unsafe { node.as_ref() }.get_or_insert(key),
         )
     }
 
@@ -326,10 +327,10 @@ where
         parent: ribbit::Packed<M>,
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
         self.dispatch(
-            |node| node.replace::<3>(parent),
-            |node| node.replace::<15>(parent),
-            |node| node.replace::<47>(parent),
-            |node| node.replace::<256>(parent),
+            |node| unsafe { node.as_ref() }.replace::<3>(parent),
+            |node| unsafe { node.as_ref() }.replace::<15>(parent),
+            |node| unsafe { node.as_ref() }.replace::<47>(parent),
+            |node| unsafe { node.as_ref() }.replace::<256>(parent),
         )
     }
 
@@ -340,10 +341,10 @@ where
         upper: U,
     ) -> NodeIter<'g, L, U, M> {
         self.dispatch(
-            |node| node.entries(lower, upper),
-            |node| node.entries(lower, upper),
-            |node| node.entries(lower, upper),
-            |node| node.entries(lower, upper),
+            |node| unsafe { node.as_ref() }.entries(lower, upper),
+            |node| unsafe { node.as_ref() }.entries(lower, upper),
+            |node| unsafe { node.as_ref() }.entries(lower, upper),
+            |node| unsafe { node.as_ref() }.entries(lower, upper),
         )
     }
 
@@ -353,10 +354,10 @@ where
     pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
         self.dispatch(
-            |node| drop(Box::from_raw((node as *const Node3<_>).cast_mut())),
-            |node| drop(Box::from_raw((node as *const Node15<_>).cast_mut())),
-            |node| drop(Box::from_raw((node as *const Node47<_>).cast_mut())),
-            |node| drop(Box::from_raw((node as *const Node256<_>).cast_mut())),
+            |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
+            |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
+            |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
+            |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
         )
     }
 
@@ -366,40 +367,19 @@ where
     pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        self.dispatch(
-            |node| {
-                let mut node = Box::from_raw((node as *const Node3<_>).cast_mut());
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            },
-            |node| {
-                let mut node = Box::from_raw((node as *const Node15<_>).cast_mut());
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            },
-            |node| {
-                let mut node = Box::from_raw((node as *const Node47<_>).cast_mut());
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            },
-            |node| {
-                let mut node = Box::from_raw((node as *const Node256<_>).cast_mut());
-                if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-                    child.deallocate_recursive_unchecked(counter);
-                }
-                drop(node);
-            },
-        );
+        validate_eq!(self.kind(), Kind::Node3.pack());
+
+        let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
+        let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
+        if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
+            child.deallocate_recursive_unchecked(counter);
+        }
+
+        drop(node);
     }
 
     #[inline(always)]
-    fn dispatch<'g, N3, N15, N47, N256, T>(
+    fn dispatch<N3, N15, N47, N256, T>(
         self,
         node_3: N3,
         node_15: N15,
@@ -407,30 +387,32 @@ where
         node_256: N256,
     ) -> T
     where
-        N3: FnOnce(&'g Node3<M>) -> T,
-        N15: FnOnce(&'g Node15<M>) -> T,
-        N47: FnOnce(&'g Node47<M>) -> T,
-        N256: FnOnce(&'g Node256<M>) -> T,
-        M: 'g,
+        N3: FnOnce(NonNull<Node3<M>>) -> T,
+        N15: FnOnce(NonNull<Node15<M>>) -> T,
+        N47: FnOnce(NonNull<Node47<M>>) -> T,
+        N256: FnOnce(NonNull<Node256<M>>) -> T,
     {
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         dispatch!(
             self.kind(),
-            node_3(unsafe { Self::as_ref(ptr) }),
-            node_15(unsafe { Self::as_ref(ptr) }),
-            node_47(unsafe { Self::as_ref(ptr) }),
-            node_256(unsafe { Self::as_ref(ptr) }),
+            node_3(unsafe { Self::as_ptr(ptr) }),
+            node_15(unsafe { Self::as_ptr(ptr) }),
+            node_47(unsafe { Self::as_ptr(ptr) }),
+            node_256(unsafe { Self::as_ptr(ptr) }),
         )
     }
 
     #[inline(always)]
-    unsafe fn as_ref<'g, N>(ptr: u64) -> &'g N
+    unsafe fn as_ptr<N>(ptr: u64) -> NonNull<N>
     where
-        N: Node<M> + 'g,
+        N: Node<M>,
     {
-        let node = unsafe { (ptr as *const N).as_ref() };
-        validate!(node.is_some());
-        unsafe { node.unwrap_unchecked() }
+        let node = NonNull::new(ptr as *mut N);
+        if cfg!(feature = "validate") {
+            node.unwrap()
+        } else {
+            unsafe { node.unwrap_unchecked() }
+        }
     }
 }
 
