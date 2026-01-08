@@ -371,7 +371,7 @@ where
         key: K::Borrow<'k>,
         allocate: &mut A,
         // FIXME
-        _deallocate: &mut D,
+        deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_, K::Prefix>>, H::PopError>
     where
         H: cursor::path::History<'k, 'g, K>,
@@ -413,17 +413,14 @@ where
                             if op.is_allocate() {
                                 if let Some(edge::Child::Node(node)) = new.child() {
                                     unsafe {
-                                        node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                        node.deallocate(stat::Counter::FreeConflict);
                                     }
                                 }
                             } else if op.is_allocate_recursive() {
-                                if let Some(edge::Child::Node(node)) = new.child() {
-                                    unsafe {
-                                        node.deallocate_recursive_unchecked(
-                                            stat::Counter::FreeConflict,
-                                        );
-                                    }
-                                }
+                                new.deallocate_recursive_unchecked(
+                                    &mut *deallocate,
+                                    stat::Counter::FreeConflict,
+                                )
                             }
                         }
                     }

@@ -350,8 +350,7 @@ unsafe fn deallocate_hazard<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Valu
     if prefix.is_node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
-            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw)
-                .deallocate_unchecked(counter);
+            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
         }
     } else {
         unsafe {
@@ -372,7 +371,7 @@ unsafe fn deallocate_epoch<M: ribbit::Pack<Packed: edge::Meta>, V: concurrent::V
             drop(V::from_raw(value));
         },
         Some(edge::Child::Node(node)) => unsafe {
-            node.deallocate_unchecked(stat::Counter::FreeRetire);
+            node.deallocate(stat::Counter::FreeRetire);
         },
     }
 }

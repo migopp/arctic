@@ -220,7 +220,25 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
         match self.child() {
             None if cfg!(feature = "validate") => unreachable!(),
             None => unsafe { core::hint::unreachable_unchecked() },
-            Some(Child::Node(node)) => node.deallocate_unchecked(counter),
+            Some(Child::Node(node)) => unsafe { node.deallocate(counter) },
+            Some(Child::Value(value)) => deallocate_value(value),
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn deallocate_recursive_unchecked<F>(
+        self,
+        deallocate_value: F,
+        counter: stat::Counter,
+    ) where
+        F: FnOnce(u64),
+    {
+        match self.child() {
+            None if cfg!(feature = "validate") => unreachable!(),
+            None => unsafe { core::hint::unreachable_unchecked() },
+            Some(Child::Node(node)) => unsafe {
+                node.deallocate_recursive(deallocate_value, counter)
+            },
             Some(Child::Value(value)) => deallocate_value(value),
         }
     }

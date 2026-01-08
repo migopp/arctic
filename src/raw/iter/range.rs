@@ -75,7 +75,7 @@ where
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
                 stack.push((len, unsafe {
-                    node.entries_unchecked(lower_byte, upper_byte)
+                    node.entries(lower_byte, upper_byte)
                 }));
 
                 Self::Node(NodeIter {
@@ -227,7 +227,7 @@ where
                         },
                         edge::Child::Node(node) => {
                             // Avoid pushing and popping iterators with only one child
-                            match unsafe { node.entries_unchecked(lower, upper) }.try_into_single()
+                            match unsafe { node.entries(lower, upper) }.try_into_single()
                             {
                                 Ok((check_lower_, check_upper_, byte_, edge_)) => {
                                     check_lower = check_lower_;

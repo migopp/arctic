@@ -90,7 +90,7 @@ where
                     unsafe { self.key.next_unchecked() }
                 };
 
-                let next = unsafe { node.get_unchecked(byte) }?;
+                let next = unsafe { node.get(byte) }?;
                 self.push(save, len, node, next);
                 continue;
             }
@@ -140,7 +140,7 @@ where
                         unsafe { self.key.next_unchecked() }
                     };
 
-                    if let Some(next) = unsafe { node.get_or_insert_unchecked(byte) } {
+                    if let Some(next) = unsafe { node.get_or_insert(byte) } {
                         self.push(save, key.len(), node, next);
                         continue;
                     }
@@ -156,7 +156,7 @@ where
 
             let (op, new) = match old_meta.expand(key) {
                 Err(_) => match old.child() {
-                    Some(edge::Child::Node(node)) => unsafe { node.replace_unchecked(old_meta) },
+                    Some(edge::Child::Node(node)) => unsafe { node.replace(old_meta) },
                     None | Some(edge::Child::Value(_)) => {
                         // Note: avoid mutating `self.key` here
                         (Smo::CreateNode, Edge::new_path(save, value))
@@ -202,7 +202,7 @@ where
                 None | Some(_) => break None,
             }
 
-            let (op, new) = unsafe { node.replace_unchecked(meta) };
+            let (op, new) = unsafe { node.replace(meta) };
 
             match self.edge.compare_exchange_packed(
                 edge,
@@ -219,7 +219,7 @@ where
                     if op.is_allocate() {
                         if let Some(edge::Child::Node(node)) = new.child() {
                             unsafe {
-                                node.deallocate_unchecked(stat::Counter::FreeConflict);
+                                node.deallocate(stat::Counter::FreeConflict);
                             }
                         }
                     }
@@ -283,7 +283,7 @@ where
                         unsafe { cursor.key.next_unchecked() }
                     };
 
-                    cursor.edge = unsafe { node.get_unchecked(byte) }?;
+                    cursor.edge = unsafe { node.get(byte) }?;
                 }
                 edge::Child::Value(value) => {
                     return Some(value);
@@ -336,7 +336,7 @@ where
             if exact {
                 if let Some(node) = edge.as_node() {
                     if let Some(byte) = self.cursor.key.next() {
-                        let next = unsafe { node.get_unchecked(byte) }?;
+                        let next = unsafe { node.get(byte) }?;
                         self.cursor.push(save, key.len(), node, next);
                         continue;
                     }

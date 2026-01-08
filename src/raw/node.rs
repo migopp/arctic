@@ -302,7 +302,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn get_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
+    pub(crate) unsafe fn get<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         self.dispatch(
             |node| unsafe { node.as_ref() }.get(key),
             |node| unsafe { node.as_ref() }.get(key),
@@ -312,7 +312,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn get_or_insert_unchecked<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
+    pub(crate) unsafe fn get_or_insert<'g>(self, key: u8) -> Option<&'g Atomic<Edge<M>>> {
         self.dispatch(
             |node| unsafe { node.as_ref() }.get_or_insert(key),
             |node| unsafe { node.as_ref() }.get_or_insert(key),
@@ -322,7 +322,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn replace_unchecked(
+    pub(crate) unsafe fn replace(
         self,
         parent: ribbit::Packed<M>,
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
@@ -335,7 +335,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn entries_unchecked<'g, L: Lower, U: Upper>(
+    pub(crate) unsafe fn entries<'g, L: Lower, U: Upper>(
         self,
         lower: L,
         upper: U,
@@ -351,7 +351,7 @@ where
     /// # SAFETY
     ///
     /// Caller must ensure there are no other references to this node.
-    pub(crate) unsafe fn deallocate_unchecked(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate(self, counter: stat::Counter) {
         stat::increment(counter);
         self.dispatch(
             |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
@@ -364,16 +364,19 @@ where
     /// # SAFETY
     ///
     /// Caller must ensure there are no other references to this node.
-    pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
+    pub(crate) unsafe fn deallocate_recursive<F>(self, deallocate_value: F, counter: stat::Counter)
+    where
+        F: FnOnce(u64),
+    {
         stat::increment(counter);
 
         validate_eq!(self.kind(), Kind::Node3.pack());
 
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
-        if let Some(child) = node.edges_mut()[0].get_packed().as_node() {
-            child.deallocate_recursive_unchecked(counter);
-        }
+        node.edges_mut()[0]
+            .get_packed()
+            .deallocate_recursive_unchecked(deallocate_value, counter);
 
         drop(node);
     }
