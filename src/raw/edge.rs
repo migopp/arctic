@@ -289,12 +289,12 @@ impl Len for u6 {
     }
 }
 
-pub(crate) enum Child<C> {
-    Node(ribbit::Packed<node::Ptr<C>>),
+pub(crate) enum Child<M> {
+    Node(ribbit::Packed<node::Ptr<M>>),
     Value(u64),
 }
 
-impl<C> Debug for Child<C> {
+impl<M> Debug for Child<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Node(node) => f.debug_tuple("Node").field(node).finish(),

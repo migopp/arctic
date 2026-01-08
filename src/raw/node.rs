@@ -175,18 +175,18 @@ where
 
 #[derive(ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
-pub(crate) struct Ptr<C> {
+pub(crate) struct Ptr<M> {
     #[ribbit(size = 2, get(vis = "pub(crate)"))]
     kind: Kind,
 
     #[ribbit(with(skip))]
     _placeholder: NonZeroU32,
 
-    _compressed: PhantomData<C>,
+    _meta: PhantomData<M>,
 }
 
-impl<C> Copy for Ptr<C> {}
-impl<C> Clone for Ptr<C> {
+impl<M> Copy for Ptr<M> {}
+impl<M> Clone for Ptr<M> {
     fn clone(&self) -> Self {
         *self
     }
