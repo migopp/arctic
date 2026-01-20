@@ -3,20 +3,20 @@ use ribbit::Atomic;
 use crate::concurrent::hazard;
 use crate::concurrent::Value;
 use crate::raw;
-pub(super) use crate::raw::cursor::path;
+use crate::raw::cursor::path;
 use crate::raw::Edge;
 use crate::raw::Smo;
 use crate::Key;
 
 /// Tree traversal state.
-pub(super) struct Point<'k, 'g, 'l, K: Key, V: Value, H> {
+pub(super) struct Cursor<'k, 'g, 'l, K: Key, V: Value, H> {
     /// SMR guard protecting allocations that overlap with `key`
     guard: hazard::guard::Traverse<'g, 'l, K::Prefix, V>,
 
-    raw: crate::raw::cursor::Point<'k, 'g, K, H>,
+    raw: raw::Cursor<'k, 'g, K, H>,
 }
 
-impl<'k, 'g, 'l, K, V, H> Point<'k, 'g, 'l, K, V, H>
+impl<'k, 'g, 'l, K, V, H> Cursor<'k, 'g, 'l, K, V, H>
 where
     K: Key,
     V: Value,
@@ -27,18 +27,18 @@ where
         smr: &'l mut hazard::Local<'g, K::Prefix, V>,
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
-    ) -> Point<'k, 'g, 'l, K, V, H>
+    ) -> Cursor<'k, 'g, 'l, K, V, H>
     where
         K: Key,
         V: Value,
         H: path::History<'k, 'g, K>,
     {
-        Point {
+        Cursor {
             guard: smr.guard(
                 #[cfg(not(feature = "smr-epoch"))]
                 K::hazard(key),
             ),
-            raw: unsafe { raw::cursor::Point::new(root, key) },
+            raw: unsafe { raw::Cursor::new(root, key) },
         }
     }
 

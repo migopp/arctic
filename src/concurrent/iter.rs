@@ -2,11 +2,12 @@ use core::ops::ControlFlow;
 
 use ribbit::Atomic;
 
-use crate::concurrent::cursor;
 use crate::concurrent::hazard;
+use crate::concurrent::Cursor;
 use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::raw;
+use crate::raw::cursor;
 use crate::raw::key;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
@@ -28,7 +29,7 @@ where
 {
     pub(super) unsafe fn new<H>(
         key: K::Read<'k>,
-        cursor: cursor::Point<'k, 'g, 'l, K, V, H>,
+        cursor: Cursor<'k, 'g, 'l, K, V, H>,
         range: R,
     ) -> Prefix<'k, 'g, 'l, K, V, R>
     where

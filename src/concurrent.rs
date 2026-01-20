@@ -12,6 +12,7 @@ use core::sync::atomic::Ordering;
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 
+use crate::raw::cursor::path;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
@@ -19,6 +20,7 @@ use crate::raw::Edge;
 use crate::sequential;
 use crate::stat;
 
+use cursor::Cursor;
 pub use iter::EntryIter;
 pub use iter::Prefix;
 pub use iter::ValueIter;
@@ -95,8 +97,7 @@ where
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_, K::Prefix>> {
         let reader = K::Read::from(key);
-        cursor::Point::<K, V, cursor::path::Discard>::new(&mut self.smr, self.raw.root(), reader)
-            .traverse_get()
+        Cursor::<K, V, path::Discard>::new(&mut self.smr, self.raw.root(), reader).traverse_get()
     }
 
     #[inline]
@@ -207,7 +208,7 @@ where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
     {
-        self.get_and_update_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
+        self.get_and_update_with_impl::<path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
@@ -221,7 +222,7 @@ where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
     {
-        self.get_and_update_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
+        self.get_and_update_with_impl::<path::Retain<_>, _, _>(key, allocate, deallocate)
             .unwrap()
     }
 
@@ -233,12 +234,12 @@ where
         deallocate: &mut D,
     ) -> Result<(Option<V::OwnedGuard<'g, 'l, K::Prefix>>, bool), H::PopError>
     where
-        H: cursor::path::History<'k, 'g, K>,
+        H: path::History<'k, 'g, K>,
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<K, V, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = Cursor::<K, V, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             let old = match cursor.traverse_update() {
@@ -341,7 +342,7 @@ where
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
     {
-        self.upsert_with_impl::<cursor::path::Discard, _, _>(key, allocate, deallocate)
+        self.upsert_with_impl::<path::Discard, _, _>(key, allocate, deallocate)
     }
 
     #[cold]
@@ -357,7 +358,7 @@ where
     {
         stat::increment(stat::Counter::InsertPessimistic);
         unsafe {
-            self.upsert_with_impl::<cursor::path::Retain<_>, _, _>(key, allocate, deallocate)
+            self.upsert_with_impl::<path::Retain<_>, _, _>(key, allocate, deallocate)
                 .unwrap()
         }
     }
@@ -376,12 +377,12 @@ where
         deallocate: &mut D,
     ) -> Result<Option<V::OwnedGuard<'g, '_, K::Prefix>>, H::PopError>
     where
-        H: cursor::path::History<'k, 'g, K>,
+        H: path::History<'k, 'g, K>,
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
     {
         let reader = K::Read::from(key);
-        let mut cursor = cursor::Point::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
+        let mut cursor = Cursor::<_, _, H>::new(&mut self.smr, self.raw.root(), reader);
         // FXIME
         let value = allocate(None);
 
@@ -475,7 +476,7 @@ where
     where
         F: FnOnce() -> u64,
     {
-        self.get_or_insert_with_impl::<cursor::path::Discard, _>(key, with)
+        self.get_or_insert_with_impl::<path::Discard, _>(key, with)
     }
 
     #[cold]
@@ -489,7 +490,7 @@ where
     {
         stat::increment(stat::Counter::GetOrInsertPessimistic);
         unsafe {
-            self.get_or_insert_with_impl::<cursor::path::Retain<_>, _>(key, with)
+            self.get_or_insert_with_impl::<path::Retain<_>, _>(key, with)
                 .unwrap()
         }
     }
@@ -501,12 +502,12 @@ where
         _with: &mut Thunk<F>,
     ) -> Result<(V::SharedGuard<'g, '_, K::Prefix>, bool), H::PopError>
     where
-        H: cursor::path::History<'k, 'g, K>,
+        H: path::History<'k, 'g, K>,
         F: FnOnce() -> u64,
     {
         let reader = K::Read::from(key);
         let mut _cursor =
-            cursor::Point::<'k, 'g, '_, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
+            Cursor::<'k, 'g, '_, _, _, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
             todo!()
@@ -580,11 +581,8 @@ where
     }
 
     pub fn all(&mut self) -> iter::Prefix<'static, 'g, '_, K, V, RangeFull> {
-        let cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
-            &mut self.smr,
-            self.raw.root(),
-            K::Read::default(),
-        );
+        let cursor =
+            Cursor::<_, _, path::Discard>::new(&mut self.smr, self.raw.root(), K::Read::default());
 
         unsafe { iter::Prefix::new(K::Read::default(), cursor, ..) }
     }
@@ -594,11 +592,7 @@ where
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<iter::Prefix<'k, 'g, '_, K, V, RangeFull>> {
         let prefix = prefix.into();
-        let mut cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
-            &mut self.smr,
-            self.raw.root(),
-            prefix,
-        );
+        let mut cursor = Cursor::<_, _, path::Discard>::new(&mut self.smr, self.raw.root(), prefix);
         cursor.traverse_prefix()?;
         Some(unsafe { iter::Prefix::new(prefix, cursor, ..) })
     }
@@ -612,11 +606,7 @@ where
         let min = min.into();
         let max = max.into();
         let prefix = min.common_prefix(max);
-        let mut cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
-            &mut self.smr,
-            self.raw.root(),
-            prefix,
-        );
+        let mut cursor = Cursor::<_, _, path::Discard>::new(&mut self.smr, self.raw.root(), prefix);
         cursor.traverse_prefix()?;
         Some(unsafe { iter::Prefix::new(prefix, cursor, min..=max) })
     }
@@ -627,11 +617,8 @@ where
         min: impl Into<K::Read<'k>>,
     ) -> iter::Prefix<'k, 'g, '_, K, V, RangeFrom<K::Read<'k>>> {
         let min = min.into();
-        let cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
-            &mut self.smr,
-            self.raw.root(),
-            K::Read::default(),
-        );
+        let cursor =
+            Cursor::<_, _, path::Discard>::new(&mut self.smr, self.raw.root(), K::Read::default());
         unsafe { iter::Prefix::new(K::Read::default(), cursor, min..) }
     }
 }

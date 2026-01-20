@@ -17,7 +17,7 @@ use crate::raw::Smo;
 use crate::stat;
 
 /// Tree traversal state.
-pub(crate) struct Point<'k, 'g, K: Key, H> {
+pub(crate) struct Cursor<'k, 'g, K: Key, H> {
     /// Total number of bits read from `key`
     bits: usize,
 
@@ -46,7 +46,7 @@ pub(crate) struct Point<'k, 'g, K: Key, H> {
 //     Frozen,
 // }
 
-impl<'k, 'g, K, H> Point<'k, 'g, K, H>
+impl<'k, 'g, K, H> Cursor<'k, 'g, K, H>
 where
     K: Key,
     H: path::History<'k, 'g, K>,
