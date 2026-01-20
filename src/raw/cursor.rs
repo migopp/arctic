@@ -72,6 +72,32 @@ where
     }
 
     #[inline]
+    pub(crate) unsafe fn traverse_value(mut self) -> Option<u64> {
+        loop {
+            let edge = self.edge.load_packed(Ordering::Relaxed);
+
+            let _ = self.key.match_exact(edge.meta())?;
+
+            match edge.child()? {
+                edge::Child::Node(node) => {
+                    let byte = if cfg!(feature = "validate") {
+                        self.key
+                            .next()
+                            .expect("Precondition: no key is prefix of another key")
+                    } else {
+                        unsafe { self.key.next_unchecked() }
+                    };
+
+                    self.edge = unsafe { node.get(byte) }?;
+                }
+                edge::Child::Value(value) => {
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    #[inline]
     pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
         loop {
             let edge = self.edge.load_packed(Ordering::Relaxed);
@@ -257,39 +283,6 @@ where
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(segment.node)
-    }
-}
-
-impl<'k, 'g, K> Point<'k, 'g, K, path::Discard>
-where
-    K: Key,
-{
-    #[inline]
-    pub(crate) unsafe fn get(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Option<u64> {
-        let mut cursor = Self::new(root, key);
-        loop {
-            let edge = cursor.edge.load_packed(Ordering::Relaxed);
-
-            let _ = cursor.key.match_exact(edge.meta())?;
-
-            match edge.child()? {
-                edge::Child::Node(node) => {
-                    let byte = if cfg!(feature = "validate") {
-                        cursor
-                            .key
-                            .next()
-                            .expect("Precondition: no key is prefix of another key")
-                    } else {
-                        unsafe { cursor.key.next_unchecked() }
-                    };
-
-                    cursor.edge = unsafe { node.get(byte) }?;
-                }
-                edge::Child::Value(value) => {
-                    return Some(value);
-                }
-            }
-        }
     }
 }
 

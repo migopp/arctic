@@ -94,7 +94,9 @@ where
 
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_, K::Prefix>> {
-        cursor::Point::<K, V, _>::get(&mut self.smr, self.raw.root(), K::Read::from(key))
+        let reader = K::Read::from(key);
+        cursor::Point::<K, V, cursor::path::Discard>::new(&mut self.smr, self.raw.root(), reader)
+            .traverse_value()
     }
 
     #[inline]

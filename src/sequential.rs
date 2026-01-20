@@ -5,7 +5,6 @@ use core::marker::PhantomData;
 
 use ribbit::Atomic;
 
-use crate::raw;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
 use crate::raw::Edge;
@@ -40,9 +39,8 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
-        unsafe { raw::cursor::Point::<K, _>::get(&self.root, K::Read::from(key)) }
-            .map(|value| unsafe { V::borrow_from_raw(value) })
+    pub fn get(&self, _key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+        todo!()
     }
 
     #[inline]

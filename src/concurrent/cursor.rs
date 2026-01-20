@@ -59,6 +59,12 @@ where
     }
 
     #[inline]
+    pub(super) fn traverse_value(self) -> Option<V::SharedGuard<'g, 'l, K::Prefix>> {
+        let value = unsafe { self.raw.traverse_value() }?;
+        Some(unsafe { V::guard_shared(self.guard, value) })
+    }
+
+    #[inline]
     pub(super) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
         self.raw.traverse_exact()
     }
@@ -87,26 +93,6 @@ where
         }
 
         Ok(())
-    }
-}
-
-impl<'k, 'g, 'l, K, V> Point<'k, 'g, 'l, K, V, path::Discard>
-where
-    K: Key,
-    V: Value,
-{
-    #[inline]
-    pub(super) fn get(
-        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
-        root: &'g Atomic<Edge<K::Edge>>,
-        key: K::Read<'k>,
-    ) -> Option<V::SharedGuard<'g, 'l, K::Prefix>> {
-        let guard = smr.guard(
-            #[cfg(not(feature = "smr-epoch"))]
-            K::hazard(key),
-        );
-        let value = unsafe { crate::raw::cursor::Point::<K, _>::get(root, key)? };
-        Some(unsafe { V::guard_shared(guard, value) })
     }
 }
 
