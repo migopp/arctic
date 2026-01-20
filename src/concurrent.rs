@@ -17,6 +17,7 @@ use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
+use crate::raw::Frozen;
 use crate::sequential;
 use crate::stat;
 
@@ -245,7 +246,7 @@ where
             let old = match cursor.traverse_update() {
                 None => return Ok((None, false)),
                 Some(Ok(old)) => old,
-                Some(Err(())) => {
+                Some(Err(Frozen)) => {
                     cursor.freeze()?;
                     continue;
                 }
@@ -428,7 +429,7 @@ where
                         }
                     }
                 }
-                Err(()) => cursor.freeze()?,
+                Err(Frozen) => cursor.freeze()?,
             }
         }
     }

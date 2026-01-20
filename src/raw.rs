@@ -21,6 +21,8 @@ pub(crate) use edge::Edge;
 pub use key::Key;
 pub(crate) use node::Node;
 
+pub(crate) struct Frozen;
+
 /// Structural modification operation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Smo {

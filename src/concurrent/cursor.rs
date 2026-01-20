@@ -5,6 +5,7 @@ use crate::concurrent::Value;
 use crate::raw;
 use crate::raw::cursor::path;
 use crate::raw::Edge;
+use crate::raw::Frozen;
 use crate::raw::Smo;
 use crate::Key;
 
@@ -69,7 +70,9 @@ where
     }
 
     #[inline]
-    pub(super) fn traverse_update(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
+    pub(super) fn traverse_update(
+        &mut self,
+    ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         self.raw.traverse_update()
     }
 
@@ -83,7 +86,7 @@ where
             ribbit::Packed<Edge<K::Edge>>,
             ribbit::Packed<Edge<K::Edge>>,
         ),
-        (),
+        Frozen,
     > {
         self.raw.traverse_upsert(value)
     }

@@ -12,6 +12,7 @@ use crate::raw::key::Read as _;
 use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::raw::Edge;
+use crate::raw::Frozen;
 use crate::raw::Key;
 use crate::raw::Smo;
 use crate::stat;
@@ -98,7 +99,9 @@ where
     }
 
     #[inline]
-    pub(crate) fn traverse_update(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
+    pub(crate) fn traverse_update(
+        &mut self,
+    ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         loop {
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -124,7 +127,7 @@ where
             self.key = save;
 
             return if meta.is_frozen() {
-                Some(Err(()))
+                Some(Err(Frozen))
             } else if meta.is_value() {
                 Some(Ok(edge))
             } else {
@@ -146,7 +149,7 @@ where
             ribbit::Packed<Edge<K::Edge>>,
             ribbit::Packed<Edge<K::Edge>>,
         ),
-        (),
+        Frozen,
     > {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
@@ -177,7 +180,7 @@ where
             self.key = save;
 
             if old_meta.is_frozen() {
-                return Err(());
+                return Err(Frozen);
             }
 
             let (op, new) = match old_meta.expand(key) {
