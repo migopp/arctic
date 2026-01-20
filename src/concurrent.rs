@@ -96,7 +96,7 @@ where
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<V::SharedGuard<'g, '_, K::Prefix>> {
         let reader = K::Read::from(key);
         cursor::Point::<K, V, cursor::path::Discard>::new(&mut self.smr, self.raw.root(), reader)
-            .traverse_value()
+            .traverse_get()
     }
 
     #[inline]
@@ -241,7 +241,7 @@ where
         let mut cursor = cursor::Point::<K, V, H>::new(&mut self.smr, self.raw.root(), reader);
 
         loop {
-            let old = match cursor.traverse_exact() {
+            let old = match cursor.traverse_update() {
                 None => return Ok((None, false)),
                 Some(Ok(old)) => old,
                 Some(Err(())) => {
@@ -386,7 +386,7 @@ where
         let value = allocate(None);
 
         loop {
-            match cursor.traverse_or_upsert(value) {
+            match cursor.traverse_upsert(value) {
                 Ok((op, old, new)) => {
                     validate!(!old.meta().is_frozen());
 
@@ -580,10 +580,13 @@ where
     }
 
     pub fn all(&mut self) -> iter::Prefix<'static, 'g, '_, K, V, RangeFull> {
-        let cursor =
-            cursor::Prefix::<_, _, cursor::path::Discard>::new_root(&mut self.smr, self.raw.root());
+        let cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
+            &mut self.smr,
+            self.raw.root(),
+            K::Read::default(),
+        );
 
-        iter::Prefix::new(cursor, ..)
+        unsafe { iter::Prefix::new(K::Read::default(), cursor, ..) }
     }
 
     pub fn prefix<'k>(
@@ -591,12 +594,13 @@ where
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<iter::Prefix<'k, 'g, '_, K, V, RangeFull>> {
         let prefix = prefix.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new(
+        let mut cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
             prefix,
-        )?;
-        Some(iter::Prefix::new(cursor, ..))
+        );
+        cursor.traverse_prefix()?;
+        Some(unsafe { iter::Prefix::new(prefix, cursor, ..) })
     }
 
     // FIXME: support `Option` for min, max
@@ -607,12 +611,14 @@ where
     ) -> Option<iter::Prefix<'k, 'g, '_, K, V, RangeInclusive<K::Read<'k>>>> {
         let min = min.into();
         let max = max.into();
-        let cursor = cursor::Prefix::<_, _, cursor::path::Discard>::new(
+        let prefix = min.common_prefix(max);
+        let mut cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
             &mut self.smr,
             self.raw.root(),
-            min.common_prefix(max),
-        )?;
-        Some(iter::Prefix::new(cursor, min..=max))
+            prefix,
+        );
+        cursor.traverse_prefix()?;
+        Some(unsafe { iter::Prefix::new(prefix, cursor, min..=max) })
     }
 
     // FIXME: replace with generic range
@@ -621,9 +627,12 @@ where
         min: impl Into<K::Read<'k>>,
     ) -> iter::Prefix<'k, 'g, '_, K, V, RangeFrom<K::Read<'k>>> {
         let min = min.into();
-        let cursor =
-            cursor::Prefix::<_, _, cursor::path::Discard>::new_root(&mut self.smr, self.raw.root());
-        iter::Prefix::new(cursor, min..)
+        let cursor = cursor::Point::<_, _, cursor::path::Discard>::new(
+            &mut self.smr,
+            self.raw.root(),
+            K::Read::default(),
+        );
+        unsafe { iter::Prefix::new(K::Read::default(), cursor, min..) }
     }
 }
 

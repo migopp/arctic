@@ -72,7 +72,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn traverse_value(mut self) -> Option<u64> {
+    pub(crate) unsafe fn traverse_get(mut self) -> Option<u64> {
         loop {
             let edge = self.edge.load_packed(Ordering::Relaxed);
 
@@ -98,7 +98,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn traverse_exact(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
+    pub(crate) fn traverse_update(&mut self) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, ()>> {
         loop {
             let edge = self.edge.load_packed(Ordering::Relaxed);
             let meta = edge.meta();
@@ -137,7 +137,7 @@ where
     /// Return CAS operands to either insert the value or structurally update
     /// the tree on the way to inserting the value.
     #[inline]
-    pub(crate) fn traverse_or_upsert(
+    pub(crate) fn traverse_upsert(
         &mut self,
         value: u64,
     ) -> Result<
@@ -203,6 +203,34 @@ where
             };
 
             return Ok((op, old, new));
+        }
+    }
+
+    pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
+        loop {
+            let edge = self.edge.load_packed(Ordering::Acquire);
+            let meta = edge.meta();
+            let save = self.key;
+
+            let (key, exact) = self.key.match_inexact(meta);
+
+            // Full match
+            if exact {
+                if let Some(node) = edge.as_node() {
+                    if let Some(byte) = self.key.next() {
+                        let next = unsafe { node.get(byte) }?;
+                        self.push(save, key.len(), node, next);
+                        continue;
+                    }
+                }
+            }
+
+            if edge.is_null() || meta.key().prefix(key.len()) != key {
+                return None;
+            } else {
+                self.key = save;
+                return Some(edge);
+            }
         }
     }
 
@@ -283,84 +311,5 @@ where
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(segment.node)
-    }
-}
-
-pub(crate) struct Prefix<'k, 'g, K: Key, H> {
-    prefix: K::Read<'k>,
-    cursor: Point<'k, 'g, K, H>,
-}
-
-impl<'k, 'g, K, H> Prefix<'k, 'g, K, H>
-where
-    K: Key,
-    H: path::History<'k, 'g, K>,
-{
-    pub(crate) unsafe fn new_root(root: &'g Atomic<Edge<K::Edge>>) -> Self {
-        let prefix = K::Read::default();
-        Self {
-            prefix,
-            cursor: Point::new(root, prefix),
-        }
-    }
-
-    pub(crate) unsafe fn new(root: &'g Atomic<Edge<K::Edge>>, prefix: K::Read<'k>) -> Option<Self> {
-        let mut cursor = Self {
-            prefix,
-            cursor: Point::new(root, prefix),
-        };
-        cursor.traverse()?;
-        Some(cursor)
-    }
-
-    pub(crate) fn prefix(&self) -> K::Read<'k> {
-        self.prefix.prefix(self.cursor.bits)
-    }
-
-    pub(crate) fn traverse(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
-        loop {
-            let edge = self.cursor.edge.load_packed(Ordering::Acquire);
-            let meta = edge.meta();
-            let save = self.cursor.key;
-
-            let (key, exact) = self.cursor.key.match_inexact(meta);
-
-            // Full match
-            if exact {
-                if let Some(node) = edge.as_node() {
-                    if let Some(byte) = self.cursor.key.next() {
-                        let next = unsafe { node.get(byte) }?;
-                        self.cursor.push(save, key.len(), node, next);
-                        continue;
-                    }
-                }
-            }
-
-            if edge.is_null() || meta.key().prefix(key.len()) != key {
-                return None;
-            } else {
-                self.cursor.key = save;
-                return Some(edge);
-            }
-        }
-    }
-}
-
-impl<'k, 'g, K, H> core::ops::Deref for Prefix<'k, 'g, K, H>
-where
-    K: Key,
-{
-    type Target = Point<'k, 'g, K, H>;
-    fn deref(&self) -> &Self::Target {
-        &self.cursor
-    }
-}
-
-impl<'k, 'g, K, H> core::ops::DerefMut for Prefix<'k, 'g, K, H>
-where
-    K: Key,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cursor
     }
 }

@@ -26,8 +26,9 @@ where
     V: Value,
     R: crate::raw::iter::Range<K::Read<'k>>,
 {
-    pub(super) fn new<H>(
-        cursor: cursor::Prefix<'k, 'g, 'l, K, V, H>,
+    pub(super) unsafe fn new<H>(
+        key: K::Read<'k>,
+        cursor: cursor::Point<'k, 'g, 'l, K, V, H>,
         range: R,
     ) -> Prefix<'k, 'g, 'l, K, V, R>
     where
@@ -35,8 +36,9 @@ where
         V: Value,
         H: cursor::path::History<'k, 'g, K>,
     {
-        let prefix = cursor.prefix();
-        let range = range.suffix(prefix.bits());
+        let bits = cursor.bits();
+        let prefix = key.prefix(bits);
+        let range = range.suffix(bits);
         Prefix {
             root: cursor.edge(),
             prefix,
