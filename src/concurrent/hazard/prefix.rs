@@ -6,24 +6,20 @@ use ribbit::traits::Integer as _;
 use ribbit::u120;
 use ribbit::u4;
 
-pub trait Prefix: Send + Sync {
+pub trait Prefix: Send + Sync + ribbit::Unpack<Loose = u128> {
     const HAZARD_NULL: Self;
     const HAZARD_ROOT: Self;
 
     fn into_prefix(self, value: bool, bits: Option<usize>) -> Self;
 
-    #[expect(clippy::wrong_self_convention)]
     fn is_active(self) -> bool;
 
-    #[expect(clippy::wrong_self_convention)]
     fn is_conflict(self, other: Self) -> bool;
 
     fn bytes(&self) -> usize;
 
-    #[expect(clippy::wrong_self_convention)]
     fn is_node(self) -> bool;
 
-    #[expect(clippy::wrong_self_convention)]
     fn is_value(self) -> bool;
 
     fn without_overlap(self) -> Self;

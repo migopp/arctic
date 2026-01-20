@@ -9,7 +9,10 @@ use crate::raw::node::Edge;
 use crate::raw::Node;
 
 #[repr(C, align(64))]
-pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack> {
+pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack>
+where
+    <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
+{
     pub(super) header: Atomic<H>,
     pub(super) edges: [Atomic<Edge<M>>; LEN],
 }
@@ -17,6 +20,7 @@ pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack> {
 impl<const LEN: usize, H, M> Default for Linear<LEN, H, M>
 where
     H: ribbit::Pack<Packed: Default>,
+    <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     fn default() -> Self {
@@ -30,6 +34,7 @@ where
 unsafe impl<const LEN: usize, H, M> Node<M> for Linear<LEN, H, M>
 where
     H: ribbit::Pack<Packed: Header + Default>,
+    <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const KIND: node::Kind = <H::Packed as Header>::KIND;
@@ -123,6 +128,7 @@ where
 impl<const LEN: usize, H, M> Debug for Linear<LEN, H, M>
 where
     H: ribbit::Pack<Packed: Debug>,
+    <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
     M: ribbit::Pack<Packed: edge::Meta + Debug>,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

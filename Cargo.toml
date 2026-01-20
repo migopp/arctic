@@ -28,7 +28,7 @@ crossbeam-epoch = { version = "0.9.18", optional = true }
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false, features = ["serialization"] }
 libc = { version = "0.2.176", optional = true }
 polonius-the-crab = "0.4.2"
-ribbit = { git = "https://github.com/nwtnni/ribbit.git", default-features = false }
+ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
