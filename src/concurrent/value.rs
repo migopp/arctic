@@ -80,12 +80,14 @@ where
 {
     type Target = V::Borrow<'v>;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.value
     }
 }
 
 impl<'v, G: smr::Guard<'v, V>, V: Value<'v>> Drop for Owned<'v, G, V> {
+    #[inline]
     fn drop(&mut self) {
         unsafe { self.guard.retire_value(self.value) }
     }
@@ -103,6 +105,7 @@ where
 {
     type Target = V::Borrow<'v>;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.value
     }
