@@ -14,7 +14,6 @@ pub unsafe trait Value<'v>: Sized + crate::sequential::Value<'v> {
     unsafe fn share<G: smr::Guard>(guard: G, raw: u64) -> Shared<'v, G, Self>;
 }
 
-// FIXME: should be able to support arbitrary lifetime for T
 unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     type Guard<G>
         = G
@@ -32,7 +31,7 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     #[inline]
     unsafe fn share<G: smr::Guard>(guard: G, raw: u64) -> Shared<'v, G, Self> {
         Shared {
-            guard,
+            _guard: guard,
             value: Self::borrow_from_raw(raw),
         }
     }
@@ -58,7 +57,7 @@ macro_rules! impl_trivial {
                 #[inline]
                 unsafe fn share<G: smr::Guard>(_guard: G, raw: u64) -> Shared<'static, G, Self> {
                     Shared {
-                        guard: smr::NoOp,
+                        _guard: smr::NoOp,
                         value: Self::borrow_from_raw(raw),
                     }
                 }
@@ -93,7 +92,7 @@ impl<'v, G: smr::Guard, V: Value<'v>> Drop for Owned<'v, G, V> {
 }
 
 pub struct Shared<'v, G: smr::Guard, V: Value<'v>> {
-    guard: V::Guard<G>,
+    _guard: V::Guard<G>,
     value: V::Borrow<'v>,
 }
 
