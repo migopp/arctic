@@ -19,6 +19,7 @@ use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
 use crate::raw::Frozen;
+use crate::raw::Smo;
 use crate::sequential;
 use crate::stat;
 
@@ -396,18 +397,25 @@ where
                         Ordering::AcqRel,
                         Ordering::Acquire,
                     ) {
-                        Ok(old) => {
+                        Ok(old_) => {
                             stat::increment(op);
-                            if op.is_retire() {
-                                unsafe {
-                                    cursor.retire(old);
+
+                            match old_.child() {
+                                _ if op == Smo::ExpandEdge => return Ok(None),
+                                None => {
+                                    validate_eq!(op, Smo::CreateNode);
+                                    return Ok(None);
                                 }
-                            } else if matches!(op, crate::raw::Smo::CreateNode) {
-                                return Ok(old
-                                    .as_value()
-                                    .map(|value| unsafe { V::own(guard, value) }));
-                            } else {
-                                return Ok(None);
+                                Some(edge::Child::Value(value)) => {
+                                    validate_eq!(op, Smo::CreateNode);
+                                    return Ok(Some(unsafe { V::own(guard, value) }));
+                                }
+                                Some(edge::Child::Node(node)) => {
+                                    validate!(op.is_retire());
+                                    unsafe {
+                                        cursor.retire_node(node);
+                                    }
+                                }
                             }
                         }
                         Err(_) => {

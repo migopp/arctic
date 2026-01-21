@@ -238,12 +238,14 @@ where
     }
 
     #[cold]
-    pub(crate) fn freeze(&mut self) -> Result<Option<ribbit::Packed<Edge<K::Edge>>>, H::PopError> {
+    pub(crate) fn freeze(
+        &mut self,
+    ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let mut node = self.pop()?;
         let mut edge = self.edge.load_packed(Ordering::Acquire);
         let mut pop = 1;
 
-        let edge = loop {
+        let old = loop {
             while edge.meta().is_frozen() {
                 node = self.pop()?;
                 edge = self.edge.load_packed(Ordering::Acquire);
@@ -252,12 +254,12 @@ where
 
             let meta = edge.meta();
 
-            match edge.child() {
-                Some(edge::Child::Node(old)) if old == node => (),
+            let old = match edge.child() {
+                Some(edge::Child::Node(old)) if old == node => old,
                 // Already helped by another thread OR freeze was pushed down by
                 // a concurrent edge expansion operation
                 None | Some(_) => break None,
-            }
+            };
 
             let (op, new) = unsafe { node.replace(meta) };
 
@@ -270,7 +272,7 @@ where
             ) {
                 Ok(_) => {
                     stat::increment(op);
-                    break Some(edge);
+                    break Some(old);
                 }
                 Err(conflict) => {
                     if op.is_allocate() {
@@ -286,7 +288,7 @@ where
         };
 
         stat::record(stat::Record::FreezePop, pop);
-        Ok(edge)
+        Ok(old)
     }
 
     #[inline]

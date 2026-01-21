@@ -27,7 +27,7 @@ impl smr::Guard for NoOp {
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
         &mut self,
         _bits: usize,
-        _edge: ribbit::Packed<crate::raw::Edge<M>>,
+        _edge: ribbit::Packed<crate::raw::node::Ptr<M>>,
     ) {
     }
 

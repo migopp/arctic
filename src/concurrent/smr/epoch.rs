@@ -1,6 +1,7 @@
 use crate::concurrent::smr;
 use crate::concurrent::Smr;
 use crate::raw::edge;
+use crate::raw::node;
 use crate::stat;
 
 #[derive(Default)]
@@ -33,13 +34,10 @@ impl smr::Guard for Guard {
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
         &mut self,
         _bits: usize,
-        edge: ribbit::Packed<crate::raw::Edge<M>>,
+        node: ribbit::Packed<node::Ptr<M>>,
     ) {
-        self.0.defer_unchecked(move || match edge.child() {
-            None | Some(edge::Child::Value(_)) => unreachable!(),
-            Some(edge::Child::Node(node)) => {
-                node.deallocate(stat::Counter::FreeRetire);
-            }
+        self.0.defer_unchecked(move || {
+            node.deallocate(stat::Counter::FreeRetire);
         });
     }
 

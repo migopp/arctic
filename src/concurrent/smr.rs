@@ -5,7 +5,7 @@ pub use epoch::Epoch;
 pub use no_op::NoOp;
 
 use crate::raw::edge;
-use crate::raw::Edge;
+use crate::raw::node;
 
 pub trait Smr: Default {
     type Local<'g>: Local
@@ -27,7 +27,7 @@ pub trait Guard {
     unsafe fn retire_node<M: ribbit::Pack<Packed: edge::Meta>>(
         &mut self,
         bits: usize,
-        edge: ribbit::Packed<Edge<M>>,
+        edge: ribbit::Packed<node::Ptr<M>>,
     );
 
     unsafe fn retire_value<'v, V: crate::sequential::Value<'v>>(&mut self, value: V::Borrow<'v>);

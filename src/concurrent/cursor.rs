@@ -3,6 +3,7 @@ use ribbit::Atomic;
 use crate::concurrent::smr;
 use crate::raw;
 use crate::raw::cursor::path;
+use crate::raw::node;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::Smo;
@@ -45,8 +46,8 @@ where
     }
 
     #[inline]
-    pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<K::Edge>>) {
-        unsafe { self.guard.retire_node(self.raw.bits(), edge) }
+    pub(super) unsafe fn retire_node(&mut self, node: ribbit::Packed<node::Ptr<K::Edge>>) {
+        unsafe { self.guard.retire_node(self.raw.bits(), node) }
     }
 
     // #[inline]
@@ -90,7 +91,7 @@ where
     pub(super) fn freeze(&mut self) -> Result<(), H::PopError> {
         if let Some(edge) = self.raw.freeze()? {
             unsafe {
-                self.retire(edge);
+                self.retire_node(edge);
             }
         }
 
