@@ -1,4 +1,3 @@
-mod cursor;
 mod hazard;
 mod iter;
 mod key;
@@ -12,18 +11,19 @@ use core::sync::atomic::Ordering;
 
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
+use smr::Guard;
 
 use crate::raw::cursor::path;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
+use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::Smo;
 use crate::sequential;
 use crate::stat;
 
-use cursor::Cursor;
 pub use iter::EntryIter;
 pub use iter::Prefix;
 pub use iter::ValueIter;
@@ -108,9 +108,8 @@ where
     #[inline]
     pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'v, '_, S, V>> {
         let reader = K::Read::from(key);
-        let mut guard = self.smr.guard();
-        let value = Cursor::<K, path::Discard, _>::new(&mut guard, self.raw.root(), reader)
-            .traverse_get()?;
+        let guard = self.smr.guard();
+        let value = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), reader).traverse_get()? };
         Some(unsafe { V::share(guard, value) })
     }
 
@@ -247,8 +246,8 @@ where
         D: FnMut(u64),
     {
         let reader = K::Read::from(key);
-        let mut guard = self.smr.guard();
-        let mut cursor = Cursor::<_, H, _>::new(&mut guard, self.raw.root(), reader);
+        let guard = self.smr.guard();
+        let mut cursor = Cursor::<_, H>::new(self.raw.root(), reader);
 
         loop {
             let old = match cursor.traverse_update() {
@@ -382,7 +381,7 @@ where
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard();
-        let mut cursor = Cursor::<_, H, _>::new(&mut guard, self.raw.root(), reader);
+        let mut cursor = Cursor::<_, H>::new(self.raw.root(), reader);
         // FXIME
         let value = allocate(None);
 
@@ -413,7 +412,7 @@ where
                                 Some(edge::Child::Node(node)) => {
                                     validate!(op.is_retire());
                                     unsafe {
-                                        cursor.retire_node(node);
+                                        guard.retire_node(cursor.bits(),node);
                                     }
                                 }
                             }
@@ -435,7 +434,11 @@ where
                         }
                     }
                 }
-                Err(Frozen) => cursor.freeze()?,
+                Err(Frozen) => {
+                    if let Some(node) = cursor.freeze()? {
+                        guard.retire_node(cursor.bits(), node);
+                    }
+                }
             }
         }
     }
@@ -509,8 +512,8 @@ where
         F: FnOnce() -> u64,
     {
         let reader = K::Read::from(key);
-        let mut guard = self.smr.guard();
-        let mut _cursor = Cursor::<'k, 'g, '_, _, H, _>::new(&mut guard, self.raw.root(), reader);
+        let _guard = self.smr.guard();
+        let mut _cursor = unsafe { Cursor::<'k, 'g, _, H>::new( self.raw.root(), reader) };
 
         loop {
             todo!()
@@ -595,8 +598,8 @@ where
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<iter::Prefix<'k, 'v, 'g, K, V, RangeFull, <S as smr::Local>::Guard<'_>>> {
         let prefix = prefix.into();
-        let mut guard = self.smr.guard();
-        let mut cursor = Cursor::<K, path::Discard, _>::new(&mut guard, self.raw.root(), prefix);
+        let guard = self.smr.guard();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), prefix)} ;
         cursor.traverse_prefix()?;
         let root = cursor.edge();
         let bits = cursor.bits();
@@ -615,8 +618,8 @@ where
         let min = min.into();
         let max = max.into();
         let prefix = min.common_prefix(max);
-        let mut guard = self.smr.guard();
-        let mut cursor = Cursor::<K, path::Discard, _>::new(&mut guard, self.raw.root(), prefix);
+        let guard = self.smr.guard();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new( self.raw.root(), prefix) };
         cursor.traverse_prefix()?;
 
         let root = cursor.edge();
