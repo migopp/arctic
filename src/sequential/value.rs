@@ -16,7 +16,9 @@ pub unsafe trait Value<'v>: 'v {
 
     fn into_raw(self) -> u64;
 
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64;
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
+    where
+        'v: 'l;
 
     /// # Safety
     ///
@@ -24,7 +26,9 @@ pub unsafe trait Value<'v>: 'v {
     /// 1. `raw` was created by a previous [`Value::into_raw`] call.
     /// 2. There are no live borrows from [`Value::borrow_mut_raw`] during lifetime `'l`.
     /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>;
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
+    where
+        'v: 'l;
 
     // FIXME
     // /// # Safety
@@ -66,13 +70,69 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     }
 
     #[inline]
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 {
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
+    where
+        'v: 'l,
+    {
         // FIXME: strict provenance
         (borrow as *const T) as u64
     }
 
     #[inline]
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
+    where
+        'v: 'l,
+    {
+        let borrow = (raw as *const T).as_ref();
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+}
+
+unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
+    type Borrow<'l>
+        = &'l T
+    where
+        Self: 'l;
+
+    #[inline]
+    fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
+        self
+    }
+
+    #[inline]
+    unsafe fn from_raw(raw: u64) -> Self {
+        let borrow = (raw as *const T).as_ref();
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+
+    #[inline]
+    fn into_raw(self) -> u64 {
+        // FIXME: strict provenance
+        (self as *const T) as u64
+    }
+
+    #[inline]
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
+    where
+        'v: 'l,
+    {
+        // FIXME: strict provenance
+        (borrow as *const T) as u64
+    }
+
+    #[inline]
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
+    where
+        'v: 'l,
+    {
         let borrow = (raw as *const T).as_ref();
         if cfg!(feature = "validate") {
             borrow.unwrap()
@@ -104,12 +164,12 @@ macro_rules! impl_integer {
                 }
 
                 #[inline]
-                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
+                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> where 'static: 'l {
                     raw as $ty
                 }
 
                 #[inline]
-                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 {
+                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 where 'static: 'l {
                     borrow as u64
                 }
             }

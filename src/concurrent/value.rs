@@ -37,6 +37,29 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     }
 }
 
+unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
+    type Guard<G>
+        = smr::NoOp
+    where
+        G: smr::Guard<'v, Self>;
+
+    #[inline]
+    unsafe fn own<G: smr::Guard<'v, Self>>(_guard: G, raw: u64) -> Owned<'v, G, Self> {
+        Owned {
+            guard: smr::NoOp,
+            value: Self::borrow_from_raw(raw),
+        }
+    }
+
+    #[inline]
+    unsafe fn share<G: smr::Guard<'v, Self>>(_guard: G, raw: u64) -> Shared<'v, G, Self> {
+        Shared {
+            _guard: smr::NoOp,
+            value: Self::borrow_from_raw(raw),
+        }
+    }
+}
+
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(

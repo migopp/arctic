@@ -65,6 +65,23 @@ mod tests {
     }
 
     #[test]
+    fn smoke_value_ref() {
+        let values = [0, 1, 2, 3, 4, 5];
+        let map = Map::<u64, &u64>::default();
+        let mut map = map.pin();
+
+        for (key, value) in values.iter().enumerate() {
+            map.upsert(key as u64, value);
+        }
+
+        #[expect(clippy::needless_range_loop)]
+        for key in 0..values.len() {
+            let value = map.get(key as u64).as_deref().copied().unwrap();
+            assert!(core::ptr::eq(value, &values[key]));
+        }
+    }
+
+    #[test]
     fn scan_value() {
         let map = Map::<u64, _>::default();
         let mut map = map.pin();
