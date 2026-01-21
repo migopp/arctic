@@ -8,7 +8,6 @@ use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::raw;
 use crate::raw::key;
-use crate::raw::key::Read as _;
 use crate::raw::Edge;
 
 pub struct Prefix<'k, 'v, 'g, K: Key, V, R, G = smr::Epoch> {
@@ -25,7 +24,7 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     pub(super) unsafe fn new(
         guard: G,
@@ -49,12 +48,12 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     #[inline]
     pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'v, 'g, '_, REVERSE, K, V, R, G> {
         EntryIter {
-            guard: &self.guard,
+            _guard: &self.guard,
             iter: unsafe {
                 raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
             },
@@ -65,7 +64,7 @@ where
     #[inline]
     pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'v, 'g, '_, REVERSE, K, V, R, G> {
         ValueIter {
-            guard: &self.guard,
+            _guard: &self.guard,
             iter: unsafe {
                 raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
             },
@@ -87,7 +86,7 @@ pub struct EntryIter<
     R: raw::iter::Range<K::Read<'k>>,
     G,
 > {
-    guard: &'l G,
+    _guard: &'l G,
     iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, K::Write, K::Edge, R>,
     value: PhantomData<&'v V>,
 }
@@ -98,7 +97,7 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'v>)> {
@@ -130,7 +129,7 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     type Item = (K, V::Borrow<'v>);
 
@@ -157,7 +156,7 @@ pub struct ValueIter<
     R: raw::iter::Range<K::Read<'k>>,
     G,
 > {
-    guard: &'l G,
+    _guard: &'l G,
     iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R>,
     value: PhantomData<&'v V>,
 }
@@ -168,7 +167,7 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<V::Borrow<'v>> {
@@ -190,7 +189,7 @@ where
     K: Key,
     V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
-    G: smr::Guard,
+    G: smr::Guard<'v, V>,
 {
     type Item = V::Borrow<'v>;
 

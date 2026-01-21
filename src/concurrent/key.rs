@@ -1,4 +1,4 @@
-use crate::concurrent::hazard;
+use crate::concurrent::smr::hazard;
 use crate::raw;
 use crate::raw::key::dynamic;
 use crate::raw::key::integer;
@@ -55,7 +55,7 @@ impl Key for u64 {
         let reader = reader.buffer;
         let mut buffer = [0u8; 16];
         buffer[..len].copy_from_slice(&reader[..len]);
-        crate::concurrent::hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+        hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
     }
 }
 
@@ -65,8 +65,8 @@ impl_integer!(u64);
 #[inline]
 fn hazard_integer<U: integer::Uint>(
     reader: integer::Reader<U>,
-) -> ribbit::Packed<crate::concurrent::hazard::prefix::Be> {
-    crate::concurrent::hazard::prefix::Be::new_hazard(
+) -> ribbit::Packed<hazard::prefix::Be> {
+    hazard::prefix::Be::new_hazard(
         reader.buffer.most_significant_u128(),
         if U::BYTES < 16 {
             reader.bits()
@@ -77,12 +77,10 @@ fn hazard_integer<U: integer::Uint>(
 }
 
 #[inline]
-fn hazard_dynamic(
-    reader: dynamic::Reader<'_>,
-) -> ribbit::Packed<crate::concurrent::hazard::prefix::Le> {
+fn hazard_dynamic(reader: dynamic::Reader<'_>) -> ribbit::Packed<hazard::prefix::Le> {
     let reader = reader.as_ref();
     let mut buffer = [0u8; 16];
     let len = reader.len().min(15);
     buffer[..len].copy_from_slice(&reader[..len]);
-    crate::concurrent::hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+    hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
 }

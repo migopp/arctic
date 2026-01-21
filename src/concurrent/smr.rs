@@ -1,34 +1,38 @@
 pub mod epoch;
+pub mod hazard;
 mod no_op;
 
 pub use epoch::Epoch;
+pub use hazard::Hazard;
 pub use no_op::NoOp;
 
+use crate::concurrent::Value;
 use crate::raw::edge;
 use crate::raw::node;
+use hazard::Prefix;
 
-pub trait Smr: Default {
-    type Local<'g>: Local
+pub trait Smr<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>>: Default {
+    type Local<'g>: Local<'v, P, V>
     where
         Self: 'g;
 
     fn local<'g>(&'g self) -> Self::Local<'g>;
 }
 
-pub trait Local {
-    type Guard<'l>: Guard
+pub trait Local<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> {
+    type Guard<'l>: Guard<'v, V>
     where
         Self: 'l;
 
-    fn guard<'l>(&'l mut self) -> Self::Guard<'l>;
+    fn guard<'l>(&'l mut self, hazard: ribbit::Packed<P>) -> Self::Guard<'l>;
 }
 
-pub trait Guard {
+pub trait Guard<'v, V: Value<'v>> {
     unsafe fn retire_node<M: ribbit::Pack<Packed: edge::Meta>>(
         &mut self,
         bits: usize,
         edge: ribbit::Packed<node::Ptr<M>>,
     );
 
-    unsafe fn retire_value<'v, V: crate::sequential::Value<'v>>(&mut self, value: V::Borrow<'v>);
+    unsafe fn retire_value(&mut self, value: V::Borrow<'v>);
 }

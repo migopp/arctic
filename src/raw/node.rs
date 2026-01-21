@@ -297,7 +297,7 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     #[inline]
-    pub(super) fn raw(self) -> NonZeroU64 {
+    pub(crate) fn raw(self) -> NonZeroU64 {
         self.value
     }
 
