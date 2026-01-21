@@ -98,6 +98,20 @@ impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<'v, P, V> {
     }
 }
 
+impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Hazard<'v, P, V> {
+    #[inline]
+    #[must_use]
+    pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
+        self.reclaim_threshold = reclaim_threshold;
+        self
+    }
+
+    #[inline]
+    pub fn set_membarrier(&mut self, enable: bool) {
+        *self.membarrier.get_mut() = enable
+    }
+}
+
 impl<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Smr<'v, P, V> for Hazard<'v, P, V> {
     type Local<'g>
         = Local<'v, 'g, P, V>
@@ -129,6 +143,11 @@ pub struct Local<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V> {
 }
 
 impl<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Local<'v, 'g, P, V> {
+    #[inline]
+    pub fn enable_membarrier(&self) {
+        self.membarrier.store(true, Ordering::Relaxed)
+    }
+
     #[cold]
     fn flush(&mut self) {
         stat::max(stat::Max::RetireCache, self.retired.len() as u64);
@@ -216,6 +235,8 @@ pub struct Guard<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>>(
 impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Guard<'v, V>
     for Guard<'v, 'g, 'l, P, V>
 {
+    #[expect(private_bounds)]
+    #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
         &mut self,
         _bits: usize,

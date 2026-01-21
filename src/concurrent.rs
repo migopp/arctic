@@ -62,9 +62,9 @@ impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
         Self::default()
     }
 
-    pub fn with_reclaim_threshold(reclaim_threshold: usize) -> Self {
+    pub fn with_smr(smr: S) -> Self {
         Self {
-            smr: todo!(),
+            smr,
             raw: sequential::Map::<K, V>::default(),
         }
     }
@@ -83,15 +83,8 @@ impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
     }
 
     #[inline]
-    pub fn set_membarrier(&mut self, membarrier: bool) {
-        todo!()
-        // self.smr.set_membarrier(membarrier);
-    }
-
-    #[inline]
-    pub fn reclaim(&mut self) {
-        todo!()
-        // self.smr.reclaim(stat::Counter::FreeReclaim);
+    pub fn smr(&mut self) -> &mut S {
+        &mut self.smr
     }
 }
 
@@ -113,9 +106,8 @@ where
     S: Smr<'v, K::Prefix, V>,
 {
     #[inline]
-    pub fn enable_membarrier(&self) {
-        todo!()
-        // self.smr.enable_membarrier();
+    pub fn smr(&self) -> &S::Local<'g> {
+        &self.smr
     }
 
     #[inline]

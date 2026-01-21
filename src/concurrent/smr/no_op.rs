@@ -25,6 +25,8 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<
 }
 
 impl<'v, V: Value<'v>> smr::Guard<'v, V> for NoOp {
+    #[expect(private_bounds)]
+    #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
         &mut self,
         _bits: usize,

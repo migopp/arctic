@@ -33,6 +33,8 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<
 pub struct Guard(crossbeam_epoch::Guard);
 
 impl<'v, V: Value<'v>> smr::Guard<'v, V> for Guard {
+    #[expect(private_bounds)]
+    #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
         &mut self,
         _bits: usize,

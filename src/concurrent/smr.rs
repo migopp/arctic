@@ -28,6 +28,8 @@ pub trait Local<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> {
 }
 
 pub trait Guard<'v, V: Value<'v>> {
+    #[expect(private_bounds)]
+    #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: edge::Meta>>(
         &mut self,
         bits: usize,
