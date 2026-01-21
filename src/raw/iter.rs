@@ -26,8 +26,6 @@ pub(crate) trait Range<R: key::Read>: Clone {
     #[expect(private_bounds)]
     type Upper: Upper<R>;
 
-    fn suffix(self, bits: usize) -> Self;
-
     fn lower(&self) -> Self::Lower;
     fn upper(&self) -> Self::Upper;
 }
@@ -37,16 +35,11 @@ impl<R: key::Read> Range<R> for RangeInclusive<R> {
     type Upper = Include<R>;
 
     #[inline]
-    fn suffix(self, bits: usize) -> Self {
-        let lower = *self.start();
-        let upper = *self.end();
-        lower.suffix(bits)..=upper.suffix(bits)
-    }
-
     fn lower(&self) -> Self::Lower {
         Include(*self.start())
     }
 
+    #[inline]
     fn upper(&self) -> Self::Upper {
         Include(*self.end())
     }
@@ -57,15 +50,11 @@ impl<R: key::Read> Range<R> for core::ops::RangeFrom<R> {
     type Upper = Unbound;
 
     #[inline]
-    fn suffix(self, bits: usize) -> Self {
-        let lower = self.start;
-        lower.suffix(bits)..
-    }
-
     fn lower(&self) -> Self::Lower {
         Include(self.start)
     }
 
+    #[inline]
     fn upper(&self) -> Self::Upper {
         Unbound
     }
@@ -76,15 +65,11 @@ impl<R: key::Read> Range<R> for core::ops::RangeToInclusive<R> {
     type Upper = Include<R>;
 
     #[inline]
-    fn suffix(self, bits: usize) -> Self {
-        let upper = self.end;
-        ..=upper.suffix(bits)
-    }
-
     fn lower(&self) -> Self::Lower {
         Unbound
     }
 
+    #[inline]
     fn upper(&self) -> Self::Upper {
         Include(self.end)
     }
@@ -93,11 +78,6 @@ impl<R: key::Read> Range<R> for core::ops::RangeToInclusive<R> {
 impl<R: key::Read> Range<R> for core::ops::RangeFull {
     type Lower = Unbound;
     type Upper = Unbound;
-
-    #[inline]
-    fn suffix(self, _bits: usize) -> Self {
-        self
-    }
 
     #[inline]
     fn lower(&self) -> Self::Lower {
