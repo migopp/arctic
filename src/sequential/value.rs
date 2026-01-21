@@ -3,7 +3,7 @@
 //! **indirect**, and must be encapsulated in a smart pointer type like
 //! [`Box`] or [`std::sync::Arc`].
 
-pub unsafe trait Value {
+pub unsafe trait Value<'v>: 'v {
     type Borrow<'l>: Copy
     where
         Self: 'l;
@@ -15,6 +15,8 @@ pub unsafe trait Value {
     //     Self: 'l;
 
     fn into_raw(self) -> u64;
+
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64;
 
     /// # Safety
     ///
@@ -42,7 +44,7 @@ pub unsafe trait Value {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-unsafe impl<T> Value for Box<T> {
+unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     type Borrow<'l>
         = &'l T
     where
@@ -63,6 +65,13 @@ unsafe impl<T> Value for Box<T> {
         Box::into_raw(self) as u64
     }
 
+    #[inline]
+    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 {
+        // FIXME: strict provenance
+        (borrow as *const T) as u64
+    }
+
+    #[inline]
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
         let borrow = (raw as *const T).as_ref();
         if cfg!(feature = "validate") {
@@ -76,7 +85,7 @@ unsafe impl<T> Value for Box<T> {
 macro_rules! impl_integer {
     ($($ty:ty),*) => {
         $(
-            unsafe impl Value for $ty {
+            unsafe impl Value<'static> for $ty {
                 type Borrow<'l> = Self;
 
                 #[inline]
@@ -97,6 +106,11 @@ macro_rules! impl_integer {
                 #[inline]
                 unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
                     raw as $ty
+                }
+
+                #[inline]
+                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 {
+                    borrow as u64
                 }
             }
         )*

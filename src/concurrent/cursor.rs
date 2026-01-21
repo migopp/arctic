@@ -1,7 +1,6 @@
 use ribbit::Atomic;
 
-use crate::concurrent::hazard;
-use crate::concurrent::Value;
+use crate::concurrent::smr;
 use crate::raw;
 use crate::raw::cursor::path;
 use crate::raw::Edge;
@@ -10,35 +9,27 @@ use crate::raw::Smo;
 use crate::Key;
 
 /// Tree traversal state.
-pub(super) struct Cursor<'k, 'g, 'l, K: Key, V: Value, H> {
+pub(super) struct Cursor<'k, 'g, 'l, K: Key, H, G> {
     /// SMR guard protecting allocations that overlap with `key`
-    guard: hazard::guard::Traverse<'g, 'l, K::Prefix, V>,
+    guard: &'l mut G,
 
     raw: raw::Cursor<'k, 'g, K, H>,
 }
 
-impl<'k, 'g, 'l, K, V, H> Cursor<'k, 'g, 'l, K, V, H>
+impl<'k, 'g, 'l, K, H, G> Cursor<'k, 'g, 'l, K, H, G>
 where
     K: Key,
-    V: Value,
     H: path::History<'k, 'g, K>,
+    G: smr::Guard,
 {
     #[inline]
     pub(super) fn new(
-        smr: &'l mut hazard::Local<'g, K::Prefix, V>,
+        guard: &'l mut G,
         root: &'g Atomic<Edge<K::Edge>>,
         key: K::Read<'k>,
-    ) -> Cursor<'k, 'g, 'l, K, V, H>
-    where
-        K: Key,
-        V: Value,
-        H: path::History<'k, 'g, K>,
-    {
+    ) -> Cursor<'k, 'g, 'l, K, H, G> {
         Cursor {
-            guard: smr.guard(
-                #[cfg(not(feature = "smr-epoch"))]
-                K::hazard(key),
-            ),
+            guard,
             raw: unsafe { raw::Cursor::new(root, key) },
         }
     }
@@ -55,18 +46,17 @@ where
 
     #[inline]
     pub(super) unsafe fn retire(&mut self, edge: ribbit::Packed<Edge<K::Edge>>) {
-        unsafe { self.guard.retire(self.raw.bits(), edge) }
+        unsafe { self.guard.retire_node(self.raw.bits(), edge) }
     }
 
-    #[inline]
-    pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, K::Prefix, V> {
-        self.guard
-    }
+    // #[inline]
+    // pub(super) fn into_guard(self) -> hazard::guard::Traverse<'g, 'l, K::Prefix, V> {
+    //     self.guard
+    // }
 
     #[inline]
-    pub(super) fn traverse_get(self) -> Option<V::SharedGuard<'g, 'l, K::Prefix>> {
-        let value = unsafe { self.raw.traverse_get() }?;
-        Some(unsafe { V::guard_shared(self.guard, value) })
+    pub(super) fn traverse_get(self) -> Option<u64> {
+        unsafe { self.raw.traverse_get() }
     }
 
     #[inline]

@@ -13,13 +13,17 @@ use crate::Key;
 pub use value::Value;
 
 #[repr(transparent)]
-pub struct Map<K: Key, V: Value> {
+pub struct Map<'v, K: Key, V: Value<'v>> {
     root: Atomic<Edge<K::Edge>>,
     _not_sync: PhantomData<Cell<()>>,
-    _value: PhantomData<V>,
+    _value: PhantomData<&'v V>,
 }
 
-impl<K: Key, V: Value> Default for Map<K, V> {
+impl<'v, K, V> Default for Map<'v, K, V>
+where
+    K: Key,
+    V: Value<'v>,
+{
     fn default() -> Self {
         Self {
             root: Atomic::new_packed(Edge::DEFAULT),
@@ -29,7 +33,11 @@ impl<K: Key, V: Value> Default for Map<K, V> {
     }
 }
 
-impl<K: Key, V: Value> Map<K, V> {
+impl<'v, K, V> Map<'v, K, V>
+where
+    K: Key,
+    V: Value<'v>,
+{
     pub(crate) fn root(&self) -> &Atomic<Edge<K::Edge>> {
         &self.root
     }
@@ -121,7 +129,7 @@ impl<K: Key, V: Value> Map<K, V> {
         todo!()
     }
 
-    pub fn iter<const REVERSE: bool>(&self) -> Iter<'_, REVERSE, K, V> {
+    pub fn iter<const REVERSE: bool>(&self) -> Iter<'v, '_, REVERSE, K, V> {
         Iter {
             _value: PhantomData,
             iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
@@ -129,18 +137,18 @@ impl<K: Key, V: Value> Map<K, V> {
     }
 }
 
-pub struct Iter<'g, const REVERSE: bool, K: Key, V> {
-    _value: PhantomData<V>,
+pub struct Iter<'v, 'g, const REVERSE: bool, K: Key, V: Value<'v>> {
+    _value: PhantomData<&'v V>,
     iter: RangeIter<'g, REVERSE, K::Read<'g>, K::Write, K::Edge, core::ops::RangeFull>,
 }
 
-impl<'g, const REVERSE: bool, K, V> Iter<'g, REVERSE, K, V>
+impl<'v, 'g, const REVERSE: bool, K, V> Iter<'v, 'g, REVERSE, K, V>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'v>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
                 // FIXME: borrow without guard
@@ -150,12 +158,12 @@ where
     }
 }
 
-impl<'g, const REVERSE: bool, K, V> Iterator for Iter<'g, REVERSE, K, V>
+impl<'v, 'g, const REVERSE: bool, K, V> Iterator for Iter<'v, 'g, REVERSE, K, V>
 where
     K: Key,
-    V: Value + 'g,
+    V: Value<'v>,
 {
-    type Item = (K, V::Borrow<'g>);
+    type Item = (K, V::Borrow<'v>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -167,7 +175,11 @@ where
     }
 }
 
-impl<K: Key, V: Value> Drop for Map<K, V> {
+impl<'v, K, V> Drop for Map<'v, K, V>
+where
+    K: Key,
+    V: Value<'v>,
+{
     fn drop(&mut self) {
         self.postorder().for_each(|edge, _| unsafe {
             edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);

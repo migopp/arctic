@@ -98,280 +98,280 @@ use crate::stat;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub(crate) struct Global<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> {
-    _value: PhantomData<V>,
-
-    #[cfg(feature = "smr-epoch")]
-    collector: crossbeam_epoch::Collector,
-    #[cfg(feature = "smr-epoch")]
-    _prefix: PhantomData<P>,
-
-    #[cfg(not(feature = "smr-epoch"))]
-    hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
-
-    #[cfg(not(feature = "smr-epoch"))]
-    retired: thread_local::ThreadLocal<Cache<core::cell::RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
-    #[cfg(not(feature = "smr-epoch"))]
-    membarrier: AtomicBool,
-    #[cfg(not(feature = "smr-epoch"))]
-    reclaim_threshold: usize,
-}
-
-impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
-    pub(crate) fn with_reclaim_threshold(_reclaim_threshold: usize) -> Self {
-        Self {
-            _value: PhantomData,
-
-            #[cfg(feature = "smr-epoch")]
-            collector: crossbeam_epoch::Collector::default(),
-            #[cfg(feature = "smr-epoch")]
-            _prefix: PhantomData,
-
-            #[cfg(not(feature = "smr-epoch"))]
-            hazards: thread_local::ThreadLocal::with_capacity(128),
-            #[cfg(not(feature = "smr-epoch"))]
-            retired: thread_local::ThreadLocal::with_capacity(128),
-            #[cfg(not(feature = "smr-epoch"))]
-            membarrier: AtomicBool::new(false),
-            #[cfg(not(feature = "smr-epoch"))]
-            reclaim_threshold: _reclaim_threshold,
-        }
-    }
-
-    #[inline]
-    pub(crate) fn set_membarrier(&mut self, membarrier: bool) {
-        #[cfg(not(feature = "smr-epoch"))]
-        {
-            *self.membarrier.get_mut() = membarrier;
-        }
-    }
-
-    pub(crate) fn pin(&self) -> Local<P, V> {
-        Local {
-            _value: PhantomData,
-
-            #[cfg(feature = "smr-epoch")]
-            handle: self.collector.register(),
-            #[cfg(feature = "smr-epoch")]
-            _prefix: PhantomData,
-
-            #[cfg(not(feature = "smr-epoch"))]
-            hazards: &self.hazards,
-            #[cfg(not(feature = "smr-epoch"))]
-            hazard: &self
-                .hazards
-                .get_or(|| Cache(ribbit::Atomic::new_packed(ribbit::Packed::<P>::HAZARD_NULL)))
-                .0,
-            #[cfg(not(feature = "smr-epoch"))]
-            retired: self.retired.get_or_default().0.borrow_mut(),
-            #[cfg(not(feature = "smr-epoch"))]
-            membarrier: &self.membarrier,
-            #[cfg(not(feature = "smr-epoch"))]
-            reclaim_threshold: self.reclaim_threshold,
-        }
-    }
-
-    pub(crate) fn reclaim(&mut self, counter: stat::Counter) {
-        #[cfg(not(feature = "smr-epoch"))]
-        {
-            self.retired
-                .iter_mut()
-                .map(|Cache(retired)| retired)
-                .flat_map(core::cell::RefCell::get_mut)
-                .for_each(|(prefix, raw)| {
-                    unsafe { deallocate_hazard::<P, V>(*prefix, *raw, counter) };
-                })
-        }
-    }
-}
-
-impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Default for Global<P, V> {
-    fn default() -> Self {
-        Self::with_reclaim_threshold(64)
-    }
-}
-
-#[cfg(not(feature = "smr-epoch"))]
-impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Drop for Global<P, V> {
-    fn drop(&mut self) {
-        self.reclaim(stat::Counter::FreeDrop);
-    }
-}
-
-pub(crate) struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
-    _value: PhantomData<&'g V>,
-
-    #[cfg(feature = "smr-epoch")]
-    handle: crossbeam_epoch::LocalHandle,
-    #[cfg(feature = "smr-epoch")]
-    _prefix: PhantomData<&'g P>,
-
-    #[cfg(not(feature = "smr-epoch"))]
-    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
-    #[cfg(not(feature = "smr-epoch"))]
-    hazard: &'g ribbit::Atomic<P>,
-    #[cfg(not(feature = "smr-epoch"))]
-    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
-    #[cfg(not(feature = "smr-epoch"))]
-    membarrier: &'g AtomicBool,
-    #[cfg(not(feature = "smr-epoch"))]
-    reclaim_threshold: usize,
-}
-
-#[cfg(feature = "smr-epoch")]
-impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
-    #[inline]
-    pub(crate) fn guard<'l>(&'l mut self) -> guard::Traverse<'g, 'l, P, V> {
-        guard::Traverse::new(self)
-    }
-
-    #[inline]
-    pub(super) fn enable_membarrier(&self) {}
-}
-
-#[cfg(not(feature = "smr-epoch"))]
-impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
-    #[inline]
-    pub(super) fn enable_membarrier(&self) {
-        self.membarrier.store(true, Ordering::Relaxed);
-    }
-
-    #[inline]
-    pub(crate) fn guard<'l>(
-        &'l mut self,
-        prefix: ribbit::Packed<P>,
-    ) -> guard::Traverse<'g, 'l, P, V> {
-        self.hazard.store_packed(prefix, Ordering::Relaxed);
-        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
-        guard::Traverse::new(self)
-    }
-
-    unsafe fn retire_edge<M: ribbit::Pack<Packed: edge::Meta>>(
-        &mut self,
-        _bits: usize,
-        edge: ribbit::Packed<Edge<M>>,
-    ) {
-        validate!(!edge.is_null());
-        stat::increment(stat::Counter::Retire);
-
-        {
-            use crate::raw::edge::Meta as _;
-
-            let prefix = self
-                .hazard
-                .load_packed(Ordering::Relaxed)
-                .into_prefix(edge.meta().is_value(), Some(_bits));
-
-            self.retired.push((prefix, edge.into_raw()));
-
-            if self.retired.len() >= self.reclaim_threshold {
-                self.flush();
-            }
-        }
-    }
-
-    unsafe fn retire_value(&mut self, raw: u64) {
-        stat::increment(stat::Counter::Retire);
-
-        let prefix = self
-            .hazard
-            .load_packed(Ordering::Relaxed)
-            .into_prefix(true, None);
-
-        self.retired.push((prefix, raw));
-
-        if self.retired.len() >= self.reclaim_threshold {
-            self.flush();
-        }
-    }
-
-    #[cold]
-    fn flush(&mut self) {
-        stat::max(stat::Max::RetireCache, self.retired.len() as u64);
-
-        membarrier::slow(self.membarrier.load(Ordering::Relaxed));
-
-        let hazards = self
-            .hazards
-            .iter()
-            .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
-            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-            .filter(|hazard| hazard.is_active())
-            .collect::<Vec<_>>();
-
-        let mut freed = 0;
-
-        self.retired.retain_mut(|(prefix, raw)| {
-            if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
-                stat::increment(stat::Counter::HazardMatch);
-                if cfg!(feature = "stat") {
-                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
-                }
-                return true;
-            }
-
-            if cfg!(feature = "stat") {
-                stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
-            }
-            freed += 1;
-            unsafe { deallocate_hazard::<P, V>(*prefix, *raw, stat::Counter::FreeRetire) };
-            false
-        });
-
-        stat::record(stat::Record::Flush, freed);
-    }
-}
-
-#[cfg_attr(feature = "smr-epoch", expect(dead_code))]
-unsafe fn deallocate_hazard<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value>(
-    prefix: ribbit::Packed<P>,
-    raw: u64,
-    counter: stat::Counter,
-) {
-    validate!(prefix.is_value() ^ prefix.is_node());
-
-    if cfg!(feature = "stat") {
-        if let Some(record) = match prefix.bytes() {
-            0 => Some(stat::Record::ReclaimAge0),
-            1 => Some(stat::Record::ReclaimAge1),
-            2 => Some(stat::Record::ReclaimAge2),
-            3 => Some(stat::Record::ReclaimAge3),
-            _ => None,
-        } {
-            match counter {
-                stat::Counter::FreeRetire => stat::record(record, prefix.age() as u64 + 1),
-                // HACK: need some age to differentiate drop from retire
-                stat::Counter::FreeDrop => stat::record(record, 0),
-                _ => (),
-            }
-        }
-    }
-
-    if prefix.is_node() {
-        unsafe {
-            // FIXME: type of edge meta is irrelevant here
-            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
-        }
-    } else {
-        unsafe {
-            stat::increment(counter);
-            drop(V::from_raw(raw));
-        }
-    }
-}
-
-#[cfg_attr(not(feature = "smr-epoch"), expect(dead_code))]
-unsafe fn deallocate_epoch<M: ribbit::Pack<Packed: edge::Meta>, V: concurrent::Value>(
-    edge: ribbit::Packed<Edge<M>>,
-) {
-    match edge.child() {
-        None => unreachable!(),
-        Some(edge::Child::Value(value)) => unsafe {
-            stat::increment(stat::Counter::FreeRetire);
-            drop(V::from_raw(value));
-        },
-        Some(edge::Child::Node(node)) => unsafe {
-            node.deallocate(stat::Counter::FreeRetire);
-        },
-    }
-}
+// pub(crate) struct Global<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> {
+//     _value: PhantomData<V>,
+//
+//     #[cfg(feature = "smr-epoch")]
+//     collector: crossbeam_epoch::Collector,
+//     #[cfg(feature = "smr-epoch")]
+//     _prefix: PhantomData<P>,
+//
+//     #[cfg(not(feature = "smr-epoch"))]
+//     hazards: thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
+//
+//     #[cfg(not(feature = "smr-epoch"))]
+//     retired: thread_local::ThreadLocal<Cache<core::cell::RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     membarrier: AtomicBool,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     reclaim_threshold: usize,
+// }
+//
+// impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Global<P, V> {
+//     pub(crate) fn with_reclaim_threshold(_reclaim_threshold: usize) -> Self {
+//         Self {
+//             _value: PhantomData,
+//
+//             #[cfg(feature = "smr-epoch")]
+//             collector: crossbeam_epoch::Collector::default(),
+//             #[cfg(feature = "smr-epoch")]
+//             _prefix: PhantomData,
+//
+//             #[cfg(not(feature = "smr-epoch"))]
+//             hazards: thread_local::ThreadLocal::with_capacity(128),
+//             #[cfg(not(feature = "smr-epoch"))]
+//             retired: thread_local::ThreadLocal::with_capacity(128),
+//             #[cfg(not(feature = "smr-epoch"))]
+//             membarrier: AtomicBool::new(false),
+//             #[cfg(not(feature = "smr-epoch"))]
+//             reclaim_threshold: _reclaim_threshold,
+//         }
+//     }
+//
+//     #[inline]
+//     pub(crate) fn set_membarrier(&mut self, membarrier: bool) {
+//         #[cfg(not(feature = "smr-epoch"))]
+//         {
+//             *self.membarrier.get_mut() = membarrier;
+//         }
+//     }
+//
+//     pub(crate) fn pin(&self) -> Local<P, V> {
+//         Local {
+//             _value: PhantomData,
+//
+//             #[cfg(feature = "smr-epoch")]
+//             handle: self.collector.register(),
+//             #[cfg(feature = "smr-epoch")]
+//             _prefix: PhantomData,
+//
+//             #[cfg(not(feature = "smr-epoch"))]
+//             hazards: &self.hazards,
+//             #[cfg(not(feature = "smr-epoch"))]
+//             hazard: &self
+//                 .hazards
+//                 .get_or(|| Cache(ribbit::Atomic::new_packed(ribbit::Packed::<P>::HAZARD_NULL)))
+//                 .0,
+//             #[cfg(not(feature = "smr-epoch"))]
+//             retired: self.retired.get_or_default().0.borrow_mut(),
+//             #[cfg(not(feature = "smr-epoch"))]
+//             membarrier: &self.membarrier,
+//             #[cfg(not(feature = "smr-epoch"))]
+//             reclaim_threshold: self.reclaim_threshold,
+//         }
+//     }
+//
+//     pub(crate) fn reclaim(&mut self, counter: stat::Counter) {
+//         #[cfg(not(feature = "smr-epoch"))]
+//         {
+//             self.retired
+//                 .iter_mut()
+//                 .map(|Cache(retired)| retired)
+//                 .flat_map(core::cell::RefCell::get_mut)
+//                 .for_each(|(prefix, raw)| {
+//                     unsafe { deallocate_hazard::<P, V>(*prefix, *raw, counter) };
+//                 })
+//         }
+//     }
+// }
+//
+// impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Default for Global<P, V> {
+//     fn default() -> Self {
+//         Self::with_reclaim_threshold(64)
+//     }
+// }
+//
+// #[cfg(not(feature = "smr-epoch"))]
+// impl<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Drop for Global<P, V> {
+//     fn drop(&mut self) {
+//         self.reclaim(stat::Counter::FreeDrop);
+//     }
+// }
+//
+// pub(crate) struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
+//     _value: PhantomData<&'g V>,
+//
+//     #[cfg(feature = "smr-epoch")]
+//     handle: crossbeam_epoch::LocalHandle,
+//     #[cfg(feature = "smr-epoch")]
+//     _prefix: PhantomData<&'g P>,
+//
+//     #[cfg(not(feature = "smr-epoch"))]
+//     hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     hazard: &'g ribbit::Atomic<P>,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     membarrier: &'g AtomicBool,
+//     #[cfg(not(feature = "smr-epoch"))]
+//     reclaim_threshold: usize,
+// }
+//
+// #[cfg(feature = "smr-epoch")]
+// impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
+//     #[inline]
+//     pub(crate) fn guard<'l>(&'l mut self) -> guard::Traverse<'g, 'l, P, V> {
+//         guard::Traverse::new(self)
+//     }
+//
+//     #[inline]
+//     pub(super) fn enable_membarrier(&self) {}
+// }
+//
+// #[cfg(not(feature = "smr-epoch"))]
+// impl<'g, P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value> Local<'g, P, V> {
+//     #[inline]
+//     pub(super) fn enable_membarrier(&self) {
+//         self.membarrier.store(true, Ordering::Relaxed);
+//     }
+//
+//     #[inline]
+//     pub(crate) fn guard<'l>(
+//         &'l mut self,
+//         prefix: ribbit::Packed<P>,
+//     ) -> guard::Traverse<'g, 'l, P, V> {
+//         self.hazard.store_packed(prefix, Ordering::Relaxed);
+//         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
+//         guard::Traverse::new(self)
+//     }
+//
+//     unsafe fn retire_edge<M: ribbit::Pack<Packed: edge::Meta>>(
+//         &mut self,
+//         _bits: usize,
+//         edge: ribbit::Packed<Edge<M>>,
+//     ) {
+//         validate!(!edge.is_null());
+//         stat::increment(stat::Counter::Retire);
+//
+//         {
+//             use crate::raw::edge::Meta as _;
+//
+//             let prefix = self
+//                 .hazard
+//                 .load_packed(Ordering::Relaxed)
+//                 .into_prefix(edge.meta().is_value(), Some(_bits));
+//
+//             self.retired.push((prefix, edge.into_raw()));
+//
+//             if self.retired.len() >= self.reclaim_threshold {
+//                 self.flush();
+//             }
+//         }
+//     }
+//
+//     unsafe fn retire_value(&mut self, raw: u64) {
+//         stat::increment(stat::Counter::Retire);
+//
+//         let prefix = self
+//             .hazard
+//             .load_packed(Ordering::Relaxed)
+//             .into_prefix(true, None);
+//
+//         self.retired.push((prefix, raw));
+//
+//         if self.retired.len() >= self.reclaim_threshold {
+//             self.flush();
+//         }
+//     }
+//
+//     #[cold]
+//     fn flush(&mut self) {
+//         stat::max(stat::Max::RetireCache, self.retired.len() as u64);
+//
+//         membarrier::slow(self.membarrier.load(Ordering::Relaxed));
+//
+//         let hazards = self
+//             .hazards
+//             .iter()
+//             .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
+//             .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+//             .filter(|hazard| hazard.is_active())
+//             .collect::<Vec<_>>();
+//
+//         let mut freed = 0;
+//
+//         self.retired.retain_mut(|(prefix, raw)| {
+//             if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
+//                 stat::increment(stat::Counter::HazardMatch);
+//                 if cfg!(feature = "stat") {
+//                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
+//                 }
+//                 return true;
+//             }
+//
+//             if cfg!(feature = "stat") {
+//                 stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
+//             }
+//             freed += 1;
+//             unsafe { deallocate_hazard::<P, V>(*prefix, *raw, stat::Counter::FreeRetire) };
+//             false
+//         });
+//
+//         stat::record(stat::Record::Flush, freed);
+//     }
+// }
+//
+// #[cfg_attr(feature = "smr-epoch", expect(dead_code))]
+// unsafe fn deallocate_hazard<P: ribbit::Pack<Packed: Prefix>, V: concurrent::Value>(
+//     prefix: ribbit::Packed<P>,
+//     raw: u64,
+//     counter: stat::Counter,
+// ) {
+//     validate!(prefix.is_value() ^ prefix.is_node());
+//
+//     if cfg!(feature = "stat") {
+//         if let Some(record) = match prefix.bytes() {
+//             0 => Some(stat::Record::ReclaimAge0),
+//             1 => Some(stat::Record::ReclaimAge1),
+//             2 => Some(stat::Record::ReclaimAge2),
+//             3 => Some(stat::Record::ReclaimAge3),
+//             _ => None,
+//         } {
+//             match counter {
+//                 stat::Counter::FreeRetire => stat::record(record, prefix.age() as u64 + 1),
+//                 // HACK: need some age to differentiate drop from retire
+//                 stat::Counter::FreeDrop => stat::record(record, 0),
+//                 _ => (),
+//             }
+//         }
+//     }
+//
+//     if prefix.is_node() {
+//         unsafe {
+//             // FIXME: type of edge meta is irrelevant here
+//             crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
+//         }
+//     } else {
+//         unsafe {
+//             stat::increment(counter);
+//             drop(V::from_raw(raw));
+//         }
+//     }
+// }
+//
+// #[cfg_attr(not(feature = "smr-epoch"), expect(dead_code))]
+// unsafe fn deallocate_epoch<M: ribbit::Pack<Packed: edge::Meta>, V: concurrent::Value>(
+//     edge: ribbit::Packed<Edge<M>>,
+// ) {
+//     match edge.child() {
+//         None => unreachable!(),
+//         Some(edge::Child::Value(value)) => unsafe {
+//             stat::increment(stat::Counter::FreeRetire);
+//             drop(V::from_raw(value));
+//         },
+//         Some(edge::Child::Node(node)) => unsafe {
+//             node.deallocate(stat::Counter::FreeRetire);
+//         },
+//     }
+// }

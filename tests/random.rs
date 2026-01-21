@@ -2,7 +2,6 @@ use core::hash::Hasher as _;
 use std::sync::Barrier;
 
 use arctic::raw::Key;
-use arctic::Value as _;
 
 mod u64 {
     use arctic::raw::Key;
@@ -185,7 +184,7 @@ mod vec {
 trait Workload: Sized + Sync {
     type Key: arctic::concurrent::Key + Sync;
 
-    type Value: arctic::Value + Send + Sync;
+    type Value: arctic::Value<'static> + Send + Sync;
 
     fn key(&self, index: usize) -> Self::Key;
 
@@ -195,7 +194,7 @@ trait Workload: Sized + Sync {
         &'a self,
         index: usize,
         key: <Self::Key as Key>::Borrow<'a>,
-        value: <Self::Value as arctic::sequential::Value>::Borrow<'_>,
+        value: <Self::Value as arctic::sequential::Value<'static>>::Borrow<'_>,
     ) where
         'a: 'g,
         'g: 'l;
@@ -247,18 +246,14 @@ where
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
                     let value = map.remove(key.borrow()).unwrap();
-                    key_set.validate(*index, key.borrow(), K::Value::borrow_owned(&value));
+                    key_set.validate(*index, key.borrow(), *value);
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().skip(chunk.len() / 2) {
                     let value = map.get(key.borrow());
-                    key_set.validate(
-                        *index,
-                        key.borrow(),
-                        K::Value::borrow_shared(&value.unwrap()),
-                    );
+                    key_set.validate(*index, key.borrow(), *value.unwrap());
                 }
             });
         }

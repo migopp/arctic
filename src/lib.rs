@@ -52,7 +52,7 @@ mod tests {
         let map = Map::<Vec<u8>, _>::default();
         let mut map = map.pin();
         map.upsert(b"abcd", 1u32);
-        assert_eq!(map.get(b"abcd"), Some(1));
+        assert_eq!(map.get(b"abcd").as_deref().copied(), Some(1));
     }
 
     #[test]
@@ -61,7 +61,7 @@ mod tests {
         let key = 0xdeadbeefu64.to_be_bytes();
         let mut map = map.pin();
         map.upsert(&key, 1u32);
-        assert_eq!(map.get(&key), Some(1));
+        assert_eq!(map.get(&key).as_deref().copied(), Some(1));
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
 
         for value in [1u32, 2, 3] {
             pin.upsert(1, value);
-            assert_eq!(pin.get(1), Some(value));
+            assert_eq!(pin.get(1).as_deref().copied(), Some(value));
         }
 
         drop(pin);
@@ -176,7 +176,7 @@ mod tests {
 
         for key in [5, 1, 4, 3, 2] {
             pin.upsert(key, key);
-            assert_eq!(pin.get(key), Some(key));
+            assert_eq!(pin.get(key).as_deref().copied(), Some(key));
         }
         let range = pin.range(2, 4).unwrap();
 
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(values, (5..10).collect::<Vec<u32>>());
     }
 
-    fn insert_all<I, K>(iter: I) -> Map<K, u32>
+    fn insert_all<I, K>(iter: I) -> Map<'static, K, u32>
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
@@ -244,11 +244,11 @@ mod tests {
 
         for (key, value) in &keys {
             pin.upsert(key.borrow(), *value);
-            assert_eq!(pin.get(key.borrow()), Some(*value));
+            assert_eq!(pin.get(key.borrow()).as_deref().copied(), Some(*value));
         }
 
         for (key, value) in &keys {
-            assert_eq!(pin.get(key.borrow()), Some(*value));
+            assert_eq!(pin.get(key.borrow()).as_deref().copied(), Some(*value));
         }
 
         drop(pin);

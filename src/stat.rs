@@ -20,7 +20,7 @@ thread_local! {
     pub(crate) static THREAD: core::cell::RefCell<Thread> = core::cell::RefCell::new(Thread::default()) ;
 }
 
-pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Process {
+pub fn process<'v, K: Key, V: Value<'v>>(map: &mut crate::concurrent::Map<'v, K, V>) -> Process {
     let mut depth = Histogram::default();
     let mut compression = Histogram::default();
     let mut node_3 = Histogram::default();

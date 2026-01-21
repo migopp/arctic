@@ -1,78 +1,75 @@
+use core::marker::PhantomData;
 use core::ops::ControlFlow;
 
 use ribbit::Atomic;
 
-use crate::concurrent::hazard;
-use crate::concurrent::Cursor;
+use crate::concurrent::smr;
 use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::raw;
-use crate::raw::cursor;
 use crate::raw::key;
 use crate::raw::key::Read as _;
 use crate::raw::Edge;
 
-/// Guard all nodes and values below this prefix from memory reclamation.
-pub struct Prefix<'k, 'g, 'l, K: Key, V: Value, R> {
-    guard: hazard::guard::Prefix<'g, 'l, K::Prefix, V>,
+pub struct Prefix<'k, 'v, 'g, K: Key, V, R, G = smr::Epoch> {
+    guard: G,
     root: &'g Atomic<Edge<K::Edge>>,
     prefix: K::Read<'k>,
     range: R,
+    value: PhantomData<&'v V>,
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R> Prefix<'k, 'g, 'l, K, V, R>
+impl<'k, 'v, 'g, K, V, R, G> Prefix<'k, 'v, 'g, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
-    pub(super) unsafe fn new<H>(
-        key: K::Read<'k>,
-        cursor: Cursor<'k, 'g, 'l, K, V, H>,
+    pub(super) unsafe fn new(
+        guard: G,
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
         range: R,
-    ) -> Prefix<'k, 'g, 'l, K, V, R>
-    where
-        K: Key,
-        V: Value,
-        H: cursor::path::History<'k, 'g, K>,
-    {
-        let bits = cursor.bits();
-        let prefix = key.prefix(bits);
-        let range = range.suffix(bits);
+    ) -> Prefix<'k, 'v, 'g, K, V, R, G> {
         Prefix {
-            root: cursor.edge(),
+            root,
             prefix,
-            guard: cursor.into_guard().guard_prefix(),
+            guard,
             range,
+            value: PhantomData,
         }
     }
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, K, V, R> Prefix<'k, 'g, 'l, K, V, R>
+impl<'k, 'v, 'g, K, V, R, G> Prefix<'k, 'v, 'g, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
     #[inline]
-    pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'g, '_, REVERSE, K, V, R> {
+    pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'v, 'g, '_, REVERSE, K, V, R, G> {
         EntryIter {
             guard: &self.guard,
             iter: unsafe {
                 raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
             },
+            value: PhantomData,
         }
     }
 
     #[inline]
-    pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'g, '_, REVERSE, K, V, R> {
+    pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'v, 'g, '_, REVERSE, K, V, R, G> {
         ValueIter {
             guard: &self.guard,
             iter: unsafe {
                 raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
             },
+            value: PhantomData,
         }
     }
 }
@@ -81,38 +78,42 @@ where
 #[expect(private_bounds)]
 pub struct EntryIter<
     'k,
+    'v,
     'g,
     'l,
     const REVERSE: bool,
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: raw::iter::Range<K::Read<'k>>,
+    G,
 > {
-    guard: &'l hazard::guard::Prefix<'g, 'l, K::Prefix, V>,
+    guard: &'l G,
     iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, K::Write, K::Edge, R>,
+    value: PhantomData<&'v V>,
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> EntryIter<'k, 'g, 'l, REVERSE, K, V, R>
+impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> EntryIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'l>)> {
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'v>)> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
+                V::borrow_from_raw(value)
             })
         })
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'v>) -> ControlFlow<()>>(self, mut apply: F) {
         self.iter.for_each(|key, value| {
             apply(unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                V::guard_borrow(self.guard, value)
+                V::borrow_from_raw(value)
             })
         })
     }
@@ -123,19 +124,21 @@ where
     }
 }
 
-impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> Iterator for EntryIter<'k, 'g, 'l, REVERSE, K, V, R>
+impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> Iterator
+    for EntryIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
-    type Item = (K, V::Borrow<'l>);
+    type Item = (K, V::Borrow<'v>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.lend().map(|(key, value)| {
             (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::guard_borrow(self.guard, value)
+                V::borrow_from_raw(value)
             })
         })
     }
@@ -145,45 +148,51 @@ where
 #[expect(private_bounds)]
 pub struct ValueIter<
     'k,
+    'v,
     'g,
     'l,
     const REVERSE: bool,
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: raw::iter::Range<K::Read<'k>>,
+    G,
 > {
-    guard: &'l hazard::guard::Prefix<'g, 'l, K::Prefix, V>,
+    guard: &'l G,
     iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R>,
+    value: PhantomData<&'v V>,
 }
 
 #[expect(private_bounds)]
-impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> ValueIter<'k, 'g, 'l, REVERSE, K, V, R>
+impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> ValueIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<V::Borrow<'l>> {
+    pub fn lend(&mut self) -> Option<V::Borrow<'v>> {
         self.iter
             .lend()
-            .map(|(_, value)| unsafe { V::guard_borrow(self.guard, value) })
+            .map(|(_, value)| unsafe { V::borrow_from_raw(value) })
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'l>) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each<F: FnMut(V::Borrow<'v>) -> ControlFlow<()>>(self, mut apply: F) {
         self.iter
-            .for_each(|_, value| apply(unsafe { V::guard_borrow(self.guard, value) }))
+            .for_each(|_, value| apply(unsafe { V::borrow_from_raw(value) }))
     }
 }
 
-impl<'k, 'g, 'l, const REVERSE: bool, K, V, R> Iterator for ValueIter<'k, 'g, 'l, REVERSE, K, V, R>
+impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> Iterator
+    for ValueIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
-    V: Value,
+    V: Value<'v>,
     R: crate::raw::iter::Range<K::Read<'k>>,
+    G: smr::Guard,
 {
-    type Item = V::Borrow<'l>;
+    type Item = V::Borrow<'v>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
