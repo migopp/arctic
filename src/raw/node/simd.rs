@@ -24,6 +24,22 @@ macro_rules! dispatch {
 }
 
 #[inline]
+pub(super) fn get_3(array: u64, key: u8) -> u8 {
+    dispatch!(avx2::get_3(array, key), get_3_fallback(array, key))
+}
+
+#[inline]
+fn get_3_fallback(array: u64, key: u8) -> u8 {
+    array
+        .to_le_bytes()
+        .into_iter()
+        .step_by(2)
+        .position(|byte| byte == key)
+        .map(|index| index as u8)
+        .unwrap_or(3)
+}
+
+#[inline]
 pub(super) fn get_15(array: u128, key: u8) -> u8 {
     dispatch!(avx2::get_15(array, key), get_15_fallback(array, key))
 }

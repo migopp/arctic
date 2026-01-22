@@ -43,6 +43,29 @@ use ribbit::Atomic;
 use crate::raw::node::linear::KeyIter;
 use crate::raw::node::linear::KeyIter3;
 
+/// https://richardstartin.github.io/posts/finding-bytes
+/// https://orlp.net/blog/extracting-depositing-bits/
+/// https://lemire.me/blog/2022/01/21/swar-explained-parsing-eight-digits/
+/// https://lamport.azurewebsites.net/pubs/multiple-byte.pdf
+#[inline]
+pub(super) fn get_3(array: u64, key: u8) -> u8 {
+    const LOWER: u64 = 0x0000_00FF_00FF_00FF;
+    const OVERFLOW: u64 = 0x0000_0100_0100_0100;
+
+    let key = key as u64;
+    // LLVM is smart enough to turn this into an `imul`
+    let key = key | (key << 16) | (key << 32);
+
+    // Convert key bytes to zero
+    let key_to_zero = array ^ key;
+
+    // Set overflow bit for byte if byte is non-zero
+    let equal_zero = key_to_zero + LOWER;
+
+    // Extract overflow bits
+    unsafe { core::arch::x86_64::_pext_u64(equal_zero, OVERFLOW) }.trailing_ones() as u8
+}
+
 #[inline]
 pub(super) fn get_15(array: u128, key: u8) -> u8 {
     let array = u128_to_avx(array);
@@ -499,6 +522,28 @@ mod tests {
     use crate::raw::node::linear::KeyIter;
     use crate::raw::node::simd;
     use crate::raw::node::simd::avx2::bitonic_sort_16;
+
+    #[test]
+    fn get_3() {
+        const COUNT: usize = 100_000;
+
+        let mut hasher = rapidhash::fast::RapidHasher::default_const();
+
+        for i in 0..COUNT {
+            hasher.write_usize(i);
+            let hash = hasher.finish();
+            let array = hash & 0x00FF_00FF_00FF;
+            let key = (hash >> 8) as u8;
+
+            let swar = super::get_3(array, key);
+            let fallback = simd::get_3_fallback(array, key);
+
+            assert_eq!(
+                swar, fallback,
+                "SWAR {swar} does not match fallback {fallback} for array {array:x?} and key {key:x?}",
+            );
+        }
+    }
 
     #[test]
     fn get_15() {
