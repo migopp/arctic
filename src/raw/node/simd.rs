@@ -162,7 +162,10 @@ pub(super) fn compress_47_fallback<L: crate::raw::node::Lower, U: crate::raw::no
     let len = indices[i as usize..=j as usize]
         .iter()
         .flat_map(|chunk| chunk.load(Ordering::Relaxed).to_le_bytes())
-        .zip((i * 16)..)
+        // HACK: using `i: u8` here causes integer overflow in debug mode
+        // when all 256 bytes are loaded
+        .zip((i as u16 * 16)..)
+        .map(|(index, key)| (index, key as u8))
         .filter(|(index, key)| (*index < len && *key >= lower.get() && *key <= upper.get()))
         .zip(&mut out.entries)
         .map(|((index, key), out)| {
