@@ -87,7 +87,7 @@ mod tests {
         let mut map = map.pin();
         let key = 1u64;
         map.upsert(key, 2u32);
-        let range = map.range(1u64, 1u64).unwrap();
+        let range = map.range(1u64..=1u64).unwrap();
         assert_eq!(range.entries::<false>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
 
@@ -115,7 +115,7 @@ mod tests {
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));
         let mut map = map.pin();
-        let range = map.range(256u64, 511u64).unwrap();
+        let range = map.range(256u64..=511u64).unwrap();
         assert_eq!(
             range.entries::<false>().collect::<Vec<_>>(),
             (256..512)
@@ -195,7 +195,7 @@ mod tests {
             pin.upsert(key, key);
             assert_eq!(pin.get(key).as_deref().copied(), Some(key));
         }
-        let range = pin.range(2, 4).unwrap();
+        let range = pin.range(2..=4).unwrap();
 
         assert_eq!(
             range.entries::<true>().collect::<Vec<_>>(),
@@ -239,7 +239,7 @@ mod tests {
         let map = insert_all((0..10i64).map(key));
 
         let mut pin = map.pin();
-        let prefix = pin.range(key(5), key(i64::MAX)).unwrap();
+        let prefix = pin.range(key(5)..=key(i64::MAX)).unwrap();
 
         let values = prefix.values::<false>().collect::<Vec<_>>();
         assert_eq!(values, (5..10).collect::<Vec<u32>>());
@@ -311,7 +311,7 @@ mod tests {
         drop(prefix);
 
         // Concurrent range iteration, non-linearizable
-        let range = pin.range(first.borrow(), last.borrow()).unwrap();
+        let range = pin.range(first.borrow()..=last.borrow()).unwrap();
         range
             .entries::<false>()
             .zip(&keys)

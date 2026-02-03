@@ -12,80 +12,91 @@ use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
+use crate::raw::key::Read as _;
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct Include<T>(pub(crate) T);
+pub struct Include<T>(pub(crate) T);
 
 #[derive(Copy, Clone, Default, Debug)]
-pub(crate) struct Unbound;
+pub struct Unbound;
 
-pub(crate) trait Range<R: key::Read>: Clone {
+pub trait Range<'k, K: raw::Key>: Clone {
     #[expect(private_bounds)]
-    type Lower: Lower<R>;
+    type Lower: Lower<K::Read<'k>>;
 
     #[expect(private_bounds)]
-    type Upper: Upper<R>;
+    type Upper: Upper<K::Read<'k>>;
 
-    fn lower(&self) -> Self::Lower;
-    fn upper(&self) -> Self::Upper;
-}
-
-impl<R: key::Read> Range<R> for RangeInclusive<R> {
-    type Lower = Include<R>;
-    type Upper = Include<R>;
+    fn lower(&self, bits: usize) -> Self::Lower;
+    fn upper(&self, bits: usize) -> Self::Upper;
 
     #[inline]
-    fn lower(&self) -> Self::Lower {
-        Include(*self.start())
-    }
-
-    #[inline]
-    fn upper(&self) -> Self::Upper {
-        Include(*self.end())
+    fn common_prefix(&self) -> K::Read<'k> {
+        K::Read::default()
     }
 }
 
-impl<R: key::Read> Range<R> for core::ops::RangeFrom<R> {
-    type Lower = Include<R>;
+impl<'k, K: raw::Key> Range<'k, K> for RangeInclusive<K::Borrow<'k>> {
+    type Lower = Include<K::Read<'k>>;
+    type Upper = Include<K::Read<'k>>;
+
+    #[inline]
+    fn lower(&self, bits: usize) -> Self::Lower {
+        Include(K::Read::from(*self.start()).suffix(bits))
+    }
+
+    #[inline]
+    fn upper(&self, bits: usize) -> Self::Upper {
+        Include(K::Read::from(*self.end()).suffix(bits))
+    }
+
+    #[inline]
+    fn common_prefix(&self) -> <K as raw::Key>::Read<'k> {
+        K::Read::from(*self.start()).common_prefix(K::Read::from(*self.end()))
+    }
+}
+
+impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeFrom<K::Borrow<'k>> {
+    type Lower = Include<K::Read<'k>>;
     type Upper = Unbound;
 
     #[inline]
-    fn lower(&self) -> Self::Lower {
-        Include(self.start)
+    fn lower(&self, bits: usize) -> Self::Lower {
+        Include(K::Read::from(self.start).suffix(bits))
     }
 
     #[inline]
-    fn upper(&self) -> Self::Upper {
+    fn upper(&self, _bits: usize) -> Self::Upper {
         Unbound
     }
 }
 
-impl<R: key::Read> Range<R> for core::ops::RangeToInclusive<R> {
+impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeToInclusive<K::Borrow<'k>> {
     type Lower = Unbound;
-    type Upper = Include<R>;
+    type Upper = Include<K::Read<'k>>;
 
     #[inline]
-    fn lower(&self) -> Self::Lower {
+    fn lower(&self, _bits: usize) -> Self::Lower {
         Unbound
     }
 
     #[inline]
-    fn upper(&self) -> Self::Upper {
-        Include(self.end)
+    fn upper(&self, bits: usize) -> Self::Upper {
+        Include(K::Read::from(self.end).suffix(bits))
     }
 }
 
-impl<R: key::Read> Range<R> for core::ops::RangeFull {
+impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeFull {
     type Lower = Unbound;
     type Upper = Unbound;
 
     #[inline]
-    fn lower(&self) -> Self::Lower {
+    fn lower(&self, _bits: usize) -> Self::Lower {
         Unbound
     }
 
     #[inline]
-    fn upper(&self) -> Self::Upper {
+    fn upper(&self, _bits: usize) -> Self::Upper {
         Unbound
     }
 }

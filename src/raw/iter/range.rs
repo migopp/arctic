@@ -8,29 +8,28 @@ use crate::raw::edge;
 use crate::raw::iter::Lower as _;
 use crate::raw::iter::Upper as _;
 use crate::raw::key;
+use crate::raw::key::Read as _;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 
 pub(crate) enum RangeIter<
+    'k,
     'g,
     const REVERSE: bool,
-    R: key::Read,
+    K: raw::Key,
+    R: raw::iter::Range<'k, K>,
     W: key::Write,
-    M: ribbit::Pack<Packed: edge::Meta>,
-    B: raw::iter::Range<R>,
 > {
     Root { writer: W, next: Option<u64> },
-    Node(NodeIter<'g, REVERSE, R, W, M, B>),
+    Node(NodeIter<'k, 'g, REVERSE, K, R, W>),
 }
 
-impl<'g, const REVERSE: bool, R, W, M, B> Default for RangeIter<'g, REVERSE, R, W, M, B>
+impl<'k, 'g, const REVERSE: bool, K, R, W> Default for RangeIter<'k, 'g, REVERSE, K, R, W>
 where
-    R: key::Read<Edge = M>,
-    W: key::Write<Edge = M>,
-    W: From<R>,
-    M: ribbit::Pack<Packed: edge::Meta>,
-    B: raw::iter::Range<R>,
+    K: raw::Key,
+    R: raw::iter::Range<'k, K>,
+    W: key::Write + From<K::Read<'k>>,
 {
     fn default() -> Self {
         Self::Root {
@@ -40,15 +39,17 @@ where
     }
 }
 
-impl<'g, const REVERSE: bool, R, W, M, B> RangeIter<'g, REVERSE, R, W, M, B>
+impl<'k, 'g, const REVERSE: bool, K, R, W> RangeIter<'k, 'g, REVERSE, K, R, W>
 where
-    R: key::Read<Edge = M>,
-    W: key::Write<Edge = M>,
-    W: From<R>,
-    M: ribbit::Pack<Packed: edge::Meta>,
-    B: raw::iter::Range<R>,
+    K: raw::Key,
+    R: raw::iter::Range<'k, K>,
+    W: key::Write<Edge = K::Edge> + From<K::Read<'k>>,
 {
-    pub(crate) unsafe fn new_unchecked(root: &'g Atomic<Edge<M>>, prefix: R, range: B) -> Self {
+    pub(crate) unsafe fn new_unchecked(
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
+        range: R,
+    ) -> Self {
         let edge = root.load_packed(Ordering::Acquire);
 
         let Some(child) = edge.child() else {
@@ -60,8 +61,8 @@ where
         let mut writer = W::from(prefix);
         let len = writer.write(W::len_from_bits(bits), key);
 
-        let mut lower = range.lower();
-        let mut upper = range.upper();
+        let mut lower = range.lower(bits);
+        let mut upper = range.upper(bits);
 
         let Some((lower_byte, upper_byte)) = lower.check(key).zip(upper.check(key)) else {
             return Self::default();
@@ -74,9 +75,7 @@ where
             },
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
-                stack.push((len, unsafe {
-                    node.entries(lower_byte, upper_byte)
-                }));
+                stack.push((len, unsafe { node.entries(lower_byte, upper_byte) }));
 
                 Self::Node(NodeIter {
                     lower,
@@ -115,33 +114,32 @@ where
 }
 
 pub(crate) struct NodeIter<
+    'k,
     'g,
     const REVERSE: bool,
-    R: key::Read,
+    K: raw::Key,
+    R: raw::iter::Range<'k, K>,
     W: key::Write,
-    M: ribbit::Pack<Packed: edge::Meta> + 'g,
-    B: raw::iter::Range<R>,
 > {
-    lower: B::Lower,
-    upper: B::Upper,
+    lower: R::Lower,
+    upper: R::Upper,
     writer: W,
     stack: Vec<(
         W::Len,
         raw::node::NodeIter<
             'g,
-            <B::Lower as raw::iter::Lower<R>>::Bound,
-            <B::Upper as raw::iter::Upper<R>>::Bound,
-            M,
+            <R::Lower as raw::iter::Lower<K::Read<'k>>>::Bound,
+            <R::Upper as raw::iter::Upper<K::Read<'k>>>::Bound,
+            K::Edge,
         >,
     )>,
 }
 
-impl<'g, const REVERSE: bool, R, W, M, B> NodeIter<'g, REVERSE, R, W, M, B>
+impl<'k, 'g, const REVERSE: bool, K, R, W> NodeIter<'k, 'g, REVERSE, K, R, W>
 where
-    R: key::Read<Edge = M>,
-    W: key::Write<Edge = M>,
-    M: ribbit::Pack<Packed: edge::Meta> + 'g,
-    B: raw::iter::Range<R>,
+    K: raw::Key,
+    R: raw::iter::Range<'k, K>,
+    W: key::Write<Edge = K::Edge>,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -227,8 +225,7 @@ where
                         },
                         edge::Child::Node(node) => {
                             // Avoid pushing and popping iterators with only one child
-                            match unsafe { node.entries(lower, upper) }.try_into_single()
-                            {
+                            match unsafe { node.entries(lower, upper) }.try_into_single() {
                                 Ok((check_lower_, check_upper_, byte_, edge_)) => {
                                     check_lower = check_lower_;
                                     check_upper = check_upper_;

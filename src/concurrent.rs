@@ -3,9 +3,7 @@ mod key;
 mod smr;
 mod value;
 
-use core::ops::RangeFrom;
 use core::ops::RangeFull;
-use core::ops::RangeInclusive;
 use core::sync::atomic::Ordering;
 
 use polonius_the_crab::polonius;
@@ -626,38 +624,23 @@ where
     }
 
     // FIXME: support `Option` for min, max
-    pub fn range<'k>(
+    pub fn range<'k, R>(
         &mut self,
-        min: impl Into<K::Read<'k>>,
-        max: impl Into<K::Read<'k>>,
-    ) -> Option<
-        iter::Prefix<'k, 'v, 'g, K, V, RangeInclusive<K::Read<'k>>, Guard<'v, 'g, '_, K, V, S>>,
-    > {
-        let min = min.into();
-        let max = max.into();
-        let prefix = min.common_prefix(max);
-        let guard = self.smr.guard(K::hazard(K::Read::default()));
+        range: R,
+    ) -> Option<iter::Prefix<'k, 'v, 'g, K, V, R, Guard<'v, 'g, '_, K, V, S>>>
+    where
+        R: crate::raw::iter::Range<'k, K>,
+    {
+        let prefix = range.common_prefix();
+        let guard = self.smr.guard(K::hazard(prefix));
         let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), prefix) };
         cursor.traverse_prefix()?;
 
         let root = cursor.edge();
         let bits = cursor.bits();
         let prefix = prefix.prefix(bits);
-        let suffix = min.suffix(bits)..=max.suffix(bits);
 
-        Some(unsafe { iter::Prefix::new(guard, root, prefix, suffix) })
-    }
-
-    // FIXME: replace with generic range
-    pub fn scan<'k>(
-        &mut self,
-        min: impl Into<K::Read<'k>>,
-    ) -> iter::Prefix<'k, 'v, 'g, K, V, RangeFrom<K::Read<'k>>, Guard<'v, 'g, '_, K, V, S>> {
-        let min = min.into();
-        let guard = self.smr.guard(K::hazard(K::Read::default()));
-
-        let root = self.raw.root();
-        unsafe { iter::Prefix::new(guard, root, K::Read::default(), min..) }
+        Some(unsafe { iter::Prefix::new(guard, root, prefix, range) })
     }
 }
 

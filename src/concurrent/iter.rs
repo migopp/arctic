@@ -18,12 +18,11 @@ pub struct Prefix<'k, 'v, 'g, K: Key, V, R, G = smr::Epoch> {
     value: PhantomData<&'v V>,
 }
 
-#[expect(private_bounds)]
 impl<'k, 'v, 'g, K, V, R, G> Prefix<'k, 'v, 'g, K, V, R, G>
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     pub(super) unsafe fn new(
@@ -42,12 +41,11 @@ where
     }
 }
 
-#[expect(private_bounds)]
 impl<'k, 'v, 'g, K, V, R, G> Prefix<'k, 'v, 'g, K, V, R, G>
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     #[inline]
@@ -74,7 +72,6 @@ where
 }
 
 /// Iterator over keys and values
-#[expect(private_bounds)]
 pub struct EntryIter<
     'k,
     'v,
@@ -83,20 +80,19 @@ pub struct EntryIter<
     const REVERSE: bool,
     K: Key,
     V: Value<'v>,
-    R: raw::iter::Range<K::Read<'k>>,
+    R: raw::iter::Range<'k, K>,
     G,
 > {
     _guard: &'l G,
-    iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, K::Write, K::Edge, R>,
+    iter: crate::raw::iter::RangeIter<'k, 'g, REVERSE, K, R, K::Write>,
     value: PhantomData<&'v V>,
 }
 
-#[expect(private_bounds)]
 impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> EntryIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     #[inline]
@@ -128,7 +124,7 @@ impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> Iterator
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     type Item = (K, V::Borrow<'v>);
@@ -144,7 +140,6 @@ where
 }
 
 /// Iterator over values only
-#[expect(private_bounds)]
 pub struct ValueIter<
     'k,
     'v,
@@ -153,20 +148,19 @@ pub struct ValueIter<
     const REVERSE: bool,
     K: Key,
     V: Value<'v>,
-    R: raw::iter::Range<K::Read<'k>>,
+    R: raw::iter::Range<'k, K>,
     G,
 > {
     _guard: &'l G,
-    iter: crate::raw::iter::RangeIter<'g, REVERSE, K::Read<'k>, key::Ignore<K::Edge>, K::Edge, R>,
+    iter: crate::raw::iter::RangeIter<'k, 'g, REVERSE, K, R, key::Ignore<K::Edge>>,
     value: PhantomData<&'v V>,
 }
 
-#[expect(private_bounds)]
 impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> ValueIter<'k, 'v, 'g, 'l, REVERSE, K, V, R, G>
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     #[inline]
@@ -188,7 +182,7 @@ impl<'k, 'v, 'g, 'l, const REVERSE: bool, K, V, R, G> Iterator
 where
     K: Key,
     V: Value<'v>,
-    R: crate::raw::iter::Range<K::Read<'k>>,
+    R: crate::raw::iter::Range<'k, K>,
     G: smr::Guard<'v, V>,
 {
     type Item = V::Borrow<'v>;

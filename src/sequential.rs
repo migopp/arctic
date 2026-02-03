@@ -129,7 +129,7 @@ where
         todo!()
     }
 
-    pub fn iter<const REVERSE: bool>(&self) -> Iter<'v, '_, REVERSE, K, V> {
+    pub fn iter<const REVERSE: bool>(&self) -> Iter<'_, 'v, '_, REVERSE, K, V> {
         Iter {
             _value: PhantomData,
             iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
@@ -137,12 +137,12 @@ where
     }
 }
 
-pub struct Iter<'v, 'g, const REVERSE: bool, K: Key, V: Value<'v>> {
+pub struct Iter<'k, 'v, 'g, const REVERSE: bool, K: Key, V: Value<'v>> {
     _value: PhantomData<&'v V>,
-    iter: RangeIter<'g, REVERSE, K::Read<'g>, K::Write, K::Edge, core::ops::RangeFull>,
+    iter: RangeIter<'k, 'g, REVERSE, K, core::ops::RangeFull, K::Write>,
 }
 
-impl<'v, 'g, const REVERSE: bool, K, V> Iter<'v, 'g, REVERSE, K, V>
+impl<'k, 'v, 'g, const REVERSE: bool, K, V> Iter<'k, 'v, 'g, REVERSE, K, V>
 where
     K: Key,
     V: Value<'v>,
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<'v, 'g, const REVERSE: bool, K, V> Iterator for Iter<'v, 'g, REVERSE, K, V>
+impl<'k, 'v, 'g, const REVERSE: bool, K, V> Iterator for Iter<'k, 'v, 'g, REVERSE, K, V>
 where
     K: Key,
     V: Value<'v>,
