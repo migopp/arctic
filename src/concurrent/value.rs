@@ -4,24 +4,24 @@ use crate::concurrent::smr;
 use crate::concurrent::smr::Guard as _;
 use crate::sequential::Value as _;
 
-pub unsafe trait Value<'v>: Sized + crate::sequential::Value<'v> {
-    type Guard<G>: smr::Guard<'v, Self>
+pub unsafe trait Value: Sized + crate::sequential::Value {
+    type Guard<G>: smr::Guard<Self>
     where
-        G: smr::Guard<'v, Self>;
+        G: smr::Guard<Self>;
 
-    unsafe fn own<G: smr::Guard<'v, Self>>(guard: G, raw: u64) -> Owned<'v, G, Self>;
+    unsafe fn own<'l, G: smr::Guard<Self>>(guard: G, raw: u64) -> Owned<'l, G, Self>;
 
-    unsafe fn share<G: smr::Guard<'v, Self>>(guard: G, raw: u64) -> Shared<'v, G, Self>;
+    unsafe fn share<'l, G: smr::Guard<Self>>(guard: G, raw: u64) -> Shared<'l, G, Self>;
 }
 
-unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
+unsafe impl<T> Value for Box<T> {
     type Guard<G>
         = G
     where
-        G: smr::Guard<'v, Self>;
+        G: smr::Guard<Self>;
 
     #[inline]
-    unsafe fn own<G: smr::Guard<'v, Self>>(guard: G, raw: u64) -> Owned<'v, G, Self> {
+    unsafe fn own<'l, G: smr::Guard<Self>>(guard: G, raw: u64) -> Owned<'l, G, Self> {
         Owned {
             guard,
             value: Self::borrow_from_raw(raw),
@@ -29,7 +29,7 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     }
 
     #[inline]
-    unsafe fn share<G: smr::Guard<'v, Self>>(guard: G, raw: u64) -> Shared<'v, G, Self> {
+    unsafe fn share<'l, G: smr::Guard<Self>>(guard: G, raw: u64) -> Shared<'l, G, Self> {
         Shared {
             _guard: guard,
             value: Self::borrow_from_raw(raw),
@@ -37,14 +37,14 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     }
 }
 
-unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
+unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     type Guard<G>
         = smr::NoOp
     where
-        G: smr::Guard<'v, Self>;
+        G: smr::Guard<Self>;
 
     #[inline]
-    unsafe fn own<G: smr::Guard<'v, Self>>(_guard: G, raw: u64) -> Owned<'v, G, Self> {
+    unsafe fn own<'l, G: smr::Guard<Self>>(_guard: G, raw: u64) -> Owned<'l, G, Self> {
         Owned {
             guard: smr::NoOp,
             value: Self::borrow_from_raw(raw),
@@ -52,7 +52,7 @@ unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
     }
 
     #[inline]
-    unsafe fn share<G: smr::Guard<'v, Self>>(_guard: G, raw: u64) -> Shared<'v, G, Self> {
+    unsafe fn share<'l, G: smr::Guard<Self>>(_guard: G, raw: u64) -> Shared<'l, G, Self> {
         Shared {
             _guard: smr::NoOp,
             value: Self::borrow_from_raw(raw),
@@ -63,14 +63,14 @@ unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
-            unsafe impl Value<'static> for $ty {
+            unsafe impl Value for $ty {
                 type Guard<G>
                     = smr::NoOp
                 where
-                    G: smr::Guard<'static, Self>;
+                    G: smr::Guard<Self>;
 
                 #[inline]
-                unsafe fn own<G: smr::Guard<'static, Self>>(_guard: G, raw: u64) -> Owned<'static, G, Self> {
+                unsafe fn own<'l, G: smr::Guard<Self>>(_guard: G, raw: u64) -> Owned<'l, G, Self> {
                     Owned {
                         guard: smr::NoOp,
                         value: Self::borrow_from_raw(raw),
@@ -78,7 +78,7 @@ macro_rules! impl_trivial {
                 }
 
                 #[inline]
-                unsafe fn share<G: smr::Guard<'static, Self>>(_guard: G, raw: u64) -> Shared<'static, G, Self> {
+                unsafe fn share<'l, G: smr::Guard<Self>>(_guard: G, raw: u64) -> Shared<'l, G, Self> {
                     Shared {
                         _guard: smr::NoOp,
                         value: Self::borrow_from_raw(raw),
@@ -91,17 +91,17 @@ macro_rules! impl_trivial {
 
 impl_trivial!(u64, u32);
 
-pub struct Owned<'v, G: smr::Guard<'v, V>, V: Value<'v>> {
+pub struct Owned<'l, G: smr::Guard<V>, V: Value + 'l> {
     guard: V::Guard<G>,
-    value: V::Borrow<'v>,
+    value: V::Borrow<'l>,
 }
 
-impl<'v, G, V> Deref for Owned<'v, G, V>
+impl<'l, G, V> Deref for Owned<'l, G, V>
 where
-    G: smr::Guard<'v, V>,
-    V: Value<'v>,
+    G: smr::Guard<V>,
+    V: Value,
 {
-    type Target = V::Borrow<'v>;
+    type Target = V::Borrow<'l>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -109,24 +109,24 @@ where
     }
 }
 
-impl<'v, G: smr::Guard<'v, V>, V: Value<'v>> Drop for Owned<'v, G, V> {
+impl<'l, G: smr::Guard<V>, V: Value> Drop for Owned<'l, G, V> {
     #[inline]
     fn drop(&mut self) {
-        unsafe { self.guard.retire_value(self.value) }
+        unsafe { self.guard.retire_value(V::borrow_into_raw(self.value)) }
     }
 }
 
-pub struct Shared<'v, G: smr::Guard<'v, V>, V: Value<'v>> {
+pub struct Shared<'l, G: smr::Guard<V>, V: Value + 'l> {
     _guard: V::Guard<G>,
-    value: V::Borrow<'v>,
+    value: V::Borrow<'l>,
 }
 
-impl<'v, G, V> Deref for Shared<'v, G, V>
+impl<'l, G, V> Deref for Shared<'l, G, V>
 where
-    G: smr::Guard<'v, V>,
-    V: Value<'v>,
+    G: smr::Guard<V>,
+    V: Value + 'l,
 {
-    type Target = V::Borrow<'v>;
+    type Target = V::Borrow<'l>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {

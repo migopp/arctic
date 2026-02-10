@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(values, (5..10).collect::<Vec<u32>>());
     }
 
-    fn insert_all<I, K>(iter: I) -> Map<'static, K, u32>
+    fn insert_all<I, K>(iter: I) -> Map<K, u32>
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,

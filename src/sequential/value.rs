@@ -3,7 +3,7 @@
 //! **indirect**, and must be encapsulated in a smart pointer type like
 //! [`Box`] or [`std::sync::Arc`].
 
-pub unsafe trait Value<'v>: 'v {
+pub unsafe trait Value {
     type Borrow<'l>: Copy
     where
         Self: 'l;
@@ -18,7 +18,7 @@ pub unsafe trait Value<'v>: 'v {
 
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
-        'v: 'l;
+        Self: 'l;
 
     /// # Safety
     ///
@@ -28,7 +28,7 @@ pub unsafe trait Value<'v>: 'v {
     /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
     where
-        'v: 'l;
+        Self: 'l;
 
     // FIXME
     // /// # Safety
@@ -48,7 +48,7 @@ pub unsafe trait Value<'v>: 'v {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
+unsafe impl<'v, T: 'v> Value for Box<T> {
     type Borrow<'l>
         = &'l T
     where
@@ -72,17 +72,14 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     #[inline]
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
-        'v: 'l,
+        Self: 'l,
     {
         // FIXME: strict provenance
         (borrow as *const T) as u64
     }
 
     #[inline]
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
-    where
-        'v: 'l,
-    {
+    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> {
         let borrow = (raw as *const T).as_ref();
         if cfg!(feature = "validate") {
             borrow.unwrap()
@@ -92,7 +89,7 @@ unsafe impl<'v, T: 'v> Value<'v> for Box<T> {
     }
 }
 
-unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
+unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     type Borrow<'l>
         = &'l T
     where
@@ -122,7 +119,7 @@ unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
     #[inline]
     fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
     where
-        'v: 'l,
+        Self: 'l,
     {
         // FIXME: strict provenance
         (borrow as *const T) as u64
@@ -131,7 +128,7 @@ unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
     #[inline]
     unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
     where
-        'v: 'l,
+        Self: 'l,
     {
         let borrow = (raw as *const T).as_ref();
         if cfg!(feature = "validate") {
@@ -145,7 +142,7 @@ unsafe impl<'v, T: 'v + Sized> Value<'v> for &'v T {
 macro_rules! impl_integer {
     ($($ty:ty),*) => {
         $(
-            unsafe impl Value<'static> for $ty {
+            unsafe impl Value for $ty {
                 type Borrow<'l> = Self;
 
                 #[inline]
@@ -164,12 +161,18 @@ macro_rules! impl_integer {
                 }
 
                 #[inline]
-                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l> where 'static: 'l {
+                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
+                where
+                    Self: 'l,
+                {
                     raw as $ty
                 }
 
                 #[inline]
-                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64 where 'static: 'l {
+                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
+                where
+                    Self: 'l,
+                {
                     borrow as u64
                 }
             }

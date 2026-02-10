@@ -56,12 +56,12 @@ where
     }
 }
 
-struct Arctic<K: arctic::Key, V: arctic::Value<'static>>(arctic::concurrent::Map<'static, K, V>);
+struct Arctic<K: arctic::Key, V: arctic::Value>(arctic::concurrent::Map<K, V>);
 
 impl<K, V> StateMachineTest for Arctic<K, V>
 where
     K: arctic::Key + Arbitrary + Clone + Debug + Ord + 'static,
-    V: arctic::Value<'static> + Arbitrary + Clone + Debug + Send + Sync + 'static,
+    V: arctic::Value + Arbitrary + Clone + Debug + Send + Sync + 'static,
     for<'a, 'b> V::Borrow<'a>: Debug + PartialEq<V::Borrow<'b>>,
 {
     type SystemUnderTest = Self;

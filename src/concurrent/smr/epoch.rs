@@ -7,7 +7,7 @@ use crate::stat;
 #[derive(Default)]
 pub struct Epoch(crossbeam_epoch::Collector);
 
-impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> Smr<'v, P, V> for Epoch {
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for Epoch {
     type Local<'g> = Local;
 
     fn local<'g>(&'g self) -> Self::Local<'g> {
@@ -17,9 +17,7 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> Smr<'v, P, 
 
 pub struct Local(crossbeam_epoch::LocalHandle);
 
-impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<'v, P, V>
-    for Local
-{
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for Local {
     type Guard<'l>
         = Guard
     where
@@ -32,7 +30,7 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<
 
 pub struct Guard(crossbeam_epoch::Guard);
 
-impl<'v, V: Value<'v>> smr::Guard<'v, V> for Guard {
+impl<V: Value> smr::Guard<V> for Guard {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -45,8 +43,7 @@ impl<'v, V: Value<'v>> smr::Guard<'v, V> for Guard {
         });
     }
 
-    unsafe fn retire_value(&mut self, value: V::Borrow<'v>) {
-        let raw = V::borrow_into_raw(value);
-        self.0.defer_unchecked(move || drop(V::from_raw(raw)));
+    unsafe fn retire_value(&mut self, value: u64) {
+        self.0.defer_unchecked(move || drop(V::from_raw(value)));
     }
 }

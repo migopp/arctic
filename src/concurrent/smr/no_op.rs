@@ -5,7 +5,7 @@ use crate::concurrent::Value;
 #[derive(Default)]
 pub struct NoOp;
 
-impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> Smr<'v, P, V> for NoOp {
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for NoOp {
     type Local<'g> = Self;
 
     fn local<'g>(&'g self) -> Self::Local<'g> {
@@ -13,7 +13,7 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> Smr<'v, P, 
     }
 }
 
-impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<'v, P, V> for NoOp {
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for NoOp {
     type Guard<'l>
         = Self
     where
@@ -24,7 +24,7 @@ impl<'v, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value<'v>> smr::Local<
     }
 }
 
-impl<'v, V: Value<'v>> smr::Guard<'v, V> for NoOp {
+impl<V: Value> smr::Guard<V> for NoOp {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -34,5 +34,5 @@ impl<'v, V: Value<'v>> smr::Guard<'v, V> for NoOp {
     ) {
     }
 
-    unsafe fn retire_value(&mut self, _value: V::Borrow<'v>) {}
+    unsafe fn retire_value(&mut self, _value: u64) {}
 }

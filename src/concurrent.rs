@@ -29,24 +29,19 @@ pub use key::Key;
 pub use smr::Smr;
 pub use value::Value;
 
-pub type Guard<'v, 'g, 'l, K, V, S> =
-    <<S as Smr<'v, <K as Key>::Prefix, V>>::Local<'g> as smr::Local<'v, <K as Key>::Prefix, V>>::Guard<
-        'l,
-    >;
-pub type Owned<'v, 'g, 'l, K, V, S> = value::Owned<'v, Guard<'v, 'g, 'l, K, V, S>, V>;
-pub type Shared<'v, 'g, 'l, K, V, S> = value::Shared<'v, Guard<'v, 'g, 'l, K, V, S>, V>;
+pub type Guard<'g, 'l, K, V, S> =
+    <<S as Smr<<K as Key>::Prefix, V>>::Local<'g> as smr::Local<<K as Key>::Prefix, V>>::Guard<'l>;
+pub type Owned<'g, 'l, K, V, S> = value::Owned<'l, Guard<'g, 'l, K, V, S>, V>;
+pub type Shared<'g, 'l, K, V, S> = value::Shared<'l, Guard<'g, 'l, K, V, S>, V>;
 
-pub struct Map<'v, K: Key, V: Value<'v>, S = smr::Hazard<'v, <K as Key>::Prefix, V>> {
+pub struct Map<K: Key, V: Value, S = smr::Hazard<<K as Key>::Prefix, V>> {
     smr: S,
-    raw: sequential::Map<'v, K, V>,
+    raw: sequential::Map<K, V>,
 }
 
-unsafe impl<'v, K: Key, V: Value<'v> + Send + Sync, S: Smr<'v, K::Prefix, V>> Sync
-    for Map<'v, K, V, S>
-{
-}
+unsafe impl<K: Key, V: Value + Send + Sync, S: Smr<K::Prefix, V>> Sync for Map<K, V, S> {}
 
-impl<'v, K: crate::Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Default for Map<'v, K, V, S> {
+impl<K: crate::Key, V: Value, S: Smr<K::Prefix, V>> Default for Map<K, V, S> {
     fn default() -> Self {
         Self {
             smr: S::default(),
@@ -55,7 +50,7 @@ impl<'v, K: crate::Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Default for Map<
     }
 }
 
-impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
+impl<K: Key, V: Value, S: Smr<K::Prefix, V>> Map<K, V, S> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -68,7 +63,7 @@ impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
     }
 
     #[inline]
-    pub fn pin(&self) -> MapRef<'v, '_, K, V, S> {
+    pub fn pin(&self) -> MapRef<'_, K, V, S> {
         MapRef {
             smr: self.smr.local(),
             raw: &self.raw,
@@ -76,7 +71,7 @@ impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
     }
 
     #[inline]
-    pub fn as_sequential(&mut self) -> &mut sequential::Map<'v, K, V> {
+    pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
         &mut self.raw
     }
 
@@ -87,21 +82,20 @@ impl<'v, K: Key, V: Value<'v>, S: Smr<'v, K::Prefix, V>> Map<'v, K, V, S> {
 }
 
 pub struct MapRef<
-    'v,
     'g,
     K: Key,
-    V: Value<'v>,
-    S: 'g + Smr<'v, K::Prefix, V> = smr::Hazard<'v, <K as Key>::Prefix, V>,
+    V: Value,
+    S: 'g + Smr<K::Prefix, V> = smr::Hazard<<K as Key>::Prefix, V>,
 > {
     smr: S::Local<'g>,
-    raw: &'g sequential::Map<'v, K, V>,
+    raw: &'g sequential::Map<K, V>,
 }
 
-impl<'v, 'g, K, V, S> MapRef<'v, 'g, K, V, S>
+impl<'g, K, V, S> MapRef<'g, K, V, S>
 where
     K: Key,
-    V: Value<'v> + Send + Sync,
-    S: Smr<'v, K::Prefix, V>,
+    V: Value + Send + Sync,
+    S: Smr<K::Prefix, V>,
 {
     #[inline]
     pub fn smr(&self) -> &S::Local<'g> {
@@ -109,7 +103,7 @@ where
     }
 
     #[inline]
-    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'v, 'g, '_, K, V, S>> {
+    pub fn get(&mut self, key: K::Borrow<'_>) -> Option<Shared<'g, '_, K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
         let value =
@@ -118,11 +112,7 @@ where
     }
 
     #[inline]
-    pub fn update(
-        &mut self,
-        key: K::Borrow<'_>,
-        value: V,
-    ) -> Result<Owned<'v, 'g, '_, K, V, S>, V> {
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Owned<'g, '_, K, V, S>, V> {
         let value = value.into_raw();
         let (old, present) = unsafe {
             self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
@@ -140,7 +130,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         mut with: F,
-    ) -> (Option<Owned<'v, 'g, '_, K, V, S>>, bool)
+    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
     where
         F: FnMut(V::Borrow<'_>) -> Option<V>,
     {
@@ -160,7 +150,7 @@ where
     }
 
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'v, 'g, '_, K, V, S>> {
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
         let (old, present) =
             unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) };
         validate_eq!(old.is_some(), present);
@@ -172,7 +162,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         mut with: F,
-    ) -> (Option<Owned<'v, 'g, '_, K, V, S>>, bool)
+    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
     where
         F: FnMut(V::Borrow<'_>) -> bool,
     {
@@ -194,7 +184,7 @@ where
         key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> (Option<Owned<'v, 'g, '_, K, V, S>>, bool)
+    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -203,7 +193,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> (Option<Owned<'v, 'g, 'polonius, K, V, S>>, bool) {
+        polonius!(|map| -> (Option<Owned<'g, 'polonius, K, V, S>>, bool) {
             if let Ok(old) = map.get_and_update_with_optimistic(key, allocate, deallocate) {
                 polonius_return!(old);
             }
@@ -218,7 +208,7 @@ where
         key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Result<(Option<Owned<'v, 'g, '_, K, V, S>>, bool), ()>
+    ) -> Result<(Option<Owned<'g, '_, K, V, S>>, bool), ()>
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -232,7 +222,7 @@ where
         key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> (Option<Owned<'v, 'g, '_, K, V, S>>, bool)
+    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
     where
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
         D: FnMut(u64),
@@ -247,7 +237,7 @@ where
         key: K::Borrow<'k>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Result<(Option<Owned<'v, 'g, '_, K, V, S>>, bool), H::PopError>
+    ) -> Result<(Option<Owned<'g, '_, K, V, S>>, bool), H::PopError>
     where
         H: path::History<'k, 'g, K>,
         A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
@@ -292,14 +282,14 @@ where
     }
 
     #[inline]
-    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'v, 'g, '_, K, V, S>> {
+    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, K, V, S>> {
         let value = value.into_raw();
         let mut map = &mut *self;
 
         if !cfg!(feature = "opt-no-path") {
             // Cursed workaround for:
             // https://github.com/rust-lang/rust/issues/54663
-            polonius!(|map| -> Option<Owned<'v, 'g, 'polonius, K, V, S>> {
+            polonius!(|map| -> Option<Owned<'g, 'polonius, K, V, S>> {
                 if let Ok(old) =
                     unsafe { map.upsert_with_optimistic(key, &mut |_| value, &mut |_| ()) }
                 {
@@ -316,7 +306,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         mut with: F,
-    ) -> Option<Owned<'v, 'g, '_, K, V, S>>
+    ) -> Option<Owned<'g, '_, K, V, S>>
     where
         F: FnMut(Option<V::Borrow<'_>>) -> V,
     {
@@ -324,7 +314,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> Option<Owned<'v, 'g, 'polonius, K, V, S>> {
+        polonius!(|map| -> Option<Owned<'g, 'polonius, K, V, S>> {
             if let Ok(old) = unsafe {
                 map.upsert_with_optimistic(key, &mut |old| with(old).into_raw(), &mut |raw| {
                     drop(V::from_raw(raw))
@@ -347,7 +337,7 @@ where
         key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Result<Option<Owned<'v, 'g, '_, K, V, S>>, ()>
+    ) -> Result<Option<Owned<'g, '_, K, V, S>>, ()>
     where
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
@@ -361,7 +351,7 @@ where
         key: K::Borrow<'_>,
         allocate: &mut A,
         deallocate: &mut D,
-    ) -> Option<Owned<'v, 'g, '_, K, V, S>>
+    ) -> Option<Owned<'g, '_, K, V, S>>
     where
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
         D: FnMut(u64),
@@ -385,7 +375,7 @@ where
         allocate: &mut A,
         // FIXME
         deallocate: &mut D,
-    ) -> Result<Option<Owned<'v, 'g, '_, K, V, S>>, H::PopError>
+    ) -> Result<Option<Owned<'g, '_, K, V, S>>, H::PopError>
     where
         H: path::History<'k, 'g, K>,
         A: FnMut(Option<V::Borrow<'_>>) -> u64,
@@ -461,7 +451,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         value: V,
-    ) -> (Shared<'v, 'g, '_, K, V, S>, bool) {
+    ) -> (Shared<'g, '_, K, V, S>, bool) {
         self.get_or_insert_with(key, || value)
     }
 
@@ -471,7 +461,7 @@ where
         &mut self,
         key: K::Borrow<'_>,
         with: F,
-    ) -> (Shared<'v, 'g, '_, K, V, S>, bool)
+    ) -> (Shared<'g, '_, K, V, S>, bool)
     where
         F: FnOnce() -> V,
     {
@@ -480,7 +470,7 @@ where
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> (Shared<'v, 'g, 'polonius, K, V, S>, bool) {
+        polonius!(|map| -> (Shared<'g, 'polonius, K, V, S>, bool) {
             if let Ok(old) = unsafe { map.get_or_insert_with_optimistic(key, &mut with) } {
                 polonius_return!(old);
             }
@@ -494,7 +484,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         with: &mut Thunk<F>,
-    ) -> Result<(Shared<'v, 'g, '_, K, V, S>, bool), ()>
+    ) -> Result<(Shared<'g, '_, K, V, S>, bool), ()>
     where
         F: FnOnce() -> u64,
     {
@@ -506,7 +496,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         with: &mut Thunk<F>,
-    ) -> (Shared<'v, 'g, '_, K, V, S>, bool)
+    ) -> (Shared<'g, '_, K, V, S>, bool)
     where
         F: FnOnce() -> u64,
     {
@@ -522,7 +512,7 @@ where
         &mut self,
         key: K::Borrow<'k>,
         _with: &mut Thunk<F>,
-    ) -> Result<(Shared<'v, 'g, '_, K, V, S>, bool), H::PopError>
+    ) -> Result<(Shared<'g, '_, K, V, S>, bool), H::PopError>
     where
         H: path::History<'k, 'g, K>,
         F: FnOnce() -> u64,
@@ -602,9 +592,7 @@ where
         }
     }
 
-    pub fn all(
-        &mut self,
-    ) -> iter::Prefix<'static, 'v, 'g, K, V, RangeFull, Guard<'v, 'g, '_, K, V, S>> {
+    pub fn all(&mut self) -> iter::Prefix<'static, 'g, K, V, RangeFull, Guard<'g, '_, K, V, S>> {
         let guard = self.smr.guard(K::hazard(K::Read::default()));
         unsafe { iter::Prefix::new(guard, self.raw.root(), K::Read::default(), ..) }
     }
@@ -612,7 +600,7 @@ where
     pub fn prefix<'k>(
         &mut self,
         prefix: impl Into<K::Read<'k>>,
-    ) -> Option<iter::Prefix<'k, 'v, 'g, K, V, RangeFull, Guard<'v, 'g, '_, K, V, S>>> {
+    ) -> Option<iter::Prefix<'k, 'g, K, V, RangeFull, Guard<'g, '_, K, V, S>>> {
         let prefix = prefix.into();
         let guard = self.smr.guard(K::hazard(prefix));
         let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), prefix) };
@@ -627,7 +615,7 @@ where
     pub fn range<'k, R>(
         &mut self,
         range: R,
-    ) -> Option<iter::Prefix<'k, 'v, 'g, K, V, R, Guard<'v, 'g, '_, K, V, S>>>
+    ) -> Option<iter::Prefix<'k, 'g, K, V, R, Guard<'g, '_, K, V, S>>>
     where
         R: crate::raw::iter::Range<'k, K>,
     {

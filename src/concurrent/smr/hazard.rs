@@ -78,15 +78,15 @@ use crate::stat;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub struct Hazard<'v, P: ribbit::Pack<Packed: Prefix>, V> {
+pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V> {
     hazards: ThreadLocal<Cache<ribbit::Atomic<P>>>,
     retired: ThreadLocal<Cache<core::cell::RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
     membarrier: AtomicBool,
     reclaim_threshold: usize,
-    value: PhantomData<&'v V>,
+    value: PhantomData<V>,
 }
 
-impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<'v, P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<P, V> {
     fn default() -> Self {
         Self {
             hazards: thread_local::ThreadLocal::with_capacity(16),
@@ -98,7 +98,7 @@ impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<'v, P, V> {
     }
 }
 
-impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Hazard<'v, P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V> Hazard<P, V> {
     #[inline]
     #[must_use]
     pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
@@ -112,9 +112,9 @@ impl<'v, P: ribbit::Pack<Packed: Prefix>, V> Hazard<'v, P, V> {
     }
 }
 
-impl<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Smr<'v, P, V> for Hazard<'v, P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Smr<P, V> for Hazard<P, V> {
     type Local<'g>
-        = Local<'v, 'g, P, V>
+        = Local<'g, P, V>
     where
         Self: 'g;
 
@@ -133,16 +133,16 @@ impl<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Smr<'v, P, V> for Hazard
     }
 }
 
-pub struct Local<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V> {
+pub struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
     hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
     hazard: &'g ribbit::Atomic<P>,
     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
     membarrier: &'g AtomicBool,
     reclaim_threshold: usize,
-    value: PhantomData<&'v V>,
+    value: PhantomData<V>,
 }
 
-impl<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Local<'v, 'g, P, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
     #[inline]
     pub fn enable_membarrier(&self) {
         self.membarrier.store(true, Ordering::Relaxed)
@@ -212,11 +212,9 @@ impl<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Local<'v, 'g, P, V> 
     }
 }
 
-impl<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Local<'v, P, V>
-    for Local<'v, 'g, P, V>
-{
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for Local<'g, P, V> {
     type Guard<'l>
-        = Guard<'v, 'g, 'l, P, V>
+        = Guard<'g, 'l, P, V>
     where
         Self: 'l;
 
@@ -228,13 +226,9 @@ impl<'v, 'g, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Local<'v, P, V>
     }
 }
 
-pub struct Guard<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>>(
-    &'l mut Local<'v, 'g, P, V>,
-);
+pub struct Guard<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'l mut Local<'g, P, V>);
 
-impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Guard<'v, V>
-    for Guard<'v, 'g, 'l, P, V>
-{
+impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 'l, P, V> {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -255,14 +249,14 @@ impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Guard<'v, V
         }
     }
 
-    unsafe fn retire_value(&mut self, value: V::Borrow<'v>) {
+    unsafe fn retire_value(&mut self, value: u64) {
         let prefix = self
             .0
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
 
-        self.0.retired.push((prefix, V::borrow_into_raw(value)));
+        self.0.retired.push((prefix, value));
 
         if self.0.retired.len() >= self.0.reclaim_threshold {
             self.0.flush();
@@ -270,7 +264,7 @@ impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> smr::Guard<'v, V
     }
 }
 
-impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> Drop for Guard<'v, 'g, 'l, P, V> {
+impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, 'l, P, V> {
     fn drop(&mut self) {
         self.0
             .hazard

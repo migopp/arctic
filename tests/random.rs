@@ -184,7 +184,7 @@ mod vec {
 trait Workload: Sized + Sync {
     type Key: arctic::concurrent::Key + Sync;
 
-    type Value: arctic::Value<'static> + Send + Sync;
+    type Value: arctic::Value + Send + Sync;
 
     fn key(&self, index: usize) -> Self::Key;
 
@@ -194,7 +194,7 @@ trait Workload: Sized + Sync {
         &'a self,
         index: usize,
         key: <Self::Key as Key>::Borrow<'a>,
-        value: <Self::Value as arctic::sequential::Value<'static>>::Borrow<'_>,
+        value: <Self::Value as arctic::sequential::Value>::Borrow<'_>,
     ) where
         'a: 'g,
         'g: 'l;

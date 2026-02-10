@@ -11,23 +11,23 @@ use crate::raw::edge;
 use crate::raw::node;
 use hazard::Prefix;
 
-pub trait Smr<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>>: Default {
-    type Local<'g>: Local<'v, P, V>
+pub trait Smr<P: ribbit::Pack<Packed: Prefix>, V: Value>: Default {
+    type Local<'g>: Local<P, V>
     where
         Self: 'g;
 
     fn local<'g>(&'g self) -> Self::Local<'g>;
 }
 
-pub trait Local<'v, P: ribbit::Pack<Packed: Prefix>, V: Value<'v>> {
-    type Guard<'l>: Guard<'v, V>
+pub trait Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
+    type Guard<'l>: Guard<V>
     where
         Self: 'l;
 
     fn guard<'l>(&'l mut self, hazard: ribbit::Packed<P>) -> Self::Guard<'l>;
 }
 
-pub trait Guard<'v, V: Value<'v>> {
+pub trait Guard<V: Value> {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: edge::Meta>>(
@@ -36,5 +36,5 @@ pub trait Guard<'v, V: Value<'v>> {
         edge: ribbit::Packed<node::Ptr<M>>,
     );
 
-    unsafe fn retire_value(&mut self, value: V::Borrow<'v>);
+    unsafe fn retire_value(&mut self, raw: u64);
 }
