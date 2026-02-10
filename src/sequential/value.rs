@@ -48,7 +48,7 @@ pub unsafe trait Value {
     unsafe fn from_raw(raw: u64) -> Self;
 }
 
-unsafe impl<'v, T: 'v> Value for Box<T> {
+unsafe impl<T: Sized> Value for Box<T> {
     type Borrow<'l>
         = &'l T
     where
