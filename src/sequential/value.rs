@@ -91,7 +91,7 @@ unsafe impl<T: Sized> Value for Box<T> {
 
 unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     type Borrow<'l>
-        = &'l T
+        = &'v T
     where
         Self: 'l;
 
