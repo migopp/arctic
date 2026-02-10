@@ -1,6 +1,6 @@
 mod iter;
 mod key;
-mod smr;
+pub mod smr;
 mod value;
 
 use core::ops::RangeFull;
