@@ -3,9 +3,11 @@ mod key;
 pub mod smr;
 mod value;
 
+use core::ops::ControlFlow;
 use core::ops::RangeFull;
 use core::sync::atomic::Ordering;
 
+use polonius_the_crab::exit_polonius;
 use polonius_the_crab::polonius;
 use polonius_the_crab::polonius_return;
 use smr::Guard as _;
@@ -91,6 +93,25 @@ pub struct MapRef<
     raw: &'g sequential::Map<K, V>,
 }
 
+pub enum Update<'g, 'l, K, V, S = smr::Hazard<<K as Key>::Prefix, V>>
+where
+    K: Key,
+    V: Value,
+    S: Smr<K::Prefix, V> + 'g,
+    S::Local<'g>: 'l,
+{
+    Absent {
+        initial: Option<V>,
+    },
+    Success {
+        old: Owned<'g, 'l, K, V, S>,
+    },
+    Failure {
+        old: Shared<'g, 'l, K, V, S>,
+        new: Option<V>,
+    },
+}
+
 impl<'g, K, V, S> MapRef<'g, K, V, S>
 where
     K: Key,
@@ -112,16 +133,36 @@ where
     }
 
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Owned<'g, '_, K, V, S>, V> {
-        let value = value.into_raw();
-        let (old, present) = unsafe {
-            self.get_and_update_with(key, &mut |old| Some(old.with_value(value)), &mut |_| ())
-        };
-        validate_eq!(old.is_some(), present);
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
+        match self.update_with(key, None, |_, _| ControlFlow::Continue(None)) {
+            Update::Absent { .. } => None,
+            Update::Success { old } => Some(old),
+            Update::Failure { .. } => unreachable!(),
+        }
+    }
 
-        match old {
-            Some(guard) => Ok(guard),
-            None => Err(unsafe { V::from_raw(value) }),
+    #[inline]
+    pub fn remove_with<F>(&mut self, key: K::Borrow<'_>, mut with: F) -> Update<'g, '_, K, V, S>
+    where
+        F: FnMut(V::Borrow<'_>) -> bool,
+    {
+        self.update_with(key, None, |old, _| {
+            if with(old) {
+                ControlFlow::Continue(None)
+            } else {
+                ControlFlow::Break(())
+            }
+        })
+    }
+
+    #[inline]
+    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Owned<'g, '_, K, V, S>, V> {
+        match self.update_with(key, Some(value), |_, new| ControlFlow::Continue(new)) {
+            Update::Absent {
+                initial: Some(initial),
+            } => Err(initial),
+            Update::Success { old } => Ok(old),
+            Update::Absent { initial: None } | Update::Failure { .. } => unreachable!(),
         }
     }
 
@@ -129,139 +170,98 @@ where
     pub fn update_with<F>(
         &mut self,
         key: K::Borrow<'_>,
-        mut with: F,
-    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
+        initial: Option<V>,
+        mut update: F,
+    ) -> Update<'g, '_, K, V, S>
     where
-        F: FnMut(V::Borrow<'_>) -> Option<V>,
-    {
-        unsafe {
-            self.get_and_update_with(
-                key,
-                &mut |old| {
-                    let old_value = V::borrow_from_raw(old.into_raw());
-                    let new_value = V::into_raw(with(old_value)?);
-                    Some(old.with_value(new_value))
-                },
-                &mut |new| {
-                    drop(V::from_raw(new));
-                },
-            )
-        }
-    }
-
-    #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
-        let (old, present) =
-            unsafe { self.get_and_update_with(key, &mut |_| Some(Edge::DEFAULT), &mut |_| ()) };
-        validate_eq!(old.is_some(), present);
-        old
-    }
-
-    #[inline]
-    pub fn remove_with<F>(
-        &mut self,
-        key: K::Borrow<'_>,
-        mut with: F,
-    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
-    where
-        F: FnMut(V::Borrow<'_>) -> bool,
-    {
-        unsafe {
-            self.get_and_update_with(
-                key,
-                &mut |old| {
-                    let old_value = V::borrow_from_raw(old.into_raw());
-                    with(old_value).then_some(Edge::DEFAULT)
-                },
-                &mut |_| (),
-            )
-        }
-    }
-
-    #[inline]
-    unsafe fn get_and_update_with<A, D>(
-        &mut self,
-        key: K::Borrow<'_>,
-        allocate: &mut A,
-        deallocate: &mut D,
-    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
-    where
-        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
-        D: FnMut(u64),
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
     {
         let mut map = self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        polonius!(|map| -> (Option<Owned<'g, 'polonius, K, V, S>>, bool) {
-            if let Ok(old) = map.get_and_update_with_optimistic(key, allocate, deallocate) {
-                polonius_return!(old);
+        let initial = polonius!(|map| -> Update<'g, 'polonius, K, V, S> {
+            match map.update_with_optimistic(key, initial, &mut update) {
+                Ok(update) => polonius_return!(update),
+                Err(initial) => exit_polonius!(initial),
             }
         });
 
-        map.get_and_update_with_pessimistic(key, allocate, deallocate)
+        map.update_with_pessimistic(key, initial, update)
     }
 
     #[inline]
-    unsafe fn get_and_update_with_optimistic<A, D>(
+    fn update_with_optimistic<F>(
         &mut self,
         key: K::Borrow<'_>,
-        allocate: &mut A,
-        deallocate: &mut D,
-    ) -> Result<(Option<Owned<'g, '_, K, V, S>>, bool), ()>
+        initial: Option<V>,
+        update: F,
+    ) -> Result<Update<'g, '_, K, V, S>, Option<V>>
     where
-        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
-        D: FnMut(u64),
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
     {
-        self.get_and_update_with_impl::<path::Discard, _, _>(key, allocate, deallocate)
+        self.update_with_impl::<path::Discard, _>(key, initial, update)
     }
 
     #[cold]
-    unsafe fn get_and_update_with_pessimistic<A, D>(
+    fn update_with_pessimistic<F>(
         &mut self,
         key: K::Borrow<'_>,
-        allocate: &mut A,
-        deallocate: &mut D,
-    ) -> (Option<Owned<'g, '_, K, V, S>>, bool)
+        initial: Option<V>,
+        update: F,
+    ) -> Update<'g, '_, K, V, S>
     where
-        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
-        D: FnMut(u64),
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
     {
-        self.get_and_update_with_impl::<path::Retain<_>, _, _>(key, allocate, deallocate)
-            .unwrap()
+        match self.update_with_impl::<path::Retain<_>, _>(key, initial, update) {
+            Ok(update) => update,
+            Err(_) => unreachable!(),
+        }
     }
 
     #[inline]
-    unsafe fn get_and_update_with_impl<'k, H, A, D>(
+    fn update_with_impl<'k, H, F>(
         &mut self,
         key: K::Borrow<'k>,
-        allocate: &mut A,
-        deallocate: &mut D,
-    ) -> Result<(Option<Owned<'g, '_, K, V, S>>, bool), H::PopError>
+        mut initial: Option<V>,
+        mut update: F,
+    ) -> Result<Update<'g, '_, K, V, S>, Option<V>>
     where
         H: path::History<'k, 'g, K>,
-        A: FnMut(ribbit::Packed<Edge<K::Edge>>) -> Option<ribbit::Packed<Edge<K::Edge>>>,
-        D: FnMut(u64),
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
     {
         let reader = K::Read::from(key);
-        let guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = Cursor::<_, H>::new(self.raw.root(), reader);
+        let mut guard = self.smr.guard(K::hazard(reader));
+        let mut cursor = unsafe { Cursor::<_, H>::new(self.raw.root(), reader) };
 
         loop {
             let old = match cursor.traverse_update() {
-                None => return Ok((None, false)),
+                None => return Ok(Update::Absent { initial }),
                 Some(Ok(old)) => old,
-                Some(Err(Frozen)) => {
-                    cursor.freeze()?;
-                    continue;
-                }
+                Some(Err(Frozen)) => match cursor.freeze() {
+                    Err(_) => return Err(initial),
+                    Ok(None) => continue,
+                    Ok(Some(node)) => unsafe {
+                        guard.retire_node(cursor.bits(), node);
+                        continue;
+                    },
+                },
             };
 
             validate!(old.meta().is_value());
 
-            let new = match allocate(old) {
-                Some(new) => new,
-                None => return Ok((None, true)),
+            let new = match update(
+                unsafe { V::borrow_from_raw(old.into_raw()) },
+                initial.take(),
+            ) {
+                ControlFlow::Continue(None) => Edge::DEFAULT,
+                ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
+                ControlFlow::Break(()) => {
+                    return Ok(Update::Failure {
+                        old: unsafe { V::share(guard, old.into_raw()) },
+                        new: initial,
+                    })
+                }
             };
 
             match cursor.edge().compare_exchange_packed(
@@ -271,11 +271,12 @@ where
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
-                    let value = old.as_value().map(|value| unsafe { V::own(guard, value) });
-                    return Ok((value, true));
+                    return Ok(Update::Success {
+                        old: unsafe { V::own(guard, old.into_raw()) },
+                    })
                 }
                 Err(_) => {
-                    deallocate(new.into_raw());
+                    initial = Some(unsafe { V::from_raw(new.into_raw()) });
                 }
             }
         }
