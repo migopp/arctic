@@ -5,8 +5,10 @@ use core::marker::PhantomData;
 
 use ribbit::Atomic;
 
+use crate::raw::cursor::path;
 use crate::raw::iter::PostorderIter;
 use crate::raw::iter::RangeIter;
+use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::stat;
 use crate::Key;
@@ -47,8 +49,11 @@ where
     }
 
     #[inline]
-    pub fn get(&self, _key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
-        todo!()
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+        let reader = K::Read::from(key);
+        let value =
+            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
+        Some(unsafe { V::borrow_from_raw(value) })
     }
 
     #[inline]
