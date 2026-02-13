@@ -53,12 +53,10 @@ where
     }
 }
 
-/// Iterator over keys and raw values
 pub(crate) struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>>(
     RangeIter<'k, 'g, REVERSE, K, R, K::Write>,
 );
 
-#[expect(unused)]
 impl<'k, 'g, const REVERSE: bool, K, R> EntryIter<'k, 'g, REVERSE, K, R>
 where
     K: Key,
@@ -98,17 +96,11 @@ pub(crate) struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>
     RangeIter<'k, 'g, REVERSE, K, R, key::Ignore<K::Edge>>,
 );
 
-#[expect(unused)]
 impl<'k, 'g, const REVERSE: bool, K, R> ValueIter<'k, 'g, REVERSE, K, R>
 where
     K: Key,
     R: Range<'k, K>,
 {
-    #[inline]
-    pub(crate) fn lend(&mut self) -> Option<u64> {
-        self.0.lend().map(|(_, value)| value)
-    }
-
     #[inline]
     pub(crate) fn for_each<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
         self.0.for_each(|_, value| apply(value))
@@ -124,6 +116,6 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.lend()
+        self.0.lend().map(|(_, value)| value)
     }
 }
