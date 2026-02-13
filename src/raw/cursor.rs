@@ -76,7 +76,7 @@ where
     #[inline]
     pub(crate) fn traverse_get(mut self) -> Option<u64> {
         loop {
-            let edge = self.edge.load_packed(Ordering::Relaxed);
+            let edge = self.edge.load_packed(Ordering::Acquire);
 
             let _ = self.key.match_exact(edge.meta())?;
 
@@ -137,7 +137,7 @@ where
         &mut self,
     ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         loop {
-            let edge = self.edge.load_packed(Ordering::Relaxed);
+            let edge = self.edge.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -182,7 +182,7 @@ where
     #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
-            let old = self.edge.load_packed(Ordering::Relaxed);
+            let old = self.edge.load_packed(Ordering::Acquire);
             let old_meta = old.meta();
             let save = self.key;
 
@@ -297,7 +297,7 @@ where
 
             match self
                 .edge
-                .compare_exchange_packed(edge, new, Ordering::AcqRel, Ordering::Relaxed)
+                .compare_exchange_packed(edge, new, Ordering::AcqRel, Ordering::Acquire)
             {
                 Ok(_) => {
                     break Some(old);
