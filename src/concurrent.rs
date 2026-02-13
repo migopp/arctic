@@ -93,7 +93,7 @@ pub struct MapRef<
     raw: &'g sequential::Map<K, V>,
 }
 
-pub enum Update<'g, 'l, K, V, S = smr::Hazard<<K as Key>::Prefix, V>>
+pub enum Update<'g, 'l, K, V, B, S = smr::Hazard<<K as Key>::Prefix, V>>
 where
     K: Key,
     V: Value,
@@ -108,7 +108,7 @@ where
     },
     Failure {
         old: Shared<'g, 'l, K, V, S>,
-        new: Option<V>,
+        r#break: B,
     },
 }
 
@@ -150,7 +150,9 @@ where
 
     #[inline]
     pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
-        match self.update_with(key, None, |_, _| ControlFlow::Continue(None)) {
+        match self.update_with(key, None, |_, _| {
+            ControlFlow::<Infallible, _>::Continue(None)
+        }) {
             Update::Absent { .. } => None,
             Update::Success { old } => Some(old),
             Update::Failure { .. } => unreachable!(),
@@ -158,7 +160,7 @@ where
     }
 
     #[inline]
-    pub fn remove_with<F>(&mut self, key: K::Borrow<'_>, mut with: F) -> Update<'g, '_, K, V, S>
+    pub fn remove_with<F>(&mut self, key: K::Borrow<'_>, mut with: F) -> Update<'g, '_, K, V, (), S>
     where
         F: FnMut(V::Borrow<'_>) -> bool,
     {
@@ -173,7 +175,9 @@ where
 
     #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Owned<'g, '_, K, V, S>, V> {
-        match self.update_with(key, Some(value), |_, new| ControlFlow::Continue(new)) {
+        match self.update_with(key, Some(value), |_, new| {
+            ControlFlow::<Infallible, _>::Continue(new)
+        }) {
             Update::Absent {
                 initial: Some(initial),
             } => Err(initial),
@@ -183,20 +187,20 @@ where
     }
 
     #[inline]
-    pub fn update_with<F>(
+    pub fn update_with<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         mut update: F,
-    ) -> Update<'g, '_, K, V, S>
+    ) -> Update<'g, '_, K, V, B, S>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
         let mut map = self;
 
         // Cursed workaround for:
         // https://github.com/rust-lang/rust/issues/54663
-        let initial = polonius!(|map| -> Update<'g, 'polonius, K, V, S> {
+        let initial = polonius!(|map| -> Update<'g, 'polonius, K, V, B, S> {
             match map.update_with_optimistic(key, initial, &mut update) {
                 Ok(update) => polonius_return!(update),
                 Err(initial) => exit_polonius!(initial),
@@ -207,44 +211,44 @@ where
     }
 
     #[inline]
-    fn update_with_optimistic<F>(
+    fn update_with_optimistic<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         update: F,
-    ) -> Result<Update<'g, '_, K, V, S>, Option<V>>
+    ) -> Result<Update<'g, '_, K, V, B, S>, Option<V>>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
-        self.update_with_impl::<path::Discard, _>(key, initial, update)
+        self.update_with_impl::<path::Discard, _, _>(key, initial, update)
     }
 
     #[cold]
-    fn update_with_pessimistic<F>(
+    fn update_with_pessimistic<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         update: F,
-    ) -> Update<'g, '_, K, V, S>
+    ) -> Update<'g, '_, K, V, B, S>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
-        match self.update_with_impl::<path::Retain<_>, _>(key, initial, update) {
+        match self.update_with_impl::<path::Retain<_>, _, _>(key, initial, update) {
             Ok(update) => update,
             Err(_) => unreachable!(),
         }
     }
 
     #[inline]
-    fn update_with_impl<'k, H, F>(
+    fn update_with_impl<'k, H, F, B>(
         &mut self,
         key: K::Borrow<'k>,
         mut initial: Option<V>,
         mut update: F,
-    ) -> Result<Update<'g, '_, K, V, S>, Option<V>>
+    ) -> Result<Update<'g, '_, K, V, B, S>, Option<V>>
     where
         H: path::History<'k, 'g, K>,
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<(), Option<V>>,
+        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -272,10 +276,10 @@ where
             ) {
                 ControlFlow::Continue(None) => Edge::DEFAULT,
                 ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
-                ControlFlow::Break(()) => {
+                ControlFlow::Break(r#break) => {
                     return Ok(Update::Failure {
                         old: unsafe { V::share(guard, old.into_raw()) },
-                        new: initial,
+                        r#break,
                     })
                 }
             };
@@ -460,9 +464,9 @@ where
             }
 
             match cursor.freeze() {
-                Ok(Some(node)) => unsafe { guard.retire_node(cursor.bits(), node) },
-                Ok(None) => (),
                 Err(_) => return Err(initial),
+                Ok(None) => (),
+                Ok(Some(node)) => unsafe { guard.retire_node(cursor.bits(), node) },
             }
         }
     }
