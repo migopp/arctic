@@ -111,11 +111,6 @@ where
             })
         })
     }
-
-    #[inline]
-    pub fn for_each_raw<F: FnMut(&K::Write, u64) -> ControlFlow<()>>(self, apply: F) {
-        self.iter.for_each(apply)
-    }
 }
 
 impl<'k, 'g, 'l, const REVERSE: bool, K, V, R, G> Iterator
