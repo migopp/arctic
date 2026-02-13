@@ -1,5 +1,7 @@
 pub(crate) mod path;
 
+use core::marker::PhantomData;
+use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
@@ -17,6 +19,29 @@ use crate::raw::Key;
 use crate::raw::Smo;
 use crate::stat;
 
+pub(crate) struct CursorMut<'k, 'g, K: Key>(Cursor<'k, 'g, K, path::Discard>);
+
+#[expect(unused)]
+impl<'k, 'g, K: Key> CursorMut<'k, 'g, K> {
+    #[inline]
+    pub(crate) fn new(root: &'g mut Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
+        Self(unsafe { Cursor::new(root, key) })
+    }
+
+    #[inline]
+    pub(crate) fn edge_mut(&mut self) -> &'g mut Atomic<Edge<K::Edge>> {
+        unsafe { self.0.edge.as_mut() }
+    }
+}
+
+impl<'k, 'g, K: Key> core::ops::Deref for CursorMut<'k, 'g, K> {
+    type Target = Cursor<'k, 'g, K, path::Discard>;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Tree traversal state.
 pub(crate) struct Cursor<'k, 'g, K: Key, H> {
     /// Total number of bits read from `key`
@@ -26,10 +51,12 @@ pub(crate) struct Cursor<'k, 'g, K: Key, H> {
     key: K::Read<'k>,
 
     /// Edge this cursor currently points to
-    edge: &'g Atomic<Edge<K::Edge>>,
+    edge: NonNull<Atomic<Edge<K::Edge>>>,
 
     /// Path history of this cursor (sequence of path segments)
     history: H,
+
+    _global: PhantomData<&'g Atomic<Edge<K::Edge>>>,
 }
 
 pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
@@ -46,7 +73,7 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
 impl<'k, 'g, K, H> Cursor<'k, 'g, K, H>
 where
     K: Key,
-    H: path::History<'k, 'g, K>,
+    H: path::History<'k, K>,
 {
     /// # Safety
     ///
@@ -56,15 +83,16 @@ where
     pub(crate) unsafe fn new(root: &'g Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
         Self {
             bits: 0,
-            edge: root,
+            edge: NonNull::from(root),
             key,
-            history: H::new(root, key),
+            history: H::default(),
+            _global: PhantomData,
         }
     }
 
     #[inline]
     pub(crate) fn edge(&self) -> &'g Atomic<Edge<K::Edge>> {
-        self.edge
+        unsafe { self.edge.as_ref() }
     }
 
     #[inline]
@@ -76,7 +104,7 @@ where
     #[inline]
     pub(crate) fn traverse_get(mut self) -> Option<u64> {
         loop {
-            let edge = self.edge.load_packed(Ordering::Acquire);
+            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
 
             let _ = self.key.match_exact(edge.meta())?;
 
@@ -90,7 +118,7 @@ where
                         unsafe { self.key.next_unchecked() }
                     };
 
-                    self.edge = unsafe { node.get(byte) }?;
+                    self.edge = unsafe { node.get(byte) }.map(NonNull::from)?;
                 }
                 edge::Child::Value(value) => {
                     return Some(value);
@@ -102,7 +130,7 @@ where
     /// Traverse to the root of the subtree prefixed by the key, if it exists.
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
         loop {
-            let edge = self.edge.load_packed(Ordering::Acquire);
+            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -137,7 +165,7 @@ where
         &mut self,
     ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         loop {
-            let edge = self.edge.load_packed(Ordering::Acquire);
+            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -182,7 +210,7 @@ where
     #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
-            let old = self.edge.load_packed(Ordering::Acquire);
+            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
             let old_meta = old.meta();
             let save = self.key;
 
@@ -274,13 +302,13 @@ where
         &mut self,
     ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let mut node = self.pop()?;
-        let mut edge = self.edge.load_packed(Ordering::Acquire);
+        let mut edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
         let mut pop = 1;
 
         let old = loop {
             while edge.meta().is_frozen() {
                 node = self.pop()?;
-                edge = self.edge.load_packed(Ordering::Acquire);
+                edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
                 pop += 1;
             }
 
@@ -295,10 +323,12 @@ where
 
             let (op, new) = unsafe { node.replace(meta) };
 
-            match self
-                .edge
-                .compare_exchange_packed(edge, new, Ordering::AcqRel, Ordering::Acquire)
-            {
+            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
+                edge,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => {
                     break Some(old);
                 }
@@ -331,7 +361,7 @@ where
         self.history.push(path::Segment {
             key,
             len,
-            edge: core::mem::replace(&mut self.edge, edge),
+            edge: core::mem::replace(&mut self.edge, NonNull::from(edge)),
             node,
         })
     }

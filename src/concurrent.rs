@@ -252,7 +252,7 @@ where
         mut update: F,
     ) -> Result<Update<'g, '_, K, V, B, S>, Option<V>>
     where
-        H: path::History<'k, 'g, K>,
+        H: path::History<'k, K>,
         F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
         let reader = K::Read::from(key);
@@ -404,7 +404,7 @@ where
         mut insert: F,
     ) -> Result<Insert<'g, '_, K, V, B, S>, Option<V>>
     where
-        H: path::History<'k, 'g, K>,
+        H: path::History<'k, K>,
         F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
     {
         let reader = K::Read::from(key);

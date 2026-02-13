@@ -140,7 +140,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         ribbit::Packed::<Self>::new(meta, node::Ptr::new(node).raw().get())
     }
 
-    pub(crate) fn new_value(
+    fn new_value(
         meta: <<M as ribbit::Pack>::Packed as Meta>::Key,
         value: u64,
     ) -> ribbit::Packed<Self> {
