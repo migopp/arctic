@@ -226,20 +226,12 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) unsafe fn deallocate_recursive_unchecked<F>(
-        self,
-        deallocate_value: F,
-        counter: stat::Counter,
-    ) where
-        F: FnOnce(u64),
-    {
+    pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         match self.child() {
             None if cfg!(feature = "validate") => unreachable!(),
             None => unsafe { core::hint::unreachable_unchecked() },
-            Some(Child::Node(node)) => unsafe {
-                node.deallocate_recursive(deallocate_value, counter)
-            },
-            Some(Child::Value(value)) => deallocate_value(value),
+            Some(Child::Node(node)) => unsafe { node.deallocate_recursive(counter) },
+            Some(Child::Value(_)) => (),
         }
     }
 }

@@ -32,9 +32,6 @@ pub(crate) enum Smo {
     ExpandNode,
     DeleteNode,
     CompressEdge,
-
-    CreateNode,
-    ExpandEdge,
 }
 
 impl Smo {
@@ -43,24 +40,6 @@ impl Smo {
         matches!(
             self,
             Self::CompressNode | Self::ReplaceNode | Self::ExpandNode
-        )
-    }
-
-    #[inline]
-    pub fn is_allocate_recursive(self) -> bool {
-        matches!(self, Self::CreateNode | Self::ExpandEdge)
-    }
-
-    /// Whether this operation retires an old node.
-    #[inline]
-    pub fn is_retire(self) -> bool {
-        matches!(
-            self,
-            Self::CompressNode
-                | Self::ReplaceNode
-                | Self::ExpandNode
-                | Self::DeleteNode
-                | Self::CompressEdge
         )
     }
 }

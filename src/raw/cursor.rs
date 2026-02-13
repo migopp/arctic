@@ -32,20 +32,22 @@ pub(crate) struct Cursor<'k, 'g, K: Key, H> {
     history: H,
 }
 
-// pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
-//     Value {
-//         old: ribbit::Packed<Edge<E>>,
-//         key: <E::Packed as edge::Meta>::Key,
-//     },
-//
-//     /// Structural modification required
-//     Smo {
-//         op: Smo,
-//         old: ribbit::Packed<Edge<E>>,
-//         new: ribbit::Packed<Edge<E>>,
-//     },
-//     Frozen,
-// }
+pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
+    Value {
+        old: ribbit::Packed<Edge<E>>,
+        key: <E::Packed as edge::Meta>::Key,
+        exact: bool,
+    },
+
+    /// Structural modification required
+    Smo {
+        smo: Smo,
+        old: ribbit::Packed<Edge<E>>,
+        new: ribbit::Packed<Edge<E>>,
+    },
+
+    Frozen,
+}
 
 impl<'k, 'g, K, H> Cursor<'k, 'g, K, H>
 where
@@ -140,25 +142,14 @@ where
     /// Return CAS operands to either insert the value or structurally update
     /// the tree on the way to inserting the value.
     #[inline]
-    pub(crate) fn traverse_upsert(
-        &mut self,
-        value: u64,
-    ) -> Result<
-        (
-            Smo,
-            ribbit::Packed<Edge<K::Edge>>,
-            ribbit::Packed<Edge<K::Edge>>,
-        ),
-        Frozen,
-    > {
+    pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
             let old = self.edge.load_packed(Ordering::Relaxed);
             let old_meta = old.meta();
-            let mut save = self.key;
+            let save = self.key;
 
             let (key, exact) = self.key.match_inexact(old_meta);
 
-            // Fast path: traverse
             if exact {
                 if let Some(node) = old.as_node() {
                     let byte = if cfg!(feature = "validate") {
@@ -179,34 +170,43 @@ where
             // Revert key to before the current edge
             self.key = save;
 
-            if old_meta.is_frozen() {
-                return Err(Frozen);
-            }
-
-            let (op, new) = match old_meta.expand(key) {
-                Err(_) => match old.child() {
-                    Some(edge::Child::Node(node)) => unsafe { node.replace(old_meta) },
-                    None | Some(edge::Child::Value(_)) => {
-                        // Note: avoid mutating `self.key` here
-                        (Smo::CreateNode, Edge::new_path(save, value))
-                    }
-                },
-                Ok((start, middle, end)) => {
-                    let _ = save.read(start.len());
-                    let byte = unsafe { save.next_unchecked() };
-                    (
-                        Smo::ExpandEdge,
-                        Edge::new_node::<Node3<K::Edge>, _, _>(
-                            start,
-                            [byte, middle],
-                            [Edge::new_path(save, value), old.with_meta(end)],
-                        ),
-                    )
+            return match (exact, old.as_node()) {
+                (true, Some(_)) if old_meta.is_frozen() => Insert::Frozen,
+                (true, Some(node)) => {
+                    let (smo, new) = unsafe { node.replace(old_meta) };
+                    Insert::Smo { smo, old, new }
                 }
+                _ => Insert::Value { old, key, exact },
             };
-
-            return Ok((op, old, new));
         }
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        old: ribbit::Packed<Edge<K::Edge>>,
+        key: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key,
+        value: u64,
+    ) -> Result<ribbit::Packed<Edge<K::Edge>>, Frozen> {
+        if old.meta().is_frozen() {
+            return Err(Frozen);
+        }
+
+        let mut save = self.key;
+
+        let new = match old.meta().expand(key) {
+            Err(_) => Edge::new_path(save, value),
+            Ok((start, middle, end)) => {
+                let _ = save.read(start.len());
+                let byte = unsafe { save.next_unchecked() };
+                Edge::new_node::<Node3<K::Edge>, _, _>(
+                    start,
+                    [byte, middle],
+                    [Edge::new_path(save, value), old.with_meta(end)],
+                )
+            }
+        };
+
+        Ok(new)
     }
 
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {

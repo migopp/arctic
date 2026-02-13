@@ -364,10 +364,7 @@ where
     /// # SAFETY
     ///
     /// Caller must ensure there are no other references to this node.
-    pub(crate) unsafe fn deallocate_recursive<F>(self, deallocate_value: F, counter: stat::Counter)
-    where
-        F: FnOnce(u64),
-    {
+    pub(crate) unsafe fn deallocate_recursive(self, counter: stat::Counter) {
         stat::increment(counter);
 
         validate_eq!(self.kind(), Kind::Node3.pack());
@@ -376,7 +373,7 @@ where
         let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
         node.edges_mut()[0]
             .get_packed()
-            .deallocate_recursive_unchecked(deallocate_value, counter);
+            .deallocate_recursive_unchecked(counter);
 
         drop(node);
     }
