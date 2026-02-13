@@ -2,6 +2,7 @@ mod value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
@@ -111,7 +112,9 @@ where
     pub fn iter<const REVERSE: bool>(&self) -> Iter<'static, '_, REVERSE, K, V> {
         Iter {
             _value: PhantomData,
-            iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
+            iter: unsafe {
+                RangeIter::new_unchecked(NonNull::from(&self.root), K::Read::default(), ..)
+            },
         }
     }
 }

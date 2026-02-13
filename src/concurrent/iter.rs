@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
+use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
@@ -53,7 +54,11 @@ where
         EntryIter {
             _guard: &self.guard,
             iter: unsafe {
-                raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
+                raw::iter::RangeIter::new_unchecked(
+                    NonNull::from(self.root),
+                    self.prefix,
+                    self.range.clone(),
+                )
             },
             value: PhantomData,
         }
@@ -64,7 +69,11 @@ where
         ValueIter {
             _guard: &self.guard,
             iter: unsafe {
-                raw::iter::RangeIter::new_unchecked(self.root, self.prefix, self.range.clone())
+                raw::iter::RangeIter::new_unchecked(
+                    NonNull::from(self.root),
+                    self.prefix,
+                    self.range.clone(),
+                )
             },
             value: PhantomData,
         }

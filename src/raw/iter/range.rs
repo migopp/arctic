@@ -4,6 +4,7 @@ use core::ops::RangeFrom;
 use core::ops::RangeFull;
 use core::ops::RangeInclusive;
 use core::ops::RangeToInclusive;
+use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
@@ -46,11 +47,11 @@ where
     W: key::Write<Edge = K::Edge> + From<K::Read<'k>>,
 {
     pub(crate) unsafe fn new_unchecked(
-        root: &'g Atomic<Edge<K::Edge>>,
+        root: NonNull<Atomic<Edge<K::Edge>>>,
         prefix: K::Read<'k>,
         range: R,
     ) -> Self {
-        let edge = root.load_packed(Ordering::Acquire);
+        let edge = unsafe { root.as_ref() }.load_packed(Ordering::Acquire);
 
         let Some(child) = edge.child() else {
             return Self::default();
