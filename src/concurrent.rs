@@ -451,7 +451,7 @@ where
                         },
                     }
                 }
-                cursor::Insert::Smo { smo, old, new } => {
+                cursor::Insert::Smo(Ok((smo, old, new))) => {
                     validate!(!old.meta().is_frozen());
 
                     match cursor.edge().compare_exchange_packed(
@@ -481,7 +481,7 @@ where
                 }
 
                 // Fall through to freeze
-                cursor::Insert::Frozen => (),
+                cursor::Insert::Smo(Err(Frozen)) => (),
             }
 
             match cursor.freeze() {
