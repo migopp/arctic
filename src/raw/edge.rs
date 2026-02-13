@@ -184,12 +184,6 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<node::Ptr<M>>) -> Self {
-        validate!(!self.meta().is_value());
-        self.with_data(node.raw().get())
-    }
-
-    #[inline]
     pub(crate) fn with_value(self, value: u64) -> Self {
         validate!(self.meta().is_value());
         self.with_data(value)
