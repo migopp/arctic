@@ -62,6 +62,7 @@ mod membarrier;
 pub(crate) mod prefix;
 pub(crate) use prefix::Prefix;
 
+use core::cell::RefCell;
 use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
@@ -78,15 +79,15 @@ use crate::stat;
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V> {
+pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     hazards: ThreadLocal<Cache<ribbit::Atomic<P>>>,
-    retired: ThreadLocal<Cache<core::cell::RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
+    retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
     membarrier: AtomicBool,
     reclaim_threshold: usize,
     value: PhantomData<V>,
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Hazard<P, V> {
     fn default() -> Self {
         Self {
             hazards: thread_local::ThreadLocal::with_capacity(16),
@@ -98,7 +99,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V> Default for Hazard<P, V> {
     }
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V> Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
     #[inline]
     #[must_use]
     pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
@@ -109,6 +110,23 @@ impl<P: ribbit::Pack<Packed: Prefix>, V> Hazard<P, V> {
     #[inline]
     pub fn set_membarrier(&mut self, enable: bool) {
         *self.membarrier.get_mut() = enable
+    }
+
+    /// Eagerly reclaim all retired allocations
+    pub fn reclaim(&mut self) {
+        self.retired
+            .iter_mut()
+            .map(|Cache(retired)| RefCell::get_mut(retired))
+            .flat_map(|retired| retired.drain(..))
+            .for_each(|(prefix, raw)| {
+                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+            })
+    }
+}
+
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Hazard<P, V> {
+    fn drop(&mut self) {
+        self.reclaim();
     }
 }
 
@@ -192,19 +210,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
                 }
             }
 
-            if prefix.is_node() {
-                unsafe {
-                    // FIXME: type of edge meta is irrelevant here
-                    crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(*raw)
-                        .deallocate(stat::Counter::FreeRetire);
-                }
-            } else {
-                unsafe {
-                    stat::increment(stat::Counter::FreeRetire);
-                    drop(V::from_raw(*raw));
-                }
-            }
-
+            deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
             false
         });
 
@@ -228,7 +234,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for Local<'
 
 pub struct Guard<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'l mut Local<'g, P, V>);
 
-impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 'l, P, V> {
+impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 'l, P, V> {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -236,6 +242,8 @@ impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Gu
         _bits: usize,
         node: ribbit::Packed<node::Ptr<M>>,
     ) {
+        stat::increment(stat::Counter::Retire);
+
         let prefix = self
             .0
             .hazard
@@ -250,6 +258,8 @@ impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Gu
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
+        stat::increment(stat::Counter::Retire);
+
         let prefix = self
             .0
             .hazard
@@ -269,5 +279,23 @@ impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, '
         self.0
             .hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+    }
+}
+
+fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
+    prefix: ribbit::Packed<P>,
+    raw: u64,
+    counter: stat::Counter,
+) {
+    if prefix.is_node() {
+        unsafe {
+            // FIXME: type of edge meta is irrelevant here
+            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
+        }
+    } else {
+        unsafe {
+            stat::increment(counter);
+            drop(V::from_raw(raw));
+        }
     }
 }

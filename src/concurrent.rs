@@ -237,6 +237,7 @@ where
     where
         F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, Option<V>>,
     {
+        stat::increment(stat::Counter::UpdatePessimistic);
         match self.update_with_impl::<path::Retain<_>, _, _>(key, initial, update) {
             Ok(update) => update,
             Err(_) => unreachable!(),
@@ -468,7 +469,6 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
-                            stat::increment(smo);
                             if let Some(node) = old.as_node() {
                                 unsafe { guard.retire_node(cursor.bits(), node) };
                             }

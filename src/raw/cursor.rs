@@ -300,7 +300,6 @@ where
                 .compare_exchange_packed(edge, new, Ordering::AcqRel, Ordering::Relaxed)
             {
                 Ok(_) => {
-                    stat::increment(op);
                     break Some(old);
                 }
                 Err(conflict) => {

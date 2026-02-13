@@ -9,7 +9,6 @@ use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
-use crate::raw::Smo;
 use crate::Key;
 use crate::Value;
 
@@ -113,12 +112,11 @@ pub struct Process {
     node_256: Histogram,
 }
 
-#[cfg_attr(not(feature = "stat"), expect(dead_code))]
 #[derive(Copy, Clone)]
 pub(crate) enum Counter {
-    Op(Smo),
     InsertPessimistic,
-    GetOrInsertPessimistic,
+    UpdatePessimistic,
+
     Retire,
     FreeConflict,
     FreeRetire,
@@ -129,13 +127,6 @@ pub(crate) enum Counter {
     Node47Consistent,
     Node47CasSuccess,
     Node47CasFailure,
-
-    ScanInsert,
-    ScanUpdate,
-    ScanScan,
-
-    LockFrozen,
-    UnlockFrozen,
 }
 
 pub(crate) enum Max {
@@ -152,19 +143,12 @@ pub(crate) enum Record {
     ReclaimAge3,
 }
 
-impl From<Smo> for Counter {
-    fn from(op: Smo) -> Self {
-        Self::Op(op)
-    }
-}
-
 #[cfg(feature = "stat")]
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
-    node: Node,
-    edge: Edge,
     insert_pessimistic: u64,
-    get_or_insert_pessimistic: u64,
+    update_pessimistic: u64,
+
     flush: Histogram,
     retire: u64,
     retire_cache: u64,
@@ -173,12 +157,6 @@ pub struct Thread {
     free_reclaim: u64,
     free_drop: u64,
     hazard_match: u64,
-    scan_insert: u64,
-    scan_update: u64,
-    scan_scan: u64,
-    scan_freeze: u64,
-    lock_frozen: u64,
-    unlock_frozen: u64,
 
     node_47_consistent: u64,
     node_47_cas_success: u64,
@@ -198,68 +176,25 @@ pub struct Thread {
 #[cfg(not(feature = "stat"))]
 pub struct Thread;
 
-#[cfg(feature = "stat")]
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-struct Node {
-    replace: u64,
-    shrink: u64,
-    grow: u64,
-    destroy: u64,
-    compress: u64,
-}
-
-#[cfg(feature = "stat")]
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-struct Edge {
-    create: u64,
-    expand: u64,
-    insert: u64,
-}
-
-#[cfg(feature = "stat")]
-impl Thread {
-    fn op(&mut self, op: Smo) -> &mut u64 {
-        match op {
-            Smo::Node(op) => match op {
-                node::Smo::Shrink => &mut self.node.shrink,
-                node::Smo::Replace => &mut self.node.replace,
-                node::Smo::Grow => &mut self.node.grow,
-                node::Smo::Destroy => &mut self.node.destroy,
-                node::Smo::Compress => &mut self.node.compress,
-            },
-            Smo::Edge(op) => match op {
-                edge::Smo::Create => &mut self.edge.create,
-                edge::Smo::Expand => &mut self.edge.expand,
-            },
-        }
-    }
-}
-
 #[inline]
 pub(crate) fn increment<C: Into<Counter>>(_counter: C) {
     #[cfg(feature = "stat")]
     if RECORD.load(Ordering::Relaxed) {
         THREAD.with_borrow_mut(|thread| {
             *match _counter.into() {
-                Counter::Op(op) => thread.op(op),
                 Counter::InsertPessimistic => &mut thread.insert_pessimistic,
-                Counter::GetOrInsertPessimistic => &mut thread.get_or_insert_pessimistic,
+                Counter::UpdatePessimistic => &mut thread.update_pessimistic,
+
                 Counter::Retire => &mut thread.retire,
                 Counter::FreeConflict => &mut thread.free_conflict,
                 Counter::FreeRetire => &mut thread.free_retire,
                 Counter::FreeReclaim => &mut thread.free_reclaim,
                 Counter::FreeDrop => &mut thread.free_drop,
                 Counter::HazardMatch => &mut thread.hazard_match,
-                Counter::ScanInsert => &mut thread.scan_insert,
-                Counter::ScanUpdate => &mut thread.scan_update,
-                Counter::ScanScan => &mut thread.scan_scan,
 
                 Counter::Node47Consistent => &mut thread.node_47_consistent,
                 Counter::Node47CasSuccess => &mut thread.node_47_cas_success,
                 Counter::Node47CasFailure => &mut thread.node_47_cas_failure,
-
-                Counter::LockFrozen => &mut thread.lock_frozen,
-                Counter::UnlockFrozen => &mut thread.unlock_frozen,
             } += 1;
         })
     }
