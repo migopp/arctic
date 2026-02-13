@@ -408,8 +408,11 @@ where
 
         loop {
             match cursor.traverse_insert() {
-                cursor::Insert::Value { old, key, exact } => {
-                    let old_value = if exact { old.as_value() } else { None };
+                cursor::Insert::Value {
+                    old_value,
+                    old,
+                    key,
+                } => {
                     let new_value = match insert(
                         old_value.map(|old| unsafe { V::borrow_from_raw(old) }),
                         initial.take(),

@@ -34,9 +34,9 @@ pub(crate) struct Cursor<'k, 'g, K: Key, H> {
 
 pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
     Value {
+        old_value: Option<u64>,
         old: ribbit::Packed<Edge<E>>,
         key: <E::Packed as edge::Meta>::Key,
-        exact: bool,
     },
 
     /// Structural modification required
@@ -208,13 +208,25 @@ where
             // Revert key to before the current edge
             self.key = save;
 
-            return match (exact, old.as_node()) {
-                (true, Some(_)) if old_meta.is_frozen() => Insert::Smo(Err(Frozen)),
-                (true, Some(node)) => {
-                    let (smo, new) = unsafe { node.replace(old_meta) };
-                    Insert::Smo(Ok((smo, old, new)))
+            let old_value = match (exact, old.child()) {
+                // Edge expansion or node creation
+                (false, _) | (true, None) => None,
+                (true, Some(edge::Child::Value(value))) => Some(value),
+
+                // Node replacement
+                (true, Some(edge::Child::Node(_))) if old_meta.is_frozen() => {
+                    return Insert::Smo(Err(Frozen))
                 }
-                _ => Insert::Value { old, key, exact },
+                (true, Some(edge::Child::Node(node))) => {
+                    let (smo, new) = unsafe { node.replace(old_meta) };
+                    return Insert::Smo(Ok((smo, old, new)));
+                }
+            };
+
+            return Insert::Value {
+                old_value,
+                old,
+                key,
             };
         }
     }
