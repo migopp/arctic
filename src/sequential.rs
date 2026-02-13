@@ -57,6 +57,14 @@ where
     }
 
     #[inline]
+    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<V::BorrowMut<'_>> {
+        let reader = K::Read::from(key);
+        let value =
+            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
+        Some(unsafe { V::borrow_mut_from_raw(value) })
+    }
+
+    #[inline]
     pub fn insert(&mut self, _key: K::Borrow<'_>, _value: V) -> Option<V> {
         todo!()
         // let mut edge = self.root();
