@@ -21,7 +21,6 @@ use crate::stat;
 
 pub(crate) struct CursorMut<'k, 'g, K: Key>(Cursor<'k, 'g, K, path::Discard>);
 
-#[expect(unused)]
 impl<'k, 'g, K: Key> CursorMut<'k, 'g, K> {
     #[inline]
     pub(crate) fn new(root: &'g mut Atomic<Edge<K::Edge>>, key: K::Read<'k>) -> Self {
@@ -39,6 +38,13 @@ impl<'k, 'g, K: Key> core::ops::Deref for CursorMut<'k, 'g, K> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<'k, 'g, K: Key> core::ops::DerefMut for CursorMut<'k, 'g, K> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
