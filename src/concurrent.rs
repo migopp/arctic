@@ -101,18 +101,18 @@ where
     S::Local<'g>: 'l,
 {
     Absent {
-        initial: Option<V>,
+        value: Option<V>,
     },
     Success {
         old: Owned<'g, 'l, K, V, S>,
     },
-    Failure {
+    Break {
         old: Shared<'g, 'l, K, V, S>,
         r#break: B,
     },
 }
 
-pub enum Upsert<'g, 'l, K, V, B = Option<V>, S = smr::Hazard<<K as Key>::Prefix, V>>
+pub enum Insert<'g, 'l, K, V, B = Option<V>, S = smr::Hazard<<K as Key>::Prefix, V>>
 where
     K: Key,
     V: Value,
@@ -122,7 +122,7 @@ where
     Success {
         old: Option<Owned<'g, 'l, K, V, S>>,
     },
-    Failure {
+    Break {
         old: Option<Shared<'g, 'l, K, V, S>>,
         r#break: B,
     },
@@ -155,7 +155,7 @@ where
         }) {
             Update::Absent { .. } => None,
             Update::Success { old } => Some(old),
-            Update::Failure { .. } => unreachable!(),
+            Update::Break { .. } => unreachable!(),
         }
     }
 
@@ -179,10 +179,10 @@ where
             ControlFlow::<Infallible, _>::Continue(new)
         }) {
             Update::Absent {
-                initial: Some(initial),
+                value: Some(initial),
             } => Err(initial),
             Update::Success { old } => Ok(old),
-            Update::Absent { initial: None } | Update::Failure { .. } => unreachable!(),
+            Update::Absent { value: None } | Update::Break { .. } => unreachable!(),
         }
     }
 
@@ -256,7 +256,7 @@ where
 
         loop {
             let old = match cursor.traverse_update() {
-                None => return Ok(Update::Absent { initial }),
+                None => return Ok(Update::Absent { value: initial }),
                 Some(Ok(old)) => old,
                 Some(Err(Frozen)) => match cursor.freeze() {
                     Err(_) => return Err(initial),
@@ -277,7 +277,7 @@ where
                 ControlFlow::Continue(None) => Edge::DEFAULT,
                 ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
                 ControlFlow::Break(r#break) => {
-                    return Ok(Update::Failure {
+                    return Ok(Update::Break {
                         old: unsafe { V::share(guard, old.into_raw()) },
                         r#break,
                     })
@@ -304,21 +304,42 @@ where
 
     #[inline]
     pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<Owned<'g, '_, K, V, S>> {
-        match self.upsert_with(key, Some(value), |_, new| {
+        match self.insert_with(key, Some(value), |_, new| {
             ControlFlow::<Infallible, _>::Continue(new.expect("Value is always initialized"))
         }) {
-            Upsert::Success { old } => old,
-            Upsert::Failure { .. } => unreachable!(),
+            Insert::Success { old } => old,
+            Insert::Break { .. } => unreachable!(),
         }
     }
 
     #[inline]
-    pub fn upsert_with<F, B>(
+    pub fn insert(
+        &mut self,
+        key: K::Borrow<'_>,
+        value: V,
+    ) -> Result<(), (Shared<'g, '_, K, V, S>, V)> {
+        match self.insert_with(key, Some(value), |old, new| {
+            let new = new.expect("Value is always initialized");
+            match old {
+                None => ControlFlow::Continue(new),
+                Some(_) => ControlFlow::Break(new),
+            }
+        }) {
+            Insert::Success { old } => {
+                validate!(old.is_none());
+                Ok(())
+            }
+            Insert::Break { old, r#break } => Err((old.expect("Break on `Some`"), r#break)),
+        }
+    }
+
+    #[inline]
+    pub fn insert_with<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
-        mut upsert: F,
-    ) -> Upsert<'g, '_, K, V, B, S>
+        mut insert: F,
+    ) -> Insert<'g, '_, K, V, B, S>
     where
         F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
     {
@@ -329,54 +350,54 @@ where
         } else {
             // Cursed workaround for:
             // https://github.com/rust-lang/rust/issues/54663
-            polonius!(|map| -> Upsert<'g, 'polonius, K, V, B, S> {
-                match map.upsert_with_optimistic(key, initial, &mut upsert) {
+            polonius!(|map| -> Insert<'g, 'polonius, K, V, B, S> {
+                match map.insert_with_optimistic(key, initial, &mut insert) {
                     Ok(update) => polonius_return!(update),
                     Err(initial) => exit_polonius!(initial),
                 }
             })
         };
 
-        map.upsert_with_pessimistic(key, initial, upsert)
+        map.insert_with_pessimistic(key, initial, insert)
     }
 
     #[inline]
-    fn upsert_with_optimistic<F, B>(
+    fn insert_with_optimistic<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
-        upsert: F,
-    ) -> Result<Upsert<'g, '_, K, V, B, S>, Option<V>>
+        insert: F,
+    ) -> Result<Insert<'g, '_, K, V, B, S>, Option<V>>
     where
         F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
     {
-        self.upsert_with_impl::<path::Discard, _, _>(key, initial, upsert)
+        self.insert_with_impl::<path::Discard, _, _>(key, initial, insert)
     }
 
     #[cold]
-    fn upsert_with_pessimistic<F, B>(
+    fn insert_with_pessimistic<F, B>(
         &mut self,
         key: K::Borrow<'_>,
         initial: Option<V>,
-        upsert: F,
-    ) -> Upsert<'g, '_, K, V, B, S>
+        insert: F,
+    ) -> Insert<'g, '_, K, V, B, S>
     where
         F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
     {
         stat::increment(stat::Counter::InsertPessimistic);
-        match self.upsert_with_impl::<path::Retain<_>, _, _>(key, initial, upsert) {
+        match self.insert_with_impl::<path::Retain<_>, _, _>(key, initial, insert) {
             Ok(upsert) => upsert,
             Err(_) => unreachable!(),
         }
     }
 
     #[inline]
-    fn upsert_with_impl<'k, H, F, B>(
+    fn insert_with_impl<'k, H, F, B>(
         &mut self,
         key: K::Borrow<'k>,
         mut initial: Option<V>,
-        mut upsert: F,
-    ) -> Result<Upsert<'g, '_, K, V, B, S>, Option<V>>
+        mut insert: F,
+    ) -> Result<Insert<'g, '_, K, V, B, S>, Option<V>>
     where
         H: path::History<'k, 'g, K>,
         F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
@@ -389,13 +410,13 @@ where
             match cursor.traverse_insert() {
                 cursor::Insert::Value { old, key, exact } => {
                     let old_value = if exact { old.as_value() } else { None };
-                    let new_value = match upsert(
+                    let new_value = match insert(
                         old_value.map(|old| unsafe { V::borrow_from_raw(old) }),
                         initial.take(),
                     ) {
                         ControlFlow::Continue(value) => V::into_raw(value),
                         ControlFlow::Break(r#break) => {
-                            return Ok(Upsert::Failure {
+                            return Ok(Insert::Break {
                                 old: old.as_value().map(|old| unsafe { V::share(guard, old) }),
                                 r#break,
                             })
@@ -413,7 +434,7 @@ where
                             Ordering::Acquire,
                         ) {
                             Ok(_) => {
-                                return Ok(Upsert::Success {
+                                return Ok(Insert::Success {
                                     old: old_value.map(|old| unsafe { V::own(guard, old) }),
                                 });
                             }
