@@ -198,14 +198,18 @@ where
     {
         let mut map = self;
 
-        // Cursed workaround for:
-        // https://github.com/rust-lang/rust/issues/54663
-        let initial = polonius!(|map| -> Update<'g, 'polonius, K, V, B, S> {
-            match map.update_with_optimistic(key, initial, &mut update) {
-                Ok(update) => polonius_return!(update),
-                Err(initial) => exit_polonius!(initial),
-            }
-        });
+        let initial = if cfg!(feature = "opt-no-path") {
+            initial
+        } else {
+            // Cursed workaround for:
+            // https://github.com/rust-lang/rust/issues/54663
+            polonius!(|map| -> Update<'g, 'polonius, K, V, B, S> {
+                match map.update_with_optimistic(key, initial, &mut update) {
+                    Ok(update) => polonius_return!(update),
+                    Err(initial) => exit_polonius!(initial),
+                }
+            })
+        };
 
         map.update_with_pessimistic(key, initial, update)
     }
