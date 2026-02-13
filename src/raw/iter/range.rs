@@ -1,34 +1,34 @@
+use core::cmp;
 use core::ops::ControlFlow;
+use core::ops::RangeFrom;
+use core::ops::RangeFull;
+use core::ops::RangeInclusive;
+use core::ops::RangeToInclusive;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
 use crate::raw;
 use crate::raw::edge;
-use crate::raw::iter::Lower as _;
-use crate::raw::iter::Upper as _;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::key::Read as _;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
+use crate::raw::Key;
 
-pub(crate) enum RangeIter<
-    'k,
-    'g,
-    const REVERSE: bool,
-    K: raw::Key,
-    R: raw::iter::Range<'k, K>,
-    W: key::Write,
-> {
+pub(crate) enum RangeIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>, W: key::Write> {
     Root { writer: W, next: Option<u64> },
     Node(NodeIter<'k, 'g, REVERSE, K, R, W>),
 }
 
 impl<'k, 'g, const REVERSE: bool, K, R, W> Default for RangeIter<'k, 'g, REVERSE, K, R, W>
 where
-    K: raw::Key,
-    R: raw::iter::Range<'k, K>,
+    K: Key,
+    R: Range<'k, K>,
     W: key::Write + From<K::Read<'k>>,
 {
     fn default() -> Self {
@@ -41,8 +41,8 @@ where
 
 impl<'k, 'g, const REVERSE: bool, K, R, W> RangeIter<'k, 'g, REVERSE, K, R, W>
 where
-    K: raw::Key,
-    R: raw::iter::Range<'k, K>,
+    K: Key,
+    R: Range<'k, K>,
     W: key::Write<Edge = K::Edge> + From<K::Read<'k>>,
 {
     pub(crate) unsafe fn new_unchecked(
@@ -113,14 +113,7 @@ where
     }
 }
 
-pub(crate) struct NodeIter<
-    'k,
-    'g,
-    const REVERSE: bool,
-    K: raw::Key,
-    R: raw::iter::Range<'k, K>,
-    W: key::Write,
-> {
+pub(crate) struct NodeIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>, W: key::Write> {
     lower: R::Lower,
     upper: R::Upper,
     writer: W,
@@ -128,8 +121,8 @@ pub(crate) struct NodeIter<
         W::Len,
         raw::node::NodeIter<
             'g,
-            <R::Lower as raw::iter::Lower<K::Read<'k>>>::Bound,
-            <R::Upper as raw::iter::Upper<K::Read<'k>>>::Bound,
+            <R::Lower as Lower<K::Read<'k>>>::Bound,
+            <R::Upper as Upper<K::Read<'k>>>::Bound,
             K::Edge,
         >,
     )>,
@@ -137,8 +130,8 @@ pub(crate) struct NodeIter<
 
 impl<'k, 'g, const REVERSE: bool, K, R, W> NodeIter<'k, 'g, REVERSE, K, R, W>
 where
-    K: raw::Key,
-    R: raw::iter::Range<'k, K>,
+    K: Key,
+    R: Range<'k, K>,
     W: key::Write<Edge = K::Edge>,
 {
     #[inline]
@@ -243,5 +236,162 @@ where
                 }
             }
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Include<T>(pub(crate) T);
+
+#[derive(Copy, Clone, Default)]
+pub struct Unbound;
+
+pub trait Range<'k, K: Key>: Clone {
+    #[expect(private_bounds)]
+    type Lower: Lower<K::Read<'k>>;
+
+    #[expect(private_bounds)]
+    type Upper: Upper<K::Read<'k>>;
+
+    fn lower(&self, bits: usize) -> Self::Lower;
+    fn upper(&self, bits: usize) -> Self::Upper;
+
+    #[inline]
+    fn common_prefix(&self) -> K::Read<'k> {
+        K::Read::default()
+    }
+}
+
+impl<'k, K: Key> Range<'k, K> for RangeInclusive<K::Borrow<'k>> {
+    type Lower = Include<K::Read<'k>>;
+    type Upper = Include<K::Read<'k>>;
+
+    #[inline]
+    fn lower(&self, bits: usize) -> Self::Lower {
+        Include(K::Read::from(*self.start()).suffix(bits))
+    }
+
+    #[inline]
+    fn upper(&self, bits: usize) -> Self::Upper {
+        Include(K::Read::from(*self.end()).suffix(bits))
+    }
+
+    #[inline]
+    fn common_prefix(&self) -> <K as Key>::Read<'k> {
+        K::Read::from(*self.start()).common_prefix(K::Read::from(*self.end()))
+    }
+}
+
+impl<'k, K: Key> Range<'k, K> for RangeFrom<K::Borrow<'k>> {
+    type Lower = Include<K::Read<'k>>;
+    type Upper = Unbound;
+
+    #[inline]
+    fn lower(&self, bits: usize) -> Self::Lower {
+        Include(K::Read::from(self.start).suffix(bits))
+    }
+
+    #[inline]
+    fn upper(&self, _bits: usize) -> Self::Upper {
+        Unbound
+    }
+}
+
+impl<'k, K: Key> Range<'k, K> for RangeToInclusive<K::Borrow<'k>> {
+    type Lower = Unbound;
+    type Upper = Include<K::Read<'k>>;
+
+    #[inline]
+    fn lower(&self, _bits: usize) -> Self::Lower {
+        Unbound
+    }
+
+    #[inline]
+    fn upper(&self, bits: usize) -> Self::Upper {
+        Include(K::Read::from(self.end).suffix(bits))
+    }
+}
+
+impl<'k, K: Key> Range<'k, K> for RangeFull {
+    type Lower = Unbound;
+    type Upper = Unbound;
+
+    #[inline]
+    fn lower(&self, _bits: usize) -> Self::Lower {
+        Unbound
+    }
+
+    #[inline]
+    fn upper(&self, _bits: usize) -> Self::Upper {
+        Unbound
+    }
+}
+
+trait Lower<R: key::Read> {
+    type Bound: raw::node::Lower;
+
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
+}
+
+trait Upper<R: key::Read> {
+    type Bound: raw::node::Upper;
+
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
+}
+
+impl<R: key::Read> Lower<R> for Include<R> {
+    type Bound = Option<u8>;
+
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+        let key = edge.key();
+        let len = key.len();
+
+        // Skip check for fixed-length keys
+        if R::BITS.is_none() && self.0.bits() < len.bits() {
+            return None;
+        }
+
+        match self.0.read(len).cmp(&key) {
+            cmp::Ordering::Less => Some(None),
+            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Greater => None,
+        }
+    }
+}
+
+impl<R: key::Read> Upper<R> for Include<R> {
+    type Bound = Option<u8>;
+
+    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+        let key = edge.key();
+        let len = key.len();
+
+        // Skip check for fixed-length keys
+        if R::BITS.is_none() && self.0.bits() > len.bits() {
+            return None;
+        }
+
+        match self.0.read(len).cmp(&key) {
+            cmp::Ordering::Less => None,
+            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Greater => Some(None),
+        }
+    }
+}
+
+impl<R: key::Read> Lower<R> for Unbound {
+    type Bound = Unbound;
+
+    #[inline]
+    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+        Some(Unbound)
+    }
+}
+
+impl<R: key::Read> Upper<R> for Unbound {
+    type Bound = Unbound;
+
+    #[inline]
+    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
+        Some(Unbound)
     }
 }
