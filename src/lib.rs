@@ -136,13 +136,15 @@ mod tests {
         }
 
         drop(pin);
-        assert_eq!(map.as_sequential().iter::<false>().count(), 1);
+        assert_eq!(map.as_sequential().all().entries::<false>().count(), 1);
 
         map.as_sequential()
-            .iter::<false>()
+            .all()
+            .entries::<false>()
             .for_each(|(key, value)| {
                 assert_eq!(key, 1);
                 assert_eq!(value, 3);
+                core::ops::ControlFlow::Continue(())
             });
     }
 
@@ -270,7 +272,7 @@ mod tests {
 
         drop(pin);
 
-        let mut iter = map.as_sequential().iter::<false>();
+        let mut iter = map.as_sequential().all().entries::<false>();
         let mut count = 0;
         while iter.lend().is_some() {
             count += 1;
@@ -283,7 +285,8 @@ mod tests {
 
         // Sequential iteration
         map.as_sequential()
-            .iter::<false>()
+            .all()
+            .entries::<false>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

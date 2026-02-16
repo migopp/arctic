@@ -518,7 +518,6 @@ where
         Some(unsafe { iter::Prefix::new(guard, root, prefix, ..) })
     }
 
-    // FIXME: support `Option` for min, max
     pub fn range<'k, R>(
         &mut self,
         range: R,

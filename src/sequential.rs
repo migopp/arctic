@@ -8,14 +8,15 @@ pub use value::Value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
-use core::ptr::NonNull;
+use core::ops::RangeFull;
 
 use ribbit::Atomic;
 
+use crate::raw;
 use crate::raw::cursor::path;
 use crate::raw::cursor::CursorMut;
 use crate::raw::iter::PostorderIter;
-use crate::raw::iter::RangeIter;
+use crate::raw::key::Read as _;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
@@ -114,51 +115,36 @@ where
         todo!()
     }
 
-    pub fn iter<const REVERSE: bool>(&self) -> Iter<'static, '_, REVERSE, K, V> {
-        Iter {
-            _value: PhantomData,
-            iter: unsafe {
-                RangeIter::new_unchecked(NonNull::from(&self.root), K::Read::default(), ..)
-            },
-        }
+    pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
+        unsafe { Prefix::new(self.root(), K::Read::default(), ..) }
     }
-}
 
-pub struct Iter<'k, 'g, const REVERSE: bool, K: Key, V: Value> {
-    _value: PhantomData<&'g V>,
-    iter: RangeIter<'k, 'g, REVERSE, K, core::ops::RangeFull, K::Write>,
-}
-
-impl<'k, 'g, const REVERSE: bool, K, V> Iter<'k, 'g, REVERSE, K, V>
-where
-    K: Key,
-    V: Value,
-{
-    #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                // FIXME: borrow without guard
-                V::borrow_from_raw(value)
-            })
-        })
+    pub fn prefix<'k>(
+        &self,
+        prefix: impl Into<K::Read<'k>>,
+    ) -> Option<Prefix<'k, '_, K, V, RangeFull>> {
+        let prefix = prefix.into();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.root(), prefix) };
+        cursor.traverse_prefix()?;
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+        Some(unsafe { Prefix::new(root, prefix, ..) })
     }
-}
 
-impl<'k, 'g, const REVERSE: bool, K, V> Iterator for Iter<'k, 'g, REVERSE, K, V>
-where
-    K: Key,
-    V: Value,
-{
-    type Item = (K, V::Borrow<'g>);
+    pub fn range<'k, R>(&mut self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
+    where
+        R: raw::iter::Range<'k, K>,
+    {
+        let prefix = range.common_prefix();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.root(), prefix) };
+        cursor.traverse_prefix()?;
 
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::borrow_from_raw(value)
-            })
-        })
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+
+        Some(unsafe { iter::Prefix::new(root, prefix, range) })
     }
 }
 

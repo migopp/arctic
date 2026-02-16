@@ -87,7 +87,8 @@ where
         state
             .0
             .as_sequential()
-            .iter::<false>()
+            .all()
+            .entries::<false>()
             .zip(expected.0.iter())
             .for_each(
                 |((actual_key, actual_value), (expected_key, expected_value))| {
