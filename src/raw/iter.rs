@@ -23,13 +23,13 @@ pub(crate) struct Prefix<'k, 'g, K: Key, R> {
     _global: PhantomData<&'g Atomic<Edge<K::Edge>>>,
 }
 
-#[expect(unused)]
 impl<'k, 'g, K, R> Prefix<'k, 'g, K, R>
 where
     K: Key,
     R: Range<'k, K>,
 {
-    pub(super) unsafe fn new(
+    #[inline]
+    pub(crate) unsafe fn new(
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
         range: R,

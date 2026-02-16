@@ -1,6 +1,11 @@
 mod iter;
 mod value;
 
+pub use iter::EntryIter;
+pub use iter::Prefix;
+pub use iter::ValueIter;
+pub use value::Value;
+
 use core::cell::Cell;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
@@ -16,7 +21,6 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::stat;
 use crate::Key;
-pub use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {

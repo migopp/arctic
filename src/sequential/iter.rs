@@ -1,7 +1,10 @@
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
 
+use ribbit::Atomic;
+
 use crate::raw::iter;
+use crate::raw::Edge;
 use crate::raw::Key;
 use crate::sequential::Value;
 
@@ -10,8 +13,19 @@ pub struct Prefix<'k, 'g, K: Key, V, R> {
     _value: PhantomData<&'g V>,
 }
 
-#[expect(unused)]
 impl<'k, 'g, K: Key, V: Value, R: iter::Range<'k, K>> Prefix<'k, 'g, K, V, R> {
+    #[inline]
+    pub(crate) unsafe fn new(
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
+        range: R,
+    ) -> Self {
+        Self {
+            inner: iter::Prefix::new(root, prefix, range),
+            _value: PhantomData,
+        }
+    }
+
     #[inline]
     pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'g, REVERSE, K, V, R> {
         EntryIter {
@@ -35,7 +49,6 @@ pub struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, V, R: iter::Range<'k, 
     _value: PhantomData<&'g V>,
 }
 
-#[expect(unused)]
 impl<'k, 'g, const REVERSE: bool, K, V, R> EntryIter<'k, 'g, REVERSE, K, V, R>
 where
     K: Key,
@@ -78,7 +91,6 @@ pub struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, V, R: iter::Range<'k, 
     _value: PhantomData<&'g V>,
 }
 
-#[expect(unused)]
 impl<'k, 'g, const REVERSE: bool, K, V, R> ValueIter<'k, 'g, REVERSE, K, V, R>
 where
     K: Key,
