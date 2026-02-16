@@ -101,16 +101,6 @@ mod tests {
         insert_all(0u64..256);
     }
 
-    // #[test]
-    // fn scan_node256_exclusive() {
-    //     let map = insert_all(0u64..256);
-    //     let mut map = map.pin();
-    //     assert_eq!(
-    //         map.range_non_linearizable(0, 255).collect::<Vec<_>>(),
-    //         (0..256).map(|key| (key, key as u32)).collect::<Vec<_>>()
-    //     );
-    // }
-
     #[test]
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));

@@ -3,6 +3,7 @@ mod value;
 
 pub use iter::EntryIter;
 pub use iter::Prefix;
+pub use iter::PrefixMut;
 pub use iter::ValueIter;
 pub use value::Value;
 
@@ -127,12 +128,30 @@ where
         Some(unsafe { Prefix::new(prefix) })
     }
 
-    pub fn range<'k, R>(&mut self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
+    pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
         R: raw::iter::Range<'k, K>,
     {
         let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
         Some(unsafe { iter::Prefix::new(prefix) })
+    }
+
+    pub fn all_mut(&mut self) -> PrefixMut<'static, '_, K, V, RangeFull> {
+        unsafe { PrefixMut::new(self.all()) }
+    }
+
+    pub fn prefix_mut<'k>(
+        &mut self,
+        prefix: impl Into<K::Read<'k>>,
+    ) -> Option<PrefixMut<'k, '_, K, V, RangeFull>> {
+        Some(unsafe { PrefixMut::new(self.prefix(prefix)?) })
+    }
+
+    pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
+    where
+        R: raw::iter::Range<'k, K>,
+    {
+        Some(unsafe { PrefixMut::new(self.range(range)?) })
     }
 }
 
