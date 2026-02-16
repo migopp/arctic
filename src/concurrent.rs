@@ -38,7 +38,7 @@ pub type Shared<'g, 'l, K, V, S> = value::Shared<'l, Guard<'g, 'l, K, V, S>, V>;
 
 pub struct Map<K: Key, V: Value, S = smr::Hazard<<K as Key>::Prefix, V>> {
     smr: S,
-    raw: sequential::Map<K, V>,
+    inner: sequential::Map<K, V>,
 }
 
 unsafe impl<K: Key, V: Value + Send + Sync, S: Smr<K::Prefix, V>> Sync for Map<K, V, S> {}
@@ -47,7 +47,7 @@ impl<K: crate::Key, V: Value, S: Smr<K::Prefix, V>> Default for Map<K, V, S> {
     fn default() -> Self {
         Self {
             smr: S::default(),
-            raw: sequential::Map::<K, V>::default(),
+            inner: sequential::Map::<K, V>::default(),
         }
     }
 }
@@ -60,7 +60,7 @@ impl<K: Key, V: Value, S: Smr<K::Prefix, V>> Map<K, V, S> {
     pub fn with_smr(smr: S) -> Self {
         Self {
             smr,
-            raw: sequential::Map::<K, V>::default(),
+            inner: sequential::Map::<K, V>::default(),
         }
     }
 
@@ -68,13 +68,13 @@ impl<K: Key, V: Value, S: Smr<K::Prefix, V>> Map<K, V, S> {
     pub fn pin(&self) -> MapRef<'_, K, V, S> {
         MapRef {
             smr: self.smr.local(),
-            raw: &self.raw,
+            raw: &self.inner,
         }
     }
 
     #[inline]
     pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
-        &mut self.raw
+        &mut self.inner
     }
 
     #[inline]
@@ -526,5 +526,30 @@ where
         let guard = self.smr.guard(K::hazard(range.common_prefix()));
         let prefix = unsafe { raw::iter::Prefix::new_range(self.raw.root(), range) }?;
         Some(unsafe { Prefix::new(guard, prefix) })
+    }
+}
+
+impl<K, V, S> From<sequential::Map<K, V>> for Map<K, V, S>
+where
+    K: Key,
+    V: Value,
+    S: Smr<K::Prefix, V>,
+{
+    fn from(map: sequential::Map<K, V>) -> Self {
+        Self {
+            smr: S::default(),
+            inner: map,
+        }
+    }
+}
+
+impl<K, V, S> From<Map<K, V, S>> for sequential::Map<K, V>
+where
+    K: Key,
+    V: Value,
+    S: Smr<K::Prefix, V>,
+{
+    fn from(map: Map<K, V, S>) -> sequential::Map<K, V> {
+        map.inner
     }
 }
