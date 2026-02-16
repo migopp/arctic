@@ -2,9 +2,11 @@ mod iter;
 mod value;
 
 pub use iter::EntryIter;
+pub use iter::EntryIterMut;
 pub use iter::Prefix;
 pub use iter::PrefixMut;
 pub use iter::ValueIter;
+pub use iter::ValueIterMut;
 pub use value::Value;
 
 use core::cell::Cell;
@@ -166,6 +168,30 @@ where
             map.upsert(key, value);
         }
         map
+    }
+}
+
+impl<'g, K, V> IntoIterator for &'g Map<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Item = (K, V::Borrow<'g>);
+    type IntoIter = EntryIter<'static, 'g, false, K, V, RangeFull>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.all().entries::<false>()
+    }
+}
+
+impl<'g, K, V> IntoIterator for &'g mut Map<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Item = (K, V::BorrowMut<'g>);
+    type IntoIter = EntryIterMut<'static, 'g, false, K, V, RangeFull>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.all_mut().entries_mut::<false>()
     }
 }
 
