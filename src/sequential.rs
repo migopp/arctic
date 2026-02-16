@@ -16,7 +16,6 @@ use crate::raw;
 use crate::raw::cursor::path;
 use crate::raw::cursor::CursorMut;
 use crate::raw::iter::PostorderIter;
-use crate::raw::key::Read as _;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
@@ -116,7 +115,7 @@ where
     }
 
     pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
-        unsafe { Prefix::new(self.root(), K::Read::default(), ..) }
+        unsafe { Prefix::new(raw::iter::Prefix::<K>::new_all(self.root())) }
     }
 
     pub fn prefix<'k>(
@@ -124,27 +123,16 @@ where
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<Prefix<'k, '_, K, V, RangeFull>> {
         let prefix = prefix.into();
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.root(), prefix) };
-        cursor.traverse_prefix()?;
-        let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
-        Some(unsafe { Prefix::new(root, prefix, ..) })
+        let prefix = unsafe { raw::iter::Prefix::<K>::new_prefix(self.root(), prefix) }?;
+        Some(unsafe { Prefix::new(prefix) })
     }
 
     pub fn range<'k, R>(&mut self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
         R: raw::iter::Range<'k, K>,
     {
-        let prefix = range.common_prefix();
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.root(), prefix) };
-        cursor.traverse_prefix()?;
-
-        let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
-
-        Some(unsafe { iter::Prefix::new(root, prefix, range) })
+        let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
+        Some(unsafe { iter::Prefix::new(prefix) })
     }
 }
 

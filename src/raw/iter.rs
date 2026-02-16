@@ -8,15 +8,19 @@ pub(crate) use range::Unbound;
 
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
+use core::ops::RangeFull;
 use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
+use crate::raw::cursor::path;
 use crate::raw::key;
+use crate::raw::key::Read as _;
+use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Key;
 
-pub(crate) struct Prefix<'k, 'g, K: Key, R> {
+pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
     root: NonNull<Atomic<Edge<K::Edge>>>,
     prefix: K::Read<'k>,
     range: R,
@@ -29,7 +33,42 @@ where
     R: Range<'k, K>,
 {
     #[inline]
-    pub(crate) unsafe fn new(
+    pub(crate) unsafe fn new_all(root: &'g Atomic<Edge<K::Edge>>) -> Prefix<'k, 'g, K, RangeFull> {
+        Prefix::new(root, K::Read::default(), ..)
+    }
+
+    pub(crate) unsafe fn new_prefix(
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
+    ) -> Option<Prefix<'k, 'g, K, RangeFull>> {
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        cursor.traverse_prefix()?;
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+        Some(unsafe { Prefix::new(root, prefix, ..) })
+    }
+
+    pub(crate) unsafe fn new_range(
+        root: &'g Atomic<Edge<K::Edge>>,
+        range: R,
+    ) -> Option<Prefix<'k, 'g, K, R>>
+    where
+        R: Range<'k, K>,
+    {
+        let prefix = range.common_prefix();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        cursor.traverse_prefix()?;
+
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+
+        Some(unsafe { Prefix::new(root, prefix, range) })
+    }
+
+    #[inline]
+    unsafe fn new(
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
         range: R,

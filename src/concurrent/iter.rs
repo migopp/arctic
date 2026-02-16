@@ -1,17 +1,14 @@
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
 
-use ribbit::Atomic;
-
 use crate::concurrent::smr;
 use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::raw;
-use crate::raw::Edge;
 use crate::sequential;
 
 pub struct Prefix<'k, 'g, K: Key, V, R, G = smr::Epoch> {
-    inner: crate::sequential::Prefix<'k, 'g, K, V, R>,
+    inner: sequential::Prefix<'k, 'g, K, V, R>,
     _guard: G,
 }
 
@@ -19,19 +16,17 @@ impl<'k, 'g, K, V, R, G> Prefix<'k, 'g, K, V, R, G>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
     G: smr::Guard<V>,
 {
     #[inline]
     pub(super) unsafe fn new(
         guard: G,
-        root: &'g Atomic<Edge<K::Edge>>,
-        prefix: K::Read<'k>,
-        range: R,
+        prefix: raw::iter::Prefix<'k, 'g, K, R>,
     ) -> Prefix<'k, 'g, K, V, R, G> {
         Prefix {
             _guard: guard,
-            inner: sequential::Prefix::new(root, prefix, range),
+            inner: sequential::Prefix::new(prefix),
         }
     }
 }
@@ -40,7 +35,7 @@ impl<'k, 'g, K, V, R, G> Prefix<'k, 'g, K, V, R, G>
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
     G: smr::Guard<V>,
 {
     #[inline]
@@ -122,7 +117,7 @@ impl<'k, 'l, const REVERSE: bool, K, V, R, G> Iterator for ValueIter<'k, 'l, REV
 where
     K: Key,
     V: Value,
-    R: crate::raw::iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
     G: smr::Guard<V>,
 {
     type Item = V::Borrow<'l>;

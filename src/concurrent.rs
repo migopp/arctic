@@ -14,10 +14,10 @@ use polonius_the_crab::polonius_return;
 use smr::Guard as _;
 use smr::Local as _;
 
+use crate::raw;
 use crate::raw::cursor;
 use crate::raw::cursor::path;
 use crate::raw::edge::Meta as _;
-use crate::raw::key::Read as _;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
@@ -501,7 +501,8 @@ where
 
     pub fn all(&mut self) -> iter::Prefix<'static, 'g, K, V, RangeFull, Guard<'g, '_, K, V, S>> {
         let guard = self.smr.guard(K::hazard(K::Read::default()));
-        unsafe { iter::Prefix::new(guard, self.raw.root(), K::Read::default(), ..) }
+        let prefix = unsafe { raw::iter::Prefix::<K>::new_all(self.raw.root()) };
+        unsafe { Prefix::new(guard, prefix) }
     }
 
     pub fn prefix<'k>(
@@ -510,12 +511,8 @@ where
     ) -> Option<iter::Prefix<'k, 'g, K, V, RangeFull, Guard<'g, '_, K, V, S>>> {
         let prefix = prefix.into();
         let guard = self.smr.guard(K::hazard(prefix));
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), prefix) };
-        cursor.traverse_prefix()?;
-        let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
-        Some(unsafe { iter::Prefix::new(guard, root, prefix, ..) })
+        let prefix = unsafe { raw::iter::Prefix::<K>::new_prefix(self.raw.root(), prefix) }?;
+        Some(unsafe { Prefix::new(guard, prefix) })
     }
 
     pub fn range<'k, R>(
@@ -525,15 +522,9 @@ where
     where
         R: crate::raw::iter::Range<'k, K>,
     {
-        let prefix = range.common_prefix();
-        let guard = self.smr.guard(K::hazard(prefix));
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(self.raw.root(), prefix) };
-        cursor.traverse_prefix()?;
-
-        let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
-
-        Some(unsafe { iter::Prefix::new(guard, root, prefix, range) })
+        // FIXME: avoid recomputing common prefix?
+        let guard = self.smr.guard(K::hazard(range.common_prefix()));
+        let prefix = unsafe { raw::iter::Prefix::new_range(self.raw.root(), range) }?;
+        Some(unsafe { Prefix::new(guard, prefix) })
     }
 }

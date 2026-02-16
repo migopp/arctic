@@ -1,27 +1,20 @@
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
 
-use ribbit::Atomic;
-
-use crate::raw::iter;
-use crate::raw::Edge;
+use crate::raw;
 use crate::raw::Key;
 use crate::sequential::Value;
 
 pub struct Prefix<'k, 'g, K: Key, V, R> {
-    inner: iter::Prefix<'k, 'g, K, R>,
+    inner: raw::iter::Prefix<'k, 'g, K, R>,
     _value: PhantomData<&'g V>,
 }
 
-impl<'k, 'g, K: Key, V: Value, R: iter::Range<'k, K>> Prefix<'k, 'g, K, V, R> {
+impl<'k, 'g, K: Key, V: Value, R: raw::iter::Range<'k, K>> Prefix<'k, 'g, K, V, R> {
     #[inline]
-    pub(crate) unsafe fn new(
-        root: &'g Atomic<Edge<K::Edge>>,
-        prefix: K::Read<'k>,
-        range: R,
-    ) -> Self {
+    pub(crate) unsafe fn new(prefix: raw::iter::Prefix<'k, 'g, K, R>) -> Self {
         Self {
-            inner: iter::Prefix::new(root, prefix, range),
+            inner: prefix,
             _value: PhantomData,
         }
     }
@@ -44,8 +37,8 @@ impl<'k, 'g, K: Key, V: Value, R: iter::Range<'k, K>> Prefix<'k, 'g, K, V, R> {
 }
 
 /// Iterator over keys and raw values
-pub struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, V, R: iter::Range<'k, K>> {
-    inner: iter::EntryIter<'k, 'g, REVERSE, K, R>,
+pub struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
+    inner: raw::iter::EntryIter<'k, 'g, REVERSE, K, R>,
     _value: PhantomData<&'g V>,
 }
 
@@ -53,7 +46,7 @@ impl<'k, 'g, const REVERSE: bool, K, V, R> EntryIter<'k, 'g, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
-    R: iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
@@ -76,7 +69,7 @@ impl<'k, 'g, const REVERSE: bool, K, V, R> Iterator for EntryIter<'k, 'g, REVERS
 where
     K: Key,
     V: Value,
-    R: iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
 {
     type Item = (K, V::Borrow<'g>);
 
@@ -89,8 +82,8 @@ where
 }
 
 /// Iterator over raw values only
-pub struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, V, R: iter::Range<'k, K>> {
-    inner: iter::ValueIter<'k, 'g, REVERSE, K, R>,
+pub struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
+    inner: raw::iter::ValueIter<'k, 'g, REVERSE, K, R>,
     _value: PhantomData<&'g V>,
 }
 
@@ -98,7 +91,7 @@ impl<'k, 'g, const REVERSE: bool, K, V, R> ValueIter<'k, 'g, REVERSE, K, V, R>
 where
     K: Key,
     V: Value,
-    R: iter::Range<'k, K>,
+    R: raw::iter::Range<'k, K>,
 {
     #[inline]
     pub fn for_each<F: FnMut(V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
