@@ -11,6 +11,7 @@ pub use value::Value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
 use core::ops::RangeFull;
 
 use ribbit::Atomic;
@@ -45,6 +46,15 @@ where
             _value: PhantomData,
         }
     }
+}
+
+pub enum Update<'g, V, B>
+where
+    V: Value + 'g,
+{
+    Absent { value: Option<V> },
+    Success { old: V },
+    Break { old: V::Borrow<'g>, r#break: B },
 }
 
 impl<K, V> Map<K, V>
@@ -106,16 +116,45 @@ where
         }
     }
 
-    #[expect(unused_variables)]
     #[inline]
     pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
-        todo!()
+        match self.update_with_impl(key, |_| ControlFlow::<(), _>::Continue(None)) {
+            Update::Absent { value: None } => None,
+            Update::Success { old } => Some(old),
+            Update::Absent { value: Some(_) } | Update::Break { .. } => unreachable!(),
+        }
     }
 
-    #[expect(unused_variables)]
     #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Option<V>, V> {
-        todo!()
+    fn update_with_impl<F, B>(&mut self, key: K::Borrow<'_>, with: F) -> Update<'_, V, B>
+    where
+        F: FnOnce(V::Borrow<'_>) -> ControlFlow<B, Option<V>>,
+    {
+        let reader = K::Read::from(key);
+        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+
+        let old = match cursor.traverse_update() {
+            None => return Update::Absent { value: None },
+            Some(Err(Frozen)) => unreachable!(),
+            Some(Ok(old)) => old,
+        };
+
+        let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
+            ControlFlow::Continue(None) => Edge::DEFAULT,
+            ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
+            ControlFlow::Break(r#break) => {
+                return Update::Break {
+                    old: unsafe { V::borrow_from_raw(old.into_raw()) },
+                    r#break,
+                }
+            }
+        };
+
+        cursor.edge_mut().set_packed(new);
+
+        Update::Success {
+            old: unsafe { V::from_raw(old.into_raw()) },
+        }
     }
 
     pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
