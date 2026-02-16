@@ -155,6 +155,20 @@ where
     }
 }
 
+impl<'k, K, V> FromIterator<(K::Borrow<'k>, V)> for Map<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from_iter<T: IntoIterator<Item = (K::Borrow<'k>, V)>>(iter: T) -> Self {
+        let mut map = Map::default();
+        for (key, value) in iter {
+            map.upsert(key, value);
+        }
+        map
+    }
+}
+
 impl<K, V> Drop for Map<K, V>
 where
     K: Key,
