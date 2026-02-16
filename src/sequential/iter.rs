@@ -63,9 +63,12 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each<F: FnMut((K::Borrow<'_>, V::Borrow<'g>)) -> ControlFlow<()>>(
+        self,
+        mut apply: F,
+    ) {
         self.inner
-            .for_each(|key, value| apply(key, unsafe { V::borrow_from_raw(value) }))
+            .for_each(|(key, value)| apply((key, unsafe { V::borrow_from_raw(value) })))
     }
 }
 

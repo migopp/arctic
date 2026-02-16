@@ -89,12 +89,12 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(&W, u64) -> ControlFlow<()>>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut((&W, u64)) -> ControlFlow<()>>(self, mut apply: F) {
         match self {
             RangeIter::Root { writer, mut next } => {
                 crate::cold();
                 if let Some(value) = next.take() {
-                    let _ = apply(&writer, value);
+                    let _ = apply((&writer, value));
                 }
             }
             RangeIter::Node(mut iter) => iter.for_each(apply),
@@ -137,16 +137,16 @@ where
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
-        self.walk::<true, _>(|_, _| ControlFlow::Continue(()))
+        self.walk::<true, _>(|(_, _)| ControlFlow::Continue(()))
     }
 
     #[inline]
-    fn for_each<F: FnMut(&W, u64) -> ControlFlow<()>>(&mut self, apply: F) {
+    fn for_each<F: FnMut((&W, u64)) -> ControlFlow<()>>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut(&W, u64) -> ControlFlow<()>>(
+    fn walk<const YIELD: bool, F: FnMut((&W, u64)) -> ControlFlow<()>>(
         &mut self,
         mut apply: F,
     ) -> Option<(&W, u64)> {
@@ -210,7 +210,7 @@ where
                         edge::Child::Value(value) if YIELD => {
                             return Some((&self.writer, value));
                         }
-                        edge::Child::Value(value) => match apply(&self.writer, value) {
+                        edge::Child::Value(value) => match apply((&self.writer, value)) {
                             ControlFlow::Continue(()) => continue 'horizontal,
                             ControlFlow::Break(()) => {
                                 self.stack.clear();

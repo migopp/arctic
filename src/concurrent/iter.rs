@@ -79,7 +79,7 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut(K::Borrow<'_>, V::Borrow<'l>) -> ControlFlow<()>>(self, apply: F) {
+    pub fn for_each<F: FnMut((K::Borrow<'_>, V::Borrow<'l>)) -> ControlFlow<()>>(self, apply: F) {
         self.inner.for_each(apply)
     }
 }

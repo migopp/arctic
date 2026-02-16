@@ -70,9 +70,9 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(K::Borrow<'_>, u64) -> ControlFlow<()>>(self, mut apply: F) {
+    pub(crate) fn for_each<F: FnMut((K::Borrow<'_>, u64)) -> ControlFlow<()>>(self, mut apply: F) {
         self.0
-            .for_each(|key, value| apply(unsafe { K::borrow_writer_unchecked(key) }, value))
+            .for_each(|(key, value)| apply((unsafe { K::borrow_writer_unchecked(key) }, value)))
     }
 }
 
@@ -103,7 +103,7 @@ where
 {
     #[inline]
     pub(crate) fn for_each<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
-        self.0.for_each(|_, value| apply(value))
+        self.0.for_each(|(_, value)| apply(value))
     }
 }
 
