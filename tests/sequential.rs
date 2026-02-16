@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::collections::BTreeMap;
 
+use arctic::Ascend;
 use proptest::arbitrary::Arbitrary;
 use proptest::prelude::Just;
 use proptest::prelude::Strategy as _;
@@ -88,7 +89,7 @@ where
             .0
             .as_sequential()
             .all()
-            .entries::<false>()
+            .entries::<Ascend>()
             .zip(expected.0.iter())
             .for_each(
                 |((actual_key, actual_value), (expected_key, expected_value))| {

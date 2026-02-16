@@ -5,6 +5,7 @@ use core::ops::Deref;
 use crate::raw;
 use crate::raw::Key;
 use crate::sequential::Value;
+use crate::Order;
 
 pub struct Prefix<'k, 'g, K: Key, V, R> {
     inner: raw::iter::Prefix<'k, 'g, K, R>,
@@ -21,17 +22,17 @@ impl<'k, 'g, K: Key, V: Value, R: raw::iter::Range<'k, K>> Prefix<'k, 'g, K, V, 
     }
 
     #[inline]
-    pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'g, REVERSE, K, V, R> {
+    pub fn entries<O: Order>(&self) -> EntryIter<'k, 'g, K, V, R, O> {
         EntryIter {
-            inner: self.inner.entries::<REVERSE>(),
+            inner: self.inner.entries::<O>(),
             _value: PhantomData,
         }
     }
 
     #[inline]
-    pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'g, REVERSE, K, V, R> {
+    pub fn values<O: Order>(&self) -> ValueIter<'k, 'g, K, V, R, O> {
         ValueIter {
-            inner: self.inner.values::<REVERSE>(),
+            inner: self.inner.values::<O>(),
             _value: PhantomData,
         }
     }
@@ -46,17 +47,17 @@ impl<'k, 'g, K: Key, V: Value, R: raw::iter::Range<'k, K>> PrefixMut<'k, 'g, K, 
     }
 
     #[inline]
-    pub fn entries_mut<const REVERSE: bool>(&mut self) -> EntryIterMut<'k, 'g, REVERSE, K, V, R> {
+    pub fn entries_mut<O: Order>(&mut self) -> EntryIterMut<'k, 'g, K, V, R, O> {
         EntryIterMut {
-            inner: self.0.inner.entries::<REVERSE>(),
+            inner: self.0.inner.entries::<O>(),
             _value: PhantomData,
         }
     }
 
     #[inline]
-    pub fn values_mut<const REVERSE: bool>(&mut self) -> ValueIterMut<'k, 'g, REVERSE, K, V, R> {
+    pub fn values_mut<O: Order>(&mut self) -> ValueIterMut<'k, 'g, K, V, R, O> {
         ValueIterMut {
-            inner: self.0.inner.values::<REVERSE>(),
+            inner: self.0.inner.values::<O>(),
             _value: PhantomData,
         }
     }
@@ -70,16 +71,17 @@ impl<'k, 'g, K: Key, V: Value, R: raw::iter::Range<'k, K>> Deref for PrefixMut<'
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
-    inner: raw::iter::EntryIter<'k, 'g, REVERSE, K, R>,
+pub struct EntryIter<'k, 'g, K: Key, V, R: raw::iter::Range<'k, K>, O> {
+    inner: raw::iter::EntryIter<'k, 'g, K, R, O>,
     _value: PhantomData<&'g V>,
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> EntryIter<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> EntryIter<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
@@ -98,11 +100,12 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> Iterator for EntryIter<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> Iterator for EntryIter<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     type Item = (K, V::Borrow<'g>);
 
@@ -114,16 +117,17 @@ where
     }
 }
 
-pub struct EntryIterMut<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
-    inner: raw::iter::EntryIter<'k, 'g, REVERSE, K, R>,
+pub struct EntryIterMut<'k, 'g, K: Key, V, R: raw::iter::Range<'k, K>, O> {
+    inner: raw::iter::EntryIter<'k, 'g, K, R, O>,
     _value: PhantomData<&'g mut V>,
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> EntryIterMut<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> EntryIterMut<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::BorrowMut<'g>)> {
@@ -142,11 +146,12 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> Iterator for EntryIterMut<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> Iterator for EntryIterMut<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     type Item = (K, V::BorrowMut<'g>);
 
@@ -158,16 +163,17 @@ where
     }
 }
 
-pub struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
-    inner: raw::iter::ValueIter<'k, 'g, REVERSE, K, R>,
+pub struct ValueIter<'k, 'g, K: Key, V, R: raw::iter::Range<'k, K>, O> {
+    inner: raw::iter::ValueIter<'k, 'g, K, R, O>,
     _value: PhantomData<&'g V>,
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> ValueIter<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> ValueIter<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub fn for_each<F: FnMut(V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
@@ -176,11 +182,12 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> Iterator for ValueIter<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> Iterator for ValueIter<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<'k, K>,
+    O: Order,
 {
     type Item = V::Borrow<'g>;
 
@@ -192,16 +199,17 @@ where
     }
 }
 
-pub struct ValueIterMut<'k, 'g, const REVERSE: bool, K: Key, V, R: raw::iter::Range<'k, K>> {
-    inner: raw::iter::ValueIter<'k, 'g, REVERSE, K, R>,
+pub struct ValueIterMut<'k, 'g, K: Key, V, R: raw::iter::Range<'k, K>, O> {
+    inner: raw::iter::ValueIter<'k, 'g, K, R, O>,
     _value: PhantomData<&'g mut V>,
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> ValueIterMut<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> ValueIterMut<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub fn for_each<F: FnMut(V::BorrowMut<'g>) -> ControlFlow<()>>(self, mut apply: F) {
@@ -210,11 +218,12 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V, R> Iterator for ValueIterMut<'k, 'g, REVERSE, K, V, R>
+impl<'k, 'g, K, V, R, O> Iterator for ValueIterMut<'k, 'g, K, V, R, O>
 where
     K: Key,
     V: Value,
     R: crate::raw::iter::Range<'k, K>,
+    O: Order,
 {
     type Item = V::BorrowMut<'g>;
 
@@ -231,6 +240,8 @@ mod tests {
     use core::ops::ControlFlow;
 
     use crate::sequential::Map;
+    use crate::Ascend;
+    use crate::Descend;
 
     #[test]
     fn values_mut() {
@@ -240,12 +251,12 @@ mod tests {
             map.upsert(i, Box::new(i));
         }
 
-        map.all_mut().values_mut::<false>().for_each(|value| {
+        map.all_mut().values_mut::<Ascend>().for_each(|value| {
             *value += 1;
             ControlFlow::Continue(())
         });
 
-        map.all().entries::<false>().for_each(|(key, value)| {
+        map.all().entries::<Descend>().for_each(|(key, value)| {
             assert_eq!(key + 1, *value);
             ControlFlow::Continue(())
         });

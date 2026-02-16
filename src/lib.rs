@@ -22,6 +22,29 @@ pub mod stat;
 pub use concurrent::Key;
 pub use concurrent::Value;
 
+#[expect(private_bounds)]
+pub trait Order: seal::Seal {}
+
+pub struct Ascend;
+pub struct Descend;
+
+impl Order for Ascend {}
+impl Order for Descend {}
+
+mod seal {
+    pub(crate) trait Seal {
+        const ASCEND: bool;
+    }
+
+    impl Seal for super::Ascend {
+        const ASCEND: bool = true;
+    }
+
+    impl Seal for super::Descend {
+        const ASCEND: bool = false;
+    }
+}
+
 /// https://users.rust-lang.org/t/compiler-hint-for-unlikely-likely-for-if-branches/62102/4
 #[inline]
 #[cold]
@@ -32,6 +55,8 @@ mod tests {
     use crate::concurrent::Map;
     use crate::raw::key::Read as _;
     use crate::sequential;
+    use crate::Ascend;
+    use crate::Descend;
 
     // https://users.rust-lang.org/t/testing-if-a-type-is-implementing-an-auto-trait/90871/6
     #[test]
@@ -88,7 +113,7 @@ mod tests {
         let key = 1u64;
         map.upsert(key, 2u32);
         let range = map.range(1u64..=1u64).unwrap();
-        assert_eq!(range.entries::<false>().collect::<Vec<_>>(), vec![(1, 2)]);
+        assert_eq!(range.entries::<Ascend>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
 
     #[test]
@@ -107,7 +132,7 @@ mod tests {
         let mut map = map.pin();
         let range = map.range(256u64..=511u64).unwrap();
         assert_eq!(
-            range.entries::<false>().collect::<Vec<_>>(),
+            range.entries::<Ascend>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
                 .map(|key| (key, key as u32 / 2))
@@ -126,11 +151,11 @@ mod tests {
         }
 
         drop(pin);
-        assert_eq!(map.as_sequential().all().entries::<false>().count(), 1);
+        assert_eq!(map.as_sequential().all().entries::<Ascend>().count(), 1);
 
         map.as_sequential()
             .all()
-            .entries::<false>()
+            .entries::<Ascend>()
             .for_each(|(key, value)| {
                 assert_eq!(key, 1);
                 assert_eq!(value, 3);
@@ -190,7 +215,7 @@ mod tests {
         let range = pin.range(2..=4).unwrap();
 
         assert_eq!(
-            range.entries::<true>().collect::<Vec<_>>(),
+            range.entries::<Descend>().collect::<Vec<_>>(),
             vec![(4, 4), (3, 3), (2, 2)]
         );
     }
@@ -233,7 +258,7 @@ mod tests {
         let mut pin = map.pin();
         let prefix = pin.range(key(5)..=key(i64::MAX)).unwrap();
 
-        let values = prefix.values::<false>().collect::<Vec<_>>();
+        let values = prefix.values::<Ascend>().collect::<Vec<_>>();
         assert_eq!(values, (5..10).collect::<Vec<u32>>());
     }
 
@@ -262,7 +287,7 @@ mod tests {
 
         drop(pin);
 
-        let mut iter = map.as_sequential().all().entries::<false>();
+        let mut iter = map.as_sequential().all().entries::<Ascend>();
         let mut count = 0;
         while iter.lend().is_some() {
             count += 1;
@@ -276,7 +301,7 @@ mod tests {
         // Sequential iteration
         map.as_sequential()
             .all()
-            .entries::<false>()
+            .entries::<Ascend>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -295,7 +320,7 @@ mod tests {
             .prefix(K::Read::from(first.borrow()).common_prefix(K::Read::from(last.borrow())))
             .unwrap();
         prefix
-            .entries::<true>()
+            .entries::<Descend>()
             .zip(keys.iter().rev())
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
@@ -306,7 +331,7 @@ mod tests {
         // Concurrent range iteration, non-linearizable
         let range = pin.range(first.borrow()..=last.borrow()).unwrap();
         range
-            .entries::<false>()
+            .entries::<Ascend>()
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);

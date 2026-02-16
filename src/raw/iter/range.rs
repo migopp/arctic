@@ -1,4 +1,5 @@
 use core::cmp;
+use core::marker::PhantomData;
 use core::ops::ControlFlow;
 use core::ops::RangeFrom;
 use core::ops::RangeFull;
@@ -20,17 +21,19 @@ use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 use crate::raw::Edge;
 use crate::raw::Key;
+use crate::Order;
 
-pub(crate) enum RangeIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>, W: key::Write> {
+pub(crate) enum RangeIter<'k, 'g, K: Key, W: key::Write, R: Range<'k, K>, O> {
     Root { writer: W, next: Option<u64> },
-    Node(NodeIter<'k, 'g, REVERSE, K, R, W>),
+    Node(NodeIter<'k, 'g, K, W, R, O>),
 }
 
-impl<'k, 'g, const REVERSE: bool, K, R, W> Default for RangeIter<'k, 'g, REVERSE, K, R, W>
+impl<'k, 'g, K, W, R, O> Default for RangeIter<'k, 'g, K, W, R, O>
 where
     K: Key,
-    R: Range<'k, K>,
     W: key::Write + From<K::Read<'k>>,
+    R: Range<'k, K>,
+    O: Order,
 {
     fn default() -> Self {
         Self::Root {
@@ -40,11 +43,12 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, R, W> RangeIter<'k, 'g, REVERSE, K, R, W>
+impl<'k, 'g, K, W, R, O> RangeIter<'k, 'g, K, W, R, O>
 where
     K: Key,
-    R: Range<'k, K>,
     W: key::Write<Edge = K::Edge> + From<K::Read<'k>>,
+    R: Range<'k, K>,
+    O: Order,
 {
     pub(crate) unsafe fn new_unchecked(
         root: NonNull<Atomic<Edge<K::Edge>>>,
@@ -83,6 +87,7 @@ where
                     upper,
                     stack,
                     writer,
+                    _order: PhantomData,
                 })
             }
         }
@@ -114,7 +119,7 @@ where
     }
 }
 
-pub(crate) struct NodeIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>, W: key::Write> {
+pub(crate) struct NodeIter<'k, 'g, K: Key, W: key::Write, R: Range<'k, K>, O> {
     lower: R::Lower,
     upper: R::Upper,
     writer: W,
@@ -127,13 +132,15 @@ pub(crate) struct NodeIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>,
             K::Edge,
         >,
     )>,
+    _order: PhantomData<O>,
 }
 
-impl<'k, 'g, const REVERSE: bool, K, R, W> NodeIter<'k, 'g, REVERSE, K, R, W>
+impl<'k, 'g, K, W, R, O> NodeIter<'k, 'g, K, W, R, O>
 where
     K: Key,
     R: Range<'k, K>,
     W: key::Write<Edge = K::Edge>,
+    O: Order,
 {
     #[inline]
     fn lend(&mut self) -> Option<(&W, u64)> {
@@ -155,10 +162,10 @@ where
             let len = *len;
 
             'horizontal: loop {
-                let Some((mut byte, mut edge)) = (if REVERSE {
-                    iter.next_back()
-                } else {
+                let Some((mut byte, mut edge)) = (if O::ASCEND {
                     iter.next()
+                } else {
+                    iter.next_back()
                 }) else {
                     self.stack.pop();
                     continue 'vertical;
@@ -183,11 +190,11 @@ where
                     let lower = if check_lower {
                         match self.lower.check(meta) {
                             Some(lower) => lower,
-                            None if REVERSE => {
+                            None if O::ASCEND => continue 'horizontal,
+                            None => {
                                 self.stack.clear();
                                 return None;
                             }
-                            None => continue 'horizontal,
                         }
                     } else {
                         Default::default()
@@ -196,11 +203,11 @@ where
                     let upper = if check_upper {
                         match self.upper.check(meta) {
                             Some(upper) => upper,
-                            None if REVERSE => continue 'horizontal,
-                            None => {
+                            None if O::ASCEND => {
                                 self.stack.clear();
                                 return None;
                             }
+                            None => continue 'horizontal,
                         }
                     } else {
                         Default::default()

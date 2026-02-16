@@ -19,6 +19,7 @@ use crate::raw::key::Read as _;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Key;
+use crate::Order;
 
 pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
     root: NonNull<Atomic<Edge<K::Edge>>>,
@@ -82,24 +83,25 @@ where
     }
 
     #[inline]
-    pub(crate) fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, 'g, REVERSE, K, R> {
+    pub(crate) fn entries<O: Order>(&self) -> EntryIter<'k, 'g, K, R, O> {
         EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
     }
 
     #[inline]
-    pub(crate) fn values<const REVERSE: bool>(&self) -> ValueIter<'k, 'g, REVERSE, K, R> {
+    pub(crate) fn values<O: Order>(&self) -> ValueIter<'k, 'g, K, R, O> {
         ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
     }
 }
 
-pub(crate) struct EntryIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>>(
-    RangeIter<'k, 'g, REVERSE, K, R, K::Write>,
+pub(crate) struct EntryIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
+    RangeIter<'k, 'g, K, K::Write, R, O>,
 );
 
-impl<'k, 'g, const REVERSE: bool, K, R> EntryIter<'k, 'g, REVERSE, K, R>
+impl<'k, 'g, K, R, O> EntryIter<'k, 'g, K, R, O>
 where
     K: Key,
     R: Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub(crate) fn lend(&mut self) -> Option<(K::Borrow<'_>, u64)> {
@@ -115,10 +117,11 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, R> Iterator for EntryIter<'k, 'g, REVERSE, K, R>
+impl<'k, 'g, K, R, O> Iterator for EntryIter<'k, 'g, K, R, O>
 where
     K: Key,
     R: Range<'k, K>,
+    O: Order,
 {
     type Item = (K, u64);
 
@@ -131,14 +134,15 @@ where
 }
 
 /// Iterator over raw values only
-pub(crate) struct ValueIter<'k, 'g, const REVERSE: bool, K: Key, R: Range<'k, K>>(
-    RangeIter<'k, 'g, REVERSE, K, R, key::Ignore<K::Edge>>,
+pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
+    RangeIter<'k, 'g, K, key::Ignore<K::Edge>, R, O>,
 );
 
-impl<'k, 'g, const REVERSE: bool, K, R> ValueIter<'k, 'g, REVERSE, K, R>
+impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>
 where
     K: Key,
     R: Range<'k, K>,
+    O: Order,
 {
     #[inline]
     pub(crate) fn for_each<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
@@ -146,10 +150,11 @@ where
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, R> Iterator for ValueIter<'k, 'g, REVERSE, K, R>
+impl<'k, 'g, K, R, O> Iterator for ValueIter<'k, 'g, K, R, O>
 where
     K: Key,
     R: crate::raw::iter::Range<'k, K>,
+    O: Order,
 {
     type Item = u64;
 

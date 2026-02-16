@@ -6,6 +6,7 @@ use crate::concurrent::Key;
 use crate::concurrent::Value;
 use crate::raw;
 use crate::sequential;
+use crate::Order;
 
 pub struct Prefix<'k, 'g, K: Key, V, R, G = smr::Epoch> {
     inner: sequential::Prefix<'k, 'g, K, V, R>,
@@ -39,33 +40,34 @@ where
     G: smr::Guard<V>,
 {
     #[inline]
-    pub fn entries<const REVERSE: bool>(&self) -> EntryIter<'k, '_, REVERSE, K, V, R, G> {
+    pub fn entries<O: Order>(&self) -> EntryIter<'k, '_, K, V, R, O, G> {
         EntryIter {
-            inner: self.inner.entries::<REVERSE>(),
+            inner: self.inner.entries::<O>(),
             _guard: PhantomData,
         }
     }
 
     #[inline]
-    pub fn values<const REVERSE: bool>(&self) -> ValueIter<'k, '_, REVERSE, K, V, R, G> {
+    pub fn values<O: Order>(&self) -> ValueIter<'k, '_, K, V, R, O, G> {
         ValueIter {
-            inner: self.inner.values::<REVERSE>(),
+            inner: self.inner.values::<O>(),
             _guard: PhantomData,
         }
     }
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'k, 'l, const REVERSE: bool, K: Key, V: Value, R: raw::iter::Range<'k, K>, G> {
-    inner: sequential::EntryIter<'k, 'l, REVERSE, K, V, R>,
+pub struct EntryIter<'k, 'l, K: Key, V: Value, R: raw::iter::Range<'k, K>, O, G> {
+    inner: sequential::EntryIter<'k, 'l, K, V, R, O>,
     _guard: PhantomData<&'l G>,
 }
 
-impl<'k, 'l, const REVERSE: bool, K, V, R, G> EntryIter<'k, 'l, REVERSE, K, V, R, G>
+impl<'k, 'l, K, V, R, O, G> EntryIter<'k, 'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
     G: smr::Guard<V>,
 {
     #[inline]
@@ -79,11 +81,12 @@ where
     }
 }
 
-impl<'k, 'l, const REVERSE: bool, K, V, R, G> Iterator for EntryIter<'k, 'l, REVERSE, K, V, R, G>
+impl<'k, 'l, K, V, R, O, G> Iterator for EntryIter<'k, 'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
     G: smr::Guard<V>,
 {
     type Item = (K, V::Borrow<'l>);
@@ -95,16 +98,17 @@ where
 }
 
 /// Iterator over values only
-pub struct ValueIter<'k, 'l, const REVERSE: bool, K: Key, V: Value, R: raw::iter::Range<'k, K>, G> {
-    inner: sequential::ValueIter<'k, 'l, REVERSE, K, V, R>,
+pub struct ValueIter<'k, 'l, K: Key, V: Value, R: raw::iter::Range<'k, K>, O, G> {
+    inner: sequential::ValueIter<'k, 'l, K, V, R, O>,
     _guard: PhantomData<&'l G>,
 }
 
-impl<'k, 'l, const REVERSE: bool, K, V, R, G> ValueIter<'k, 'l, REVERSE, K, V, R, G>
+impl<'k, 'l, K, V, R, O, G> ValueIter<'k, 'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
     G: smr::Guard<V>,
 {
     #[inline]
@@ -113,11 +117,12 @@ where
     }
 }
 
-impl<'k, 'l, const REVERSE: bool, K, V, R, G> Iterator for ValueIter<'k, 'l, REVERSE, K, V, R, G>
+impl<'k, 'l, K, V, R, O, G> Iterator for ValueIter<'k, 'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     R: raw::iter::Range<'k, K>,
+    O: Order,
     G: smr::Guard<V>,
 {
     type Item = V::Borrow<'l>;

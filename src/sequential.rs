@@ -23,6 +23,7 @@ use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::stat;
+use crate::Ascend;
 use crate::Key;
 
 #[repr(transparent)]
@@ -177,9 +178,9 @@ where
     V: Value,
 {
     type Item = (K, V::Borrow<'g>);
-    type IntoIter = EntryIter<'static, 'g, false, K, V, RangeFull>;
+    type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
-        self.all().entries::<false>()
+        self.all().entries::<Ascend>()
     }
 }
 
@@ -189,9 +190,9 @@ where
     V: Value,
 {
     type Item = (K, V::BorrowMut<'g>);
-    type IntoIter = EntryIterMut<'static, 'g, false, K, V, RangeFull>;
+    type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
-        self.all_mut().entries_mut::<false>()
+        self.all_mut().entries_mut::<Ascend>()
     }
 }
 
