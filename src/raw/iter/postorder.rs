@@ -33,7 +33,10 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut(ribbit::Packed<Edge<M>>, usize)>(mut self, mut apply: F) {
+    pub(crate) fn for_each_internal<F: FnMut(ribbit::Packed<Edge<M>>, usize)>(
+        mut self,
+        mut apply: F,
+    ) {
         'vertical: loop {
             let depth = self.stack.len().saturating_sub(1);
 

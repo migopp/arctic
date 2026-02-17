@@ -111,9 +111,13 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut((K::Borrow<'_>, u64)) -> ControlFlow<()>>(self, mut apply: F) {
-        self.0
-            .for_each(|(key, value)| apply((unsafe { K::borrow_writer_unchecked(key) }, value)))
+    pub(crate) fn for_each_internal<F: FnMut((K::Borrow<'_>, u64)) -> ControlFlow<()>>(
+        self,
+        mut apply: F,
+    ) {
+        self.0.for_each_internal(|(key, value)| {
+            apply((unsafe { K::borrow_writer_unchecked(key) }, value))
+        })
     }
 }
 
@@ -145,8 +149,8 @@ where
     O: Order,
 {
     #[inline]
-    pub(crate) fn for_each<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
-        self.0.for_each(|(_, value)| apply(value))
+    pub(crate) fn for_each_internal<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
+        self.0.for_each_internal(|(_, value)| apply(value))
     }
 }
 

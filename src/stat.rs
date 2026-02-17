@@ -27,35 +27,37 @@ pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Proc
     let mut node_47 = Histogram::default();
     let mut node_256 = Histogram::default();
 
-    map.as_sequential().postorder().for_each(|edge, depth_| {
-        let Some(child) = edge.child() else {
-            return;
-        };
+    map.as_sequential()
+        .postorder()
+        .for_each_internal(|edge, depth_| {
+            let Some(child) = edge.child() else {
+                return;
+            };
 
-        let meta = edge.meta();
-        let bits = meta.key().len().bits();
-        compression.record((bits >> 3) as u64);
+            let meta = edge.meta();
+            let bits = meta.key().len().bits();
+            compression.record((bits >> 3) as u64);
 
-        match child {
-            edge::Child::Value(_) => {
-                depth.record(depth_ as u64);
+            match child {
+                edge::Child::Value(_) => {
+                    depth.record(depth_ as u64);
+                }
+                edge::Child::Node(node) => {
+                    let histogram = match node.kind().unpack() {
+                        node::Kind::Node3 => &mut node_3,
+                        node::Kind::Node15 => &mut node_15,
+                        node::Kind::Node47 => &mut node_47,
+                        node::Kind::Node256 => &mut node_256,
+                    };
+
+                    let children = unsafe { node.entries(Unbound, Unbound) }
+                        .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                        .count();
+
+                    histogram.record(children as u64);
+                }
             }
-            edge::Child::Node(node) => {
-                let histogram = match node.kind().unpack() {
-                    node::Kind::Node3 => &mut node_3,
-                    node::Kind::Node15 => &mut node_15,
-                    node::Kind::Node47 => &mut node_47,
-                    node::Kind::Node256 => &mut node_256,
-                };
-
-                let children = unsafe { node.entries(Unbound, Unbound) }
-                    .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
-                    .count();
-
-                histogram.record(children as u64);
-            }
-        }
-    });
+        });
 
     Process {
         depth,

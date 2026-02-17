@@ -76,8 +76,11 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut((K::Borrow<'_>, V::Borrow<'l>)) -> ControlFlow<()>>(self, apply: F) {
-        self.inner.for_each(apply)
+    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, V::Borrow<'l>)) -> ControlFlow<()>>(
+        self,
+        apply: F,
+    ) {
+        self.inner.for_each_internal(apply)
     }
 }
 
@@ -112,8 +115,8 @@ where
     G: smr::Guard<V>,
 {
     #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'l>) -> ControlFlow<()>>(self, apply: F) {
-        self.inner.for_each(apply)
+    pub fn for_each_internal<F: FnMut(V::Borrow<'l>) -> ControlFlow<()>>(self, apply: F) {
+        self.inner.for_each_internal(apply)
     }
 }
 

@@ -156,7 +156,7 @@ mod tests {
         map.as_sequential()
             .all()
             .entries::<Ascend>()
-            .for_each(|(key, value)| {
+            .for_each_internal(|(key, value)| {
                 assert_eq!(key, 1);
                 assert_eq!(value, 3);
                 core::ops::ControlFlow::Continue(())

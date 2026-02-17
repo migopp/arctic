@@ -241,7 +241,7 @@ where
     V: Value,
 {
     fn drop(&mut self) {
-        self.postorder().for_each(|edge, _| unsafe {
+        self.postorder().for_each_internal(|edge, _| unsafe {
             edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);
         })
     }

@@ -91,12 +91,12 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut((K::Borrow<'_>, V::Borrow<'g>)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, V::Borrow<'g>)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
         self.inner
-            .for_each(|(key, value)| apply((key, unsafe { V::borrow_from_raw(value) })))
+            .for_each_internal(|(key, value)| apply((key, unsafe { V::borrow_from_raw(value) })))
     }
 }
 
@@ -137,12 +137,13 @@ where
     }
 
     #[inline]
-    pub fn for_each<F: FnMut((K::Borrow<'_>, V::BorrowMut<'g>)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, V::BorrowMut<'g>)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
-        self.inner
-            .for_each(|(key, value)| apply((key, unsafe { V::borrow_mut_from_raw(value) })))
+        self.inner.for_each_internal(|(key, value)| {
+            apply((key, unsafe { V::borrow_mut_from_raw(value) }))
+        })
     }
 }
 
@@ -176,9 +177,9 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each<F: FnMut(V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each_internal<F: FnMut(V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
         self.inner
-            .for_each(|value| apply(unsafe { V::borrow_from_raw(value) }))
+            .for_each_internal(|value| apply(unsafe { V::borrow_from_raw(value) }))
     }
 }
 
@@ -212,9 +213,9 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each<F: FnMut(V::BorrowMut<'g>) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each_internal<F: FnMut(V::BorrowMut<'g>) -> ControlFlow<()>>(self, mut apply: F) {
         self.inner
-            .for_each(|value| apply(unsafe { V::borrow_mut_from_raw(value) }))
+            .for_each_internal(|value| apply(unsafe { V::borrow_mut_from_raw(value) }))
     }
 }
 
@@ -251,14 +252,18 @@ mod tests {
             map.upsert(i, Box::new(i));
         }
 
-        map.all_mut().values_mut::<Ascend>().for_each(|value| {
-            *value += 1;
-            ControlFlow::Continue(())
-        });
+        map.all_mut()
+            .values_mut::<Ascend>()
+            .for_each_internal(|value| {
+                *value += 1;
+                ControlFlow::Continue(())
+            });
 
-        map.all().entries::<Descend>().for_each(|(key, value)| {
-            assert_eq!(key + 1, *value);
-            ControlFlow::Continue(())
-        });
+        map.all()
+            .entries::<Descend>()
+            .for_each_internal(|(key, value)| {
+                assert_eq!(key + 1, *value);
+                ControlFlow::Continue(())
+            });
     }
 }

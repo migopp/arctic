@@ -94,7 +94,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each<F: FnMut((&W, u64)) -> ControlFlow<()>>(self, mut apply: F) {
+    pub(crate) fn for_each_internal<F: FnMut((&W, u64)) -> ControlFlow<()>>(self, mut apply: F) {
         match self {
             RangeIter::Root { writer, mut next } => {
                 crate::cold();
@@ -102,7 +102,7 @@ where
                     let _ = apply((&writer, value));
                 }
             }
-            RangeIter::Node(mut iter) => iter.for_each(apply),
+            RangeIter::Node(mut iter) => iter.for_each_internal(apply),
         }
     }
 
@@ -148,7 +148,7 @@ where
     }
 
     #[inline]
-    fn for_each<F: FnMut((&W, u64)) -> ControlFlow<()>>(&mut self, apply: F) {
+    fn for_each_internal<F: FnMut((&W, u64)) -> ControlFlow<()>>(&mut self, apply: F) {
         self.walk::<false, _>(apply);
     }
 
