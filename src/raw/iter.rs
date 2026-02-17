@@ -1,172 +1,169 @@
 mod postorder;
 mod range;
 
-use core::cmp;
-use core::ops::RangeInclusive;
-
 pub(crate) use postorder::PostorderIter;
+pub use range::Range;
 pub(crate) use range::RangeIter;
+pub(crate) use range::Unbound;
 
-use crate::raw;
-use crate::raw::edge::Key as _;
-use crate::raw::edge::Len as _;
-use crate::raw::edge::Meta as _;
+use core::marker::PhantomData;
+use core::ops::ControlFlow;
+use core::ops::RangeFull;
+use core::ptr::NonNull;
+
+use ribbit::Atomic;
+
+use crate::raw::cursor::path;
 use crate::raw::key;
 use crate::raw::key::Read as _;
+use crate::raw::Cursor;
+use crate::raw::Edge;
+use crate::raw::Key;
+use crate::Order;
 
-#[derive(Copy, Clone, Debug)]
-pub struct Include<T>(pub(crate) T);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Unbound;
-
-pub trait Range<'k, K: raw::Key>: Clone {
-    #[expect(private_bounds)]
-    type Lower: Lower<K::Read<'k>>;
-
-    #[expect(private_bounds)]
-    type Upper: Upper<K::Read<'k>>;
-
-    fn lower(&self, bits: usize) -> Self::Lower;
-    fn upper(&self, bits: usize) -> Self::Upper;
-
-    #[inline]
-    fn common_prefix(&self) -> K::Read<'k> {
-        K::Read::default()
-    }
+pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
+    root: NonNull<Atomic<Edge<K::Edge>>>,
+    prefix: K::Read<'k>,
+    range: R,
+    _global: PhantomData<&'g Atomic<Edge<K::Edge>>>,
 }
 
-impl<'k, K: raw::Key> Range<'k, K> for RangeInclusive<K::Borrow<'k>> {
-    type Lower = Include<K::Read<'k>>;
-    type Upper = Include<K::Read<'k>>;
-
+impl<'k, 'g, K, R> Prefix<'k, 'g, K, R>
+where
+    K: Key,
+    R: Range<'k, K>,
+{
     #[inline]
-    fn lower(&self, bits: usize) -> Self::Lower {
-        Include(K::Read::from(*self.start()).suffix(bits))
+    pub(crate) unsafe fn new_all(root: &'g Atomic<Edge<K::Edge>>) -> Prefix<'k, 'g, K, RangeFull> {
+        Prefix::new(root, K::Read::default(), ..)
+    }
+
+    pub(crate) unsafe fn new_prefix(
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
+    ) -> Option<Prefix<'k, 'g, K, RangeFull>> {
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        cursor.traverse_prefix()?;
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+        Some(unsafe { Prefix::new(root, prefix, ..) })
+    }
+
+    pub(crate) unsafe fn new_range(
+        root: &'g Atomic<Edge<K::Edge>>,
+        range: R,
+    ) -> Option<Prefix<'k, 'g, K, R>>
+    where
+        R: Range<'k, K>,
+    {
+        let prefix = range.common_prefix();
+        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        cursor.traverse_prefix()?;
+
+        let root = cursor.edge();
+        let bits = cursor.bits();
+        let prefix = prefix.prefix(bits);
+
+        Some(unsafe { Prefix::new(root, prefix, range) })
     }
 
     #[inline]
-    fn upper(&self, bits: usize) -> Self::Upper {
-        Include(K::Read::from(*self.end()).suffix(bits))
-    }
-
-    #[inline]
-    fn common_prefix(&self) -> <K as raw::Key>::Read<'k> {
-        K::Read::from(*self.start()).common_prefix(K::Read::from(*self.end()))
-    }
-}
-
-impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeFrom<K::Borrow<'k>> {
-    type Lower = Include<K::Read<'k>>;
-    type Upper = Unbound;
-
-    #[inline]
-    fn lower(&self, bits: usize) -> Self::Lower {
-        Include(K::Read::from(self.start).suffix(bits))
-    }
-
-    #[inline]
-    fn upper(&self, _bits: usize) -> Self::Upper {
-        Unbound
-    }
-}
-
-impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeToInclusive<K::Borrow<'k>> {
-    type Lower = Unbound;
-    type Upper = Include<K::Read<'k>>;
-
-    #[inline]
-    fn lower(&self, _bits: usize) -> Self::Lower {
-        Unbound
-    }
-
-    #[inline]
-    fn upper(&self, bits: usize) -> Self::Upper {
-        Include(K::Read::from(self.end).suffix(bits))
-    }
-}
-
-impl<'k, K: raw::Key> Range<'k, K> for core::ops::RangeFull {
-    type Lower = Unbound;
-    type Upper = Unbound;
-
-    #[inline]
-    fn lower(&self, _bits: usize) -> Self::Lower {
-        Unbound
-    }
-
-    #[inline]
-    fn upper(&self, _bits: usize) -> Self::Upper {
-        Unbound
-    }
-}
-
-trait Lower<R: key::Read>: core::fmt::Debug {
-    type Bound: raw::node::Lower;
-
-    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
-}
-
-trait Upper<R: key::Read>: core::fmt::Debug {
-    type Bound: raw::node::Upper;
-
-    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound>;
-}
-
-impl<R: key::Read> Lower<R> for Include<R> {
-    type Bound = Option<u8>;
-
-    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
-
-        // Skip check for fixed-length keys
-        if R::BITS.is_none() && self.0.bits() < len.bits() {
-            return None;
-        }
-
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => Some(None),
-            cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => None,
+    unsafe fn new(
+        root: &'g Atomic<Edge<K::Edge>>,
+        prefix: K::Read<'k>,
+        range: R,
+    ) -> Prefix<'k, 'g, K, R> {
+        Prefix {
+            root: NonNull::from(root),
+            prefix,
+            range,
+            _global: PhantomData,
         }
     }
-}
 
-impl<R: key::Read> Upper<R> for Include<R> {
-    type Bound = Option<u8>;
+    #[inline]
+    pub(crate) fn entries<O: Order>(&self) -> EntryIter<'k, 'g, K, R, O> {
+        EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
+    }
 
-    fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
-
-        // Skip check for fixed-length keys
-        if R::BITS.is_none() && self.0.bits() > len.bits() {
-            return None;
-        }
-
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => None,
-            cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => Some(None),
-        }
+    #[inline]
+    pub(crate) fn values<O: Order>(&self) -> ValueIter<'k, 'g, K, R, O> {
+        ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
     }
 }
 
-impl<R: key::Read> Lower<R> for Unbound {
-    type Bound = Unbound;
+pub(crate) struct EntryIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
+    RangeIter<'k, 'g, K, K::Write, R, O>,
+);
+
+impl<'k, 'g, K, R, O> EntryIter<'k, 'g, K, R, O>
+where
+    K: Key,
+    R: Range<'k, K>,
+    O: Order,
+{
+    #[inline]
+    pub(crate) fn lend(&mut self) -> Option<(K::Borrow<'_>, u64)> {
+        self.0
+            .lend()
+            .map(|(key, value)| (unsafe { K::borrow_writer_unchecked(key) }, value))
+    }
 
     #[inline]
-    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        Some(Unbound)
+    pub(crate) fn for_each_internal<F: FnMut((K::Borrow<'_>, u64)) -> ControlFlow<()>>(
+        self,
+        mut apply: F,
+    ) {
+        self.0.for_each_internal(|(key, value)| {
+            apply((unsafe { K::borrow_writer_unchecked(key) }, value))
+        })
     }
 }
 
-impl<R: key::Read> Upper<R> for Unbound {
-    type Bound = Unbound;
+impl<'k, 'g, K, R, O> Iterator for EntryIter<'k, 'g, K, R, O>
+where
+    K: Key,
+    R: Range<'k, K>,
+    O: Order,
+{
+    type Item = (K, u64);
 
     #[inline]
-    fn check(&mut self, _edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        Some(Unbound)
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .lend()
+            .map(|(key, value)| (unsafe { K::from_writer_unchecked(key.clone()) }, value))
+    }
+}
+
+/// Iterator over raw values only
+pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
+    RangeIter<'k, 'g, K, key::Ignore<K::Edge>, R, O>,
+);
+
+impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>
+where
+    K: Key,
+    R: Range<'k, K>,
+    O: Order,
+{
+    #[inline]
+    pub(crate) fn for_each_internal<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
+        self.0.for_each_internal(|(_, value)| apply(value))
+    }
+}
+
+impl<'k, 'g, K, R, O> Iterator for ValueIter<'k, 'g, K, R, O>
+where
+    K: Key,
+    R: crate::raw::iter::Range<'k, K>,
+    O: Order,
+{
+    type Item = u64;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.lend().map(|(_, value)| value)
     }
 }

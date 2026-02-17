@@ -38,12 +38,16 @@ impl<V: Value> smr::Guard<V> for Guard {
         _bits: usize,
         node: ribbit::Packed<node::Ptr<M>>,
     ) {
+        stat::increment(stat::Counter::Retire);
+
         self.0.defer_unchecked(move || {
             node.deallocate(stat::Counter::FreeRetire);
         });
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
+        stat::increment(stat::Counter::Retire);
+
         self.0.defer_unchecked(move || drop(V::from_raw(value)));
     }
 }

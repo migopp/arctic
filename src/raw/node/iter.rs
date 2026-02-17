@@ -331,13 +331,13 @@ impl Drop for KeyIter {
     }
 }
 
-pub(crate) trait Lower: Copy + Default + core::fmt::Debug {
+pub(crate) trait Lower: Copy + Default {
     const UNBOUND: bool = false;
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;
 }
 
-pub(crate) trait Upper: Copy + Default + core::fmt::Debug {
+pub(crate) trait Upper: Copy + Default {
     const UNBOUND: bool = false;
     fn get(self) -> u8;
     fn check(self, byte: u8) -> bool;

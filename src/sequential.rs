@@ -1,16 +1,31 @@
+mod iter;
 mod value;
+
+pub use iter::EntryIter;
+pub use iter::EntryIterMut;
+pub use iter::Prefix;
+pub use iter::PrefixMut;
+pub use iter::ValueIter;
+pub use iter::ValueIterMut;
+pub use value::Value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
+use core::ops::ControlFlow;
+use core::ops::RangeFull;
 
 use ribbit::Atomic;
 
+use crate::raw;
+use crate::raw::cursor::path;
+use crate::raw::cursor::CursorMut;
 use crate::raw::iter::PostorderIter;
-use crate::raw::iter::RangeIter;
+use crate::raw::Cursor;
 use crate::raw::Edge;
+use crate::raw::Frozen;
 use crate::stat;
+use crate::Ascend;
 use crate::Key;
-pub use value::Value;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {
@@ -33,6 +48,15 @@ where
     }
 }
 
+pub enum Update<'g, V, B>
+where
+    V: Value + 'g,
+{
+    Absent { value: Option<V> },
+    Success { old: V },
+    Break { old: V::Borrow<'g>, r#break: B },
+}
+
 impl<K, V> Map<K, V>
 where
     K: Key,
@@ -47,131 +71,167 @@ where
     }
 
     #[inline]
-    pub fn get(&self, _key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
-        todo!()
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+        let reader = K::Read::from(key);
+        let value =
+            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
+        Some(unsafe { V::borrow_from_raw(value) })
     }
 
     #[inline]
-    pub fn insert(&mut self, _key: K::Borrow<'_>, _value: V) -> Option<V> {
-        todo!()
-        // let mut edge = self.root();
-        // let mut reader = K::Read::from(key);
-        //
-        // loop {
-        //     let old = edge.load_packed(Ordering::Relaxed);
-        //     let old_key = old.meta().key();
-        //     let old_len = old_key.len();
-        //
-        //     let key = reader.read(old_len);
-        //
-        //     // Fast path: traverse
-        //     if key == old_key {
-        //         if let Some(node) = old.as_node() {
-        //             let byte = reader.next().unwrap();
-        //             let node = unsafe { node.into_ref_unchecked() };
-        //             if let Some(next) = node.get_or_insert(byte) {
-        //                 edge = next;
-        //                 continue;
-        //             }
-        //         }
-        //     }
-        //
-        //     let new = match old.meta().expand(key) {
-        //         Err(()) => match old.child() {
-        //             Some(edge::Child::Node(node)) => {
-        //                 // node.expand([(key.next(), Self::insert_help(key, value))]);
-        //                 todo!()
-        //             }
-        //             None | Some(edge::Child::Value(_)) => Self::insert_help(reader, value),
-        //         },
-        //         Ok((start, middle, end)) => {
-        //             let byte = reader.next().unwrap();
-        //             Edge::new_node::<raw::node::Node3<_>, _>(
-        //                 start,
-        //                 [
-        //                     (byte, Self::insert_help(reader, value)),
-        //                     (middle, old.with_meta(end)),
-        //                 ],
-        //             )
-        //         }
-        //     };
-        //
-        //     edge.store_packed(new, Ordering::Relaxed);
-        //     return old.as_value().map(|value| unsafe { V::from_raw(value) });
-        // }
+    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<V::BorrowMut<'_>> {
+        let reader = K::Read::from(key);
+        let value =
+            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
+        Some(unsafe { V::borrow_mut_from_raw(value) })
     }
 
-    #[expect(unused)]
-    fn insert_help(mut _reader: K::Read<'_>, _value: V) -> ribbit::Packed<Edge<K::Edge>> {
-        todo!()
-        // let prefix = reader.read(<ribbit::Packed<K::Edge> as edge::Meta>::MAX_LEN);
-        //
-        // if reader.bits() > 0 {
-        //     let byte = reader.next().unwrap();
-        //     Edge::new_node::<raw::node::Node3<_>, _>(
-        //         prefix,
-        //         [(byte, Self::insert_help(reader, value))],
-        //     )
-        // } else {
-        //     Edge::new_value(prefix, value.into_raw())
-        // }
-    }
-
-    #[expect(unused_variables)]
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
-        todo!()
-    }
+    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V> {
+        let reader = K::Read::from(key);
+        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+        let new_value = V::into_raw(value);
 
-    #[expect(unused_variables)]
-    #[inline]
-    pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Option<V>, V> {
-        todo!()
-    }
-
-    pub fn iter<const REVERSE: bool>(&self) -> Iter<'static, '_, REVERSE, K, V> {
-        Iter {
-            _value: PhantomData,
-            iter: unsafe { RangeIter::new_unchecked(&self.root, K::Read::default(), ..) },
+        loop {
+            match cursor.traverse_insert() {
+                crate::raw::cursor::Insert::Value {
+                    old_value,
+                    old,
+                    key,
+                } => match cursor.insert(old, key, new_value) {
+                    Err(Frozen) => unreachable!(),
+                    Ok(new) => {
+                        cursor.edge_mut().set_packed(new);
+                        return old_value.map(|old| unsafe { V::from_raw(old) });
+                    }
+                },
+                crate::raw::cursor::Insert::Smo(Ok((_, old, new))) => {
+                    cursor.edge_mut().set_packed(new);
+                    if let Some(node) = old.as_node() {
+                        unsafe { node.deallocate(stat::Counter::FreeRetire) };
+                    }
+                }
+                crate::raw::cursor::Insert::Smo(Err(Frozen)) => unreachable!(),
+            }
         }
     }
+
+    #[inline]
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
+        match self.update_with_impl(key, |_| ControlFlow::<(), _>::Continue(None)) {
+            Update::Absent { value: None } => None,
+            Update::Success { old } => Some(old),
+            Update::Absent { value: Some(_) } | Update::Break { .. } => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn update_with_impl<F, B>(&mut self, key: K::Borrow<'_>, with: F) -> Update<'_, V, B>
+    where
+        F: FnOnce(V::Borrow<'_>) -> ControlFlow<B, Option<V>>,
+    {
+        let reader = K::Read::from(key);
+        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+
+        let old = match cursor.traverse_update() {
+            None => return Update::Absent { value: None },
+            Some(Err(Frozen)) => unreachable!(),
+            Some(Ok(old)) => old,
+        };
+
+        let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
+            ControlFlow::Continue(None) => Edge::DEFAULT,
+            ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
+            ControlFlow::Break(r#break) => {
+                return Update::Break {
+                    old: unsafe { V::borrow_from_raw(old.into_raw()) },
+                    r#break,
+                }
+            }
+        };
+
+        cursor.edge_mut().set_packed(new);
+
+        Update::Success {
+            old: unsafe { V::from_raw(old.into_raw()) },
+        }
+    }
+
+    pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
+        unsafe { Prefix::new(raw::iter::Prefix::<K>::new_all(self.root())) }
+    }
+
+    pub fn prefix<'k>(
+        &self,
+        prefix: impl Into<K::Read<'k>>,
+    ) -> Option<Prefix<'k, '_, K, V, RangeFull>> {
+        let prefix = prefix.into();
+        let prefix = unsafe { raw::iter::Prefix::<K>::new_prefix(self.root(), prefix) }?;
+        Some(unsafe { Prefix::new(prefix) })
+    }
+
+    pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
+    where
+        R: raw::iter::Range<'k, K>,
+    {
+        let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
+        Some(unsafe { iter::Prefix::new(prefix) })
+    }
+
+    pub fn all_mut(&mut self) -> PrefixMut<'static, '_, K, V, RangeFull> {
+        unsafe { PrefixMut::new(self.all()) }
+    }
+
+    pub fn prefix_mut<'k>(
+        &mut self,
+        prefix: impl Into<K::Read<'k>>,
+    ) -> Option<PrefixMut<'k, '_, K, V, RangeFull>> {
+        Some(unsafe { PrefixMut::new(self.prefix(prefix)?) })
+    }
+
+    pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
+    where
+        R: raw::iter::Range<'k, K>,
+    {
+        Some(unsafe { PrefixMut::new(self.range(range)?) })
+    }
 }
 
-pub struct Iter<'k, 'g, const REVERSE: bool, K: Key, V: Value> {
-    _value: PhantomData<&'g V>,
-    iter: RangeIter<'k, 'g, REVERSE, K, core::ops::RangeFull, K::Write>,
-}
-
-impl<'k, 'g, const REVERSE: bool, K, V> Iter<'k, 'g, REVERSE, K, V>
+impl<'k, K, V> FromIterator<(K::Borrow<'k>, V)> for Map<K, V>
 where
     K: Key,
     V: Value,
 {
-    #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::borrow_writer_unchecked(key) }, unsafe {
-                // FIXME: borrow without guard
-                V::borrow_from_raw(value)
-            })
-        })
+    fn from_iter<T: IntoIterator<Item = (K::Borrow<'k>, V)>>(iter: T) -> Self {
+        let mut map = Map::default();
+        for (key, value) in iter {
+            map.upsert(key, value);
+        }
+        map
     }
 }
 
-impl<'k, 'g, const REVERSE: bool, K, V> Iterator for Iter<'k, 'g, REVERSE, K, V>
+impl<'g, K, V> IntoIterator for &'g Map<K, V>
 where
     K: Key,
     V: Value,
 {
     type Item = (K, V::Borrow<'g>);
+    type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.all().entries::<Ascend>()
+    }
+}
 
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.lend().map(|(key, value)| {
-            (unsafe { K::from_writer_unchecked(key.clone()) }, unsafe {
-                V::borrow_from_raw(value)
-            })
-        })
+impl<'g, K, V> IntoIterator for &'g mut Map<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Item = (K, V::BorrowMut<'g>);
+    type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.all_mut().entries_mut::<Ascend>()
     }
 }
 
@@ -181,7 +241,7 @@ where
     V: Value,
 {
     fn drop(&mut self) {
-        self.postorder().for_each(|edge, _| unsafe {
+        self.postorder().for_each_internal(|edge, _| unsafe {
             edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);
         })
     }

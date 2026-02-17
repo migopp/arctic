@@ -140,7 +140,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         ribbit::Packed::<Self>::new(meta, node::Ptr::new(node).raw().get())
     }
 
-    pub(crate) fn new_value(
+    fn new_value(
         meta: <<M as ribbit::Pack>::Packed as Meta>::Key,
         value: u64,
     ) -> ribbit::Packed<Self> {
@@ -184,12 +184,6 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) fn with_node(self, node: ribbit::Packed<node::Ptr<M>>) -> Self {
-        validate!(!self.meta().is_value());
-        self.with_data(node.raw().get())
-    }
-
-    #[inline]
     pub(crate) fn with_value(self, value: u64) -> Self {
         validate!(self.meta().is_value());
         self.with_data(value)
@@ -226,20 +220,12 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) unsafe fn deallocate_recursive_unchecked<F>(
-        self,
-        deallocate_value: F,
-        counter: stat::Counter,
-    ) where
-        F: FnOnce(u64),
-    {
+    pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         match self.child() {
             None if cfg!(feature = "validate") => unreachable!(),
             None => unsafe { core::hint::unreachable_unchecked() },
-            Some(Child::Node(node)) => unsafe {
-                node.deallocate_recursive(deallocate_value, counter)
-            },
-            Some(Child::Value(value)) => deallocate_value(value),
+            Some(Child::Node(node)) => unsafe { node.deallocate_recursive(counter) },
+            Some(Child::Value(_)) => (),
         }
     }
 }
