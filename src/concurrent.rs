@@ -161,31 +161,6 @@ where
     }
 
     #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
-        match self.update_with(key, None, |_, _| {
-            ControlFlow::<Infallible, _>::Continue(None)
-        }) {
-            Update::Absent { .. } => None,
-            Update::Success { old } => Some(old),
-            Update::Break { .. } => unreachable!(),
-        }
-    }
-
-    #[inline]
-    pub fn remove_with<F>(&mut self, key: K::Borrow<'_>, mut with: F) -> Update<'g, '_, K, V, (), S>
-    where
-        F: FnMut(V::Borrow<'_>) -> bool,
-    {
-        self.update_with(key, None, |old, _| {
-            if with(old) {
-                ControlFlow::Continue(None)
-            } else {
-                ControlFlow::Break(())
-            }
-        })
-    }
-
-    #[inline]
     pub fn update(&mut self, key: K::Borrow<'_>, value: V) -> Result<Owned<'g, '_, K, V, S>, V> {
         match self.update_with(key, Some(value), |_, new| {
             ControlFlow::<Infallible, _>::Continue(new)
@@ -322,7 +297,25 @@ where
     }
 
     #[inline]
-    fn remove_with_impl<'k, H, F>(
+    pub fn remove_with<F>(&mut self, key: K::Borrow<'_>, with: F) -> Remove<'g, '_, K, V, S>
+    where
+        F: FnMut(V::Borrow<'_>) -> bool,
+    {
+        let Ok(remove) = self.remove_with_impl::<true, path::Retain<'_, K>, _>(key, with);
+        remove
+    }
+
+    #[inline]
+    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<Owned<'g, '_, K, V, S>> {
+        match self.remove_with_impl::<true, path::Retain<'_, K>, _>(key, |_| true) {
+            Ok(Remove::Absent) => None,
+            Ok(Remove::Success { old }) => Some(old),
+            Ok(Remove::Break) => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn remove_with_impl<'k, const RECURSE: bool, H, F>(
         &mut self,
         key: K::Borrow<'k>,
         mut remove: F,
@@ -363,6 +356,10 @@ where
                 break unsafe { old.into_value_unchecked() };
             }
         };
+
+        if RECURSE {
+            cursor.reclaim()?;
+        }
 
         Ok(Remove::Success {
             old: unsafe { V::own(guard, old) },

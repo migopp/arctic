@@ -44,6 +44,13 @@ where
     type Grow: Node<M>;
     type Shrink: Node<M>;
 
+    fn len(&self) -> u8 {
+        self.edges()
+            .iter()
+            .filter(|edge| !edge.load_packed(Ordering::Relaxed).is_null())
+            .count() as u8
+    }
+
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
     fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<L, U, M> {
@@ -299,6 +306,16 @@ where
     #[inline]
     pub(crate) fn raw(self) -> NonZeroU64 {
         self.value
+    }
+
+    #[inline]
+    pub(crate) unsafe fn len<'g>(self) -> u8 {
+        self.dispatch(
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+        )
     }
 
     #[inline]

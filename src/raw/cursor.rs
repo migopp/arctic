@@ -307,13 +307,13 @@ where
     pub(crate) fn freeze(
         &mut self,
     ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
-        let mut node = self.pop()?;
+        let mut node = self.pop()?.expect("Root edge cannot be frozen");
         let mut edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
         let mut pop = 1;
 
         let old = loop {
             while edge.meta().is_frozen() {
-                node = self.pop()?;
+                node = self.pop()?.expect("Root edge cannot be frozen");
                 edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
                 pop += 1;
             }
@@ -355,6 +355,53 @@ where
     }
 
     #[inline]
+    pub(crate) fn reclaim(mut self) -> Result<(), H::PopError> {
+        let Some(node) = self.pop()? else {
+            return Ok(());
+        };
+
+        if unsafe { node.len() } > 0 {
+            return Ok(());
+        }
+
+        self.reclaim_cold(node)
+    }
+
+    #[cold]
+    fn reclaim_cold(
+        &mut self,
+        mut node: ribbit::Packed<node::Ptr<K::Edge>>,
+    ) -> Result<(), H::PopError> {
+        loop {
+            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+
+            let (_smo, new) = unsafe { node.replace(old.meta()) };
+
+            let next = match unsafe { self.edge.as_ref() }.compare_exchange_packed(
+                old,
+                new,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => self.pop(),
+                Err(_) => {
+                    if let Some(node) = new.as_node() {
+                        unsafe { node.deallocate(stat::Counter::FreeConflict) };
+                    }
+                    self.traverse_prefix();
+                    self.pop()
+                }
+            };
+
+            match next? {
+                None => return Ok(()),
+                Some(next) if unsafe { next.len() } > 0 => return Ok(()),
+                Some(next) => node = next,
+            }
+        }
+    }
+
+    #[inline]
     fn push(
         &mut self,
         key: K::Read<'k>,
@@ -372,12 +419,14 @@ where
         })
     }
 
-    #[cold]
-    fn pop(&mut self) -> Result<ribbit::Packed<node::Ptr<K::Edge>>, H::PopError> {
-        let segment = self.history.pop()?.expect("Root edge can never be frozen");
+    #[inline]
+    fn pop(&mut self) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
+        let Some(segment) = self.history.pop()? else {
+            return Ok(None);
+        };
         self.bits -= segment.len.bits() + 8;
         self.key = segment.key;
         self.edge = segment.edge;
-        Ok(segment.node)
+        Ok(Some(segment.node))
     }
 }
