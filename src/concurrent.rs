@@ -112,6 +112,18 @@ where
     },
 }
 
+pub enum Remove<'g, 'l, K, V, S = smr::Hazard<<K as Key>::Prefix, V>>
+where
+    K: Key,
+    V: Value,
+    S: Smr<K::Prefix, V> + 'g,
+    S::Local<'g>: 'l,
+{
+    Absent,
+    Success { old: Owned<'g, 'l, K, V, S> },
+    Break,
+}
+
 pub enum Insert<'g, 'l, K, V, B = Option<V>, S = smr::Hazard<<K as Key>::Prefix, V>>
 where
     K: Key,
@@ -307,6 +319,54 @@ where
                 }
             }
         }
+    }
+
+    #[inline]
+    fn remove_with_impl<'k, H, F>(
+        &mut self,
+        key: K::Borrow<'k>,
+        mut remove: F,
+    ) -> Result<Remove<'g, '_, K, V, S>, H::PopError>
+    where
+        H: path::History<'k, K>,
+        F: FnMut(V::Borrow<'_>) -> bool,
+    {
+        let reader = K::Read::from(key);
+        let mut guard = self.smr.guard(K::hazard(reader));
+        let mut cursor = unsafe { Cursor::<_, H>::new(self.raw.root(), reader) };
+
+        let old = loop {
+            let old = match cursor.traverse_update() {
+                None => return Ok(Remove::Absent),
+                Some(Ok(old)) => old,
+                Some(Err(Frozen)) => match cursor.freeze()? {
+                    None => continue,
+                    Some(node) => unsafe {
+                        guard.retire_node(cursor.bits(), node);
+                        continue;
+                    },
+                },
+            };
+
+            validate!(old.meta().is_value());
+
+            match remove(unsafe { V::borrow_from_raw(old.into_value_unchecked()) }) {
+                true => (),
+                false => return Ok(Remove::Break),
+            }
+
+            if cursor
+                .edge()
+                .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break unsafe { old.into_value_unchecked() };
+            }
+        };
+
+        Ok(Remove::Success {
+            old: unsafe { V::own(guard, old) },
+        })
     }
 
     #[inline]
