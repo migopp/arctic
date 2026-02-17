@@ -141,7 +141,9 @@ where
 
         let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
             ControlFlow::Continue(None) => Edge::DEFAULT,
-            ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
+            ControlFlow::Continue(Some(new)) => unsafe {
+                old.with_value_unchecked(V::into_raw(new))
+            },
             ControlFlow::Break(r#break) => {
                 return Update::Break {
                     old: unsafe { V::borrow_from_raw(old.into_raw()) },

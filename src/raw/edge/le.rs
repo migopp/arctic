@@ -63,10 +63,13 @@ impl IntoIterator for LePacked {
 
 impl edge::Meta for LePacked {
     const DEFAULT: Self = Self::new(u56::new(0), false, false, u6::new(0));
-    const MAX_LEN: Self::Len = u6::new(56);
 
-    type Len = u6;
     type Key = Self;
+
+    #[inline]
+    fn new(key: Self::Key, value: bool) -> Self {
+        key.with_value(value)
+    }
 
     #[inline]
     fn key(self) -> Self::Key {
@@ -170,17 +173,11 @@ impl edge::Meta for LePacked {
 }
 
 impl edge::Key for LePacked {
-    type Meta = ribbit::Packed<Le>;
     type Len = u6;
 
     #[inline]
     fn len(self) -> Self::Len {
         self.len()
-    }
-
-    #[inline]
-    fn with_value(self, value: bool) -> Self::Meta {
-        self.with_value(value)
     }
 
     #[inline]

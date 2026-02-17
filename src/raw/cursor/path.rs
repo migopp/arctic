@@ -17,7 +17,7 @@ pub(crate) struct Segment<'k, K: Key> {
     pub(super) edge: NonNull<Atomic<Edge<K::Edge>>>,
 
     /// Number of bytes matched along `edge`
-    pub(super) len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+    pub(super) len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
 
     /// Node underneath `edge`
     pub(super) node: ribbit::Packed<node::Ptr<K::Edge>>,

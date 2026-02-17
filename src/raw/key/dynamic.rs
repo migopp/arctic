@@ -61,7 +61,7 @@ impl key::Read for Reader<'_> {
     #[inline]
     fn read(
         &mut self,
-        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
     ) -> ribbit::Packed<edge::Le> {
         if len.bits() == 0 {
             return ribbit::Packed::<edge::Le>::DEFAULT;
