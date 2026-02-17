@@ -358,7 +358,7 @@ where
     fn push(
         &mut self,
         key: K::Read<'k>,
-        len: <<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
         node: ribbit::Packed<node::Ptr<K::Edge>>,
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {

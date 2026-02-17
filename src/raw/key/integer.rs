@@ -108,7 +108,7 @@ impl<U: Uint> key::Read for Reader<U> {
     #[inline]
     fn read(
         &mut self,
-        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
         let len = edge::Be::min_len(len, self.bits as usize);
         let meta = edge::Be::key_from_u64_truncate(self.buffer.most_significant_u64(), len);
@@ -201,7 +201,7 @@ impl key::Read for Slow {
     #[inline]
     fn read(
         &mut self,
-        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
         let len = self.len.min((len.value() >> 3) as usize);
         let key = edge::Le::key_from_u64_truncate(
@@ -217,7 +217,7 @@ impl key::Read for Slow {
     fn match_exact(
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
-    ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
+    ) -> Option<<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len> {
         let (key, exact) = self.match_inexact(edge);
         exact.then_some(key.len())
     }

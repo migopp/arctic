@@ -276,14 +276,16 @@ where
             validate!(old.meta().is_value());
 
             let new = match update(
-                unsafe { V::borrow_from_raw(old.into_raw()) },
+                unsafe { V::borrow_from_raw(old.into_value_unchecked()) },
                 initial.take(),
             ) {
                 ControlFlow::Continue(None) => Edge::DEFAULT,
-                ControlFlow::Continue(Some(new)) => old.with_value(V::into_raw(new)),
+                ControlFlow::Continue(Some(new)) => unsafe {
+                    old.with_value_unchecked(V::into_raw(new))
+                },
                 ControlFlow::Break(r#break) => {
                     return Ok(Update::Break {
-                        old: unsafe { V::share(guard, old.into_raw()) },
+                        old: unsafe { V::share(guard, old.into_value_unchecked()) },
                         r#break,
                     })
                 }
@@ -297,11 +299,11 @@ where
             ) {
                 Ok(_) => {
                     return Ok(Update::Success {
-                        old: unsafe { V::own(guard, old.into_raw()) },
+                        old: unsafe { V::own(guard, old.into_value_unchecked()) },
                     })
                 }
                 Err(_) => {
-                    initial = Some(unsafe { V::from_raw(new.into_raw()) });
+                    initial = Some(unsafe { V::from_raw(new.into_value_unchecked()) });
                 }
             }
         }

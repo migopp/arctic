@@ -24,7 +24,8 @@ pub(crate) struct Edge<M> {
     #[ribbit(size = 64)]
     pub(crate) meta: M,
 
-    data: u64,
+    #[ribbit(get(rename = "child_raw"))]
+    child: u64,
 }
 
 impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
@@ -32,28 +33,11 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         ribbit::Packed::<Self>::new(<M::Packed as Meta>::DEFAULT, 0);
 
     #[inline]
-    pub(crate) fn freeze(edge: &Atomic<Self>) {
-        let mut old = edge.load_packed(Ordering::Relaxed);
-
-        while !old.meta().is_frozen() {
-            match edge.compare_exchange_packed(
-                old,
-                old.with_meta(old.meta().with_frozen(true)),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(conflict) => old = conflict,
-            }
-        }
-    }
-
-    #[inline]
     pub(crate) fn new_path<R>(mut reader: R, value: u64) -> ribbit::Packed<Self>
     where
         R: key::Read<Edge = M>,
     {
-        let key = reader.read(<<R::Edge as ribbit::Pack>::Packed as Meta>::MAX_LEN);
+        let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
         let Some(byte) = reader.next() else {
             return Self::new_value(key, value);
         };
@@ -72,7 +56,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     {
         let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
         let head = ribbit::Packed::<Self>::new(
-            key.with_value(false),
+            <M::Packed as Meta>::new(key, false),
             node::Ptr::new_ptr(tail).raw().get(),
         );
 
@@ -84,7 +68,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
                 unsafe { edge.unwrap_unchecked() }
             };
 
-            let key = reader.read(<<R::Edge as ribbit::Pack>::Packed as Meta>::MAX_LEN);
+            let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
 
             let Some(next_byte) = reader.next() else {
                 edge.set_packed(Self::new_value(key, value));
@@ -94,7 +78,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
 
             let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
             edge.set_packed(ribbit::Packed::<Self>::new(
-                key.with_value(false),
+                <M::Packed as Meta>::new(key, false),
                 node::Ptr::new_ptr(next_node).raw().get(),
             ));
             tail = next_node;
@@ -112,7 +96,9 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         K: IntoIterator<Item = u8>,
         E: IntoIterator<Item = ribbit::Packed<Edge<M>>>,
     {
-        unsafe { Self::new_node_unchecked::<N, K, E>(key.with_value(false), keys, edges) }
+        unsafe {
+            Self::new_node_unchecked::<N, K, E>(<M::Packed as Meta>::new(key, false), keys, edges)
+        }
     }
 
     #[cold]
@@ -141,17 +127,34 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     }
 
     fn new_value(
-        meta: <<M as ribbit::Pack>::Packed as Meta>::Key,
+        key: <<M as ribbit::Pack>::Packed as Meta>::Key,
         value: u64,
     ) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(meta.with_value(true), value)
+        ribbit::Packed::<Self>::new(<M::Packed as Meta>::new(key, true), value)
+    }
+
+    #[inline]
+    pub(crate) fn freeze(edge: &Atomic<Self>) {
+        let mut old = edge.load_packed(Ordering::Relaxed);
+
+        while !old.meta().is_frozen() {
+            match edge.compare_exchange_packed(
+                old,
+                old.with_meta(old.meta().with_frozen(true)),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(conflict) => old = conflict,
+            }
+        }
     }
 }
 
 impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     #[inline]
     pub(crate) fn is_null(self) -> bool {
-        !self.meta().is_value() && self.data() == 0
+        !self.meta().is_value() && self.child_raw() == 0
     }
 
     #[inline]
@@ -160,37 +163,44 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
             return None;
         }
 
-        unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(self.data()) }
+        unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(self.child_raw()) }
     }
 
     #[inline]
     pub(crate) fn as_value(self) -> Option<u64> {
-        self.meta().is_value().then(|| self.data())
-    }
-
-    #[inline]
-    pub(crate) fn into_raw(self) -> u64 {
-        self.data()
+        self.meta().is_value().then(|| self.child_raw())
     }
 
     #[inline]
     pub(crate) fn child(self) -> Option<Child<M>> {
-        let data = self.data();
+        let raw = self.child_raw();
         if self.meta().is_value() {
-            Some(Child::Value(data))
+            Some(Child::Value(raw))
         } else {
-            unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(data) }.map(Child::Node)
+            unsafe { ribbit::Packed::<Option<node::Ptr<M>>>::new_unchecked(raw) }.map(Child::Node)
         }
     }
 
+    /// # Safety
+    ///
+    /// Caller must ensure that child is a value.
     #[inline]
-    pub(crate) fn with_value(self, value: u64) -> Self {
+    pub(crate) unsafe fn into_value_unchecked(self) -> u64 {
         validate!(self.meta().is_value());
-        self.with_data(value)
+        self.child_raw()
+    }
+
+    /// # Safety
+    ///
+    /// Caller must ensure that child is a value.
+    #[inline]
+    pub(crate) unsafe fn with_value_unchecked(self, value: u64) -> Self {
+        validate!(self.meta().is_value());
+        self.with_child(value)
     }
 
     #[inline]
-    pub(crate) fn unfreeze(self) -> Self {
+    pub(super) fn unfreeze(self) -> Self {
         self.with_meta(self.meta().with_frozen(false))
     }
 
@@ -247,39 +257,37 @@ where
 pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug {
     const DEFAULT: Self;
 
-    const MAX_LEN: Self::Len;
+    type Key: Key;
 
-    type Len: Len;
-    type Key: Key<Meta = Self, Len = Self::Len>;
+    fn new(key: Self::Key, value: bool) -> Self;
+    fn with_frozen(self, frozen: bool) -> Self;
 
     fn key(self) -> Self::Key;
-
     fn is_value(self) -> bool;
     fn is_frozen(self) -> bool;
 
-    fn with_frozen(self, frozen: bool) -> Self;
-
     fn expand(self, new: Self::Key) -> Result<(Self::Key, u8, Self), ()>;
-
     fn compress(self, byte: u8, child: Self) -> Option<Self>;
 }
 
 pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u8> {
-    type Meta;
     type Len: Len;
 
     fn len(self) -> Self::Len;
-    fn with_value(self, value: bool) -> Self::Meta;
     fn prefix(self, len: Self::Len) -> Self;
 }
 
 pub(crate) trait Len: Copy + Eq {
+    const MAX: Self;
+
     #[cfg_attr(not(test), expect(unused))]
     fn new(bits: usize) -> Self;
     fn bits(self) -> usize;
 }
 
 impl Len for u6 {
+    const MAX: Self = u6::new(56);
+
     #[inline]
     fn new(bits: usize) -> Self {
         validate_eq!(bits & 0b111, 0);

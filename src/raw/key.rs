@@ -57,14 +57,14 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
 
     fn read(
         &mut self,
-        len: <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
     ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key;
 
     #[inline]
     fn match_exact(
         &mut self,
         edge: <Self::Edge as ribbit::Pack>::Packed,
-    ) -> Option<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Len> {
+    ) -> Option<<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len> {
         let key = edge::Meta::key(edge);
         let len = edge::Key::len(key);
         (self.read(len) == key).then_some(len)
@@ -357,11 +357,10 @@ mod tests {
         let mut index = 0;
         let mut actual = Vec::new();
 
-        for len in lens
-            .iter()
-            .copied()
-            .map(|bytes| bytes << 3)
-            .map(<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Len::new)
+        for len in
+            lens.iter().copied().map(|bytes| bytes << 3).map(
+                <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::new,
+            )
         {
             assert_eq!(reader.bytes(), array.len() - index);
 
