@@ -18,6 +18,7 @@ opt-no-dispatch = []
 
 smr-disable = []
 smr-epoch = []
+smr-seize = []
 
 validate = []
 
