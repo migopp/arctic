@@ -379,7 +379,7 @@ where
     }
 
     #[inline(always)]
-    fn dispatch<N3, N15, N47, N256, T>(
+    pub(crate) fn dispatch<N3, N15, N47, N256, T>(
         self,
         node_3: N3,
         node_15: N15,
