@@ -36,7 +36,7 @@ pub type Guard<'g, 'l, K, V, S> =
 pub type Owned<'g, 'l, K, V, S> = value::Owned<'l, Guard<'g, 'l, K, V, S>, V>;
 pub type Shared<'g, 'l, K, V, S> = value::Shared<'l, Guard<'g, 'l, K, V, S>, V>;
 
-pub struct Map<K: Key, V: Value, S = smr::Seize> {
+pub struct Map<K: Key, V: Value, S = smr::Hazard<<K as Key>::Prefix, V>> {
     smr: S,
     inner: sequential::Map<K, V>,
 }
@@ -83,12 +83,17 @@ impl<K: Key, V: Value, S: Smr<K::Prefix, V>> Map<K, V, S> {
     }
 }
 
-pub struct MapRef<'g, K: Key, V: Value, S: 'g + Smr<K::Prefix, V> = smr::Seize> {
+pub struct MapRef<
+    'g,
+    K: Key,
+    V: Value,
+    S: 'g + Smr<K::Prefix, V> = smr::Hazard<<K as Key>::Prefix, V>,
+> {
     smr: S::Local<'g>,
     raw: &'g sequential::Map<K, V>,
 }
 
-pub enum Update<'g, 'l, K, V, B, S = smr::Seize>
+pub enum Update<'g, 'l, K, V, B, S = smr::Hazard<<K as Key>::Prefix, V>>
 where
     K: Key,
     V: Value,
@@ -107,7 +112,7 @@ where
     },
 }
 
-pub enum Insert<'g, 'l, K, V, B = Option<V>, S = smr::Seize>
+pub enum Insert<'g, 'l, K, V, B = Option<V>, S = smr::Hazard<<K as Key>::Prefix, V>>
 where
     K: Key,
     V: Value,
