@@ -9,6 +9,12 @@ use seize::Guard as _;
 #[derive(Default)]
 pub struct Seize(seize::Collector);
 
+impl Seize {
+    pub fn with_batch_size(&mut self, batch_size: usize) -> Self {
+        Self(seize::Collector::new().batch_size(batch_size))
+    }
+}
+
 impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for Seize {
     // In this case, there is no notion of a local handle.
     // We get the same effect from calling `enter` on a `Collector`.
