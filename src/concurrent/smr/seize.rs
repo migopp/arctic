@@ -10,7 +10,7 @@ use seize::Guard as _;
 pub struct Seize(seize::Collector);
 
 impl Seize {
-    pub fn with_batch_size(&mut self, batch_size: usize) -> Self {
+    pub fn with_batch_size(batch_size: usize) -> Self {
         Self(seize::Collector::new().batch_size(batch_size))
     }
 }
