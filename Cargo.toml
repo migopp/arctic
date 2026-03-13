@@ -33,6 +33,12 @@ seize = { version = "0.5.1", features = ["fast-barrier"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
+# https://github.com/kaist-cp/smr-benchmark/blob/00b4e4d06d9b91f289b4644163f0cac0660d4af7/Cargo.toml#L42-L45
+[dependencies.crossbeam-ebr]
+package = "crossbeam-epoch"
+git = "https://github.com/kaist-cp/crossbeam"
+branch = "smr-benchmark"
+
 [dev-dependencies]
 proptest = "1.9.0"
 proptest-state-machine = "0.6.0"
