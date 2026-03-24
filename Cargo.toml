@@ -13,6 +13,7 @@ opt-no-node47-iter = []
 opt-no-int = []
 opt-no-expand = []
 opt-membarrier = ["dep:libc"]
+opt-seize-fastbarrier = ["seize/fastbarrier"]
 opt-no-path = []
 opt-no-dispatch = []
 
@@ -29,7 +30,7 @@ hdrhistogram = { version = "7.5.4", optional = true, default-features = false, f
 libc = { version = "0.2.176", optional = true }
 polonius-the-crab = "0.4.2"
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
-seize = { version = "0.5.1", features = ["fast-barrier"] }
+seize = { version = "0.5.1", default-features = false, features = ["libc"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
