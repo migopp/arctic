@@ -13,7 +13,7 @@ opt-no-node47-iter = []
 opt-no-int = []
 opt-no-expand = []
 opt-membarrier = ["dep:libc"]
-opt-seize-fastbarrier = ["seize/fastbarrier"]
+opt-seize-fastbarrier = ["seize/fast-barrier"]
 opt-no-path = []
 opt-no-dispatch = []
 
