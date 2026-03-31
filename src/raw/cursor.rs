@@ -377,23 +377,22 @@ where
 
             let (_smo, new) = unsafe { node.replace(old.meta()) };
 
-            let next = match unsafe { self.edge.as_ref() }.compare_exchange_packed(
+            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
                 old,
                 new,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => self.pop(),
+                Ok(_) => (),
                 Err(_) => {
                     if let Some(node) = new.as_node() {
                         unsafe { node.deallocate(stat::Counter::FreeConflict) };
                     }
                     self.traverse_prefix();
-                    self.pop()
                 }
             };
 
-            match next? {
+            match self.pop()? {
                 None => return Ok(()),
                 Some(next) if unsafe { next.len() } > 0 => return Ok(()),
                 Some(next) => node = next,
