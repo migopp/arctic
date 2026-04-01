@@ -52,32 +52,10 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
     ) {
         stat::increment(stat::Counter::Retire);
 
-        node.dispatch(
-            |ptr| {
-                self.0.defer_retire(ptr.as_ptr(), |ptr, _| {
-                    stat::increment(stat::Counter::FreeRetire);
-                    drop(unsafe { Box::from_raw(ptr) });
-                })
-            },
-            |ptr| {
-                self.0.defer_retire(ptr.as_ptr(), |ptr, _| {
-                    stat::increment(stat::Counter::FreeRetire);
-                    drop(unsafe { Box::from_raw(ptr) });
-                })
-            },
-            |ptr| {
-                self.0.defer_retire(ptr.as_ptr(), |ptr, _| {
-                    stat::increment(stat::Counter::FreeRetire);
-                    drop(unsafe { Box::from_raw(ptr) });
-                })
-            },
-            |ptr| {
-                self.0.defer_retire(ptr.as_ptr(), |ptr, _| {
-                    stat::increment(stat::Counter::FreeRetire);
-                    drop(unsafe { Box::from_raw(ptr) });
-                })
-            },
-        );
+        self.0.defer_retire(node.raw().get() as *mut (), |ptr, _| {
+            unsafe { node::Ptr::<M>::new_unchecked(ptr as u64) }
+                .deallocate(stat::Counter::FreeRetire)
+        })
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -89,9 +67,7 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
         //
         // See: [`seize::raw::Collector::add`] and [`seize::raw::Collector::try_retire`].
         //
-        self.0.defer_retire(value as *mut u64, |value_as_ptr, _| {
-            let value = value_as_ptr as u64;
-            drop(V::from_raw(value))
-        });
+        self.0
+            .defer_retire(value as *mut (), |ptr, _| drop(V::from_raw(ptr as u64)));
     }
 }
