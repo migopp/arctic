@@ -50,6 +50,8 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
         _bits: usize,
         node: ribbit::Packed<node::Ptr<M>>,
     ) {
+        stat::increment(stat::Counter::Retire);
+
         node.dispatch(
             |ptr| {
                 self.0.defer_retire(ptr.as_ptr(), |ptr, _| {
@@ -79,11 +81,14 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
+        stat::increment(stat::Counter::Retire);
+
         // HACK: Unfortunately, Seize does not natively support `defer_unchecked`.
         // However, `defer_retire` does take an arbitrary closure to run at retire-time,
         // and passes the `ptr` argument directly to it...
         //
         // See: [`seize::raw::Collector::add`] and [`seize::raw::Collector::try_retire`].
+        //
         self.0.defer_retire(value as *mut u64, |value_as_ptr, _| {
             let value = value_as_ptr as u64;
             drop(V::from_raw(value))
