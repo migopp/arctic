@@ -1,10 +1,12 @@
 pub mod epoch;
 pub mod hazard;
 mod no_op;
+pub mod seize;
 
 pub use epoch::Epoch;
 pub use hazard::Hazard;
 pub use no_op::NoOp;
+pub use seize::Seize;
 
 use crate::concurrent::Value;
 use crate::raw::edge;
