@@ -32,7 +32,6 @@ pub(crate) trait Uint:
 
     fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
 
-    fn most_significant_u128(self) -> u128;
     fn most_significant_u64(self) -> u64;
     fn most_significant_u8(self) -> u8;
 
@@ -380,11 +379,6 @@ macro_rules! impl_unsigned_int {
                 #[inline]
                 fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
                     apply(&self.to_be_bytes())
-                }
-
-                #[inline]
-                fn most_significant_u128(self) -> u128 {
-                    $into_u128(self)
                 }
 
                 #[inline]
