@@ -19,8 +19,7 @@ name = "arctic"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "crossbeam-epoch 0.9.13",
- "crossbeam-epoch 0.9.18",
+ "crossbeam-epoch",
  "hdrhistogram",
  "libc",
  "polonius-the-crab",
@@ -101,18 +100,9 @@ source = "git+https://github.com/kaist-cp/crossbeam?branch=smr-benchmark#ee76060
 dependencies = [
  "autocfg",
  "cfg-if",
- "crossbeam-utils 0.8.14",
+ "crossbeam-utils",
  "memoffset",
  "scopeguard",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils 0.8.21",
 ]
 
 [[package]]
@@ -122,12 +112,6 @@ source = "git+https://github.com/kaist-cp/crossbeam?branch=smr-benchmark#ee76060
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "crossbeam-utils"
-version = "0.8.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "darling"

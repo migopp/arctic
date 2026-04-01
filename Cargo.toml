@@ -12,12 +12,14 @@ opt-no-node15-iter = []
 opt-no-node47-iter = []
 opt-no-int = []
 opt-no-expand = []
-opt-membarrier = ["dep:libc"]
-opt-seize-fastbarrier = ["seize/fast-barrier"]
+opt-membarrier = ["dep:libc", "seize/fast-barrier"]
 opt-no-path = []
 opt-no-dispatch = []
 
 smr-disable = []
+# FIXME: make these dependencies optional
+# smr-epoch = ["dep:crossbeam-epoch"]
+# smr-seize = ["dep:seize"]
 smr-epoch = []
 smr-seize = []
 
@@ -25,7 +27,6 @@ validate = []
 
 [dependencies]
 base64 = { version = "0.22.1", optional = true }
-crossbeam-epoch = { version = "0.9.18" }
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false, features = ["serialization"] }
 libc = { version = "0.2.176", optional = true }
 polonius-the-crab = "0.4.2"
@@ -35,10 +36,11 @@ serde = { version = "1.0.219", optional = true, features = ["derive"] }
 thread_local = { git = "https://github.com/nwtnni/thread_local-rs.git" }
 
 # https://github.com/kaist-cp/smr-benchmark/blob/00b4e4d06d9b91f289b4644163f0cac0660d4af7/Cargo.toml#L42-L45
-[dependencies.crossbeam-ebr]
-package = "crossbeam-epoch"
+[dependencies.crossbeam-epoch]
 git = "https://github.com/kaist-cp/crossbeam"
 branch = "smr-benchmark"
+# version = "0.9.18"
+# optional = true
 
 [dev-dependencies]
 proptest = "1.9.0"

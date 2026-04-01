@@ -5,11 +5,11 @@ use crate::raw::node;
 use crate::stat;
 
 #[derive(Default)]
-pub struct Epoch(crossbeam_ebr::Collector);
+pub struct Epoch(crossbeam_epoch::Collector);
 
 impl Epoch {
     pub fn with_bag_capacity(max_objects: usize) -> Self {
-        crossbeam_ebr::set_bag_capacity(max_objects);
+        crossbeam_epoch::set_bag_capacity(max_objects);
         Self::default()
     }
 }
@@ -22,7 +22,7 @@ impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for Epoch
     }
 }
 
-pub struct Local(crossbeam_ebr::LocalHandle);
+pub struct Local(crossbeam_epoch::LocalHandle);
 
 impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for Local {
     type Guard<'l>
@@ -35,7 +35,7 @@ impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> fo
     }
 }
 
-pub struct Guard(crossbeam_ebr::Guard);
+pub struct Guard(crossbeam_epoch::Guard);
 
 impl<V: Value> smr::Guard<V> for Guard {
     #[expect(private_bounds)]
