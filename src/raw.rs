@@ -26,10 +26,7 @@ pub(crate) struct Frozen;
 /// Structural modification operation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Smo {
-    #[expect(dead_code)]
-    CompressNode,
     ReplaceNode,
-    ExpandNode,
     DeleteNode,
     CompressEdge,
 }
@@ -37,9 +34,6 @@ pub(crate) enum Smo {
 impl Smo {
     #[inline]
     pub fn is_allocate(self) -> bool {
-        matches!(
-            self,
-            Self::CompressNode | Self::ReplaceNode | Self::ExpandNode
-        )
+        matches!(self, Self::ReplaceNode)
     }
 }

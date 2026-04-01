@@ -6,6 +6,7 @@ use proptest::arbitrary::Arbitrary;
 use proptest::prelude::Just;
 use proptest::prelude::Strategy as _;
 use proptest::prop_oneof;
+use proptest::sample::Selector;
 use proptest_state_machine::prop_state_machine;
 use proptest_state_machine::ReferenceStateMachine;
 use proptest_state_machine::StateMachineTest;
@@ -22,7 +23,8 @@ prop_state_machine! {
 
 #[derive(Clone, Debug)]
 pub enum Transition<K, V> {
-    Insert(K, V),
+    Upsert(K, V),
+    Remove(K),
 }
 
 #[derive(Debug, Clone)]
@@ -30,27 +32,38 @@ struct Map<K, V>(BTreeMap<K, V>);
 
 impl<K, V> ReferenceStateMachine for Map<K, V>
 where
-    K: Arbitrary + Clone + Debug + Ord + 'static,
+    K: Arbitrary + Clone + Debug + Default + Ord + 'static,
     V: Arbitrary + Clone + Debug + 'static,
 {
     type State = Self;
     type Transition = Transition<K, V>;
 
     fn init_state() -> proptest::prelude::BoxedStrategy<Self::State> {
-        Just(Self(BTreeMap::default())).boxed()
+        Just(Self(BTreeMap::new())).boxed()
     }
 
-    fn transitions(_: &Self::State) -> proptest::prelude::BoxedStrategy<Self::Transition> {
+    fn transitions(state: &Self::State) -> proptest::prelude::BoxedStrategy<Self::Transition> {
+        let state = state.clone();
         prop_oneof![
-            1 => (K::arbitrary(), V::arbitrary()).prop_map(|(key, value)| Transition::Insert(key, value)),
-        ]
-        .boxed()
+            1 => (K::arbitrary(), V::arbitrary()).prop_map(|(key, value)| Transition::Upsert(key, value)),
+            1 => proptest::prelude::any::<Selector>().prop_map(move |selector| {
+                let key = if state.0.is_empty() {
+                    K::default()
+                } else {
+                    selector.select(state.0.keys()).clone()
+                };
+                Transition::Remove(key)
+            }),
+        ].boxed()
     }
 
     fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
         match transition {
-            Transition::Insert(key, value) => {
+            Transition::Upsert(key, value) => {
                 state.0.insert(key.clone(), value.clone());
+            }
+            Transition::Remove(key) => {
+                state.0.remove(key);
             }
         }
         state
@@ -61,7 +74,7 @@ struct Arctic<K: arctic::Key, V: arctic::Value>(arctic::concurrent::Map<K, V>);
 
 impl<K, V> StateMachineTest for Arctic<K, V>
 where
-    K: arctic::Key + Arbitrary + Clone + Debug + Ord + 'static,
+    K: arctic::Key + Arbitrary + Clone + Debug + Default + Ord + 'static,
     V: arctic::Value + Arbitrary + Clone + Debug + Send + Sync + 'static,
     for<'a, 'b> V::Borrow<'a>: Debug + PartialEq<V::Borrow<'b>>,
 {
@@ -78,12 +91,16 @@ where
         expected: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
+        let mut pin = state.0.pin();
         match transition {
-            Transition::Insert(key, value) => {
-                let mut pin = state.0.pin();
+            Transition::Upsert(key, value) => {
                 pin.upsert(K::borrow(&key), value);
             }
+            Transition::Remove(key) => {
+                pin.remove(K::borrow(&key));
+            }
         }
+        drop(pin);
 
         state
             .0

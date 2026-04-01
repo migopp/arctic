@@ -44,6 +44,13 @@ where
     type Grow: Node<M>;
     type Shrink: Node<M>;
 
+    fn len(&self) -> u8 {
+        self.edges()
+            .iter()
+            .filter(|edge| !edge.load_packed(Ordering::Relaxed).is_null())
+            .count() as u8
+    }
+
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
     fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<L, U, M> {
@@ -161,16 +168,19 @@ where
         let keys = keys.into_iter().take(len);
         let edges = edges.into_iter().take(len);
 
-        if len == Self::LEN {
-            (Smo::ExpandNode, unsafe {
-                Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges)
-            })
+        let edge = if len == Self::LEN {
+            unsafe { Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges) }
+        } else if len < 4 {
+            unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
+        } else if len < 16 {
+            unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
+        } else if len < 48 {
+            unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
         } else {
-            // Catch-all:
-            (Smo::ReplaceNode, unsafe {
-                Edge::new_node_unchecked::<Self, _, _>(meta, keys, edges)
-            })
-        }
+            unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
+        };
+
+        (Smo::ReplaceNode, edge)
     }
 }
 
@@ -299,6 +309,16 @@ where
     #[inline]
     pub(crate) fn raw(self) -> NonZeroU64 {
         self.value
+    }
+
+    #[inline]
+    pub(crate) unsafe fn len<'g>(self) -> u8 {
+        self.dispatch(
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+            |node| unsafe { node.as_ref() }.len(),
+        )
     }
 
     #[inline]
