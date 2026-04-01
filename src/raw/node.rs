@@ -168,16 +168,19 @@ where
         let keys = keys.into_iter().take(len);
         let edges = edges.into_iter().take(len);
 
-        if len == Self::LEN {
-            (Smo::ExpandNode, unsafe {
-                Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges)
-            })
+        let edge = if len == Self::LEN {
+            unsafe { Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges) }
+        } else if len < 4 {
+            unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
+        } else if len < 16 {
+            unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
+        } else if len < 48 {
+            unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
         } else {
-            // Catch-all:
-            (Smo::ReplaceNode, unsafe {
-                Edge::new_node_unchecked::<Self, _, _>(meta, keys, edges)
-            })
-        }
+            unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
+        };
+
+        (Smo::ReplaceNode, edge)
     }
 }
 

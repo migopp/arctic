@@ -116,8 +116,6 @@ impl edge::Meta for BePacked {
 
     #[inline]
     fn compress(self, byte: u8, child: Self) -> Option<Self> {
-        validate!(self.frozen());
-
         let parent_bits = self.len().value();
         let child_bits = child.len().value();
         let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;
