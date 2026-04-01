@@ -53,9 +53,9 @@ impl Key for u64 {
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
         let len = reader.bytes();
         let reader = reader.buffer;
-        let mut buffer = [0u8; 16];
+        let mut buffer = [0u8; 8];
         buffer[..len].copy_from_slice(&reader[..len]);
-        hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+        hazard::prefix::Le::new_hazard(u64::from_le_bytes(buffer), len << 3)
     }
 }
 
@@ -67,11 +67,11 @@ fn hazard_integer<U: integer::Uint>(
     reader: integer::Reader<U>,
 ) -> ribbit::Packed<hazard::prefix::Be> {
     hazard::prefix::Be::new_hazard(
-        reader.buffer.most_significant_u128(),
-        if U::BYTES < 16 {
+        reader.buffer.most_significant_u64(),
+        if U::BYTES < 8 {
             reader.bits()
         } else {
-            reader.bits().min(120)
+            reader.bits().min(56)
         },
     )
 }
@@ -79,8 +79,8 @@ fn hazard_integer<U: integer::Uint>(
 #[inline]
 fn hazard_dynamic(reader: dynamic::Reader<'_>) -> ribbit::Packed<hazard::prefix::Le> {
     let reader = reader.as_ref();
-    let mut buffer = [0u8; 16];
-    let len = reader.len().min(15);
+    let mut buffer = [0u8; 8];
+    let len = reader.len().min(7);
     buffer[..len].copy_from_slice(&reader[..len]);
-    hazard::prefix::Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+    hazard::prefix::Le::new_hazard(u64::from_le_bytes(buffer), len << 3)
 }
