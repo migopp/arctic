@@ -62,16 +62,14 @@ mod membarrier;
 pub(crate) mod prefix;
 pub(crate) use prefix::Prefix;
 
-use core::cell::RefCell;
+use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use thread_local::ThreadLocal;
-
-use crate::concurrent::smr;
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
+use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
 
@@ -80,8 +78,9 @@ use crate::stat;
 struct Cache<T>(T);
 
 pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V: Value> {
-    hazards: ThreadLocal<Cache<ribbit::Atomic<P>>>,
-    retired: ThreadLocal<Cache<RefCell<Vec<(ribbit::Packed<P>, u64)>>>>,
+    // FIXME: jagged/triangular array
+    hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
+    locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
     value: PhantomData<V>,
@@ -90,8 +89,18 @@ pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V: Value> {
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Hazard<P, V> {
     fn default() -> Self {
         Self {
-            hazards: thread_local::ThreadLocal::with_capacity(16),
-            retired: thread_local::ThreadLocal::with_capacity(16),
+            hazards: core::array::from_fn(|_| {
+                Cache(ribbit::Atomic::new_packed(
+                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
+                ))
+            }),
+            locals: core::array::from_fn(|_| {
+                UnsafeCell::new(Local {
+                    snapshot: Vec::new(),
+                    retired: Vec::new(),
+                    _value: PhantomData,
+                })
+            }),
             membarrier: AtomicBool::new(false),
             reclaim_threshold: 64,
             value: PhantomData,
@@ -114,10 +123,11 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
 
     /// Eagerly reclaim all retired allocations
     pub fn reclaim(&mut self) {
-        self.retired
+        self.locals
             .iter_mut()
-            .map(|Cache(retired)| RefCell::get_mut(retired))
-            .flat_map(|retired| retired.drain(..))
+            .take(smr::thread::count())
+            .map(|local| local.get_mut())
+            .flat_map(|local| local.retired.drain(..))
             .for_each(|(prefix, raw)| {
                 deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
             })
@@ -132,60 +142,49 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Hazard<P, V> {
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Smr<P, V> for Hazard<P, V> {
     type Local<'g>
-        = Local<'g, P, V>
+        = &'g Hazard<P, V>
     where
         Self: 'g;
 
     fn local<'g>(&'g self) -> Self::Local<'g> {
-        Local {
-            hazards: &self.hazards,
-            hazard: &self
-                .hazards
-                .get_or(|| Cache(ribbit::Atomic::new_packed(ribbit::Packed::<P>::HAZARD_NULL)))
-                .0,
-            snapshot: Vec::with_capacity(self.reclaim_threshold),
-            retired: self.retired.get_or_default().0.borrow_mut(),
-            membarrier: &self.membarrier,
-            reclaim_threshold: self.reclaim_threshold,
-            value: PhantomData,
-        }
+        self
     }
 }
 
-pub struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
-    hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
-    hazard: &'g ribbit::Atomic<P>,
+#[repr(align(64))]
+pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     snapshot: Vec<ribbit::Packed<P>>,
-    retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
-    membarrier: &'g AtomicBool,
-    reclaim_threshold: usize,
-    value: PhantomData<V>,
+    retired: Vec<(ribbit::Packed<P>, u64)>,
+    _value: PhantomData<V>,
 }
 
-impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
     #[inline]
     pub fn enable_membarrier(&self) {
         self.membarrier.store(true, Ordering::Relaxed)
     }
 
     #[cold]
-    fn flush(&mut self) {
-        stat::max(stat::Max::RetireCache, self.retired.len() as u64);
+    fn flush(&self) {
+        let id = smr::thread::Id::current();
+        let local = unsafe { &mut *self.locals[usize::from(id)].get() };
+
+        stat::max(stat::Max::RetireCache, local.retired.len() as u64);
 
         membarrier::slow(self.membarrier.load(Ordering::Relaxed));
 
-        self.snapshot.extend(
-            self.hazards
+        local.snapshot.extend(
+            self.hazards[..usize::from(id)]
                 .iter()
-                .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
+                .chain(&self.hazards[usize::from(id) + 1..smr::thread::count()])
                 .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
                 .filter(|hazard| hazard.is_active()),
         );
 
         let mut freed = 0;
 
-        self.retired.retain_mut(|(prefix, raw)| {
-            if self
+        local.retired.retain_mut(|(prefix, raw)| {
+            if local
                 .snapshot
                 .iter()
                 .any(|hazard| hazard.is_conflict(*prefix))
@@ -220,12 +219,12 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
             false
         });
 
-        self.snapshot.clear();
+        local.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
     }
 }
 
-impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for Local<'g, P, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for &'g Hazard<P, V> {
     type Guard<'l>
         = Guard<'g, 'l, P, V>
     where
@@ -233,13 +232,16 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for Local<'
 
     #[inline]
     fn guard<'l>(&'l mut self, hazard: ribbit::Packed<P>) -> Self::Guard<'l> {
-        self.hazard.store_packed(hazard, Ordering::Relaxed);
+        let id = smr::thread::Id::current();
+        self.hazards[usize::from(id)]
+            .0
+            .store_packed(hazard, Ordering::Relaxed);
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
         Guard(self)
     }
 }
 
-pub struct Guard<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'l mut Local<'g, P, V>);
+pub struct Guard<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'l mut &'g Hazard<P, V>);
 
 impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 'l, P, V> {
     #[expect(private_bounds)]
@@ -251,41 +253,54 @@ impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<
     ) {
         stat::increment(stat::Counter::Retire);
 
-        let prefix = self
-            .0
-            .hazard
-            .load_packed(Ordering::Relaxed)
-            .into_prefix(false, Some(_bits));
+        {
+            let id = smr::thread::Id::current();
+            let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
+            let hazard = &self.0.hazards[usize::from(id)].0;
 
-        self.0.retired.push((prefix, node.raw().get()));
+            let prefix = hazard
+                .load_packed(Ordering::Relaxed)
+                .into_prefix(false, Some(_bits));
 
-        if self.0.retired.len() >= self.0.reclaim_threshold {
-            self.0.flush();
+            local.retired.push((prefix, node.raw().get()));
+
+            if local.retired.len() < self.0.reclaim_threshold {
+                return;
+            }
         }
+
+        self.0.flush();
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
         stat::increment(stat::Counter::Retire);
 
-        let prefix = self
-            .0
-            .hazard
-            .load_packed(Ordering::Relaxed)
-            .into_prefix(true, None);
+        {
+            let id = smr::thread::Id::current();
+            let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
+            let hazard = &self.0.hazards[usize::from(id)].0;
 
-        self.0.retired.push((prefix, value));
+            let prefix = hazard
+                .load_packed(Ordering::Relaxed)
+                .into_prefix(true, None);
 
-        if self.0.retired.len() >= self.0.reclaim_threshold {
-            self.0.flush();
+            local.retired.push((prefix, value));
+
+            if local.retired.len() < self.0.reclaim_threshold {
+                return;
+            }
         }
+
+        self.0.flush();
     }
 }
 
 impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, 'l, P, V> {
     fn drop(&mut self) {
-        self.0
-            .hazard
-            .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+        let id = smr::thread::Id::current();
+        let hazard = &self.0.hazards[usize::from(id)].0;
+
+        hazard.store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
     }
 }
 
