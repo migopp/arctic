@@ -16,16 +16,16 @@ use core::ops::RangeFull;
 
 use ribbit::Atomic;
 
+use crate::Ascend;
+use crate::Key;
 use crate::raw;
-use crate::raw::cursor::path;
-use crate::raw::cursor::CursorMut;
-use crate::raw::iter::PostorderIter;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
+use crate::raw::cursor::CursorMut;
+use crate::raw::cursor::path;
+use crate::raw::iter::PostorderIter;
 use crate::stat;
-use crate::Ascend;
-use crate::Key;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {
@@ -148,7 +148,7 @@ where
                 return Update::Break {
                     old: unsafe { V::borrow_from_raw(old.into_raw()) },
                     r#break,
-                }
+                };
             }
         };
 
