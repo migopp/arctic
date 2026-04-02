@@ -143,6 +143,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Smr<P, V> for Hazard<P, V> {
                 .hazards
                 .get_or(|| Cache(ribbit::Atomic::new_packed(ribbit::Packed::<P>::HAZARD_NULL)))
                 .0,
+            snapshot: Vec::with_capacity(self.reclaim_threshold),
             retired: self.retired.get_or_default().0.borrow_mut(),
             membarrier: &self.membarrier,
             reclaim_threshold: self.reclaim_threshold,
@@ -154,6 +155,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Smr<P, V> for Hazard<P, V> {
 pub struct Local<'g, P: ribbit::Pack<Packed: Prefix>, V> {
     hazards: &'g thread_local::ThreadLocal<Cache<ribbit::Atomic<P>>>,
     hazard: &'g ribbit::Atomic<P>,
+    snapshot: Vec<ribbit::Packed<P>>,
     retired: std::cell::RefMut<'g, Vec<(ribbit::Packed<P>, u64)>>,
     membarrier: &'g AtomicBool,
     reclaim_threshold: usize,
@@ -172,18 +174,22 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
 
         membarrier::slow(self.membarrier.load(Ordering::Relaxed));
 
-        let hazards = self
-            .hazards
-            .iter()
-            .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
-            .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-            .filter(|hazard| hazard.is_active())
-            .collect::<Vec<_>>();
+        self.snapshot.extend(
+            self.hazards
+                .iter()
+                .filter(|Cache(hazard)| !core::ptr::addr_eq(hazard, self.hazard))
+                .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
+                .filter(|hazard| hazard.is_active()),
+        );
 
         let mut freed = 0;
 
         self.retired.retain_mut(|(prefix, raw)| {
-            if hazards.iter().any(|hazard| hazard.is_conflict(*prefix)) {
+            if self
+                .snapshot
+                .iter()
+                .any(|hazard| hazard.is_conflict(*prefix))
+            {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
@@ -214,6 +220,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Local<'g, P, V> {
             false
         });
 
+        self.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
     }
 }
@@ -274,7 +281,7 @@ impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<
     }
 }
 
-impl<'v, 'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, 'l, P, V> {
+impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, 'l, P, V> {
     fn drop(&mut self) {
         self.0
             .hazard
