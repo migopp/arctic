@@ -1,14 +1,14 @@
 use core::marker::PhantomData;
 use core::ops::ControlFlow;
 
-use crate::concurrent::smr;
+use crate::Order;
 use crate::concurrent::Key;
 use crate::concurrent::Value;
+use crate::concurrent::smr;
 use crate::raw;
 use crate::sequential;
-use crate::Order;
 
-pub struct Prefix<'k, 'g, K: Key, V, R, G = smr::Epoch> {
+pub struct Prefix<'k, 'g, K: Key, V, R, G> {
     inner: sequential::Prefix<'k, 'g, K, V, R>,
     _guard: G,
 }

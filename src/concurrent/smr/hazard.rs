@@ -73,11 +73,21 @@ use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
 
+pub struct Hazard;
+
+impl Smr for Hazard {
+    type Global<P, V>
+        = Global<P, V>
+    where
+        P: ribbit::Pack<Packed: Prefix>,
+        V: Value;
+}
+
 #[repr(C, align(64))]
 #[derive(Default)]
 struct Cache<T>(T);
 
-pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V: Value> {
+pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
@@ -86,7 +96,7 @@ pub struct Hazard<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     value: PhantomData<V>,
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     fn default() -> Self {
         Self {
             hazards: core::array::from_fn(|_| {
@@ -108,7 +118,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Hazard<P, V> {
     }
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     #[inline]
     #[must_use]
     pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
@@ -134,20 +144,38 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
     }
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Global<P, V> {
     fn drop(&mut self) {
         self.reclaim();
     }
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Smr<P, V> for Hazard<P, V> {
-    type Local<'g>
-        = &'g Hazard<P, V>
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global<P, V> {
+    type Guard<'g>
+        = Guard<'g, P, V>
     where
+        V: 'g,
         Self: 'g;
 
-    fn local<'g>(&'g self) -> Self::Local<'g> {
-        self
+    #[inline]
+    fn guard<'g>(&'g self, hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    where
+        V: 'g,
+    {
+        let id = smr::thread::Id::current();
+
+        validate!(
+            !self.hazards[usize::from(id)]
+                .0
+                .load_packed(Ordering::Relaxed)
+                .is_active()
+        );
+
+        self.hazards[usize::from(id)]
+            .0
+            .store_packed(hazard, Ordering::Relaxed);
+        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
+        Guard(self)
     }
 }
 
@@ -158,7 +186,7 @@ pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     _value: PhantomData<V>,
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     #[inline]
     pub fn enable_membarrier(&self) {
         self.membarrier.store(true, Ordering::Relaxed)
@@ -224,26 +252,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Hazard<P, V> {
     }
 }
 
-impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Local<P, V> for &'g Hazard<P, V> {
-    type Guard<'l>
-        = Guard<'g, 'l, P, V>
-    where
-        Self: 'l;
+pub struct Guard<'g, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'g Global<P, V>);
 
-    #[inline]
-    fn guard<'l>(&'l mut self, hazard: ribbit::Packed<P>) -> Self::Guard<'l> {
-        let id = smr::thread::Id::current();
-        self.hazards[usize::from(id)]
-            .0
-            .store_packed(hazard, Ordering::Relaxed);
-        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
-        Guard(self)
-    }
-}
-
-pub struct Guard<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'l mut &'g Hazard<P, V>);
-
-impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 'l, P, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, P, V> {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -295,7 +306,7 @@ impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<
     }
 }
 
-impl<'g, 'l, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, 'l, P, V> {
+impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
         let id = smr::thread::Id::current();
         let hazard = &self.0.hazards[usize::from(id)].0;

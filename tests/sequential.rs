@@ -7,9 +7,9 @@ use proptest::prelude::Just;
 use proptest::prelude::Strategy as _;
 use proptest::prop_oneof;
 use proptest::sample::Selector;
-use proptest_state_machine::prop_state_machine;
 use proptest_state_machine::ReferenceStateMachine;
 use proptest_state_machine::StateMachineTest;
+use proptest_state_machine::prop_state_machine;
 
 prop_state_machine! {
     #[test]
@@ -91,16 +91,14 @@ where
         expected: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
-        let mut pin = state.0.pin();
         match transition {
             Transition::Upsert(key, value) => {
-                pin.upsert(K::borrow(&key), value);
+                state.0.upsert(K::borrow(&key), value);
             }
             Transition::Remove(key) => {
-                pin.remove(K::borrow(&key));
+                state.0.remove(K::borrow(&key));
             }
         }
-        drop(pin);
 
         state
             .0

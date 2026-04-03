@@ -6,8 +6,8 @@ use arctic::raw::Key;
 mod u64 {
     use arctic::raw::Key;
 
-    use super::test_map;
     use super::Workload;
+    use super::test_map;
 
     #[test]
     fn many() {
@@ -43,13 +43,13 @@ mod u64 {
             &'a self,
             index: usize,
             key: <Self::Key as Key>::Borrow<'a>,
-            value: u64,
+            value: &<Self::Value as arctic::sequential::Value>::Target,
         ) where
             'a: 'g,
             'g: 'l,
         {
             assert_eq!(index as u64, key);
-            assert_eq!(index as u64, value);
+            assert_eq!(index as u64, *value);
         }
     }
 }
@@ -57,8 +57,8 @@ mod u64 {
 mod boxed {
     use arctic::raw::Key;
 
-    use super::test_map;
     use super::Workload;
+    use super::test_map;
 
     struct Boxed;
 
@@ -125,8 +125,8 @@ mod vec {
 
     use arctic::raw::Key;
 
-    use super::test_map;
     use super::Workload;
+    use super::test_map;
 
     struct Bytes;
 
@@ -170,13 +170,13 @@ mod vec {
             &'a self,
             index: usize,
             key: <Self::Key as Key>::Borrow<'a>,
-            value: u64,
+            value: &<Self::Value as arctic::sequential::Value>::Target,
         ) where
             'a: 'g,
             'g: 'l,
         {
             assert_eq!(key, self.key(index));
-            assert_eq!(value, index as u64);
+            assert_eq!(*value, index as u64);
         }
     }
 }
@@ -194,7 +194,7 @@ trait Workload: Sized + Sync {
         &'a self,
         index: usize,
         key: <Self::Key as Key>::Borrow<'a>,
-        value: <Self::Value as arctic::sequential::Value>::Borrow<'_>,
+        value: &<Self::Value as arctic::sequential::Value>::Target,
     ) where
         'a: 'g,
         'g: 'l;
@@ -232,8 +232,6 @@ where
     std::thread::scope(|scope| {
         for chunk in items.chunks_exact(key_count / thread_count) {
             scope.spawn(move || {
-                let mut map = map.pin();
-
                 barrier.wait();
 
                 for (index, key) in chunk {
@@ -245,15 +243,21 @@ where
                 barrier.wait();
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
-                    let value = map.remove(key.borrow()).unwrap();
-                    key_set.validate(*index, key.borrow(), *value);
+                    let value = match map.update_with(key.borrow(), None, |_, _| {
+                        core::ops::ControlFlow::<core::convert::Infallible, _>::Continue(None)
+                    }) {
+                        arctic::concurrent::Update::Absent { value } => unreachable!(),
+                        arctic::concurrent::Update::Success { old } => old,
+                        arctic::concurrent::Update::Break { old, r#break } => unreachable!(),
+                    };
+                    key_set.validate(*index, key.borrow(), &*value);
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().skip(chunk.len() / 2) {
                     let value = map.get(key.borrow());
-                    key_set.validate(*index, key.borrow(), *value.unwrap());
+                    key_set.validate(*index, key.borrow(), value.as_deref().unwrap());
                 }
             });
         }

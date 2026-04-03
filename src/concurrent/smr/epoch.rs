@@ -8,12 +8,22 @@ use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
 
-pub struct Epoch {
+pub struct Epoch;
+
+impl Smr for Epoch {
+    type Global<P, V>
+        = Global
+    where
+        P: ribbit::Pack<Packed: smr::hazard::Prefix>,
+        V: Value;
+}
+
+pub struct Global {
     collector: crossbeam_epoch::Collector,
     locals: [UnsafeCell<Option<LocalHandle>>; smr::thread::MAX],
 }
 
-impl Default for Epoch {
+impl Default for Global {
     fn default() -> Self {
         Self {
             collector: crossbeam_epoch::Collector::default(),
@@ -22,7 +32,7 @@ impl Default for Epoch {
     }
 }
 
-impl Epoch {
+impl Global {
     pub fn with_bag_capacity(max_objects: usize) -> Self {
         crossbeam_epoch::set_bag_capacity(max_objects);
         Self::default()
@@ -45,28 +55,22 @@ impl Epoch {
     }
 }
 
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for Epoch {
-    type Local<'g> = &'g LocalHandle;
-
-    fn local<'g>(&'g self) -> Self::Local<'g> {
-        self.local()
-    }
-}
-
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for &'_ LocalHandle {
-    type Guard<'l>
-        = Guard
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Global<P, V> for Global {
+    type Guard<'g>
+        = crossbeam_epoch::Guard
     where
-        Self: 'l;
+        V: 'g,
+        Self: 'g;
 
-    fn guard<'l>(&'l mut self, _hazard: ribbit::Packed<P>) -> Self::Guard<'l> {
-        Guard(self.pin())
+    fn guard<'g>(&'g self, _hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    where
+        V: 'g,
+    {
+        self.local().pin()
     }
 }
 
-pub struct Guard(crossbeam_epoch::Guard);
-
-impl<V: Value> smr::Guard<V> for Guard {
+impl<V: Value> smr::Guard<V> for crossbeam_epoch::Guard {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -77,7 +81,7 @@ impl<V: Value> smr::Guard<V> for Guard {
         stat::increment(stat::Counter::Retire);
 
         unsafe {
-            self.0.defer_unchecked(move || {
+            self.defer_unchecked(move || {
                 node.deallocate(stat::Counter::FreeRetire);
             });
         }
@@ -87,7 +91,7 @@ impl<V: Value> smr::Guard<V> for Guard {
         stat::increment(stat::Counter::Retire);
 
         unsafe {
-            self.0.defer_unchecked(move || drop(V::from_raw(value)));
+            self.defer_unchecked(move || drop(V::from_raw(value)));
         }
     }
 }

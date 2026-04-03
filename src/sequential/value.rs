@@ -12,6 +12,8 @@ pub unsafe trait Value {
     where
         Self: 'l;
 
+    type Target;
+
     fn into_raw(self) -> u64;
 
     /// # Safety
@@ -47,6 +49,8 @@ pub unsafe trait Value {
     unsafe fn borrow_mut_from_raw<'l>(raw: u64) -> Self::BorrowMut<'l>
     where
         Self: 'l;
+
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target;
 }
 
 unsafe impl<T: Sized> Value for Box<T> {
@@ -59,6 +63,8 @@ unsafe impl<T: Sized> Value for Box<T> {
         = &'l mut T
     where
         Self: 'l;
+
+    type Target = T;
 
     #[inline]
     unsafe fn from_raw(raw: u64) -> Self {
@@ -109,6 +115,11 @@ unsafe impl<T: Sized> Value for Box<T> {
             unsafe { borrow.unwrap_unchecked() }
         }
     }
+
+    #[inline]
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+        unsafe { Self::borrow_from_raw(*raw) }
+    }
 }
 
 unsafe impl<'v, T: 'v + Sized> Value for &'v T {
@@ -121,6 +132,8 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
         = &'v T
     where
         Self: 'l;
+
+    type Target = &'v T;
 
     #[inline]
     fn into_raw(self) -> u64 {
@@ -172,6 +185,11 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     {
         Self::borrow_from_raw(raw)
     }
+
+    #[inline]
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+        unsafe { core::mem::transmute(raw) }
+    }
 }
 
 macro_rules! impl_integer {
@@ -181,6 +199,8 @@ macro_rules! impl_integer {
                 type Borrow<'l> = Self;
 
                 type BorrowMut<'l> = Self;
+
+                type Target = Self;
 
                 #[inline]
                 fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
@@ -219,6 +239,12 @@ macro_rules! impl_integer {
                     Self: 'l,
                 {
                     Self::borrow_from_raw(raw)
+                }
+
+                #[inline]
+                unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+                    // FIXME: broken for non-64 bit
+                    unsafe { core::mem::transmute(raw) }
                 }
             }
         )*

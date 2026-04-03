@@ -1,25 +1,29 @@
-use crate::concurrent::smr;
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
+use crate::concurrent::smr;
 
 #[derive(Default)]
 pub struct NoOp;
 
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for NoOp {
-    type Local<'g> = Self;
-
-    fn local<'g>(&'g self) -> Self::Local<'g> {
-        Self
-    }
-}
-
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for NoOp {
-    type Guard<'l>
+impl Smr for NoOp {
+    type Global<P, V>
         = Self
     where
-        Self: 'l;
+        P: ribbit::Pack<Packed: smr::hazard::Prefix>,
+        V: Value;
+}
 
-    fn guard<'l>(&'l mut self, _hazard: ribbit::Packed<P>) -> Self::Guard<'l> {
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Global<P, V> for NoOp {
+    type Guard<'g>
+        = Self
+    where
+        V: 'g,
+        Self: 'g;
+
+    fn guard<'g>(&'g self, _hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    where
+        V: 'g,
+    {
         Self
     }
 }

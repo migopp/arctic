@@ -14,20 +14,22 @@ use crate::raw::edge;
 use crate::raw::node;
 use hazard::Prefix;
 
-pub trait Smr<P: ribbit::Pack<Packed: Prefix>, V: Value>: Default {
-    type Local<'g>: Local<P, V>
+pub trait Smr {
+    type Global<P, V>: Global<P, V>
     where
-        Self: 'g;
-
-    fn local<'g>(&'g self) -> Self::Local<'g>;
+        P: ribbit::Pack<Packed: Prefix>,
+        V: Value;
 }
 
-pub trait Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
-    type Guard<'l>: Guard<V>
+pub trait Global<P: ribbit::Pack<Packed: Prefix>, V: Value>: Default {
+    type Guard<'g>: Guard<V>
     where
-        Self: 'l;
+        V: 'g,
+        Self: 'g;
 
-    fn guard<'l>(&'l mut self, hazard: ribbit::Packed<P>) -> Self::Guard<'l>;
+    fn guard<'g>(&'g self, hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    where
+        V: 'g;
 }
 
 pub trait Guard<V: Value> {

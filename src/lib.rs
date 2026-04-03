@@ -52,11 +52,11 @@ pub(crate) fn cold() {}
 
 #[cfg(test)]
 mod tests {
+    use crate::Ascend;
+    use crate::Descend;
     use crate::concurrent::Map;
     use crate::raw::key::Read as _;
     use crate::sequential;
-    use crate::Ascend;
-    use crate::Descend;
 
     // https://users.rust-lang.org/t/testing-if-a-type-is-implementing-an-auto-trait/90871/6
     #[test]
@@ -75,7 +75,6 @@ mod tests {
     #[test]
     fn smoke() {
         let map = Map::<Vec<u8>, _>::default();
-        let mut map = map.pin();
         map.upsert(b"abcd", 1u32);
         assert_eq!(map.get(b"abcd").as_deref().copied(), Some(1));
     }
@@ -84,7 +83,6 @@ mod tests {
     fn smoke_u64_key() {
         let map = Map::<Vec<u8>, _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
-        let mut map = map.pin();
         map.upsert(&key, 1u32);
         assert_eq!(map.get(&key).as_deref().copied(), Some(1));
     }
@@ -93,7 +91,6 @@ mod tests {
     fn smoke_value_ref() {
         let values = [0, 1, 2, 3, 4, 5];
         let map = Map::<u64, &u64>::default();
-        let mut map = map.pin();
 
         for (key, value) in values.iter().enumerate() {
             map.upsert(key as u64, value);
@@ -107,9 +104,39 @@ mod tests {
     }
 
     #[test]
+    fn smoke_value_box() {
+        let values = [0, 1, 2, 3, 4, 5];
+        let map = Map::<u64, Box<u64>>::default();
+
+        for (key, value) in values.iter().enumerate() {
+            map.upsert(key as u64, Box::new(*value));
+        }
+
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for key in (0..values.len()).cycle().take(100_000) {
+                        let value = map.get(key as u64).as_deref().copied().unwrap();
+                        assert_eq!(key, value as usize);
+                    }
+                });
+            }
+        });
+
+        // TODO: multiple hazards?
+        // let a = map.get(3);
+        // let b = map.get(5);
+        // assert_ne!(a.as_deref(), b.as_deref());
+
+        for key in 0..values.len() {
+            let value = map.get(key as u64).as_deref().copied().unwrap();
+            assert_eq!(key, value as usize);
+        }
+    }
+
+    #[test]
     fn scan_value() {
         let map = Map::<u64, _>::default();
-        let mut map = map.pin();
         let key = 1u64;
         map.upsert(key, 2u32);
         let range = map.range(1u64..=1u64).unwrap();
@@ -129,7 +156,6 @@ mod tests {
     #[test]
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));
-        let mut map = map.pin();
         let range = map.range(256u64..=511u64).unwrap();
         assert_eq!(
             range.entries::<Ascend>().collect::<Vec<_>>(),
@@ -143,14 +169,12 @@ mod tests {
     #[test]
     fn node3_overwrite() {
         let mut map = Map::<u64, _>::default();
-        let mut pin = map.pin();
 
         for value in [1u32, 2, 3] {
-            pin.upsert(1, value);
-            assert_eq!(pin.get(1).as_deref().copied(), Some(value));
+            map.upsert(1, value);
+            assert_eq!(map.get(1).as_deref().copied(), Some(value));
         }
 
-        drop(pin);
         assert_eq!(map.as_sequential().all().entries::<Ascend>().count(), 1);
 
         map.as_sequential()
@@ -206,13 +230,12 @@ mod tests {
     #[test]
     fn range_reverse() {
         let map = Map::<u64, _>::default();
-        let mut pin = map.pin();
 
         for key in [5, 1, 4, 3, 2] {
-            pin.upsert(key, key);
-            assert_eq!(pin.get(key).as_deref().copied(), Some(key));
+            map.upsert(key, key);
+            assert_eq!(map.get(key).as_deref().copied(), Some(key));
         }
-        let range = pin.range(2..=4).unwrap();
+        let range = map.range(2..=4).unwrap();
 
         assert_eq!(
             range.entries::<Descend>().collect::<Vec<_>>(),
@@ -255,8 +278,7 @@ mod tests {
 
         let map = insert_all((0..10i64).map(key));
 
-        let mut pin = map.pin();
-        let prefix = pin.range(key(5)..=key(i64::MAX)).unwrap();
+        let prefix = map.range(key(5)..=key(i64::MAX)).unwrap();
 
         let values = prefix.values::<Ascend>().collect::<Vec<_>>();
         assert_eq!(values, (5..10).collect::<Vec<u32>>());
@@ -274,18 +296,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut map = Map::default();
-        let mut pin = map.pin();
 
         for (key, value) in &keys {
-            pin.upsert(key.borrow(), *value);
-            assert_eq!(pin.get(key.borrow()).as_deref().copied(), Some(*value));
+            map.upsert(key.borrow(), *value);
+            assert_eq!(map.get(key.borrow()).as_deref().copied(), Some(*value));
         }
 
         for (key, value) in &keys {
-            assert_eq!(pin.get(key.borrow()).as_deref().copied(), Some(*value));
+            assert_eq!(map.get(key.borrow()).as_deref().copied(), Some(*value));
         }
-
-        drop(pin);
 
         let mut iter = map.as_sequential().all().entries::<Ascend>();
         let mut count = 0;
@@ -308,15 +327,12 @@ mod tests {
                 assert_eq!(lv, *rv);
             });
 
-        let mut pin = map.pin();
-
         let Some(((first, _), (last, _))) = keys.first().zip(keys.last()) else {
-            drop(pin);
             return map;
         };
 
         // Concurrent prefix iteration, non-linearizable
-        let prefix = pin
+        let prefix = map
             .prefix(K::Read::from(first.borrow()).common_prefix(K::Read::from(last.borrow())))
             .unwrap();
         prefix
@@ -329,7 +345,7 @@ mod tests {
         drop(prefix);
 
         // Concurrent range iteration, non-linearizable
-        let range = pin.range(first.borrow()..=last.borrow()).unwrap();
+        let range = map.range(first.borrow()..=last.borrow()).unwrap();
         range
             .entries::<Ascend>()
             .zip(&keys)
@@ -339,7 +355,6 @@ mod tests {
             });
         drop(range);
 
-        drop(pin);
         map
     }
 }

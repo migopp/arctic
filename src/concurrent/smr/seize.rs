@@ -1,48 +1,47 @@
-use crate::concurrent::smr;
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
+use crate::concurrent::smr;
+use crate::concurrent::smr::Prefix;
 use crate::raw::node;
 use crate::stat;
 
 use seize::Guard as _;
 
-#[derive(Default)]
-pub struct Seize(seize::Collector);
+pub struct Seize;
 
-impl Seize {
+impl Smr for Global {
+    type Global<P, V>
+        = Global
+    where
+        P: ribbit::Pack<Packed: smr::hazard::Prefix>,
+        V: Value;
+}
+
+#[derive(Default)]
+pub struct Global(seize::Collector);
+
+impl Global {
     pub fn with_batch_size(batch_size: usize) -> Self {
         Self(seize::Collector::new().batch_size(batch_size))
     }
 }
 
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> Smr<P, V> for Seize {
-    // In this case, there is no notion of a local handle.
-    // We get the same effect from calling `enter` on a `Collector`.
-    //
-    // So, just forward `Self`.
-    type Local<'g> = Local<'g>;
-
-    fn local<'g>(&'g self) -> Self::Local<'g> {
-        Local(&self.0)
-    }
-}
-
-pub struct Local<'g>(&'g seize::Collector);
-
-impl<'g, P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Local<P, V> for Local<'g> {
-    type Guard<'l>
-        = Guard<'l>
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global {
+    type Guard<'g>
+        = seize::LocalGuard<'g>
     where
-        'g: 'l;
+        V: 'g,
+        Self: 'g;
 
-    fn guard<'l>(&'l mut self, _hazad: ribbit::Packed<P>) -> Self::Guard<'l> {
-        Guard(self.0.enter())
+    fn guard<'g>(&'g self, _hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    where
+        V: 'g,
+    {
+        self.0.enter()
     }
 }
 
-pub struct Guard<'g>(seize::LocalGuard<'g>);
-
-impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
+impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {
     #[expect(private_bounds)]
     #[expect(private_interfaces)]
     unsafe fn retire_node<M: ribbit::Pack<Packed: crate::raw::edge::Meta>>(
@@ -52,10 +51,11 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
     ) {
         stat::increment(stat::Counter::Retire);
 
-        self.0.defer_retire(node.raw().get() as *mut (), |ptr, _| {
-            unsafe { node::Ptr::<M>::new_unchecked(ptr as u64) }
-                .deallocate(stat::Counter::FreeRetire)
-        })
+        unsafe {
+            self.defer_retire(node.raw().get() as *mut (), |ptr, _| {
+                node::Ptr::<M>::new_unchecked(ptr as u64).deallocate(stat::Counter::FreeRetire)
+            })
+        }
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -67,7 +67,8 @@ impl<'g, V: Value> smr::Guard<V> for Guard<'g> {
         //
         // See: [`seize::raw::Collector::add`] and [`seize::raw::Collector::try_retire`].
         //
-        self.0
-            .defer_retire(value as *mut (), |ptr, _| drop(V::from_raw(ptr as u64)));
+        unsafe {
+            self.defer_retire(value as *mut (), |ptr, _| drop(V::from_raw(ptr as u64)));
+        }
     }
 }

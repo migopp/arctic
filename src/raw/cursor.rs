@@ -6,6 +6,10 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
+use crate::raw::Edge;
+use crate::raw::Frozen;
+use crate::raw::Key;
+use crate::raw::Smo;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -13,10 +17,6 @@ use crate::raw::edge::Meta as _;
 use crate::raw::key::Read as _;
 use crate::raw::node;
 use crate::raw::node::Node3;
-use crate::raw::Edge;
-use crate::raw::Frozen;
-use crate::raw::Key;
-use crate::raw::Smo;
 use crate::stat;
 
 pub(crate) struct CursorMut<'k, 'g, K: Key>(Cursor<'k, 'g, K, path::Discard>);
@@ -249,7 +249,7 @@ where
 
                 // Node replacement
                 (true, Some(edge::Child::Node(_))) if old_meta.is_frozen() => {
-                    return Insert::Smo(Err(Frozen))
+                    return Insert::Smo(Err(Frozen));
                 }
                 (true, Some(edge::Child::Node(node))) => {
                     let (smo, new) = unsafe { node.replace(old_meta) };
