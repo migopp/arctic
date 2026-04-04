@@ -67,6 +67,8 @@ use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
+use std::collections::VecDeque;
+
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
 use crate::concurrent::smr;
@@ -108,6 +110,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                 UnsafeCell::new(Local {
                     snapshot: Vec::new(),
                     retired: Vec::new(),
+                    condemned: VecDeque::new(),
                     _value: PhantomData,
                 })
             }),
@@ -163,6 +166,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global<P, 
         V: 'g,
     {
         let id = smr::thread::Id::current();
+        let local = unsafe { &mut *self.locals[usize::from(id)].get() };
 
         validate!(
             !self.hazards[usize::from(id)]
@@ -175,6 +179,11 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global<P, 
             .0
             .store_packed(hazard, Ordering::Relaxed);
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
+
+        if cfg!(feature = "opt-amortized-free-guard") {
+            local.deallocate_one();
+        }
+
         Guard(self)
     }
 }
@@ -183,6 +192,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global<P, 
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<(ribbit::Packed<P>, u64)>,
+    condemned: VecDeque<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
 }
 
@@ -243,12 +253,27 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 }
             }
 
-            deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+            if cfg!(any(
+                feature = "opt-amortized-free-guard",
+                feature = "opt-amortized-free-retire"
+            )) {
+                local.condemned.push_back((*prefix, *raw));
+            } else {
+                deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+            }
             false
         });
 
         local.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
+    }
+}
+
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Local<P, V> {
+    pub fn deallocate_one(&mut self) {
+        if let Some((prefix, raw)) = self.condemned.pop_front() {
+            deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
+        }
     }
 }
 
@@ -268,6 +293,10 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             let id = smr::thread::Id::current();
             let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
             let hazard = &self.0.hazards[usize::from(id)].0;
+
+            if cfg!(feature = "opt-amortized-free-retire") {
+                local.deallocate_one();
+            }
 
             let prefix = hazard
                 .load_packed(Ordering::Relaxed)
@@ -290,6 +319,10 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             let id = smr::thread::Id::current();
             let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
             let hazard = &self.0.hazards[usize::from(id)].0;
+
+            if cfg!(feature = "opt-amortized-free-retire") {
+                local.deallocate_one();
+            }
 
             let prefix = hazard
                 .load_packed(Ordering::Relaxed)
