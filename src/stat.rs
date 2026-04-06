@@ -3,14 +3,15 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Unpack as _;
 
+use crate::Key;
+use crate::Value;
+use crate::concurrent::Smr;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
-use crate::Key;
-use crate::Value;
 
 static RECORD: AtomicBool = AtomicBool::new(false);
 
@@ -19,7 +20,7 @@ thread_local! {
     pub(crate) static THREAD: core::cell::RefCell<Thread> = core::cell::RefCell::new(Thread::default()) ;
 }
 
-pub fn process<K: Key, V: Value>(map: &mut crate::concurrent::Map<K, V>) -> Process {
+pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, S>) -> Process {
     let mut depth = Histogram::default();
     let mut compression = Histogram::default();
     let mut node_3 = Histogram::default();
