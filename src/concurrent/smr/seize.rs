@@ -9,7 +9,7 @@ use seize::Guard as _;
 
 pub struct Seize;
 
-impl Smr for Global {
+impl Smr for Seize {
     type Global<P, V>
         = Global
     where
