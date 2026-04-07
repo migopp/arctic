@@ -12,7 +12,7 @@ pub struct Epoch;
 
 impl Smr for Epoch {
     type Global<P, V>
-        = Global
+        = Box<Global>
     where
         P: ribbit::Pack<Packed: smr::hazard::Prefix>,
         V: Value;
@@ -55,7 +55,7 @@ impl Global {
     }
 }
 
-impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Global<P, V> for Global {
+impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Global<P, V> for Box<Global> {
     type Guard<'g>
         = crossbeam_epoch::Guard
     where

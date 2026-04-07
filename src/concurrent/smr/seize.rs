@@ -9,7 +9,7 @@ use seize::Guard as _;
 
 pub struct Seize;
 
-impl Smr for Global {
+impl Smr for Seize {
     type Global<P, V>
         = Global
     where
@@ -68,7 +68,10 @@ impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {
         // See: [`seize::raw::Collector::add`] and [`seize::raw::Collector::try_retire`].
         //
         unsafe {
-            self.defer_retire(value as *mut (), |ptr, _| drop(V::from_raw(ptr as u64)));
+            self.defer_retire(value as *mut (), |ptr, _| {
+                stat::increment(stat::Counter::FreeRetire);
+                drop(V::from_raw(ptr as u64))
+            });
         }
     }
 }

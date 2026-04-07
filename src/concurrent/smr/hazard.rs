@@ -79,7 +79,7 @@ pub struct Hazard;
 
 impl Smr for Hazard {
     type Global<P, V>
-        = Global<P, V>
+        = Box<Global<P, V>>
     where
         P: ribbit::Pack<Packed: Prefix>,
         V: Value;
@@ -153,7 +153,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Global<P, V> {
     }
 }
 
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global<P, V> {
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global<P, V>> {
     type Guard<'g>
         = Guard<'g, P, V>
     where
