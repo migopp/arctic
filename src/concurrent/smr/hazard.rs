@@ -174,6 +174,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
 
         if cfg!(feature = "opt-amortized-free-guard") {
+            let local = unsafe { &mut *local.get() };
             local.deallocate_one();
         }
 
