@@ -3,7 +3,6 @@ mod key;
 pub mod smr;
 mod value;
 
-use core::convert::Infallible;
 use core::ops::ControlFlow;
 use core::ops::RangeFull;
 use core::sync::atomic::Ordering;
@@ -79,7 +78,7 @@ impl<K: Key, V: Value, S: Smr> Map<K, V, S> {
     }
 }
 
-pub enum Update<'g, K, V, S, B = Option<V>>
+pub enum Update<'g, K, V, S>
 where
     K: Key,
     V: Value + 'g,
@@ -92,7 +91,7 @@ where
     Success(Updated<'g, K, V, S>),
     Break {
         old: Shared<'g, K, V, S>,
-        r#break: B,
+        initial: Option<V>,
     },
 }
 
@@ -108,7 +107,7 @@ where
     Break { old: Shared<'g, K, V, S> },
 }
 
-pub enum Upsert<'g, K, V, S, B = Option<V>>
+pub enum Upsert<'g, K, V, S>
 where
     K: Key,
     V: Value + 'g,
@@ -118,7 +117,7 @@ where
     Success(Upserted<'g, K, V, S>),
     Break {
         old: Option<Shared<'g, K, V, S>>,
-        r#break: B,
+        initial: Option<V>,
     },
 }
 
@@ -140,7 +139,7 @@ where
     #[inline]
     pub fn update(&self, key: K::Borrow<'_>, value: V) -> Result<Updated<K, V, S>, V> {
         match self.update_with(key, Some(value), |_, initial| {
-            ControlFlow::<Infallible, _>::Continue(initial.expect("Value is always initialized"))
+            ControlFlow::<(), _>::Continue(initial.take().expect("Value is always initialized"))
         }) {
             Update::Absent {
                 initial: Some(initial),
@@ -151,14 +150,14 @@ where
     }
 
     #[inline]
-    pub fn update_with<F, B>(
+    pub fn update_with<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         mut update: F,
-    ) -> Update<'_, K, V, S, B>
+    ) -> Update<K, V, S>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let initial = if cfg!(feature = "opt-no-path") {
             initial
@@ -173,45 +172,45 @@ where
     }
 
     #[inline]
-    fn update_with_optimistic<F, B>(
+    fn update_with_optimistic<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         update: F,
-    ) -> Result<Update<'_, K, V, S, B>, Option<V>>
+    ) -> Result<Update<K, V, S>, Option<V>>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
     {
-        self.update_with_impl::<path::Discard, _, _>(key, initial, update)
+        self.update_with_impl::<path::Discard, _>(key, initial, update)
     }
 
     #[cold]
-    fn update_with_pessimistic<F, B>(
+    fn update_with_pessimistic<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         update: F,
-    ) -> Update<'_, K, V, S, B>
+    ) -> Update<K, V, S>
     where
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         stat::increment(stat::Counter::UpdatePessimistic);
-        match self.update_with_impl::<path::Retain<_>, _, _>(key, initial, update) {
+        match self.update_with_impl::<path::Retain<_>, _>(key, initial, update) {
             Ok(update) => update,
             Err(_) => unreachable!(),
         }
     }
 
     #[inline]
-    fn update_with_impl<'k, H, F, B>(
+    fn update_with_impl<'k, H, F>(
         &self,
         key: K::Borrow<'k>,
         mut initial: Option<V>,
         mut update: F,
-    ) -> Result<Update<'_, K, V, S, B>, Option<V>>
+    ) -> Result<Update<K, V, S>, Option<V>>
     where
         H: path::History<'k, K>,
-        F: FnMut(V::Borrow<'_>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -234,12 +233,12 @@ where
             validate!(old.meta().is_value());
 
             let old_value = unsafe { old.into_value_unchecked() };
-            let new_value = match update(unsafe { V::borrow_from_raw(old_value) }, initial.take()) {
+            let new_value = match update(unsafe { V::borrow_from_raw(old_value) }, &mut initial) {
                 ControlFlow::Continue(new) => V::into_raw(new),
-                ControlFlow::Break(r#break) => {
+                ControlFlow::Break(()) => {
                     return Ok(Update::Break {
                         old: unsafe { Shared::<K, V, S>::wrap(guard, old.into_value_unchecked()) },
-                        r#break,
+                        initial,
                     });
                 }
             };
@@ -390,7 +389,7 @@ where
     #[inline]
     pub fn upsert(&self, key: K::Borrow<'_>, value: V) -> Upserted<'_, K, V, S> {
         match self.upsert_with(key, Some(value), |_, new| {
-            ControlFlow::<Infallible, _>::Continue(new.expect("Value is always initialized"))
+            ControlFlow::<(), _>::Continue(new.take().expect("Value is always initialized"))
         }) {
             Upsert::Success(upserted) => upserted,
             Upsert::Break { .. } => unreachable!(),
@@ -403,29 +402,29 @@ where
         key: K::Borrow<'_>,
         value: V,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, V)> {
-        match self.upsert_with(key, Some(value), |old, new| {
-            let new = new.expect("Value is always initialized");
-            match old {
-                None => ControlFlow::Continue(new),
-                Some(_) => ControlFlow::Break(new),
-            }
+        match self.upsert_with(key, Some(value), |old, new| match old {
+            None => ControlFlow::Continue(new.take().expect("Value is always initialized")),
+            Some(_) => ControlFlow::Break(()),
         }) {
             Upsert::Success(upserted) => Ok(upserted
                 .into_inserted()
                 .unwrap_or_else(|_| unreachable!("Continue on `None`"))),
-            Upsert::Break { old, r#break } => Err((old.expect("Break on `Some`"), r#break)),
+            Upsert::Break { old, initial } => Err((
+                old.expect("Break on `Some`"),
+                initial.expect("Value is always initialized"),
+            )),
         }
     }
 
     #[inline]
-    pub fn upsert_with<F, B>(
+    pub fn upsert_with<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         mut upsert: F,
-    ) -> Upsert<'_, K, V, S, B>
+    ) -> Upsert<K, V, S>
     where
-        F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let initial = if cfg!(feature = "opt-no-path") {
             initial
@@ -440,45 +439,45 @@ where
     }
 
     #[inline]
-    fn upsert_with_optimistic<F, B>(
+    fn upsert_with_optimistic<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         upsert: F,
-    ) -> Result<Upsert<'_, K, V, S, B>, Option<V>>
+    ) -> Result<Upsert<K, V, S>, Option<V>>
     where
-        F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
     {
-        self.upsert_with_impl::<path::Discard, _, _>(key, initial, upsert)
+        self.upsert_with_impl::<path::Discard, _>(key, initial, upsert)
     }
 
     #[cold]
-    fn upsert_with_pessimistic<F, B>(
+    fn upsert_with_pessimistic<F>(
         &self,
         key: K::Borrow<'_>,
         initial: Option<V>,
         upsert: F,
-    ) -> Upsert<'_, K, V, S, B>
+    ) -> Upsert<K, V, S>
     where
-        F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         stat::increment(stat::Counter::InsertPessimistic);
-        match self.upsert_with_impl::<path::Retain<_>, _, _>(key, initial, upsert) {
+        match self.upsert_with_impl::<path::Retain<_>, _>(key, initial, upsert) {
             Ok(upsert) => upsert,
             Err(_) => unreachable!(),
         }
     }
 
     #[inline]
-    fn upsert_with_impl<'k, H, F, B>(
+    fn upsert_with_impl<'k, H, F>(
         &self,
         key: K::Borrow<'k>,
         mut initial: Option<V>,
         mut upsert: F,
-    ) -> Result<Upsert<'_, K, V, S, B>, Option<V>>
+    ) -> Result<Upsert<K, V, S>, Option<V>>
     where
         H: path::History<'k, K>,
-        F: FnMut(Option<V::Borrow<'_>>, Option<V>) -> ControlFlow<B, V>,
+        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -493,15 +492,15 @@ where
                 } => {
                     let new_value = match upsert(
                         old_value.map(|old| unsafe { V::borrow_from_raw(old) }),
-                        initial.take(),
+                        &mut initial,
                     ) {
                         ControlFlow::Continue(value) => V::into_raw(value),
-                        ControlFlow::Break(r#break) => {
+                        ControlFlow::Break(()) => {
                             return Ok(Upsert::Break {
                                 old: old
                                     .as_value()
                                     .map(|old| unsafe { Shared::<K, V, S>::wrap(guard, old) }),
-                                r#break,
+                                initial,
                             });
                         }
                     };
