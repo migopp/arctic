@@ -161,30 +161,27 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         Self: 'g;
 
     #[inline]
-    fn guard<'g>(&'g self, hazard: ribbit::Packed<P>) -> Self::Guard<'g>
+    fn guard<'g>(&'g self, prefix: ribbit::Packed<P>) -> Self::Guard<'g>
     where
         V: 'g,
     {
-        let id = smr::thread::Id::current();
-        let local = unsafe { &mut *self.locals[usize::from(id)].get() };
+        let id = usize::from(smr::thread::Id::current());
+        let hazard = &self.hazards[id].0;
+        let local = &self.locals[id];
 
-        validate!(
-            !self.hazards[usize::from(id)]
-                .0
-                .load_packed(Ordering::Relaxed)
-                .is_active()
-        );
-
-        self.hazards[usize::from(id)]
-            .0
-            .store_packed(hazard, Ordering::Relaxed);
+        validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
+        hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
 
         if cfg!(feature = "opt-amortized-free-guard") {
             local.deallocate_one();
         }
 
-        Guard(self)
+        Guard {
+            hazard,
+            local,
+            global: self,
+        }
     }
 }
 
@@ -203,18 +200,17 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     #[cold]
-    fn flush(&self) {
+    fn flush(global: &Global<P, V>, local: &mut Local<P, V>) {
         let id = smr::thread::Id::current();
-        let local = unsafe { &mut *self.locals[usize::from(id)].get() };
 
         stat::max(stat::Max::RetireCache, local.retired.len() as u64);
 
-        membarrier::slow(self.membarrier.load(Ordering::Relaxed));
+        membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
         local.snapshot.extend(
-            self.hazards[..usize::from(id)]
+            global.hazards[..usize::from(id)]
                 .iter()
-                .chain(&self.hazards[usize::from(id) + 1..smr::thread::count()])
+                .chain(&global.hazards[usize::from(id) + 1..smr::thread::count()])
                 .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
                 .filter(|hazard| hazard.is_active()),
         );
@@ -277,7 +273,11 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Local<P, V> {
     }
 }
 
-pub struct Guard<'g, P: ribbit::Pack<Packed: Prefix>, V: Value>(&'g Global<P, V>);
+pub struct Guard<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> {
+    hazard: &'g ribbit::Atomic<P>,
+    local: &'g UnsafeCell<Local<P, V>>,
+    global: &'g Global<P, V>,
+}
 
 impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, P, V> {
     #[expect(private_bounds)]
@@ -289,62 +289,54 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
     ) {
         stat::increment(stat::Counter::Retire);
 
-        {
-            let id = smr::thread::Id::current();
-            let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
-            let hazard = &self.0.hazards[usize::from(id)].0;
+        let local = unsafe { &mut *self.local.get() };
 
-            if cfg!(feature = "opt-amortized-free-retire") {
-                local.deallocate_one();
-            }
-
-            let prefix = hazard
-                .load_packed(Ordering::Relaxed)
-                .into_prefix(false, Some(_bits));
-
-            local.retired.push((prefix, node.raw().get()));
-
-            if local.retired.len() < self.0.reclaim_threshold {
-                return;
-            }
+        if cfg!(feature = "opt-amortized-free-retire") {
+            local.deallocate_one();
         }
 
-        self.0.flush();
+        let prefix = self
+            .hazard
+            .load_packed(Ordering::Relaxed)
+            .into_prefix(false, Some(_bits));
+
+        local.retired.push((prefix, node.raw().get()));
+
+        if local.retired.len() < self.global.reclaim_threshold {
+            return;
+        }
+
+        Global::flush(self.global, local)
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
         stat::increment(stat::Counter::Retire);
 
-        {
-            let id = smr::thread::Id::current();
-            let local = unsafe { &mut *self.0.locals[usize::from(id)].get() };
-            let hazard = &self.0.hazards[usize::from(id)].0;
+        let local = unsafe { &mut *self.local.get() };
 
-            if cfg!(feature = "opt-amortized-free-retire") {
-                local.deallocate_one();
-            }
-
-            let prefix = hazard
-                .load_packed(Ordering::Relaxed)
-                .into_prefix(true, None);
-
-            local.retired.push((prefix, value));
-
-            if local.retired.len() < self.0.reclaim_threshold {
-                return;
-            }
+        if cfg!(feature = "opt-amortized-free-retire") {
+            local.deallocate_one();
         }
 
-        self.0.flush();
+        let prefix = self
+            .hazard
+            .load_packed(Ordering::Relaxed)
+            .into_prefix(true, None);
+
+        local.retired.push((prefix, value));
+
+        if local.retired.len() < self.global.reclaim_threshold {
+            return;
+        }
+
+        Global::flush(self.global, local)
     }
 }
 
 impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
-        let id = smr::thread::Id::current();
-        let hazard = &self.0.hazards[usize::from(id)].0;
-
-        hazard.store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+        self.hazard
+            .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
     }
 }
 
