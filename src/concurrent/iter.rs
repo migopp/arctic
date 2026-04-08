@@ -27,7 +27,7 @@ where
     ) -> Prefix<'k, 'g, K, V, R, G> {
         Prefix {
             _guard: guard,
-            inner: sequential::Prefix::new(prefix),
+            inner: unsafe { sequential::Prefix::new(prefix) },
         }
     }
 }

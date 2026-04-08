@@ -21,16 +21,16 @@ pub(crate) use iter::KeyIter;
 pub(crate) use iter::Lower;
 pub(crate) use iter::NodeIter;
 pub(crate) use iter::Upper;
-pub(crate) use node_15::Node15;
-pub(crate) use node_256::Node256;
 pub(crate) use node_3::Node3;
+pub(crate) use node_15::Node15;
 pub(crate) use node_47::Node47;
+pub(crate) use node_256::Node256;
 
+use crate::raw::Edge;
+use crate::raw::Smo;
 use crate::raw::edge;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
-use crate::raw::Edge;
-use crate::raw::Smo;
 use crate::stat;
 use linear::Linear;
 
@@ -225,11 +225,7 @@ macro_rules! dispatch {
             let lo = kind & 0b01;
 
             if hi == 0 {
-                if lo == 0 {
-                    $node3
-                } else {
-                    $node15
-                }
+                if lo == 0 { $node3 } else { $node15 }
             } else if lo == 0 {
                 $node47
             } else {
@@ -391,9 +387,11 @@ where
 
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
-        node.edges_mut()[0]
-            .get_packed()
-            .deallocate_recursive_unchecked(counter);
+        unsafe {
+            node.edges_mut()[0]
+                .get_packed()
+                .deallocate_recursive_unchecked(counter);
+        }
 
         drop(node);
     }
