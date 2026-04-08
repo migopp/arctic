@@ -1,6 +1,6 @@
 pub mod epoch;
 pub mod hazard;
-mod no_op;
+pub mod no_op;
 pub mod seize;
 mod thread;
 

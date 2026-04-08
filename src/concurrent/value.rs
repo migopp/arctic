@@ -1,16 +1,13 @@
+use core::mem::ManuallyDrop;
 use core::ops::Deref;
 
 use crate::concurrent::smr;
 use crate::concurrent::smr::Guard as _;
 
 pub unsafe trait Value: Sized + crate::sequential::Value {
-    type Guard<G>: smr::Guard<Self>
+    type Guard<G>: smr::Guard<Self> + From<G>
     where
         G: smr::Guard<Self>;
-
-    unsafe fn own<G: smr::Guard<Self>>(guard: G, raw: u64) -> Owned<G, Self>;
-
-    unsafe fn share<G: smr::Guard<Self>>(guard: G, raw: u64) -> Shared<G, Self>;
 }
 
 unsafe impl<T> Value for Box<T> {
@@ -18,39 +15,13 @@ unsafe impl<T> Value for Box<T> {
         = G
     where
         G: smr::Guard<Self>;
-
-    #[inline]
-    unsafe fn own<G: smr::Guard<Self>>(guard: G, raw: u64) -> Owned<G, Self> {
-        Owned { guard, raw }
-    }
-
-    #[inline]
-    unsafe fn share<G: smr::Guard<Self>>(guard: G, raw: u64) -> Shared<G, Self> {
-        Shared { _guard: guard, raw }
-    }
 }
 
 unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     type Guard<G>
-        = smr::NoOp
+        = smr::no_op::Guard<G, Self>
     where
         G: smr::Guard<Self>;
-
-    #[inline]
-    unsafe fn own<G: smr::Guard<Self>>(_guard: G, raw: u64) -> Owned<G, Self> {
-        Owned {
-            guard: smr::NoOp,
-            raw,
-        }
-    }
-
-    #[inline]
-    unsafe fn share<G: smr::Guard<Self>>(_guard: G, raw: u64) -> Shared<G, Self> {
-        Shared {
-            _guard: smr::NoOp,
-            raw,
-        }
-    }
 }
 
 macro_rules! impl_trivial {
@@ -58,25 +29,9 @@ macro_rules! impl_trivial {
         $(
             unsafe impl Value for $ty {
                 type Guard<G>
-                    = smr::NoOp
+                    = smr::no_op::Guard<G, Self>
                 where
                     G: smr::Guard<Self>;
-
-                #[inline]
-                unsafe fn own<G: smr::Guard<Self>>(_guard: G, raw: u64) -> Owned<G, Self> {
-                    Owned {
-                        guard: smr::NoOp,
-                        raw,
-                    }
-                }
-
-                #[inline]
-                unsafe fn share<G: smr::Guard<Self>>(_guard: G, raw: u64) -> Shared<G, Self> {
-                    Shared {
-                        _guard: smr::NoOp,
-                        raw,
-                    }
-                }
             }
         )*
     };
@@ -87,6 +42,19 @@ impl_trivial!(u64, u32);
 pub struct Owned<G: smr::Guard<V>, V: Value> {
     guard: V::Guard<G>,
     raw: u64,
+}
+
+impl<G, V> Owned<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+{
+    pub(crate) unsafe fn wrap(guard: G, raw: u64) -> Self {
+        Self {
+            guard: V::Guard::<G>::from(guard),
+            raw,
+        }
+    }
 }
 
 impl<G, V> Deref for Owned<G, V>
@@ -103,7 +71,6 @@ where
 }
 
 impl<G: smr::Guard<V>, V: Value> Drop for Owned<G, V> {
-    #[inline]
     fn drop(&mut self) {
         unsafe { self.guard.retire_value(self.raw) }
     }
@@ -112,6 +79,19 @@ impl<G: smr::Guard<V>, V: Value> Drop for Owned<G, V> {
 pub struct Shared<G: smr::Guard<V>, V: Value> {
     _guard: V::Guard<G>,
     raw: u64,
+}
+
+impl<G, V> Shared<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+{
+    pub(crate) unsafe fn wrap(guard: G, raw: u64) -> Self {
+        Self {
+            _guard: V::Guard::<G>::from(guard),
+            raw,
+        }
+    }
 }
 
 impl<G, V> Deref for Shared<G, V>
@@ -124,5 +104,94 @@ where
     #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe { V::target_from_raw(&self.raw) }
+    }
+}
+
+pub struct Updated<G: smr::Guard<V>, V: Value> {
+    guard: V::Guard<G>,
+    old: u64,
+    new: u64,
+}
+
+impl<G, V> Updated<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+{
+    pub(crate) unsafe fn wrap(guard: G, old: u64, new: u64) -> Self {
+        Self {
+            guard: V::Guard::<G>::from(guard),
+            old,
+            new,
+        }
+    }
+
+    #[inline]
+    pub fn old(&self) -> &V::Target {
+        unsafe { V::target_from_raw(&self.old) }
+    }
+
+    #[inline]
+    pub fn new(&self) -> &V::Target {
+        unsafe { V::target_from_raw(&self.new) }
+    }
+}
+
+impl<G: smr::Guard<V>, V: Value> Drop for Updated<G, V> {
+    fn drop(&mut self) {
+        unsafe { self.guard.retire_value(self.old) }
+    }
+}
+
+pub struct Upserted<G: smr::Guard<V>, V: Value> {
+    guard: V::Guard<G>,
+    old: Option<u64>,
+    new: u64,
+}
+
+impl<G, V> Upserted<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+{
+    pub(crate) unsafe fn wrap(guard: G, old: Option<u64>, new: u64) -> Self {
+        Self {
+            guard: V::Guard::<G>::from(guard),
+            old,
+            new,
+        }
+    }
+
+    pub(crate) fn into_inserted(self) -> Result<Shared<G, V>, Self> {
+        // https://internals.rust-lang.org/t/move-out-of-deref-for-manuallydrop/19216
+        let upserted = ManuallyDrop::new(self);
+
+        match upserted.old {
+            None => Ok(Shared {
+                // HACK: work around not being able to move out of deref
+                _guard: unsafe { core::ptr::read(&upserted.guard) },
+                raw: upserted.new,
+            }),
+            Some(_) => Err(ManuallyDrop::into_inner(upserted)),
+        }
+    }
+
+    #[inline]
+    pub fn old(&self) -> Option<&V::Target> {
+        self.old
+            .as_ref()
+            .map(|old| unsafe { V::target_from_raw(old) })
+    }
+
+    #[inline]
+    pub fn new(&self) -> &V::Target {
+        unsafe { V::target_from_raw(&self.new) }
+    }
+}
+
+impl<G: smr::Guard<V>, V: Value> Drop for Upserted<G, V> {
+    fn drop(&mut self) {
+        let Some(old) = self.old else { return };
+        unsafe { self.guard.retire_value(old) }
     }
 }
