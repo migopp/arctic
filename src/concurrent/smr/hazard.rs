@@ -140,10 +140,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .iter_mut()
             .take(smr::thread::count())
             .map(|local| local.get_mut())
-            .flat_map(|local| local.retired.drain(..))
+            .flat_map(|local| local.retired.drain(..).chain(local.condemned.drain(..)))
             .for_each(|(prefix, raw)| {
                 deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
-            })
+            });
     }
 }
 
