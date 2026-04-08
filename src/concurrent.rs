@@ -402,17 +402,33 @@ where
         key: K::Borrow<'_>,
         value: V,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, V)> {
-        match self.upsert_with(key, Some(value), |old, new| match old {
-            None => ControlFlow::Continue(new.take().expect("Value is always initialized")),
+        let mut value = Some(value);
+        self.insert_with(key, || value.take().expect("Call thunk once"))
+            .map_err(|(shared, initial)| (shared, initial.expect("Value is always initialized")))
+    }
+
+    #[inline]
+    pub fn insert_with<F>(
+        &self,
+        key: K::Borrow<'_>,
+        insert: F,
+    ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, Option<V>)>
+    where
+        F: FnOnce() -> V,
+    {
+        let mut thunk = Some(insert);
+
+        match self.upsert_with(key, None, |old, new| match old {
+            None => ControlFlow::Continue(match new.take() {
+                None => (thunk.take().expect("Call thunk once"))(),
+                Some(new) => new,
+            }),
             Some(_) => ControlFlow::Break(()),
         }) {
             Upsert::Success(upserted) => Ok(upserted
                 .into_inserted()
                 .unwrap_or_else(|_| unreachable!("Continue on `None`"))),
-            Upsert::Break { old, initial } => Err((
-                old.expect("Break on `Some`"),
-                initial.expect("Value is always initialized"),
-            )),
+            Upsert::Break { old, initial } => Err((old.expect("Break on `Some`"), initial)),
         }
     }
 
