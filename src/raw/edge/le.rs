@@ -1,8 +1,8 @@
 use core::ops::BitOr as _;
 use core::ops::BitXor;
 
-use ribbit::u56;
 use ribbit::u6;
+use ribbit::u56;
 
 use crate::raw::edge;
 

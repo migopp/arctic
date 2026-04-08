@@ -3,10 +3,10 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
+use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
-use crate::raw::Node;
 
 #[repr(C, align(64))]
 pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack>

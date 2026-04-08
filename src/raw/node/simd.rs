@@ -3,9 +3,9 @@ use core::sync::atomic::Ordering;
 #[cfg(target_feature = "avx2")]
 mod avx2;
 
+use ribbit::Atomic;
 use ribbit::u2;
 use ribbit::u4;
-use ribbit::Atomic;
 
 use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear::KeyIter;

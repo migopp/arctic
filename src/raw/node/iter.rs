@@ -2,15 +2,15 @@ use core::marker::PhantomData;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
-use ribbit::u2;
 use ribbit::Atomic;
 use ribbit::Pack as _;
+use ribbit::u2;
 
+use crate::raw::Edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
 use crate::raw::node::linear;
 use crate::raw::node::node_256;
-use crate::raw::Edge;
 
 pub(crate) struct NodeIter<'g, L, U, M: ribbit::Pack> {
     lower: L,

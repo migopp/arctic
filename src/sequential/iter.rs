@@ -2,10 +2,10 @@ use core::marker::PhantomData;
 use core::ops::ControlFlow;
 use core::ops::Deref;
 
+use crate::Order;
 use crate::raw;
 use crate::raw::Key;
 use crate::sequential::Value;
-use crate::Order;
 
 pub struct Prefix<'k, 'g, K: Key, V, R> {
     inner: raw::iter::Prefix<'k, 'g, K, R>,
@@ -240,9 +240,9 @@ where
 mod tests {
     use core::ops::ControlFlow;
 
-    use crate::sequential::Map;
     use crate::Ascend;
     use crate::Descend;
+    use crate::sequential::Map;
 
     #[test]
     fn values_mut() {

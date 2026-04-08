@@ -3,10 +3,10 @@ use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
-use crate::raw::edge;
-use crate::raw::node;
 use crate::raw::Edge;
 use crate::raw::Key;
+use crate::raw::edge;
+use crate::raw::node;
 
 /// A path along the tree is composed of 0 or more path segments.
 pub(crate) struct Segment<'k, K: Key> {

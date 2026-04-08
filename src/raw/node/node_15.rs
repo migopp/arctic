@@ -1,11 +1,11 @@
-use ribbit::u120;
 use ribbit::u4;
+use ribbit::u120;
 
 use crate::raw::edge;
 use crate::raw::node;
-use crate::raw::node::linear;
 use crate::raw::node::Node3;
 use crate::raw::node::Node47;
+use crate::raw::node::linear;
 
 pub(crate) type Node15<C> = super::Linear<15, Header, C>;
 
