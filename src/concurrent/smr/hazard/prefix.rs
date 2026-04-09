@@ -15,6 +15,7 @@ pub trait Prefix: Send + Sync + ribbit::Unpack<Loose = u64> {
     fn is_active(self) -> bool;
 
     fn is_conflict(self, other: Self) -> bool;
+    fn is_conflict_simd(self, other: [Self; 4]) -> bool;
 
     fn bytes(&self) -> usize;
 
@@ -128,6 +129,68 @@ impl Prefix for BePacked {
         }
 
         self.is_overlap(prefix)
+    }
+
+    #[inline]
+    fn is_conflict_simd(self, prefix: [Self; 4]) -> bool {
+        use core::arch::x86_64::*;
+        validate!(self.is_active());
+        validate!(self.node() ^ self.value());
+
+        unsafe {
+            // set hazard and broadcast prefix
+            let h = _mm256_set_epi64x(
+                prefix[3].value as i64,
+                prefix[2].value as i64,
+                prefix[1].value as i64,
+                prefix[0].value as i64,
+            );
+            let p = _mm256_set1_epi64x(self.value as i64);
+
+            let zeros = _mm256_setzero_si256();
+            let ones = _mm256_set1_epi64x(-1i64);
+
+            // Case: `hazard` doesn't protect node or value
+            // (h & p) & 0b11
+            let type_bits = _mm256_and_si256(_mm256_and_si256(h, p), _mm256_set1_epi64x(0b11));
+
+            // != 0
+            let type_match = _mm256_xor_si256(_mm256_cmpeq_epi64(type_bits, zeros), ones);
+
+            // Case: `hazard` protects prefixes only, and `prefix` is higher up the tree
+            // get overlap bit
+            let h_no_overlap =
+                _mm256_cmpeq_epi64(_mm256_and_si256(h, _mm256_set1_epi64x(0b100)), zeros);
+
+            // fetch len
+            let h_len = _mm256_and_si256(_mm256_srli_epi64::<3>(h), _mm256_set1_epi64x(0b111));
+            let p_len = _mm256_and_si256(_mm256_srli_epi64::<3>(p), _mm256_set1_epi64x(0b111));
+
+            // !h.overlap() && h.len > p.len
+            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_len, p_len));
+
+            // Case: Overlapping prefix
+            // h ^ p
+            let xor = _mm256_xor_si256(h, p);
+
+            // min_len * 8
+            let min_len = _mm256_min_epu16(h_len, p_len);
+            let bits = _mm256_slli_epi64::<3>(min_len);
+
+            // Be::extract logic
+            let shift = _mm256_sub_epi64(_mm256_set1_epi64x(64), bits);
+            let prefix_mask = _mm256_sllv_epi64(ones, shift);
+
+            // (xor & mask) == 0
+            let overlap = _mm256_cmpeq_epi64(_mm256_and_si256(xor, prefix_mask), zeros);
+
+            // combine, type_match & !skip & overlap
+            let result = _mm256_and_si256(
+                type_match,
+                _mm256_and_si256(_mm256_andnot_si256(skip, ones), overlap),
+            );
+            _mm256_testz_si256(result, result) == 0
+        }
     }
 
     #[inline]
@@ -268,6 +331,66 @@ impl Prefix for LePacked {
         self.is_overlap(prefix)
     }
 
+    fn is_conflict_simd(self, prefix: [Self; 4]) -> bool {
+        use core::arch::x86_64::*;
+        validate!(self.node() ^ self.value());
+        validate!(self.is_active());
+
+        unsafe {
+            // set hazard and broadcast prefix
+            let h = _mm256_set_epi64x(
+                prefix[3].value as i64,
+                prefix[2].value as i64,
+                prefix[1].value as i64,
+                prefix[0].value as i64,
+            );
+            let p = _mm256_set1_epi64x(self.value as i64);
+
+            let zeros = _mm256_setzero_si256();
+            let ones = _mm256_set1_epi64x(-1i64);
+
+            // Case: `hazard` doesn't protect node or value
+            // (h & p) & (0b11 << 56)
+            let type_bits =
+                _mm256_and_si256(_mm256_and_si256(h, p), _mm256_set1_epi64x(0b11 << 56));
+            // != 0
+            let type_match = _mm256_xor_si256(_mm256_cmpeq_epi64(type_bits, zeros), ones);
+
+            // Case: `hazard` protects prefixes only, and `prefix` is higher up the tree
+            // get overlap bit
+            let h_no_overlap =
+                _mm256_cmpeq_epi64(_mm256_and_si256(h, _mm256_set1_epi64x(0b100 << 56)), zeros);
+
+            // fetch len
+            let h_len = _mm256_and_si256(_mm256_srli_epi64::<59>(h), _mm256_set1_epi64x(0b111));
+            let p_len = _mm256_and_si256(_mm256_srli_epi64::<59>(p), _mm256_set1_epi64x(0b111));
+
+            // !h.overlap() && h.len > p.len
+            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_len, p_len));
+
+            // Case: Overlapping prefix
+            // h ^ p
+            let xor = _mm256_xor_si256(h, p);
+
+            // min_len * 8
+            let min_len = _mm256_min_epu16(h_len, p_len);
+            let bits = _mm256_slli_epi64::<3>(min_len);
+
+            // Be::extract logic
+            let one = _mm256_set1_epi64x(1);
+            let prefix_mask = _mm256_sub_epi64(_mm256_sllv_epi64(one, bits), one);
+
+            let overlap = _mm256_cmpeq_epi64(_mm256_and_si256(xor, prefix_mask), zeros);
+
+            // combine: type_match & !skip & overlap
+            let result = _mm256_and_si256(
+                type_match,
+                _mm256_and_si256(_mm256_andnot_si256(skip, ones), overlap),
+            );
+            _mm256_testz_si256(result, result) == 0
+        }
+    }
+
     #[inline]
     fn is_node(self) -> bool {
         self.node()
@@ -316,5 +439,311 @@ impl LePacked {
         let len = self.len().min(other.len());
         let bits = (len.value() as usize) << 3;
         Le::extract(self.value ^ other.value, bits) == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Be, BePacked, Le, LePacked, Prefix};
+
+    #[test]
+    fn be_simd_vs_scalar() {
+        let cases: Vec<(BePacked, [BePacked; 4])> = vec![
+            // prefix=value, mix of overlapping + disjoint hazards
+            (
+                be_p(0xABCD_0000_0000_0000, 16, true),
+                [
+                    be(0xABCD_0000_0000_0000, 16),
+                    be(0x1234_0000_0000_0000, 16),
+                    be(0xAB00_0000_0000_0000, 8),
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // all disjoint hazards
+            (
+                be_p(0xAA00_0000_0000_0000, 8, true),
+                [
+                    be(0xBB00_0000_0000_0000, 8),
+                    be(0xCC00_0000_0000_0000, 8),
+                    be(0xDD00_0000_0000_0000, 8),
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // null padding
+            (
+                be_p(0xABCD_0000_0000_0000, 16, true),
+                [
+                    be(0xFF00_0000_0000_0000, 8),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // depth skip: hazard deeper, no overlap bit
+            (
+                be_p(0xABCD_0000_0000_0000, 16, false),
+                [
+                    be(0xABCD_EF00_0000_0000, 24).without_overlap(),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // conflict only in last lane
+            (
+                be_p(0xABCD_0000_0000_0000, 16, true),
+                [
+                    be(0xFF00_0000_0000_0000, 8),
+                    be(0xEE00_0000_0000_0000, 8),
+                    be(0xDD00_0000_0000_0000, 8),
+                    be(0xABCD_0000_0000_0000, 16),
+                ],
+            ),
+            // root hazard overlaps everything
+            (
+                be_p(0xABCD_0000_0000_0000, 16, true),
+                [
+                    be(0, 0),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // node prefix instead of value
+            (
+                be_p(0xABCD_0000_0000_0000, 16, false),
+                [
+                    be(0xABCD_0000_0000_0000, 16),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                be_p(0xABCD_0000_0000_0000, 16, true),
+                [
+                    be(0xABCD_0000_0000_0000, 16).without_node(),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // hazard protects only values, prefix is a node → no type match
+            (
+                be_p(0xABCD_0000_0000_0000, 16, false),
+                [
+                    be(0xABCD_0000_0000_0000, 16).without_node(),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // all 4 lanes conflict
+            (
+                be_p(0xAB00_0000_0000_0000, 8, true),
+                [
+                    be(0xAB00_0000_0000_0000, 8),
+                    be(0xABCD_0000_0000_0000, 16),
+                    be(0xABCD_EF00_0000_0000, 24),
+                    be(0, 0),
+                ],
+            ),
+            // prefix shorter than hazard, same path → conflict
+            (
+                be_p(0xAB00_0000_0000_0000, 8, true),
+                [
+                    be(0xABCD_0000_0000_0000, 16),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // prefix longer than hazard, same path → conflict
+            (
+                be_p(0xABCD_EF00_0000_0000, 24, true),
+                [
+                    be(0xAB00_0000_0000_0000, 8),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // single bit difference in prefix
+            (
+                be_p(0xABCE_0000_0000_0000, 16, true),
+                [
+                    be(0xABCD_0000_0000_0000, 16),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // depth skip WITH overlap bit → should NOT skip
+            (
+                be_p(0xABCD_0000_0000_0000, 16, false),
+                [
+                    be(0xABCD_EF00_0000_0000, 24),
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                    BePacked::HAZARD_NULL,
+                ],
+            ),
+            // // max length prefix
+            // (
+            //     be_p(0xABCD_EF01_2345_6700, 56),
+            //     [
+            //         be(0xABCD_EF01_2345_6700, 56),
+            //         BePacked::HAZARD_NULL,
+            //         BePacked::HAZARD_NULL,
+            //         BePacked::HAZARD_NULL,
+            //     ],
+            // ),
+        ];
+
+        for (i, (prefix, hazards)) in cases.iter().enumerate() {
+            let scalar = hazards
+                .iter()
+                .any(|h| h.is_active() && h.is_conflict(*prefix));
+            let simd = prefix.is_conflict_simd(*hazards);
+            assert_eq!(scalar, simd, "Be case {i}");
+        }
+    }
+
+    #[test]
+    fn le_simd_vs_scalar() {
+        let cases: Vec<(LePacked, [LePacked; 4])> = vec![
+            (
+                le_p(0xABCD, 16, true),
+                [
+                    le(0xABCD, 16),
+                    le(0x1234, 16),
+                    le(0xAB, 8),
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xAA, 8, true),
+                [le(0xBB, 8), le(0xCC, 8), le(0xDD, 8), LePacked::HAZARD_NULL],
+            ),
+            (
+                le_p(0xABCD, 16, true),
+                [
+                    le(0xFF, 8),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCD, 16, false),
+                [
+                    le(0xABCDEF, 24).without_overlap(),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCD, 16, true),
+                [le(0xFF, 8), le(0xEE, 8), le(0xDD, 8), le(0xABCD, 16)],
+            ),
+            (
+                le_p(0xABCD, 16, true),
+                [
+                    le(0, 0),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCD, 16, true),
+                [
+                    le(0xABCD, 16).without_node(),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCD, 16, false),
+                [
+                    le(0xABCD, 16).without_node(),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xAB, 8, true),
+                [le(0xAB, 8), le(0xABCD, 16), le(0xABCDEF, 24), le(0, 0)],
+            ),
+            (
+                le_p(0xAB, 8, true),
+                [
+                    le(0xABCD, 16),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCDEF, 24, true),
+                [
+                    le(0xAB, 8),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCE, 16, true),
+                [
+                    le(0xABCD, 16),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCD, 16, false),
+                [
+                    le(0xABCDEF, 24),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+            (
+                le_p(0xABCDEF012345, 48, true),
+                [
+                    le(0xABCDEF012345, 48),
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                    LePacked::HAZARD_NULL,
+                ],
+            ),
+        ];
+
+        for (i, (prefix, hazards)) in cases.iter().enumerate() {
+            let scalar = hazards
+                .iter()
+                .any(|h| h.is_active() && h.is_conflict(*prefix));
+            let simd = prefix.is_conflict_simd(*hazards);
+            assert_eq!(scalar, simd, "Le case {i}");
+        }
+    }
+
+    fn be(prefix: u64, bits: usize) -> BePacked {
+        Be::new_hazard(prefix, bits)
+    }
+    fn be_p(prefix: u64, bits: usize, val: bool) -> BePacked {
+        be(prefix, bits).into_prefix(val, Some(bits))
+    }
+    fn le(prefix: u64, bits: usize) -> LePacked {
+        Le::new_hazard(prefix, bits)
+    }
+    fn le_p(prefix: u64, bits: usize, val: bool) -> LePacked {
+        le(prefix, bits).into_prefix(val, Some(bits))
     }
 }

@@ -210,11 +210,15 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let mut freed = 0;
 
         local.retired.retain_mut(|(prefix, raw)| {
-            if local
-                .snapshot
-                .iter()
-                .any(|hazard| hazard.is_conflict(*prefix))
-            {
+            if local.snapshot.chunks(4).any(|hazard| {
+                let hazards = [
+                    hazard.get(0).copied().unwrap_or(Prefix::HAZARD_NULL),
+                    hazard.get(1).copied().unwrap_or(Prefix::HAZARD_NULL),
+                    hazard.get(2).copied().unwrap_or(Prefix::HAZARD_NULL),
+                    hazard.get(3).copied().unwrap_or(Prefix::HAZARD_NULL),
+                ];
+                prefix.is_conflict_simd(hazards)
+            }) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
