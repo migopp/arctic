@@ -15,17 +15,17 @@ macro_rules! dispatch {
     }};
 }
 
-pub fn check_hazard<P: ribbit::Pack<Packed: Prefix>, V>(
+pub fn check_hazard<P: ribbit::Pack<Packed: Prefix>>(
     snapshot: &[ribbit::Packed<P>],
     prefix: ribbit::Packed<P>,
 ) -> bool {
     dispatch!(
-        avx2::check_hazard::<P, V>(snapshot, prefix),
-        check_hazard_fallback::<P, V>(snapshot, prefix)
+        avx2::check_hazard::<P>(snapshot, prefix),
+        check_hazard_fallback::<P>(snapshot, prefix)
     )
 }
 
-fn check_hazard_fallback<P: ribbit::Pack<Packed: Prefix>, V>(
+fn check_hazard_fallback<P: ribbit::Pack<Packed: Prefix>>(
     snapshot: &[ribbit::Packed<P>],
     prefix: ribbit::Packed<P>,
 ) -> bool {

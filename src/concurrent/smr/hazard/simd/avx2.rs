@@ -1,6 +1,6 @@
 use crate::concurrent::smr::hazard::Prefix;
 
-pub fn check_hazard<P: ribbit::Pack<Packed: Prefix>, V>(
+pub fn check_hazard<P: ribbit::Pack<Packed: Prefix>>(
     snapshot: &[ribbit::Packed<P>],
     prefix: ribbit::Packed<P>,
 ) -> bool {
