@@ -1,8 +1,8 @@
 use crate::concurrent::smr::hazard;
 use crate::raw;
+use crate::raw::key::Read as _;
 use crate::raw::key::dynamic;
 use crate::raw::key::integer;
-use crate::raw::key::Read as _;
 
 pub trait Key: raw::Key {
     type Prefix: ribbit::Pack<Packed: hazard::Prefix>;

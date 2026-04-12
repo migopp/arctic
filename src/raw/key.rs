@@ -343,10 +343,10 @@ impl<'w> From<&'w dynamic::Writer> for &'w str {
 
 #[cfg(test)]
 mod tests {
+    use crate::raw::Key;
     use crate::raw::edge;
     use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
-    use crate::raw::Key;
 
     pub(super) fn take_all<'k, K: Key>(
         array: &[u8],

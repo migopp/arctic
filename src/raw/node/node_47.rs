@@ -3,18 +3,18 @@ use core::ops::Shr;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
-use ribbit::u6;
 use ribbit::Atomic;
+use ribbit::u6;
 
+use crate::raw::Edge;
+use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
-use crate::raw::node::iter::KeyIndex;
-use crate::raw::node::linear;
 use crate::raw::node::Node15;
 use crate::raw::node::Node256;
-use crate::raw::Edge;
-use crate::raw::Node;
+use crate::raw::node::iter::KeyIndex;
+use crate::raw::node::linear;
 use crate::stat;
 
 #[repr(C, align(1024))]

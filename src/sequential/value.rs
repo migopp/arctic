@@ -68,7 +68,7 @@ unsafe impl<T: Sized> Value for Box<T> {
 
     #[inline]
     unsafe fn from_raw(raw: u64) -> Self {
-        Box::from_raw(raw as *mut T)
+        unsafe { Box::from_raw(raw as *mut T) }
     }
 
     #[inline]
@@ -95,7 +95,7 @@ unsafe impl<T: Sized> Value for Box<T> {
     where
         Self: 'l,
     {
-        let borrow = (raw as *const T).as_ref();
+        let borrow = unsafe { (raw as *const T).as_ref() };
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -108,7 +108,7 @@ unsafe impl<T: Sized> Value for Box<T> {
     where
         Self: 'l,
     {
-        let borrow = (raw as *mut T).as_mut();
+        let borrow = unsafe { (raw as *mut T).as_mut() };
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -143,7 +143,7 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
 
     #[inline]
     unsafe fn from_raw(raw: u64) -> Self {
-        let borrow = (raw as *const T).as_ref();
+        let borrow = unsafe { (raw as *const T).as_ref() };
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -170,7 +170,7 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     where
         Self: 'l,
     {
-        let borrow = (raw as *const T).as_ref();
+        let borrow = unsafe { (raw as *const T).as_ref() };
         if cfg!(feature = "validate") {
             borrow.unwrap()
         } else {
@@ -183,7 +183,7 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     where
         Self: 'l,
     {
-        Self::borrow_from_raw(raw)
+        unsafe { Self::borrow_from_raw(raw) }
     }
 
     #[inline]
@@ -238,7 +238,7 @@ macro_rules! impl_integer {
                 where
                     Self: 'l,
                 {
-                    Self::borrow_from_raw(raw)
+                    unsafe { Self::borrow_from_raw(raw) }
                 }
 
                 #[inline]

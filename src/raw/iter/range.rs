@@ -10,7 +10,10 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
+use crate::Order;
 use crate::raw;
+use crate::raw::Edge;
+use crate::raw::Key;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -19,9 +22,6 @@ use crate::raw::key;
 use crate::raw::key::Read as _;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
-use crate::raw::Edge;
-use crate::raw::Key;
-use crate::Order;
 
 pub(crate) enum RangeIter<'k, 'g, K: Key, W: key::Write, R: Range<'k, K>, O> {
     Root { writer: W, next: Option<u64> },

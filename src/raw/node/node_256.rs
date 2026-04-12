@@ -2,11 +2,11 @@ use core::fmt::Debug;
 
 use ribbit::Atomic;
 
+use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
 use crate::raw::node::Node47;
-use crate::raw::Node;
 
 #[repr(C, align(4096))]
 pub(crate) struct Node256<M: ribbit::Pack>([Atomic<Edge<M>>; 256]);

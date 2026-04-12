@@ -13,13 +13,13 @@ use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
-use crate::raw::cursor::path;
-use crate::raw::key;
-use crate::raw::key::Read as _;
+use crate::Order;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Key;
-use crate::Order;
+use crate::raw::cursor::path;
+use crate::raw::key;
+use crate::raw::key::Read as _;
 
 pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
     root: NonNull<Atomic<Edge<K::Edge>>>,
@@ -35,7 +35,7 @@ where
 {
     #[inline]
     pub(crate) unsafe fn new_all(root: &'g Atomic<Edge<K::Edge>>) -> Prefix<'k, 'g, K, RangeFull> {
-        Prefix::new(root, K::Read::default(), ..)
+        unsafe { Prefix::new(root, K::Read::default(), ..) }
     }
 
     pub(crate) unsafe fn new_prefix(

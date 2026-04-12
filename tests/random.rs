@@ -236,21 +236,18 @@ where
 
                 for (index, key) in chunk {
                     let value = key_set.value(*index);
-                    let old = map.upsert(key.borrow(), value);
-                    assert!(old.is_none());
+                    map.insert(key.borrow(), value)
+                        .ok()
+                        .as_deref()
+                        .expect("Key should not be present");
                 }
 
                 barrier.wait();
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
-                    let value = match map.update_with(key.borrow(), None, |_, _| {
-                        core::ops::ControlFlow::<core::convert::Infallible, _>::Continue(None)
-                    }) {
-                        arctic::concurrent::Update::Absent { value } => unreachable!(),
-                        arctic::concurrent::Update::Success { old } => old,
-                        arctic::concurrent::Update::Break { old, r#break } => unreachable!(),
-                    };
-                    key_set.validate(*index, key.borrow(), &*value);
+                    // FIXME: change to recursive removal after figuring out retiring
+                    let value = map.remove_non_recursive(key.borrow()).unwrap();
+                    key_set.validate(*index, key.borrow(), &value);
                 }
 
                 barrier.wait();
