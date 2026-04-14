@@ -43,14 +43,17 @@ pub trait Prefix: Send + Sync + ribbit::Unpack<Loose = u64> {
 pub struct Be {
     // Hazard: whether to protect nodes
     // Prefix: whether this is a node
+    #[ribbit(get(rename = "is_node"))]
     pub(super) node: bool,
 
     // Hazard: whether to protect values
     // Prefix: whether this is a value
+    #[ribbit(get(rename = "is_value"))]
     pub(super) value: bool,
 
     // Hazard: whether to protect overlaps (or just underneath prefix)
     // Prefix: ignore
+    #[ribbit(get(rename = "is_overlap"))]
     pub(super) overlap: bool,
 
     // NOTE: at offset 3 so we don't need to shift bits
@@ -130,12 +133,12 @@ impl Prefix for BePacked {
 
     #[inline]
     fn is_node(self) -> bool {
-        self.node()
+        self.is_node()
     }
 
     #[inline]
     fn is_value(self) -> bool {
-        self.value()
+        self.is_value()
     }
 
     #[inline]
@@ -173,7 +176,7 @@ impl Prefix for BePacked {
 impl BePacked {
     #[inline]
     fn is_conflict(self, hazard: Self) -> bool {
-        validate!(self.node() ^ self.value());
+        validate!(self.is_node() ^ self.is_value());
 
         // Case: `hazard` doesn't protect node or value
         if (hazard.value & self.value) & 0b11 == 0 {
@@ -181,18 +184,13 @@ impl BePacked {
         }
 
         // Case: `hazard` protects prefixes only, and `prefix` is higher up the tree
-        if !hazard.overlap() && hazard.len() > self.len() {
+        if !hazard.is_overlap() && hazard.len() > self.len() {
             return false;
         }
 
-        self.is_overlap(hazard)
-    }
-
-    #[inline]
-    fn is_overlap(self, other: Self) -> bool {
-        let len = self.len().min(other.len());
+        let len = self.len().min(hazard.len());
         let bits = (len.value() as usize) << 3;
-        Be::extract(self.value ^ other.value, bits) == 0
+        Be::extract(self.value ^ hazard.value, bits) == 0
     }
 }
 
@@ -201,8 +199,13 @@ impl BePacked {
 pub struct Le {
     prefix: u56,
 
+    #[ribbit(get(rename = "is_node"))]
     pub(super) node: bool,
+
+    #[ribbit(get(rename = "is_value"))]
     pub(super) value: bool,
+
+    #[ribbit(get(rename = "is_overlap"))]
     pub(super) overlap: bool,
 
     len: u3,
@@ -279,12 +282,12 @@ impl Prefix for LePacked {
 
     #[inline]
     fn is_node(self) -> bool {
-        self.node()
+        self.is_node()
     }
 
     #[inline]
     fn is_value(self) -> bool {
-        self.value()
+        self.is_value()
     }
 
     #[inline]
@@ -322,7 +325,7 @@ impl Prefix for LePacked {
 impl LePacked {
     #[inline]
     fn is_conflict(self, hazard: Self) -> bool {
-        validate!(self.node() ^ self.value());
+        validate!(self.is_node() ^ self.is_value());
 
         // Case: `hazard` doesn't protect node or value
         if (hazard.value & self.value) & const { 0b11u64 << 56 } == 0 {
@@ -330,17 +333,12 @@ impl LePacked {
         }
 
         // Case: `hazard` protects prefixes only, and `prefix` is higher up the tree
-        if !hazard.overlap() && hazard.len() > self.len() {
+        if !hazard.is_overlap() && hazard.len() > self.len() {
             return false;
         }
 
-        self.is_overlap(hazard)
-    }
-
-    #[inline]
-    fn is_overlap(self, other: Self) -> bool {
-        let len = self.len().min(other.len());
+        let len = self.len().min(hazard.len());
         let bits = (len.value() as usize) << 3;
-        Le::extract(self.value ^ other.value, bits) == 0
+        Le::extract(self.value ^ hazard.value, bits) == 0
     }
 }

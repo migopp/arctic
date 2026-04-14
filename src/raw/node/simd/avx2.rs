@@ -594,8 +594,6 @@ mod tests {
             for (index, entry) in simd.entries.iter_mut().enumerate() {
                 if entry.key == 0xFF && entry.index == 0xFF {
                     assert!(index >= simd.tail as usize);
-                    entry.key = 0;
-                    entry.index = 0;
                 }
             }
 
