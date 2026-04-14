@@ -164,19 +164,15 @@ impl Prefix for BePacked {
                 _mm256_cmpeq_epi64(_mm256_and_si256(h, _mm256_set1_epi64x(0b100)), zeros);
 
             // fetch len
-            let h_len = _mm256_and_si256(_mm256_srli_epi64::<3>(h), _mm256_set1_epi64x(0b111));
-            let p_len = _mm256_and_si256(_mm256_srli_epi64::<3>(p), _mm256_set1_epi64x(0b111));
-
-            // !h.overlap() && h.len > p.len
-            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_len, p_len));
+            let h_bits = _mm256_and_si256(h, _mm256_set1_epi64x(0b111_000));
+            let p_bits = _mm256_and_si256(p, _mm256_set1_epi64x(0b111_000));
+            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_bits, p_bits)); // !h.overlap() && h.len > p.len
 
             // Case: Overlapping prefix
             // h ^ p
             let xor = _mm256_xor_si256(h, p);
 
-            // min_len * 8
-            let min_len = _mm256_min_epu16(h_len, p_len);
-            let bits = _mm256_slli_epi64::<3>(min_len);
+            let bits = _mm256_min_epu16(h_bits, p_bits);
 
             // Be::extract logic
             let shift = _mm256_sub_epi64(_mm256_set1_epi64x(64), bits);
@@ -364,19 +360,19 @@ impl Prefix for LePacked {
                 _mm256_cmpeq_epi64(_mm256_and_si256(h, _mm256_set1_epi64x(0b100 << 56)), zeros);
 
             // fetch len
-            let h_len = _mm256_and_si256(_mm256_srli_epi64::<59>(h), _mm256_set1_epi64x(0b111));
-            let p_len = _mm256_and_si256(_mm256_srli_epi64::<59>(p), _mm256_set1_epi64x(0b111));
+            let h_bits =
+                _mm256_and_si256(_mm256_srli_epi64::<56>(h), _mm256_set1_epi64x(0b111_000));
+            let p_bits =
+                _mm256_and_si256(_mm256_srli_epi64::<56>(p), _mm256_set1_epi64x(0b111_000));
 
             // !h.overlap() && h.len > p.len
-            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_len, p_len));
+            let skip = _mm256_and_si256(h_no_overlap, _mm256_cmpgt_epi64(h_bits, p_bits));
 
             // Case: Overlapping prefix
             // h ^ p
             let xor = _mm256_xor_si256(h, p);
 
-            // min_len * 8
-            let min_len = _mm256_min_epu16(h_len, p_len);
-            let bits = _mm256_slli_epi64::<3>(min_len);
+            let bits = _mm256_min_epu16(h_bits, p_bits);
 
             // Be::extract logic
             let one = _mm256_set1_epi64x(1);
