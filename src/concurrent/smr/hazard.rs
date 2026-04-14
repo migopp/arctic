@@ -67,13 +67,20 @@ use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use std::collections::VecDeque;
-
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
 use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
+
+#[cfg(any(
+    feature = "opt-amortized-free-guard",
+    feature = "opt-amortized-free-retire"
+))]
+use std::collections::VecDeque;
+
+#[cfg(feature = "opt-batch")]
+use crossbeam_queue::SegQueue;
 
 pub struct Hazard;
 
@@ -95,10 +102,19 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
+    // FIXME: Make segment size match reclaim threshold.
+    #[cfg(feature = "opt-batch")]
+    condemned: SegQueue<(ribbit::Packed<P>, u64)>,
+    #[cfg(feature = "opt-batch")]
+    mid_free: AtomicBool,
     value: PhantomData<V>,
 }
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
+    #[cfg(any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire"
+    ))]
     fn default() -> Self {
         Self {
             hazards: core::array::from_fn(|_| {
@@ -111,6 +127,54 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     snapshot: Vec::new(),
                     retired: Vec::new(),
                     condemned: VecDeque::new(),
+                    _value: PhantomData,
+                })
+            }),
+            membarrier: AtomicBool::new(false),
+            reclaim_threshold: 64,
+            value: PhantomData,
+        }
+    }
+
+    #[cfg(feature = "opt-batch")]
+    fn default() -> Self {
+        Self {
+            hazards: core::array::from_fn(|_| {
+                Cache(ribbit::Atomic::new_packed(
+                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
+                ))
+            }),
+            locals: core::array::from_fn(|_| {
+                UnsafeCell::new(Local {
+                    snapshot: Vec::new(),
+                    retired: Vec::new(),
+                    _value: PhantomData,
+                })
+            }),
+            membarrier: AtomicBool::new(false),
+            reclaim_threshold: 64,
+            condemned: SegQueue::new(),
+            mid_free: AtomicBool::new(false),
+            value: PhantomData,
+        }
+    }
+
+    #[cfg(not(any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire",
+        feature = "opt-batch"
+    )))]
+    fn default() -> Self {
+        Self {
+            hazards: core::array::from_fn(|_| {
+                Cache(ribbit::Atomic::new_packed(
+                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
+                ))
+            }),
+            locals: core::array::from_fn(|_| {
+                UnsafeCell::new(Local {
+                    snapshot: Vec::new(),
+                    retired: Vec::new(),
                     _value: PhantomData,
                 })
             }),
@@ -135,6 +199,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     /// Eagerly reclaim all retired allocations
+    #[cfg(any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire"
+    ))]
     pub fn reclaim(&mut self) {
         self.locals
             .iter_mut()
@@ -144,6 +212,33 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .for_each(|(prefix, raw)| {
                 deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
             });
+    }
+
+    /// Eagerly reclaim all retired allocations
+    #[cfg(not(any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire",
+    )))]
+    pub fn reclaim(&mut self) {
+        self.locals
+            .iter_mut()
+            .take(smr::thread::count())
+            .map(|local| local.get_mut())
+            .flat_map(|local| local.retired.drain(..))
+            .for_each(|(prefix, raw)| {
+                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+            });
+
+        #[cfg(feature = "opt-batch")]
+        {
+            // Also free the global condemned allocations.
+            //
+            // FIXME: This is buns. Doesn't implement `drain` or `iter_mut`, though...
+            while !self.condemned.is_empty() {
+                let (prefix, raw) = unsafe { self.condemned.pop().unwrap_unchecked() };
+                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+            }
+        }
     }
 }
 
@@ -173,7 +268,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         hazard.store_packed(prefix, Ordering::Relaxed);
         membarrier::fast(self.membarrier.load(Ordering::Relaxed));
 
-        if cfg!(feature = "opt-amortized-free-guard") {
+        #[cfg(feature = "opt-amortized-free-guard")]
+        {
             let local = unsafe { &mut *local.get() };
             local.deallocate_one();
         }
@@ -190,6 +286,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<(ribbit::Packed<P>, u64)>,
+    #[cfg(any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire"
+    ))]
     condemned: VecDeque<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
 }
@@ -250,23 +350,54 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 }
             }
 
-            if cfg!(any(
+            #[cfg(any(
                 feature = "opt-amortized-free-guard",
                 feature = "opt-amortized-free-retire"
-            )) {
+            ))]
+            {
                 local.condemned.push_back((*prefix, *raw));
-            } else {
+            }
+
+            #[cfg(feature = "opt-batch")]
+            {
+                global.condemned.push((*prefix, *raw));
+            }
+
+            #[cfg(not(any(
+                feature = "opt-amortized-free-guard",
+                feature = "opt-amortized-free-retire",
+                feature = "opt-batch"
+            )))]
+            {
                 deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
             }
             false
         });
+
+        #[cfg(feature = "opt-batch")]
+        {
+            if global.condemned.len() >= global.reclaim_threshold
+                && !global.mid_free.swap(true, Ordering::Relaxed)
+            {
+                for _ in 0..global.reclaim_threshold {
+                    let (prefix, raw) = unsafe { global.condemned.pop().unwrap_unchecked() };
+                    deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
+                }
+                global.mid_free.store(false, Ordering::Relaxed);
+            }
+        }
 
         local.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
     }
 }
 
+#[cfg(any(
+    feature = "opt-amortized-free-guard",
+    feature = "opt-amortized-free-retire"
+))]
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Local<P, V> {
+    #[inline]
     pub fn deallocate_one(&mut self) {
         if let Some((prefix, raw)) = self.condemned.pop_front() {
             deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
@@ -292,7 +423,8 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         let local = unsafe { &mut *self.local.get() };
 
-        if cfg!(feature = "opt-amortized-free-retire") {
+        #[cfg(feature = "opt-amortized-free-retire")]
+        {
             local.deallocate_one();
         }
 
@@ -315,7 +447,8 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         let local = unsafe { &mut *self.local.get() };
 
-        if cfg!(feature = "opt-amortized-free-retire") {
+        #[cfg(feature = "opt-amortized-free-retire")]
+        {
             local.deallocate_one();
         }
 
