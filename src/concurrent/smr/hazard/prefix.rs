@@ -1,4 +1,4 @@
-// #[cfg(target_feature = "avx2")]
+#[cfg(target_feature = "avx2")]
 mod avx2;
 
 use core::ops::BitAnd as _;
