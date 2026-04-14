@@ -82,6 +82,15 @@ use std::collections::VecDeque;
 #[cfg(feature = "opt-batch")]
 use crossbeam_queue::SegQueue;
 
+#[cfg(all(
+    any(
+        feature = "opt-amortized-free-guard",
+        feature = "opt-amortized-free-retire"
+    ),
+    feature = "opt-batch"
+))]
+compile_error!("`opt-amortized-*` and `opt-batch` are mutually exclusive");
+
 pub struct Hazard;
 
 impl Smr for Hazard {
