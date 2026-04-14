@@ -80,7 +80,7 @@ use crate::stat;
 use std::collections::VecDeque;
 
 #[cfg(feature = "opt-batch")]
-use crossbeam_queue::SegQueue;
+use crossbeam_queue::ArrayQueue;
 
 #[cfg(all(
     any(
@@ -113,9 +113,9 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     reclaim_threshold: usize,
     // FIXME: Make segment size match reclaim threshold.
     #[cfg(feature = "opt-batch")]
-    condemned: SegQueue<(ribbit::Packed<P>, u64)>,
+    condemned: ArrayQueue<Batch<P, V>>,
     #[cfg(feature = "opt-batch")]
-    mid_free: AtomicBool,
+    mid_free: Cache<AtomicBool>,
     value: PhantomData<V>,
 }
 
@@ -162,8 +162,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             membarrier: AtomicBool::new(false),
             reclaim_threshold: 64,
-            condemned: SegQueue::new(),
-            mid_free: AtomicBool::new(false),
+            condemned: ArrayQueue::new(smr::thread::MAX),
+            mid_free: Cache(AtomicBool::new(false)),
             value: PhantomData,
         }
     }
@@ -244,8 +244,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             //
             // FIXME: This is buns. Doesn't implement `drain` or `iter_mut`, though...
             while !self.condemned.is_empty() {
-                let (prefix, raw) = unsafe { self.condemned.pop().unwrap_unchecked() };
-                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+                let mut batch = unsafe { self.condemned.pop().unwrap_unchecked() };
+                Batch::deallocate(&mut batch);
             }
         }
     }
@@ -327,6 +327,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         let mut freed = 0;
 
+        #[cfg(feature = "opt-batch")]
+        let mut batch = Vec::with_capacity(global.reclaim_threshold);
+
         local.retired.retain_mut(|(prefix, raw)| {
             if local
                 .snapshot
@@ -369,7 +372,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
             #[cfg(feature = "opt-batch")]
             {
-                global.condemned.push((*prefix, *raw));
+                batch.push((*prefix, *raw));
             }
 
             #[cfg(not(any(
@@ -385,14 +388,24 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         #[cfg(feature = "opt-batch")]
         {
-            if global.condemned.len() >= global.reclaim_threshold
-                && !global.mid_free.swap(true, Ordering::Relaxed)
-            {
-                for _ in 0..global.reclaim_threshold {
-                    let (prefix, raw) = unsafe { global.condemned.pop().unwrap_unchecked() };
-                    deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
+            // First, unconditionally push batch to the condemned queue.
+            let batch = Batch {
+                inner: batch,
+                _value: PhantomData,
+            };
+            if let Err(mut batch) = global.condemned.push(batch) {
+                // No space in condemned queue. Must deallocate now.
+                Batch::deallocate(&mut batch);
+            }
+
+            // Deallocate a batch, if we can.
+            //
+            // Goal here is to limit parallel frees.
+            if !global.condemned.is_empty() && !global.mid_free.0.swap(true, Ordering::Relaxed) {
+                if let Some(mut batch) = global.condemned.pop() {
+                    Batch::deallocate(&mut batch);
                 }
-                global.mid_free.store(false, Ordering::Relaxed);
+                global.mid_free.0.store(false, Ordering::Relaxed);
             }
         }
 
@@ -498,5 +511,21 @@ fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
             stat::increment(counter);
             drop(V::from_raw(raw));
         }
+    }
+}
+
+#[cfg(feature = "opt-batch")]
+struct Batch<P: ribbit::Pack<Packed: Prefix>, V: Value> {
+    inner: Vec<(ribbit::Packed<P>, u64)>,
+    _value: PhantomData<V>,
+}
+
+#[cfg(feature = "opt-batch")]
+impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Batch<P, V> {
+    fn deallocate(batch: &mut Batch<P, V>) {
+        batch
+            .inner
+            .drain(..)
+            .for_each(|(prefix, raw)| deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim));
     }
 }
