@@ -60,6 +60,7 @@
 
 mod membarrier;
 pub(crate) mod prefix;
+mod simd;
 pub(crate) use prefix::Prefix;
 
 use core::cell::UnsafeCell;
@@ -210,11 +211,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let mut freed = 0;
 
         local.retired.retain_mut(|(prefix, raw)| {
-            if local
-                .snapshot
-                .iter()
-                .any(|hazard| hazard.is_conflict(*prefix))
-            {
+            if simd::check_hazard::<P>(&local.snapshot, *prefix) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
