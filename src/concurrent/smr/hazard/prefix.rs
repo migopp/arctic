@@ -4,6 +4,7 @@ use core::ops::Not as _;
 
 use ribbit::traits::Integer as _;
 use ribbit::u3;
+use ribbit::u48;
 use ribbit::u56;
 
 pub trait Prefix: Send + Sync + ribbit::Unpack<Loose = u64> {
@@ -304,7 +305,7 @@ impl Prefix for LePacked {
     fn with_age(self, age: u8) -> Self {
         self.with_prefix(
             self.prefix()
-                .bitand(const { u56::new(0xFFu64 << 48) })
+                .bitand(const { u56::new(u48::MAX.value()) })
                 .bitor(u56::new((age as u64) << 48)),
         )
     }
