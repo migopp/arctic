@@ -193,18 +193,14 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
     #[cold]
     fn flush(global: &Global<P, V>, local: &mut Local<P, V>) {
-        let id = smr::thread::Id::current();
-
         stat::max(stat::Max::RetireCache, local.retired.len() as u64);
 
         membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
         local.snapshot.extend(
-            global.hazards[..usize::from(id)]
+            global.hazards[..smr::thread::count().next_multiple_of(4)]
                 .iter()
-                .chain(&global.hazards[usize::from(id) + 1..smr::thread::count()])
-                .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-                .filter(|hazard| hazard.is_active()),
+                .map(|hazard| hazard.0.load_packed(Ordering::Relaxed)),
         );
 
         let mut freed = 0;
@@ -212,14 +208,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         local.retired.retain_mut(|(prefix, raw)| {
             let (chunks, leftover) = local.snapshot.as_chunks::<4>();
 
-            if chunks.iter().any(|chunk| prefix.is_conflict(chunk))
-                || prefix.is_conflict(&[
-                    leftover.get(0).copied().unwrap_or(Prefix::HAZARD_NULL),
-                    leftover.get(1).copied().unwrap_or(Prefix::HAZARD_NULL),
-                    leftover.get(2).copied().unwrap_or(Prefix::HAZARD_NULL),
-                    leftover.get(3).copied().unwrap_or(Prefix::HAZARD_NULL),
-                ])
-            {
+            validate!(leftover.is_empty());
+
+            if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
@@ -271,39 +262,27 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
     ) {
         stat::increment(stat::Counter::Retire);
 
-        let local = unsafe { &mut *self.local.get() };
-
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
 
-        local.retired.push((prefix, node.raw().get()));
-
-        if local.retired.len() < self.global.reclaim_threshold {
-            return;
-        }
-
-        Global::flush(self.global, local)
+        unsafe { &mut *self.local.get() }
+            .retired
+            .push((prefix, node.raw().get()));
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
         stat::increment(stat::Counter::Retire);
-
-        let local = unsafe { &mut *self.local.get() };
 
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
 
-        local.retired.push((prefix, value));
-
-        if local.retired.len() < self.global.reclaim_threshold {
-            return;
-        }
-
-        Global::flush(self.global, local)
+        unsafe { &mut *self.local.get() }
+            .retired
+            .push((prefix, value));
     }
 }
 
@@ -311,6 +290,13 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
         self.hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+
+        let local = unsafe { &mut *self.local.get() };
+        if local.retired.len() < self.global.reclaim_threshold {
+            return;
+        }
+
+        Global::flush(self.global, local)
     }
 }
 
