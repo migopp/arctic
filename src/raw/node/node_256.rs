@@ -11,8 +11,7 @@ use crate::raw::node::Node47;
 #[repr(C, align(4096))]
 pub(crate) struct Node256<M: ribbit::Pack>([Atomic<Edge<M>>; 256]);
 
-const _: () = assert!(core::mem::size_of::<Node256<()>>() == 4096);
-const _: () = assert!(core::mem::align_of::<Node256<()>>() == 4096);
+const_assert_size_align!(Node256::<()>, 4096, 4096);
 
 impl<M> Default for Node256<M>
 where

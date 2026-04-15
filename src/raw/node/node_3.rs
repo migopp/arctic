@@ -10,8 +10,7 @@ use super::Node15;
 
 pub(crate) type Node3<C> = super::Linear<3, Header, C>;
 
-const _: () = assert!(core::mem::size_of::<Node3<()>>() == 64);
-const _: () = assert!(core::mem::align_of::<Node3<()>>() == 64);
+const_assert_size_align!(Node3::<()>, 64, 64);
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
 #[ribbit(size = 64, packed(rename = "HeaderPacked"), debug)]

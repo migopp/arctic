@@ -1,3 +1,10 @@
+macro_rules! const_assert_size_align {
+    ($ty:ty, $size:expr, $align:expr) => {
+        const _: [(); $size] = [(); core::mem::size_of::<$ty>()];
+        const _: [(); $align] = [(); core::mem::align_of::<$ty>()];
+    };
+}
+
 macro_rules! validate {
     ($($tt:tt)*) => {
         if cfg!(any(feature = "validate", debug_assertions, test)) {
