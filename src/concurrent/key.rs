@@ -10,8 +10,10 @@ pub trait Key: raw::Key {
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix>;
 }
 
+type Le = hazard::prefix::Le128;
+
 impl Key for Vec<u8> {
-    type Prefix = hazard::prefix::Le;
+    type Prefix = Le;
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
@@ -20,7 +22,7 @@ impl Key for Vec<u8> {
 }
 
 impl Key for String {
-    type Prefix = hazard::prefix::Le;
+    type Prefix = Le;
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
@@ -77,10 +79,17 @@ fn hazard_integer<U: integer::Uint>(
 }
 
 #[inline]
-fn hazard_dynamic(reader: dynamic::Reader<'_>) -> ribbit::Packed<hazard::prefix::Le> {
+fn hazard_dynamic(reader: dynamic::Reader<'_>) -> ribbit::Packed<Le> {
     let reader = reader.as_ref();
-    let mut buffer = [0u8; 8];
-    let len = reader.len().min(7);
+
+    // let mut buffer = [0u8; 8];
+    // let len = reader.len().min(7);
+
+    let mut buffer = [0u8; 16];
+    let len = reader.len().min(15);
+
     buffer[..len].copy_from_slice(&reader[..len]);
-    hazard::prefix::Le::new_hazard(u64::from_le_bytes(buffer), len << 3)
+
+    // hazard::prefix::Le::new_hazard(u64::from_le_bytes(buffer), len << 3)
+    Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
 }
