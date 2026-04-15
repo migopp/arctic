@@ -294,13 +294,21 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
 
         let local = unsafe { &mut *self.local.get() };
-        if local.cycle < self.global.reclaim_threshold {
-            local.cycle += 1;
+        if local.retired.len() < self.global.reclaim_threshold {
+            local.cycle = 0;
             return;
         }
 
-        local.cycle = 0;
-        Global::flush(self.global, local)
+        if local.cycle == 0 {
+            Global::flush(self.global, local)
+        }
+
+        // FIXME: introduce separate configuration
+        local.cycle = if local.cycle == self.global.reclaim_threshold {
+            0
+        } else {
+            local.cycle + 1
+        };
     }
 }
 
