@@ -106,6 +106,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
                     _value: PhantomData,
@@ -180,6 +181,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 
 #[repr(align(64))]
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
+    cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
@@ -292,10 +294,12 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
 
         let local = unsafe { &mut *self.local.get() };
-        if local.retired.len() < self.global.reclaim_threshold {
+        if local.cycle < self.global.reclaim_threshold {
+            local.cycle += 1;
             return;
         }
 
+        local.cycle = 0;
         Global::flush(self.global, local)
     }
 }
