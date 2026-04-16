@@ -11,21 +11,13 @@ use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear::KeyIter;
 use crate::raw::node::linear::KeyIter3;
 
-macro_rules! dispatch {
-    ($avx2:expr, $fallback:expr $(,)?) => {{
-        #[cfg(all(not(feature = "opt-no-node15-get"), target_feature = "avx2"))]
-        {
-            return $avx2;
-        }
-
-        #[allow(unreachable_code)]
-        $fallback
-    }};
-}
-
 #[inline]
 pub(super) fn get_3(array: u64, key: u8) -> u8 {
-    dispatch!(avx2::get_3(array, key), get_3_fallback(array, key))
+    simd!(
+        "opt-no-node3-get",
+        avx2::get_3(array, key),
+        get_3_fallback(array, key)
+    )
 }
 
 #[inline]
@@ -41,7 +33,11 @@ fn get_3_fallback(array: u64, key: u8) -> u8 {
 
 #[inline]
 pub(super) fn get_15(array: u128, key: u8) -> u8 {
-    dispatch!(avx2::get_15(array, key), get_15_fallback(array, key))
+    simd!(
+        "opt-no-node15-get",
+        avx2::get_15(array, key),
+        get_15_fallback(array, key)
+    )
 }
 
 #[inline]
@@ -61,7 +57,8 @@ pub(super) fn compress_3<L: crate::raw::node::Lower, U: crate::raw::node::Upper>
     lower: L,
     upper: U,
 ) -> KeyIter3 {
-    dispatch!(
+    simd!(
+        "opt-no-node3-compress",
         avx2::compress_3(keys, len, lower, upper),
         compress_3_fallback(keys, len, lower, upper),
     )
@@ -90,6 +87,10 @@ fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         .count();
 
     buffer[..len].sort_unstable();
+    if cfg!(feature = "validate") {
+        // HACK: AVX2 implementation pads with 0xFF bytes
+        buffer[len..].fill(0xFF_FF);
+    }
     let buffer = unsafe { core::mem::transmute::<[u16; 3], [KeyIndex; 3]>(buffer) };
     KeyIter3::new_3(buffer, len as u8)
 }
@@ -102,7 +103,8 @@ pub(super) fn compress_15<L: crate::raw::node::Lower, U: crate::raw::node::Upper
     upper: U,
     out: &mut crate::raw::node::linear::KeyIter<15>,
 ) {
-    dispatch!(
+    simd!(
+        "opt-no-node15-compress",
         avx2::compress_15(keys, len, lower, upper, out),
         compress_15_fallback(keys, len, lower, upper, out),
     )
@@ -142,7 +144,8 @@ pub(super) fn compress_47<L: crate::raw::node::Lower, U: crate::raw::node::Upper
     len: u8,
     out: &mut KeyIter<63>,
 ) {
-    dispatch!(
+    simd!(
+        "opt-no-node47-compress",
         avx2::compress_47(indices, lower, upper, len, out),
         compress_47_fallback(indices, lower, upper, len, out),
     )

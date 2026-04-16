@@ -9,8 +9,7 @@ use crate::raw::node::linear;
 
 pub(crate) type Node15<C> = super::Linear<15, Header, C>;
 
-const _: () = assert!(core::mem::size_of::<Node15<()>>() == 256);
-const _: () = assert!(core::mem::align_of::<Node15<()>>() == 64);
+const_assert_size_align!(Node15::<()>, 256, 64);
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = "HeaderPacked"), debug)]

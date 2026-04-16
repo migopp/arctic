@@ -1,3 +1,10 @@
+macro_rules! const_assert_size_align {
+    ($ty:ty, $size:expr, $align:expr) => {
+        const _: [(); $size] = [(); core::mem::size_of::<$ty>()];
+        const _: [(); $align] = [(); core::mem::align_of::<$ty>()];
+    };
+}
+
 macro_rules! validate {
     ($($tt:tt)*) => {
         if cfg!(any(feature = "validate", debug_assertions, test)) {
@@ -12,6 +19,20 @@ macro_rules! validate_eq {
             assert_eq!($($tt)*);
         }
     };
+}
+
+macro_rules! simd {
+    ($flag:expr, $avx2:expr, $fallback:expr $(, $fmt:expr)* $(,)?) => {{
+        #[cfg(all(not(feature = $flag), target_feature = "avx2"))]
+        {
+            let avx2 = $avx2;
+            validate_eq!(avx2, $fallback $(, $fmt)*);
+            return $avx2;
+        }
+
+        #[allow(unreachable_code)]
+        $fallback
+    }};
 }
 
 pub mod concurrent;

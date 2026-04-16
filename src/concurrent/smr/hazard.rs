@@ -182,6 +182,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
                     _value: PhantomData,
@@ -293,6 +294,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 
 #[repr(align(64))]
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
+    cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<(ribbit::Packed<P>, u64)>,
     #[cfg(any(
@@ -311,31 +313,25 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
     #[cold]
     fn flush(global: &Global<P, V>, local: &mut Local<P, V>) {
-        let id = smr::thread::Id::current();
-
         stat::max(stat::Max::RetireCache, local.retired.len() as u64);
 
         membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
         local.snapshot.extend(
-            global.hazards[..usize::from(id)]
+            global.hazards[..smr::thread::count().next_multiple_of(4)]
                 .iter()
-                .chain(&global.hazards[usize::from(id) + 1..smr::thread::count()])
-                .map(|hazard| hazard.0.load_packed(Ordering::Relaxed))
-                .filter(|hazard| hazard.is_active()),
+                .map(|hazard| hazard.0.load_packed(Ordering::Relaxed)),
         );
 
         let mut freed = 0;
+        let (chunks, leftover) = local.snapshot.as_chunks::<4>();
+        validate!(leftover.is_empty());
 
         #[cfg(feature = "opt-batch")]
         let mut batch = Vec::with_capacity(global.reclaim_threshold);
 
         local.retired.retain_mut(|(prefix, raw)| {
-            if local
-                .snapshot
-                .iter()
-                .any(|hazard| hazard.is_conflict(*prefix))
-            {
+            if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
@@ -445,11 +441,6 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         let local = unsafe { &mut *self.local.get() };
 
-        #[cfg(feature = "opt-amortized-free-retire")]
-        {
-            local.deallocate_one();
-        }
-
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
@@ -457,22 +448,16 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         local.retired.push((prefix, node.raw().get()));
 
-        if local.retired.len() < self.global.reclaim_threshold {
-            return;
+        #[cfg(feature = "opt-amortized-free-retire")]
+        {
+            local.deallocate_one();
         }
-
-        Global::flush(self.global, local)
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
         stat::increment(stat::Counter::Retire);
 
         let local = unsafe { &mut *self.local.get() };
-
-        #[cfg(feature = "opt-amortized-free-retire")]
-        {
-            local.deallocate_one();
-        }
 
         let prefix = self
             .hazard
@@ -481,11 +466,10 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         local.retired.push((prefix, value));
 
-        if local.retired.len() < self.global.reclaim_threshold {
-            return;
+        #[cfg(feature = "opt-amortized-free-retire")]
+        {
+            local.deallocate_one();
         }
-
-        Global::flush(self.global, local)
     }
 }
 
@@ -493,6 +477,23 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
         self.hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+
+        let local = unsafe { &mut *self.local.get() };
+        if local.retired.len() < self.global.reclaim_threshold {
+            local.cycle = 0;
+            return;
+        }
+
+        if local.cycle == 0 {
+            Global::flush(self.global, local)
+        }
+
+        // FIXME: introduce separate configuration
+        local.cycle = if local.cycle == self.global.reclaim_threshold {
+            0
+        } else {
+            local.cycle + 1
+        };
     }
 }
 

@@ -23,8 +23,7 @@ pub(crate) struct Node47<M: ribbit::Pack> {
     edges: [Atomic<Edge<M>>; 47],
 }
 
-const _: () = assert!(core::mem::size_of::<Node47<()>>() == 1024);
-const _: () = assert!(core::mem::align_of::<Node47<()>>() == 1024);
+const_assert_size_align!(Node47::<()>, 1024, 1024);
 
 impl<M> Default for Node47<M>
 where
