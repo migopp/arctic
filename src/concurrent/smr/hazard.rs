@@ -206,12 +206,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         );
 
         let mut freed = 0;
+        let (chunks, leftover) = local.snapshot.as_chunks::<4>();
+        validate!(leftover.is_empty());
 
         local.retired.retain_mut(|(prefix, raw)| {
-            let (chunks, leftover) = local.snapshot.as_chunks::<4>();
-
-            validate!(leftover.is_empty());
-
             if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
