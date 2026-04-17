@@ -4,11 +4,18 @@
 use core::sync::atomic::Ordering;
 
 #[inline(always)]
-pub(crate) fn fast(membarrier: bool) {
+pub(crate) fn fast_store_ordering(membarrier: bool) -> Ordering {
+    if cfg!(feature = "opt-membarrier") && membarrier {
+        Ordering::Relaxed
+    } else {
+        Ordering::SeqCst
+    }
+}
+
+#[inline(always)]
+pub(crate) fn fast_barrier(membarrier: bool) {
     if cfg!(feature = "opt-membarrier") && membarrier {
         core::sync::atomic::compiler_fence(Ordering::SeqCst);
-    } else {
-        core::sync::atomic::fence(Ordering::SeqCst);
     }
 }
 
