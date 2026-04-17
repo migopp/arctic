@@ -114,8 +114,6 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     // FIXME: Make segment size match reclaim threshold.
     #[cfg(feature = "opt-batch")]
     condemned: ArrayQueue<Batch<P, V>>,
-    #[cfg(feature = "opt-batch")]
-    mid_free: Cache<AtomicBool>,
     value: PhantomData<V>,
 }
 
@@ -133,6 +131,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
                     condemned: VecDeque::new(),
@@ -155,6 +154,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
                     _value: PhantomData,
@@ -163,7 +163,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             membarrier: AtomicBool::new(false),
             reclaim_threshold: 64,
             condemned: ArrayQueue::new(smr::thread::MAX),
-            mid_free: Cache(AtomicBool::new(false)),
             value: PhantomData,
         }
     }
@@ -397,11 +396,12 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             // Deallocate a batch, if we can.
             //
             // Goal here is to limit parallel frees.
-            if !global.condemned.is_empty() && !global.mid_free.0.swap(true, Ordering::Relaxed) {
-                if let Some(mut batch) = global.condemned.pop() {
-                    Batch::deallocate(&mut batch);
+            if !global.condemned.is_empty() {
+                for _ in 0..8 {
+                    if let Some(mut batch) = global.condemned.pop() {
+                        Batch::deallocate(&mut batch);
+                    }
                 }
-                global.mid_free.0.store(false, Ordering::Relaxed);
             }
         }
 
