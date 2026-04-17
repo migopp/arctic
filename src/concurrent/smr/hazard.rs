@@ -73,6 +73,9 @@ use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
 
+#[cfg(feature = "opt-hazard-epochs")]
+use core::sync::atomic::AtomicUsize;
+
 #[cfg(any(
     feature = "opt-amortized-free-guard",
     feature = "opt-amortized-free-retire"
@@ -108,16 +111,43 @@ struct Cache<T>(T);
 pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
+    #[cfg(feature = "opt-hazard-epochs")]
+    global_epoch: Cache<AtomicUsize>,
+    #[cfg(feature = "opt-hazard-epochs")]
+    epochs: [Cache<AtomicUsize>; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
-    // FIXME: Make segment size match reclaim threshold.
     #[cfg(feature = "opt-batch")]
     condemned: ArrayQueue<Batch<P, V>>,
     value: PhantomData<V>,
 }
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
+    #[cfg(feature = "opt-hazard-epochs")]
+    fn default() -> Self {
+        Self {
+            hazards: core::array::from_fn(|_| {
+                Cache(ribbit::Atomic::new_packed(
+                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
+                ))
+            }),
+            global_epoch: Cache(AtomicUsize::new(0)),
+            epochs: core::array::from_fn(|_| Cache(AtomicUsize::new(usize::MAX))),
+            locals: core::array::from_fn(|_| {
+                UnsafeCell::new(Local {
+                    cycle: 0,
+                    snapshot: Vec::new(),
+                    retired: Vec::new(),
+                    _value: PhantomData,
+                })
+            }),
+            membarrier: AtomicBool::new(false),
+            reclaim_threshold: 64,
+            value: PhantomData,
+        }
+    }
+
     #[cfg(any(
         feature = "opt-amortized-free-guard",
         feature = "opt-amortized-free-retire"
@@ -168,6 +198,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     }
 
     #[cfg(not(any(
+        feature = "opt-hazard-epochs",
         feature = "opt-amortized-free-guard",
         feature = "opt-amortized-free-retire",
         feature = "opt-batch"
@@ -234,7 +265,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .take(smr::thread::count())
             .map(|local| local.get_mut())
             .flat_map(|local| local.retired.drain(..))
-            .for_each(|(prefix, raw)| {
+            .for_each(|retired| {
+                let prefix = retired.0;
+                let raw = retired.1;
                 deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
             });
 
@@ -275,13 +308,20 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
         hazard.store_packed(prefix, Ordering::Relaxed);
-        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
+
+        #[cfg(feature = "opt-hazard-epochs")]
+        {
+            let global_epoch = self.global_epoch.0.load(Ordering::Relaxed);
+            self.epochs[id].0.store(global_epoch, Ordering::Relaxed);
+        }
 
         #[cfg(feature = "opt-amortized-free-guard")]
         {
             let local = unsafe { &mut *local.get() };
             local.deallocate_one();
         }
+
+        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
 
         Guard {
             hazard,
@@ -291,11 +331,17 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
     }
 }
 
+#[cfg(feature = "opt-hazard-epochs")]
+type Retired<P> = (ribbit::Packed<P>, u64, usize);
+
+#[cfg(not(feature = "opt-hazard-epochs"))]
+type Retired<P> = (ribbit::Packed<P>, u64);
+
 #[repr(align(64))]
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
-    retired: Vec<(ribbit::Packed<P>, u64)>,
+    retired: Vec<Retired<P>>,
     #[cfg(any(
         feature = "opt-amortized-free-guard",
         feature = "opt-amortized-free-retire"
@@ -316,6 +362,26 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
+        #[cfg(feature = "opt-hazard-epochs")]
+        let global_epoch = {
+            // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
+            let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
+            let advance_epoch = (0..smr::thread::count())
+                .all(|i| global.epochs[i].0.load(Ordering::Relaxed) >= global_epoch);
+            if advance_epoch {
+                global_epoch = match global.global_epoch.0.compare_exchange(
+                    global_epoch,
+                    global_epoch + 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => global_epoch + 1,
+                    Err(e) => e,
+                };
+            }
+            global_epoch
+        };
+
         local.snapshot.extend(
             global.hazards[..smr::thread::count().next_multiple_of(4)]
                 .iter()
@@ -329,13 +395,33 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         #[cfg(feature = "opt-batch")]
         let mut batch = Vec::with_capacity(global.reclaim_threshold);
 
-        local.retired.retain_mut(|(prefix, raw)| {
-            if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
-                stat::increment(stat::Counter::HazardMatch);
-                if cfg!(feature = "stat") {
-                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
+        local.retired.retain_mut(|retired| {
+            let prefix = &mut retired.0;
+            let raw = &mut retired.1;
+
+            #[cfg(feature = "opt-hazard-epochs")]
+            {
+                let retired_epoch = retired.2;
+                if global_epoch < retired_epoch + 2
+                    && chunks.iter().any(|chunk| prefix.is_conflict(chunk))
+                {
+                    stat::increment(stat::Counter::HazardMatch);
+                    if cfg!(feature = "stat") {
+                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    }
+                    return true;
                 }
-                return true;
+            }
+
+            #[cfg(not(feature = "opt-hazard-epochs"))]
+            {
+                if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
+                    stat::increment(stat::Counter::HazardMatch);
+                    if cfg!(feature = "stat") {
+                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    }
+                    return true;
+                }
             }
 
             if cfg!(feature = "stat") {
@@ -446,7 +532,16 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
 
-        local.retired.push((prefix, node.raw().get()));
+        #[cfg(not(feature = "opt-hazard-epochs"))]
+        {
+            local.retired.push((prefix, node.raw().get()));
+        }
+
+        #[cfg(feature = "opt-hazard-epochs")]
+        {
+            let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
+            local.retired.push((prefix, node.raw().get(), global_epoch));
+        }
 
         #[cfg(feature = "opt-amortized-free-retire")]
         {
@@ -464,7 +559,16 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
 
-        local.retired.push((prefix, value));
+        #[cfg(not(feature = "opt-hazard-epochs"))]
+        {
+            local.retired.push((prefix, value));
+        }
+
+        #[cfg(feature = "opt-hazard-epochs")]
+        {
+            let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
+            local.retired.push((prefix, value, global_epoch));
+        }
 
         #[cfg(feature = "opt-amortized-free-retire")]
         {
@@ -477,6 +581,14 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
         self.hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+
+        #[cfg(feature = "opt-hazard-epochs")]
+        {
+            let id = usize::from(smr::thread::Id::current());
+            self.global.epochs[id]
+                .0
+                .store(usize::MAX, Ordering::Relaxed);
+        }
 
         let local = unsafe { &mut *self.local.get() };
         if local.retired.len() < self.global.reclaim_threshold {
