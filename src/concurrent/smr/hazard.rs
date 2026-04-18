@@ -303,11 +303,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         V: 'g,
     {
         let id = usize::from(smr::thread::Id::current());
+        let membarrier = self.membarrier.load(Ordering::Relaxed);
         let hazard = &self.hazards[id].0;
         let local = &self.locals[id];
-
-        validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
-        hazard.store_packed(prefix, Ordering::Relaxed);
 
         #[cfg(feature = "opt-hazard-epochs")]
         {
@@ -321,7 +319,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
             local.deallocate_one();
         }
 
-        membarrier::fast(self.membarrier.load(Ordering::Relaxed));
+        validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
+        hazard.store_packed(prefix, membarrier::fast_store_ordering(membarrier));
+        membarrier::fast_barrier(membarrier);
 
         Guard {
             hazard,
