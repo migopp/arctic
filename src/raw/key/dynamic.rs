@@ -82,6 +82,14 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
+    fn trim(
+        &mut self,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    ) {
+        self.0 = &self.0[..self.0.len() - (len.value() >> 3) as usize]
+    }
+
+    #[inline]
     fn prefix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
         Reader(&self.0[..bits >> 3])

@@ -84,6 +84,11 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
         (read, read == key)
     }
 
+    fn trim(
+        &mut self,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    );
+
     // Prefix operations for prefix and range iteration
     fn prefix(self, bits: usize) -> Self;
     fn suffix(self, bits: usize) -> Self;

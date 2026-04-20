@@ -117,6 +117,14 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
+    fn trim(
+        &mut self,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    ) {
+        self.bits -= len.value();
+    }
+
+    #[inline]
     fn prefix(self, bits: usize) -> Self {
         validate!(bits <= U::BITS as usize);
 
@@ -246,6 +254,14 @@ impl key::Read for Slow {
         self.buffer.copy_within(len.., 0);
         self.len -= len;
         (key, len == len_prefix)
+    }
+
+    #[inline]
+    fn trim(
+        &mut self,
+        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    ) {
+        self.len -= (len.value() >> 3) as usize;
     }
 
     #[inline]
