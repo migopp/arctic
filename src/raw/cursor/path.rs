@@ -30,10 +30,7 @@ where
 {
     type PopError;
 
-    fn trim(
-        &mut self,
-        len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    );
+    fn trim(&mut self, bits: usize);
 
     fn push(&mut self, segment: Segment<'k, K>);
     fn pop(&mut self) -> Result<Option<Segment<'k, K>>, Self::PopError>;
@@ -49,11 +46,7 @@ where
     type PopError = ();
 
     #[inline]
-    fn trim(
-        &mut self,
-        _: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-    }
+    fn trim(&mut self, _: usize) {}
 
     #[inline]
     fn push(&mut self, _segment: Segment<'k, K>) {}
@@ -73,11 +66,8 @@ where
     type PopError = Infallible;
 
     #[inline]
-    fn trim(
-        &mut self,
-        len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-        self.0.iter_mut().for_each(|segment| segment.key.trim(len))
+    fn trim(&mut self, bits: usize) {
+        self.0.iter_mut().for_each(|segment| segment.key.trim(bits))
     }
 
     #[inline]

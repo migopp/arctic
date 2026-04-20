@@ -381,7 +381,7 @@ where
         };
 
         if RECURSIVE {
-            cursor.trim(old.meta().key().len() + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE);
+            let mut trim = old.meta().key().len();
 
             'outer: while let Some(target) = cursor
                 .pop()
@@ -390,6 +390,8 @@ where
                 if unsafe { target.len() } > 0 {
                     break 'outer;
                 }
+
+                cursor.trim(trim.bits() + 8);
 
                 loop {
                     let Some(old) = cursor.traverse_prefix() else {
@@ -414,7 +416,7 @@ where
                     ) {
                         Ok(old) => {
                             unsafe { guard.retire_node(cursor.bits(), target) };
-                            cursor.trim(old.meta().key().len() + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE);
+                            trim = old.meta().key().len();
                             continue 'outer;
                         }
                         // FIXME: help freeze

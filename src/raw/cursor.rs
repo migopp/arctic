@@ -363,9 +363,7 @@ where
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
-        self.bits += (len
-            + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE)
-            .bits();
+        self.bits += len.bits() + 8;
         self.history.push(path::Segment {
             key,
             len,
@@ -381,18 +379,15 @@ where
         let Some(segment) = self.history.pop()? else {
             return Ok(None);
         };
-        self.bits -= segment.len.bits();
+        self.bits -= segment.len.bits() + 8;
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(Some(segment.node))
     }
 
     #[inline]
-    pub(crate) fn trim(
-        &mut self,
-        len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-        self.history.trim(len);
-        self.key.trim(len);
+    pub(crate) fn trim(&mut self, bits: usize) {
+        self.history.trim(bits);
+        self.key.trim(bits);
     }
 }

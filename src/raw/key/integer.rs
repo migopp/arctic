@@ -117,11 +117,8 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
-    fn trim(
-        &mut self,
-        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-        self.bits -= len.value();
+    fn trim(&mut self, bits: usize) {
+        self.bits -= bits as u8;
     }
 
     #[inline]
@@ -257,11 +254,8 @@ impl key::Read for Slow {
     }
 
     #[inline]
-    fn trim(
-        &mut self,
-        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-        self.len -= (len.value() >> 3) as usize;
+    fn trim(&mut self, bits: usize) {
+        self.len -= bits >> 3;
     }
 
     #[inline]

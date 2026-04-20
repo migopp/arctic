@@ -82,11 +82,8 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
-    fn trim(
-        &mut self,
-        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) {
-        self.0 = &self.0[..self.0.len() - (len.value() >> 3) as usize]
+    fn trim(&mut self, bits: usize) {
+        self.0 = &self.0[..self.0.len() - (bits >> 3)]
     }
 
     #[inline]

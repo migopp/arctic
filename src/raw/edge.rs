@@ -280,7 +280,6 @@ pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u
 
 pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
-    const BYTE: Self;
 
     #[cfg_attr(not(test), expect(unused))]
     fn new(bits: usize) -> Self;
@@ -289,7 +288,6 @@ pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
 
 impl Len for u6 {
     const MAX: Self = u6::new(56);
-    const BYTE: Self = u6::new(8);
 
     #[inline]
     fn new(bits: usize) -> Self {
