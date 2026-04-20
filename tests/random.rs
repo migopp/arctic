@@ -2,6 +2,7 @@ use core::hash::Hasher as _;
 use std::sync::Barrier;
 
 use arctic::raw::Key;
+use arctic::sequential::Value;
 
 mod u64 {
     use arctic::raw::Key;
@@ -203,6 +204,7 @@ trait Workload: Sized + Sync {
 fn test_map<'k, K: Workload>(key_set: &'k K, thread_count: usize, key_count: usize, hash: bool)
 where
     for<'a> <K::Key as Key>::Borrow<'a>: Sync + core::fmt::Debug,
+    for<'a> <K::Value as Value>::Borrow<'a>: core::fmt::Debug,
 {
     assert_eq!(key_count % thread_count, 0);
 
@@ -246,7 +248,7 @@ where
 
                 for (index, key) in chunk.iter().take(chunk.len() / 2) {
                     // FIXME: change to recursive removal after figuring out retiring
-                    let value = map.remove_non_recursive(key.borrow()).unwrap();
+                    let value = map.remove(key.borrow()).unwrap();
                     key_set.validate(*index, key.borrow(), &value);
                 }
 

@@ -16,6 +16,9 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor;
 use crate::raw::cursor::path;
+use crate::raw::edge;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::sequential;
 use crate::stat;
@@ -373,16 +376,61 @@ where
                 .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
-                break unsafe { old.into_value_unchecked() };
+                break old;
             }
         };
 
         if RECURSIVE {
-            cursor.reclaim()?;
+            cursor.trim(old.meta().key().len() + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE);
+
+            'outer: while let Some(target) = cursor
+                .pop()
+                .unwrap_or_else(|_| panic!("Recursive remove requires path"))
+            {
+                if unsafe { target.len() } > 0 {
+                    break 'outer;
+                }
+
+                loop {
+                    let Some(old) = cursor.traverse_prefix() else {
+                        break 'outer;
+                    };
+
+                    let new = match old.child() {
+                        None => break 'outer,
+                        Some(edge::Child::Value(_)) => unreachable!(),
+                        Some(edge::Child::Node(node)) if node == target => {
+                            unsafe { node.replace(old.meta()) }.1
+                        }
+                        // Must have been replaced by someone else
+                        Some(edge::Child::Node(_)) => break 'outer,
+                    };
+
+                    match cursor.edge().compare_exchange_packed(
+                        old,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(old) => {
+                            unsafe { guard.retire_node(cursor.bits(), target) };
+                            cursor.trim(old.meta().key().len() + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE);
+                            continue 'outer;
+                        }
+                        // FIXME: help freeze
+                        Err(conflict) if conflict.meta().is_frozen() => todo!(),
+                        Err(_) => {
+                            if let Some(node) = new.as_node() {
+                                unsafe { node.deallocate(stat::Counter::FreeConflict) };
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(Remove::Success {
-            old: unsafe { Owned::<K, V, S>::wrap(guard, old) },
+            old: unsafe { Owned::<K, V, S>::wrap(guard, old.into_value_unchecked()) },
         })
     }
 

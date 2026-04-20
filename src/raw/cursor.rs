@@ -355,52 +355,6 @@ where
     }
 
     #[inline]
-    pub(crate) fn reclaim(mut self) -> Result<(), H::PopError> {
-        let Some(node) = self.pop()? else {
-            return Ok(());
-        };
-
-        if unsafe { node.len() } > 0 {
-            return Ok(());
-        }
-
-        self.reclaim_cold(node)
-    }
-
-    #[cold]
-    fn reclaim_cold(
-        &mut self,
-        mut node: ribbit::Packed<node::Ptr<K::Edge>>,
-    ) -> Result<(), H::PopError> {
-        loop {
-            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
-
-            let (_smo, new) = unsafe { node.replace(old.meta()) };
-
-            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
-                old,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => (),
-                Err(_) => {
-                    if let Some(node) = new.as_node() {
-                        unsafe { node.deallocate(stat::Counter::FreeConflict) };
-                    }
-                    self.traverse_prefix();
-                }
-            };
-
-            match self.pop()? {
-                None => return Ok(()),
-                Some(next) if unsafe { next.len() } > 0 => return Ok(()),
-                Some(next) => node = next,
-            }
-        }
-    }
-
-    #[inline]
     fn push(
         &mut self,
         key: K::Read<'k>,
@@ -421,7 +375,9 @@ where
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
+    pub(crate) fn pop(
+        &mut self,
+    ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let Some(segment) = self.history.pop()? else {
             return Ok(None);
         };
@@ -429,5 +385,14 @@ where
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(Some(segment.node))
+    }
+
+    #[inline]
+    pub(crate) fn trim(
+        &mut self,
+        len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    ) {
+        self.history.trim(len);
+        self.key.trim(len);
     }
 }
