@@ -6,6 +6,7 @@ pub(crate) use le::Le;
 use ribbit::u6;
 
 use core::fmt::Debug;
+use core::ops::Add;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
@@ -277,8 +278,9 @@ pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u
     fn prefix(self, len: Self::Len) -> Self;
 }
 
-pub(crate) trait Len: Copy + Eq {
+pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
+    const BYTE: Self;
 
     #[cfg_attr(not(test), expect(unused))]
     fn new(bits: usize) -> Self;
@@ -287,6 +289,7 @@ pub(crate) trait Len: Copy + Eq {
 
 impl Len for u6 {
     const MAX: Self = u6::new(56);
+    const BYTE: Self = u6::new(8);
 
     #[inline]
     fn new(bits: usize) -> Self {

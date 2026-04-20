@@ -409,7 +409,9 @@ where
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
-        self.bits += 8 + len.bits();
+        self.bits += (len
+            + <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::BYTE)
+            .bits();
         self.history.push(path::Segment {
             key,
             len,
@@ -423,7 +425,7 @@ where
         let Some(segment) = self.history.pop()? else {
             return Ok(None);
         };
-        self.bits -= segment.len.bits() + 8;
+        self.bits -= segment.len.bits();
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(Some(segment.node))
