@@ -255,11 +255,34 @@ mod tests {
     use crate::sequential::Map;
 
     #[test]
-    fn values_mut() {
+    fn indirect_values_mut() {
         let mut map = Map::<u64, _>::default();
 
         for i in 0..1024 {
             map.upsert(i, Box::new(i));
+        }
+
+        map.all_mut()
+            .values_mut::<Ascend>()
+            .for_each_internal(|value| {
+                *value += 1;
+                ControlFlow::Continue(())
+            });
+
+        map.all()
+            .entries::<Descend>()
+            .for_each_internal(|(key, value)| {
+                assert_eq!(key + 1, *value);
+                ControlFlow::Continue(())
+            });
+    }
+
+    #[test]
+    fn direct_values_mut() {
+        let mut map = Map::<u64, _>::default();
+
+        for i in 0..1024 {
+            map.upsert(i, i);
         }
 
         map.all_mut()
