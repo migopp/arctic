@@ -116,7 +116,7 @@ where
 
             match edge.child()? {
                 edge::Child::Node(node) => {
-                    let byte = if cfg!(feature = "validate") {
+                    let byte = if const { K::Read::BITS.is_none() } {
                         self.key
                             .next()
                             .expect("Precondition: no key is prefix of another key")
@@ -179,7 +179,7 @@ where
             let len = self.key.match_exact(meta)?;
 
             if let Some(node) = edge.as_node() {
-                let byte = if cfg!(feature = "validate") {
+                let byte = if const { K::Read::BITS.is_none() } {
                     self.key
                         .next()
                         .expect("Precondition: no key is prefix of another key")
@@ -224,7 +224,7 @@ where
 
             if exact {
                 if let Some(node) = old.as_node() {
-                    let byte = if cfg!(feature = "validate") {
+                    let byte = if const { K::Read::BITS.is_none() } {
                         self.key
                             .next()
                             .expect("Precondition: no key is prefix of another key")
