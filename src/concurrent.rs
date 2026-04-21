@@ -601,9 +601,8 @@ where
                         },
                     }
                 }
-                cursor::Insert::Smo(Ok((smo, old, new))) => {
-                    validate!(!old.meta().is_frozen());
-
+                cursor::Insert::Smo { old_node, old } if !old.meta().is_frozen() => {
+                    let (smo, new) = unsafe { old_node.replace(old.meta()) };
                     match cursor.edge().compare_exchange_packed(
                         old,
                         new,
@@ -630,7 +629,7 @@ where
                 }
 
                 // Fall through to freeze
-                cursor::Insert::Smo(Err(Frozen)) => (),
+                cursor::Insert::Smo { .. } => (),
             }
 
             match cursor.freeze() {

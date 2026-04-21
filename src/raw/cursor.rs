@@ -9,7 +9,6 @@ use ribbit::Atomic;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::Key;
-use crate::raw::Smo;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -73,7 +72,10 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
     },
 
     /// Structural modification required
-    Smo(Result<(Smo, ribbit::Packed<Edge<E>>, ribbit::Packed<Edge<E>>), Frozen>),
+    Smo {
+        old_node: ribbit::Packed<node::Ptr<E>>,
+        old: ribbit::Packed<Edge<E>>,
+    },
 }
 
 impl<'k, 'g, K, H> Cursor<'k, 'g, K, H>
@@ -208,11 +210,6 @@ where
     /// Traverse to the edge associated with the key, or to
     /// the first edge where an SMO would be necessary to
     /// insert the key.
-    ///
-    /// NOTE: does not check for frozen if returning `Insert::Value`,
-    /// since the caller may only need read access to the key.
-    /// If the caller does need write access, they must check for
-    /// the frozen bit before CASing.
     #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
@@ -247,13 +244,11 @@ where
                 (false, _) | (true, None) => None,
                 (true, Some(edge::Child::Value(value))) => Some(value),
 
-                // Node replacement
-                (true, Some(edge::Child::Node(_))) if old_meta.is_frozen() => {
-                    return Insert::Smo(Err(Frozen));
-                }
                 (true, Some(edge::Child::Node(node))) => {
-                    let (smo, new) = unsafe { node.replace(old_meta) };
-                    return Insert::Smo(Ok((smo, old, new)));
+                    return Insert::Smo {
+                        old_node: node,
+                        old,
+                    };
                 }
             };
 

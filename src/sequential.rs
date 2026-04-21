@@ -24,6 +24,7 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor::CursorMut;
 use crate::raw::cursor::path;
+use crate::raw::edge::Meta as _;
 use crate::raw::iter::PostorderIter;
 use crate::stat;
 
@@ -111,13 +112,15 @@ where
                         return old_value.map(|old| unsafe { V::from_raw(old) });
                     }
                 },
-                crate::raw::cursor::Insert::Smo(Ok((_, old, new))) => {
+                crate::raw::cursor::Insert::Smo { old_node, old } => {
+                    validate!(!old.meta().is_frozen());
+                    // FIXME: implement separate `replace_mut` that does not freeze/CAS
+                    let (_smo, new) = unsafe { old_node.replace(old.meta()) };
                     cursor.edge_mut().set_packed(new);
                     if let Some(node) = old.as_node() {
                         unsafe { node.deallocate(stat::Counter::FreeRetire) };
                     }
                 }
-                crate::raw::cursor::Insert::Smo(Err(Frozen)) => unreachable!(),
             }
         }
     }
