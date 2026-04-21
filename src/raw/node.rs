@@ -308,7 +308,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn len<'g>(self) -> u8 {
+    pub(crate) unsafe fn len(self) -> u8 {
         self.dispatch(
             |node| unsafe { node.as_ref() }.len(),
             |node| unsafe { node.as_ref() }.len(),
