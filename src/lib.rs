@@ -90,13 +90,13 @@ mod tests {
         impl<T: ?Sized> AmbiguousIfSync<((), ())> for T {}
         impl<T: ?Sized + Sync> AmbiguousIfSync<()> for T {}
 
-        const _: () = <sequential::Map<u64, u32>>::ASSERT_NOT_SYNC;
+        const _: () = <sequential::Map<u64, u64>>::ASSERT_NOT_SYNC;
     }
 
     #[test]
     fn smoke() {
         let map = Map::<Vec<u8>, _>::default();
-        map.upsert(b"abcd", 1u32);
+        map.upsert(b"abcd", 1u64);
         assert_eq!(map.get(b"abcd").as_deref().copied(), Some(1));
     }
 
@@ -104,7 +104,7 @@ mod tests {
     fn smoke_u64_key() {
         let map = Map::<Vec<u8>, _>::default();
         let key = 0xdeadbeefu64.to_be_bytes();
-        map.upsert(&key, 1u32);
+        map.upsert(&key, 1u64);
         assert_eq!(map.get(&key).as_deref().copied(), Some(1));
     }
 
@@ -159,7 +159,7 @@ mod tests {
     fn scan_value() {
         let map = Map::<u64, _>::default();
         let key = 1u64;
-        map.upsert(key, 2u32);
+        map.upsert(key, 2u64);
         let range = map.range(1u64..=1u64).unwrap();
         assert_eq!(range.entries::<Ascend>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
@@ -182,7 +182,7 @@ mod tests {
             range.entries::<Ascend>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
-                .map(|key| (key, key as u32 / 2))
+                .map(|key| (key, key as u64 / 2))
                 .collect::<Vec<_>>()
         );
     }
@@ -191,7 +191,7 @@ mod tests {
     fn node3_overwrite() {
         let mut map = Map::<u64, _>::default();
 
-        for value in [1u32, 2, 3] {
+        for value in [1u64, 2, 3] {
             map.upsert(1, value);
             assert_eq!(map.get(1).as_deref().copied(), Some(value));
         }
@@ -302,10 +302,10 @@ mod tests {
         let prefix = map.range(key(5)..=key(i64::MAX)).unwrap();
 
         let values = prefix.values::<Ascend>().collect::<Vec<_>>();
-        assert_eq!(values, (5..10).collect::<Vec<u32>>());
+        assert_eq!(values, (5..10).collect::<Vec<u64>>());
     }
 
-    fn insert_all<I, K>(iter: I) -> Map<K, u32>
+    fn insert_all<I, K>(iter: I) -> Map<K, u64>
     where
         I: IntoIterator<Item = K>,
         K: crate::Key + Clone + Ord + core::fmt::Debug,
@@ -313,7 +313,7 @@ mod tests {
         let mut keys = iter
             .into_iter()
             .enumerate()
-            .map(|(index, key)| (key, index as u32))
+            .map(|(index, key)| (key, index as u64))
             .collect::<Vec<_>>();
 
         let mut map = Map::default();

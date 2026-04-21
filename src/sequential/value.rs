@@ -51,6 +51,7 @@ pub unsafe trait Value {
         Self: 'l;
 
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target;
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target;
 }
 
 unsafe impl<T: Sized> Value for Box<T> {
@@ -118,7 +119,22 @@ unsafe impl<T: Sized> Value for Box<T> {
 
     #[inline]
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
-        unsafe { Self::borrow_from_raw(*raw) }
+        let borrow = unsafe { (*raw as *const T).as_ref() };
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+
+    #[inline]
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
+        let borrow = unsafe { (*raw as *mut T).as_mut() };
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
     }
 }
 
@@ -190,6 +206,11 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
         unsafe { core::mem::transmute(raw) }
     }
+
+    #[inline]
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
+        unsafe { core::mem::transmute(raw) }
+    }
 }
 
 macro_rules! impl_integer {
@@ -243,7 +264,13 @@ macro_rules! impl_integer {
 
                 #[inline]
                 unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
-                    // FIXME: broken for non-64 bit
+                    // TODO: supporting non-8-byte values requires
+                    // changes due to endianness
+                    unsafe { core::mem::transmute(raw) }
+                }
+
+                #[inline]
+                unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
                     unsafe { core::mem::transmute(raw) }
                 }
             }
@@ -251,4 +278,4 @@ macro_rules! impl_integer {
     };
 }
 
-impl_integer!(u64, u32, u16, u8, i64, i32, i16, i8);
+impl_integer!(u64, i64);
