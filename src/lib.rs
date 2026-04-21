@@ -182,7 +182,7 @@ mod tests {
             range.entries::<Ascend>().collect::<Vec<_>>(),
             (256..512)
                 .step_by(2)
-                .map(|key| (key, key as u64 / 2))
+                .map(|key| (key, key / 2))
                 .collect::<Vec<_>>()
         );
     }
@@ -203,7 +203,7 @@ mod tests {
             .entries::<Ascend>()
             .for_each_internal(|(key, value)| {
                 assert_eq!(key, 1);
-                assert_eq!(value, 3);
+                assert_eq!(*value, 3);
                 core::ops::ControlFlow::Continue(())
             });
     }
@@ -345,7 +345,7 @@ mod tests {
             .zip(&keys)
             .for_each(|((lk, lv), (rk, rv))| {
                 assert_eq!(lk, *rk);
-                assert_eq!(lv, *rv);
+                assert_eq!(*lv, *rv);
             });
 
         let Some(((first, _), (last, _))) = keys.first().zip(keys.last()) else {

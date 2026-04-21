@@ -76,7 +76,7 @@ impl<K, V> StateMachineTest for Arctic<K, V>
 where
     K: arctic::Key + Arbitrary + Clone + Debug + Default + Ord + 'static,
     V: arctic::Value + Arbitrary + Clone + Debug + Send + Sync + 'static,
-    for<'a, 'b> V::Borrow<'a>: Debug + PartialEq<V::Borrow<'b>>,
+    V::Target: Debug + PartialEq,
 {
     type SystemUnderTest = Self;
 
@@ -109,7 +109,7 @@ where
             .for_each(
                 |((actual_key, actual_value), (expected_key, expected_value))| {
                     assert_eq!(actual_key, *expected_key);
-                    assert_eq!(actual_value, V::borrow(expected_value));
+                    assert_eq!(actual_value, expected_value.as_target());
                 },
             );
 

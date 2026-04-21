@@ -63,7 +63,9 @@ impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
 
 impl<'g, L: Lower, U: Upper, M: ribbit::Pack> NodeIter<'g, L, U, M> {
     #[inline]
-    pub(crate) fn try_into_single(self) -> Result<(bool, bool, u8, &'g Atomic<Edge<M>>), Self> {
+    pub(crate) fn try_into_single(
+        self,
+    ) -> Result<(bool, bool, u8, NonNull<Atomic<Edge<M>>>), Self> {
         self.keys
             .try_into_single()
             .map(|KeyIndex { key, index }| {
@@ -78,7 +80,7 @@ impl<'g, L: Lower, U: Upper, M: ribbit::Pack> NodeIter<'g, L, U, M> {
                     self.len,
                 );
 
-                let edge = unsafe { self.edges.add(index as usize).as_ref() };
+                let edge = unsafe { self.edges.add(index as usize) };
                 (lower, upper, key, edge)
             })
             .map_err(|keys| Self {
@@ -94,7 +96,7 @@ impl<'g, L: Lower, U: Upper, M: ribbit::Pack> NodeIter<'g, L, U, M> {
 }
 
 impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
-    type Item = (u8, &'g Atomic<Edge<M>>);
+    type Item = (u8, NonNull<Atomic<Edge<M>>>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -108,7 +110,7 @@ impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
             self.len,
         );
 
-        let edge = unsafe { self.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.edges.add(index as usize) };
         Some((key, edge))
     }
 
@@ -131,7 +133,7 @@ impl<'g, L, U, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, L, U, M> {
             self.len,
         );
 
-        let edge = unsafe { self.edges.add(index as usize).as_ref() };
+        let edge = unsafe { self.edges.add(index as usize) };
         Some((key, edge))
     }
 }

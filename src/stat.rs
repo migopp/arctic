@@ -52,7 +52,11 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
                     };
 
                     let children = unsafe { node.entries(Unbound, Unbound) }
-                        .filter(|(_, edge)| !edge.load_packed(Ordering::Relaxed).is_null())
+                        .filter(|(_, edge)| {
+                            !unsafe { edge.as_ref() }
+                                .load_packed(Ordering::Relaxed)
+                                .is_null()
+                        })
                         .count();
 
                     histogram.record(children as u64);

@@ -102,32 +102,6 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn as_value_unchecked(&self) -> &'g u64 {
-        unsafe {
-            if cfg!(target_endian = "little") {
-                self.edge.byte_add(8)
-            } else {
-                self.edge
-            }
-            .cast::<u64>()
-            .as_ref()
-        }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn as_value_mut_unchecked(&mut self) -> &'g mut u64 {
-        unsafe {
-            if cfg!(target_endian = "little") {
-                self.edge.byte_add(8)
-            } else {
-                self.edge
-            }
-            .cast::<u64>()
-            .as_mut()
-        }
-    }
-
-    #[inline]
     pub(crate) fn bits(&self) -> usize {
         self.bits
     }

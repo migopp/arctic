@@ -137,7 +137,7 @@ where
 
         let len = self
             .entries(Unbound, Unbound)
-            .map(|(key, edge)| (key, edge.load_packed(Ordering::Relaxed)))
+            .map(|(key, edge)| (key, unsafe { edge.as_ref() }.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {
                 validate!(

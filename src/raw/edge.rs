@@ -34,6 +34,32 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         ribbit::Packed::<Self>::new(<M::Packed as Meta>::DEFAULT, 0);
 
     #[inline]
+    pub(crate) unsafe fn as_value_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g u64 {
+        unsafe {
+            if cfg!(target_endian = "little") {
+                edge.byte_add(8)
+            } else {
+                edge
+            }
+            .cast::<u64>()
+            .as_ref()
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn as_value_mut_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g mut u64 {
+        unsafe {
+            if cfg!(target_endian = "little") {
+                edge.byte_add(8)
+            } else {
+                edge
+            }
+            .cast::<u64>()
+            .as_mut()
+        }
+    }
+
+    #[inline]
     pub(crate) fn new_path<R>(mut reader: R, value: u64) -> ribbit::Packed<Self>
     where
         R: key::Read<Edge = M>,

@@ -204,7 +204,7 @@ trait Workload: Sized + Sync {
 fn test_map<'k, K: Workload>(key_set: &'k K, thread_count: usize, key_count: usize, hash: bool)
 where
     for<'a> <K::Key as Key>::Borrow<'a>: Sync + core::fmt::Debug,
-    for<'a> <K::Value as Value>::Borrow<'a>: core::fmt::Debug,
+    <K::Value as Value>::Target: core::fmt::Debug,
 {
     assert_eq!(key_count % thread_count, 0);
 

@@ -4,6 +4,7 @@ use core::ops::Deref;
 
 use crate::Order;
 use crate::raw;
+use crate::raw::Edge;
 use crate::raw::Key;
 use crate::sequential::Value;
 
@@ -84,19 +85,24 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::Borrow<'g>)> {
-        self.inner
-            .lend()
-            .map(|(key, value)| (key, unsafe { V::borrow_from_raw(value) }))
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, &'g V::Target)> {
+        self.inner.lend().map(|(key, _, edge)| {
+            (key, unsafe {
+                V::target_from_raw(Edge::as_value_unchecked(edge))
+            })
+        })
     }
 
     #[inline]
-    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, V::Borrow<'g>)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, &'g V::Target)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
-        self.inner
-            .for_each_internal(|(key, value)| apply((key, unsafe { V::borrow_from_raw(value) })))
+        self.inner.for_each_internal(|(key, _, edge)| {
+            apply((key, unsafe {
+                V::target_from_raw(Edge::as_value_unchecked(edge))
+            }))
+        })
     }
 }
 
@@ -107,13 +113,12 @@ where
     R: raw::iter::Range<'k, K>,
     O: Order,
 {
-    type Item = (K, V::Borrow<'g>);
+    type Item = (K, &'g V::Target);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|(key, value)| (key, unsafe { V::borrow_from_raw(value) }))
+        self.lend()
+            .map(|(key, value)| (K::clone_from_borrow(key), value))
     }
 }
 
@@ -130,19 +135,23 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, V::BorrowMut<'g>)> {
-        self.inner
-            .lend()
-            .map(|(key, value)| (key, unsafe { V::borrow_mut_from_raw(value) }))
+    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, &'g mut V::Target)> {
+        self.inner.lend().map(|(key, _, edge)| {
+            (key, unsafe {
+                V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge))
+            })
+        })
     }
 
     #[inline]
-    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, V::BorrowMut<'g>)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, &'g mut V::Target)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
-        self.inner.for_each_internal(|(key, value)| {
-            apply((key, unsafe { V::borrow_mut_from_raw(value) }))
+        self.inner.for_each_internal(|(key, _, edge)| {
+            apply((key, unsafe {
+                V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge))
+            }))
         })
     }
 }
@@ -154,13 +163,12 @@ where
     R: raw::iter::Range<'k, K>,
     O: Order,
 {
-    type Item = (K, V::BorrowMut<'g>);
+    type Item = (K, &'g mut V::Target);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .next()
-            .map(|(key, value)| (key, unsafe { V::borrow_mut_from_raw(value) }))
+        self.lend()
+            .map(|(key, value)| (K::clone_from_borrow(key), value))
     }
 }
 
@@ -177,9 +185,10 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each_internal<F: FnMut(V::Borrow<'g>) -> ControlFlow<()>>(self, mut apply: F) {
-        self.inner
-            .for_each_internal(|value| apply(unsafe { V::borrow_from_raw(value) }))
+    pub fn for_each_internal<F: FnMut(&'g V::Target) -> ControlFlow<()>>(self, mut apply: F) {
+        self.inner.for_each_internal(|(_, edge)| {
+            apply(unsafe { V::target_from_raw(Edge::as_value_unchecked(edge)) })
+        })
     }
 }
 
@@ -190,13 +199,13 @@ where
     R: crate::raw::iter::Range<'k, K>,
     O: Order,
 {
-    type Item = V::Borrow<'g>;
+    type Item = &'g V::Target;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
-            .next()
-            .map(|value| unsafe { V::borrow_from_raw(value) })
+            .lend()
+            .map(|(_, edge)| unsafe { V::target_from_raw(Edge::as_value_unchecked(edge)) })
     }
 }
 
@@ -213,9 +222,10 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each_internal<F: FnMut(V::BorrowMut<'g>) -> ControlFlow<()>>(self, mut apply: F) {
-        self.inner
-            .for_each_internal(|value| apply(unsafe { V::borrow_mut_from_raw(value) }))
+    pub fn for_each_internal<F: FnMut(&'g mut V::Target) -> ControlFlow<()>>(self, mut apply: F) {
+        self.inner.for_each_internal(|(_, edge)| {
+            apply(unsafe { V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge)) })
+        })
     }
 }
 
@@ -226,13 +236,13 @@ where
     R: crate::raw::iter::Range<'k, K>,
     O: Order,
 {
-    type Item = V::BorrowMut<'g>;
+    type Item = &'g mut V::Target;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
-            .next()
-            .map(|value| unsafe { V::borrow_mut_from_raw(value) })
+            .lend()
+            .map(|(_, edge)| unsafe { V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge)) })
     }
 }
 

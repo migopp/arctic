@@ -98,7 +98,7 @@ where
 
         if first {
             let (_, edge) = self.iter.next()?;
-            let edge = edge.load_packed(Ordering::Acquire);
+            let edge = unsafe { edge.as_ref() }.load_packed(Ordering::Acquire);
             self.edge = edge;
         }
 
