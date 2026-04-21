@@ -110,7 +110,7 @@ where
     #[inline]
     pub(crate) fn traverse_get(mut self) -> Option<u64> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
 
             let _ = self.key.match_exact(edge.meta())?;
 
@@ -136,7 +136,7 @@ where
     /// Traverse to the root of the subtree prefixed by the key, if it exists.
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -171,7 +171,7 @@ where
         &mut self,
     ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -216,7 +216,7 @@ where
     #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
-            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let old = self.edge().load_packed(Ordering::Acquire);
             let old_meta = old.meta();
             let save = self.key;
 
@@ -308,13 +308,13 @@ where
         &mut self,
     ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let mut node = self.pop()?.expect("Root edge cannot be frozen");
-        let mut edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+        let mut edge = self.edge().load_packed(Ordering::Acquire);
         let mut pop = 1;
 
         let old = loop {
             while edge.meta().is_frozen() {
                 node = self.pop()?.expect("Root edge cannot be frozen");
-                edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+                edge = self.edge().load_packed(Ordering::Acquire);
                 pop += 1;
             }
 
@@ -329,7 +329,7 @@ where
 
             let (op, new) = unsafe { node.replace(meta) };
 
-            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
+            match self.edge().compare_exchange_packed(
                 edge,
                 new,
                 Ordering::AcqRel,
