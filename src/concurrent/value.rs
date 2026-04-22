@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
 
@@ -76,6 +77,17 @@ impl<G: smr::Guard<V>, V: Value> Drop for Owned<G, V> {
     }
 }
 
+impl<G, V> Debug for Owned<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+    V::Target: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
 pub struct Shared<G: smr::Guard<V>, V: Value> {
     _guard: V::Guard<G>,
     raw: u64,
@@ -104,6 +116,17 @@ where
     #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe { V::target_from_raw(&self.raw) }
+    }
+}
+
+impl<G, V> Debug for Shared<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+    V::Target: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.deref().fmt(f)
     }
 }
 
@@ -140,6 +163,20 @@ where
 impl<G: smr::Guard<V>, V: Value> Drop for Updated<G, V> {
     fn drop(&mut self) {
         unsafe { self.guard.retire_value(self.old) }
+    }
+}
+
+impl<G, V> Debug for Updated<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+    V::Target: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Updated")
+            .field("old", self.old())
+            .field("new", self.new())
+            .finish()
     }
 }
 
@@ -193,5 +230,19 @@ impl<G: smr::Guard<V>, V: Value> Drop for Upserted<G, V> {
     fn drop(&mut self) {
         let Some(old) = self.old else { return };
         unsafe { self.guard.retire_value(old) }
+    }
+}
+
+impl<G, V> Debug for Upserted<G, V>
+where
+    G: smr::Guard<V>,
+    V: Value,
+    V::Target: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Upserted")
+            .field("old", &self.old())
+            .field("new", self.new())
+            .finish()
     }
 }
