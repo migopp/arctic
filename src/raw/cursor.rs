@@ -9,7 +9,6 @@ use ribbit::Atomic;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::Key;
-use crate::raw::Smo;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -73,7 +72,10 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
     },
 
     /// Structural modification required
-    Smo(Result<(Smo, ribbit::Packed<Edge<E>>, ribbit::Packed<Edge<E>>), Frozen>),
+    Smo {
+        old_node: ribbit::Packed<node::Ptr<E>>,
+        old: ribbit::Packed<Edge<E>>,
+    },
 }
 
 impl<'k, 'g, K, H> Cursor<'k, 'g, K, H>
@@ -108,15 +110,15 @@ where
 
     /// Traverse to the value associated with the key, if it exists.
     #[inline]
-    pub(crate) fn traverse_get(mut self) -> Option<u64> {
+    pub(crate) fn traverse_get(&mut self) -> Option<u64> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
 
             let _ = self.key.match_exact(edge.meta())?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {
-                    let byte = if cfg!(feature = "validate") {
+                    let byte = if const { K::Read::BITS.is_none() } {
                         self.key
                             .next()
                             .expect("Precondition: no key is prefix of another key")
@@ -136,7 +138,7 @@ where
     /// Traverse to the root of the subtree prefixed by the key, if it exists.
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<K::Edge>>> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -171,7 +173,7 @@ where
         &mut self,
     ) -> Option<Result<ribbit::Packed<Edge<K::Edge>>, Frozen>> {
         loop {
-            let edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
             let save = self.key;
 
@@ -179,7 +181,7 @@ where
             let len = self.key.match_exact(meta)?;
 
             if let Some(node) = edge.as_node() {
-                let byte = if cfg!(feature = "validate") {
+                let byte = if const { K::Read::BITS.is_none() } {
                     self.key
                         .next()
                         .expect("Precondition: no key is prefix of another key")
@@ -208,15 +210,10 @@ where
     /// Traverse to the edge associated with the key, or to
     /// the first edge where an SMO would be necessary to
     /// insert the key.
-    ///
-    /// NOTE: does not check for frozen if returning `Insert::Value`,
-    /// since the caller may only need read access to the key.
-    /// If the caller does need write access, they must check for
-    /// the frozen bit before CASing.
     #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<K::Edge> {
         loop {
-            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+            let old = self.edge().load_packed(Ordering::Acquire);
             let old_meta = old.meta();
             let save = self.key;
 
@@ -224,7 +221,7 @@ where
 
             if exact {
                 if let Some(node) = old.as_node() {
-                    let byte = if cfg!(feature = "validate") {
+                    let byte = if const { K::Read::BITS.is_none() } {
                         self.key
                             .next()
                             .expect("Precondition: no key is prefix of another key")
@@ -247,13 +244,11 @@ where
                 (false, _) | (true, None) => None,
                 (true, Some(edge::Child::Value(value))) => Some(value),
 
-                // Node replacement
-                (true, Some(edge::Child::Node(_))) if old_meta.is_frozen() => {
-                    return Insert::Smo(Err(Frozen));
-                }
                 (true, Some(edge::Child::Node(node))) => {
-                    let (smo, new) = unsafe { node.replace(old_meta) };
-                    return Insert::Smo(Ok((smo, old, new)));
+                    return Insert::Smo {
+                        old_node: node,
+                        old,
+                    };
                 }
             };
 
@@ -308,13 +303,13 @@ where
         &mut self,
     ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let mut node = self.pop()?.expect("Root edge cannot be frozen");
-        let mut edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+        let mut edge = self.edge().load_packed(Ordering::Acquire);
         let mut pop = 1;
 
         let old = loop {
             while edge.meta().is_frozen() {
                 node = self.pop()?.expect("Root edge cannot be frozen");
-                edge = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
+                edge = self.edge().load_packed(Ordering::Acquire);
                 pop += 1;
             }
 
@@ -329,7 +324,7 @@ where
 
             let (op, new) = unsafe { node.replace(meta) };
 
-            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
+            match self.edge().compare_exchange_packed(
                 edge,
                 new,
                 Ordering::AcqRel,
@@ -355,52 +350,6 @@ where
     }
 
     #[inline]
-    pub(crate) fn reclaim(mut self) -> Result<(), H::PopError> {
-        let Some(node) = self.pop()? else {
-            return Ok(());
-        };
-
-        if unsafe { node.len() } > 0 {
-            return Ok(());
-        }
-
-        self.reclaim_cold(node)
-    }
-
-    #[cold]
-    fn reclaim_cold(
-        &mut self,
-        mut node: ribbit::Packed<node::Ptr<K::Edge>>,
-    ) -> Result<(), H::PopError> {
-        loop {
-            let old = unsafe { self.edge.as_ref() }.load_packed(Ordering::Acquire);
-
-            let (_smo, new) = unsafe { node.replace(old.meta()) };
-
-            match unsafe { self.edge.as_ref() }.compare_exchange_packed(
-                old,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => (),
-                Err(_) => {
-                    if let Some(node) = new.as_node() {
-                        unsafe { node.deallocate(stat::Counter::FreeConflict) };
-                    }
-                    self.traverse_prefix();
-                }
-            };
-
-            match self.pop()? {
-                None => return Ok(()),
-                Some(next) if unsafe { next.len() } > 0 => return Ok(()),
-                Some(next) => node = next,
-            }
-        }
-    }
-
-    #[inline]
     fn push(
         &mut self,
         key: K::Read<'k>,
@@ -409,7 +358,7 @@ where
         edge: &'g Atomic<Edge<K::Edge>>,
     ) {
         // 1 extra byte for node
-        self.bits += 8 + len.bits();
+        self.bits += len.bits() + 8;
         self.history.push(path::Segment {
             key,
             len,
@@ -419,7 +368,9 @@ where
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
+    pub(crate) fn pop(
+        &mut self,
+    ) -> Result<Option<ribbit::Packed<node::Ptr<K::Edge>>>, H::PopError> {
         let Some(segment) = self.history.pop()? else {
             return Ok(None);
         };
@@ -427,5 +378,11 @@ where
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(Some(segment.node))
+    }
+
+    #[inline]
+    pub(crate) fn trim(&mut self, bits: usize) {
+        self.history.trim(bits);
+        self.key.trim(bits);
     }
 }

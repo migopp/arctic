@@ -104,36 +104,22 @@ where
     O: Order,
 {
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(K::Borrow<'_>, u64)> {
-        self.0
-            .lend()
-            .map(|(key, value)| (unsafe { K::borrow_writer_unchecked(key) }, value))
+    pub(crate) fn lend(&mut self) -> Option<(K::Borrow<'_>, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
+        self.0.lend().map(|(writer, value, edge)| {
+            (unsafe { K::borrow_writer_unchecked(writer) }, value, edge)
+        })
     }
 
     #[inline]
-    pub(crate) fn for_each_internal<F: FnMut((K::Borrow<'_>, u64)) -> ControlFlow<()>>(
+    pub(crate) fn for_each_internal<
+        F: FnMut((K::Borrow<'_>, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
+    >(
         self,
         mut apply: F,
     ) {
-        self.0.for_each_internal(|(key, value)| {
-            apply((unsafe { K::borrow_writer_unchecked(key) }, value))
+        self.0.for_each_internal(|(writer, value, edge)| {
+            apply((unsafe { K::borrow_writer_unchecked(writer) }, value, edge))
         })
-    }
-}
-
-impl<'k, 'g, K, R, O> Iterator for EntryIter<'k, 'g, K, R, O>
-where
-    K: Key,
-    R: Range<'k, K>,
-    O: Order,
-{
-    type Item = (K, u64);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0
-            .lend()
-            .map(|(key, value)| (unsafe { K::from_writer_unchecked(key.clone()) }, value))
     }
 }
 
@@ -149,21 +135,18 @@ where
     O: Order,
 {
     #[inline]
-    pub(crate) fn for_each_internal<F: FnMut(u64) -> ControlFlow<()>>(self, mut apply: F) {
-        self.0.for_each_internal(|(_, value)| apply(value))
+    pub(crate) fn lend(&mut self) -> Option<(u64, NonNull<Atomic<Edge<K::Edge>>>)> {
+        self.0.lend().map(|(_, value, edge)| (value, edge))
     }
-}
-
-impl<'k, 'g, K, R, O> Iterator for ValueIter<'k, 'g, K, R, O>
-where
-    K: Key,
-    R: crate::raw::iter::Range<'k, K>,
-    O: Order,
-{
-    type Item = u64;
 
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.lend().map(|(_, value)| value)
+    pub(crate) fn for_each_internal<
+        F: FnMut((u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
+    >(
+        self,
+        mut apply: F,
+    ) {
+        self.0
+            .for_each_internal(|(_, value, edge)| apply((value, edge)))
     }
 }

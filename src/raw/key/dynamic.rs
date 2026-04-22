@@ -82,6 +82,11 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
+    fn trim(&mut self, bits: usize) {
+        self.0 = &self.0[..self.0.len() - (bits >> 3)]
+    }
+
+    #[inline]
     fn prefix(self, bits: usize) -> Self {
         validate!(self.bits() >= bits);
         Reader(&self.0[..bits >> 3])

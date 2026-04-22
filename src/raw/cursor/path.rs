@@ -6,6 +6,7 @@ use ribbit::Atomic;
 use crate::raw::Edge;
 use crate::raw::Key;
 use crate::raw::edge;
+use crate::raw::key::Read as _;
 use crate::raw::node;
 
 /// A path along the tree is composed of 0 or more path segments.
@@ -29,6 +30,8 @@ where
 {
     type PopError;
 
+    fn trim(&mut self, bits: usize);
+
     fn push(&mut self, segment: Segment<'k, K>);
     fn pop(&mut self) -> Result<Option<Segment<'k, K>>, Self::PopError>;
 }
@@ -41,6 +44,9 @@ where
     K: Key,
 {
     type PopError = ();
+
+    #[inline]
+    fn trim(&mut self, _: usize) {}
 
     #[inline]
     fn push(&mut self, _segment: Segment<'k, K>) {}
@@ -58,6 +64,11 @@ where
     K: Key,
 {
     type PopError = Infallible;
+
+    #[inline]
+    fn trim(&mut self, bits: usize) {
+        self.0.iter_mut().for_each(|segment| segment.key.trim(bits))
+    }
 
     #[inline]
     fn push(&mut self, segment: Segment<'k, K>) {

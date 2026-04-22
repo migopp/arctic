@@ -6,6 +6,7 @@ pub(crate) use le::Le;
 use ribbit::u6;
 
 use core::fmt::Debug;
+use core::ops::Add;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
@@ -31,6 +32,32 @@ pub(crate) struct Edge<M> {
 impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     pub(crate) const DEFAULT: ribbit::Packed<Self> =
         ribbit::Packed::<Self>::new(<M::Packed as Meta>::DEFAULT, 0);
+
+    #[inline]
+    pub(crate) unsafe fn as_value_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g u64 {
+        unsafe {
+            if cfg!(target_endian = "little") {
+                edge.byte_add(8)
+            } else {
+                edge
+            }
+            .cast::<u64>()
+            .as_ref()
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn as_value_mut_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g mut u64 {
+        unsafe {
+            if cfg!(target_endian = "little") {
+                edge.byte_add(8)
+            } else {
+                edge
+            }
+            .cast::<u64>()
+            .as_mut()
+        }
+    }
 
     #[inline]
     pub(crate) fn new_path<R>(mut reader: R, value: u64) -> ribbit::Packed<Self>
@@ -277,7 +304,7 @@ pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u
     fn prefix(self, len: Self::Len) -> Self;
 }
 
-pub(crate) trait Len: Copy + Eq {
+pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
 
     #[cfg_attr(not(test), expect(unused))]

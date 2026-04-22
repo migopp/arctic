@@ -24,7 +24,10 @@ use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 
 pub(crate) enum RangeIter<'k, 'g, K: Key, W: key::Write, R: Range<'k, K>, O> {
-    Root { writer: W, next: Option<u64> },
+    Root {
+        writer: W,
+        next: Option<(u64, NonNull<Atomic<Edge<K::Edge>>>)>,
+    },
     Node(NodeIter<'k, 'g, K, W, R, O>),
 }
 
@@ -76,7 +79,7 @@ where
         match child {
             edge::Child::Value(value) => Self::Root {
                 writer,
-                next: Some(value),
+                next: Some((value, root)),
             },
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
@@ -85,8 +88,8 @@ where
                 Self::Node(NodeIter {
                     lower,
                     upper,
-                    stack,
                     writer,
+                    stack,
                     _order: PhantomData,
                 })
             }
@@ -94,12 +97,17 @@ where
     }
 
     #[inline]
-    pub(crate) fn for_each_internal<F: FnMut((&W, u64)) -> ControlFlow<()>>(self, mut apply: F) {
+    pub(crate) fn for_each_internal<
+        F: FnMut((&W, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
+    >(
+        self,
+        mut apply: F,
+    ) {
         match self {
             RangeIter::Root { writer, mut next } => {
                 crate::cold();
-                if let Some(value) = next.take() {
-                    let _ = apply((&writer, value));
+                if let Some((value, edge)) = next.take() {
+                    let _ = apply((&writer, value, edge));
                 }
             }
             RangeIter::Node(mut iter) => iter.for_each_internal(apply),
@@ -107,12 +115,12 @@ where
     }
 
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(&W, u64)> {
+    pub(crate) fn lend(&mut self) -> Option<(&W, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
         match self {
-            RangeIter::Root { writer: key, next } => {
+            RangeIter::Root { writer, next } => {
                 crate::cold();
-                let value = next.take()?;
-                Some((key, value))
+                let (value, edge) = next.take()?;
+                Some((writer, value, edge))
             }
             RangeIter::Node(iter) => iter.lend(),
         }
@@ -143,20 +151,26 @@ where
     O: Order,
 {
     #[inline]
-    fn lend(&mut self) -> Option<(&W, u64)> {
-        self.walk::<true, _>(|(_, _)| ControlFlow::Continue(()))
+    fn lend(&mut self) -> Option<(&W, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
+        self.walk::<true, _>(|(_, _, _)| unreachable!())
     }
 
     #[inline]
-    fn for_each_internal<F: FnMut((&W, u64)) -> ControlFlow<()>>(&mut self, apply: F) {
+    fn for_each_internal<F: FnMut((&W, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>>(
+        &mut self,
+        apply: F,
+    ) {
         self.walk::<false, _>(apply);
     }
 
     #[inline]
-    fn walk<const YIELD: bool, F: FnMut((&W, u64)) -> ControlFlow<()>>(
+    fn walk<
+        const YIELD: bool,
+        F: FnMut((&W, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
+    >(
         &mut self,
         mut apply: F,
-    ) -> Option<(&W, u64)> {
+    ) -> Option<(&W, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
         'vertical: loop {
             let (len, iter) = self.stack.last_mut()?;
             let len = *len;
@@ -177,7 +191,7 @@ where
 
                 'compress: loop {
                     let (meta, child) = {
-                        let edge = edge.load_packed(Ordering::Acquire);
+                        let edge = unsafe { edge.as_ref() }.load_packed(Ordering::Acquire);
                         let Some(child) = edge.child() else {
                             continue 'horizontal;
                         };
@@ -215,9 +229,9 @@ where
 
                     match child {
                         edge::Child::Value(value) if YIELD => {
-                            return Some((&self.writer, value));
+                            return Some((&self.writer, value, edge));
                         }
-                        edge::Child::Value(value) => match apply((&self.writer, value)) {
+                        edge::Child::Value(value) => match apply((&self.writer, value, edge)) {
                             ControlFlow::Continue(()) => continue 'horizontal,
                             ControlFlow::Break(()) => {
                                 self.stack.clear();

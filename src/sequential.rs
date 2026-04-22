@@ -11,8 +11,8 @@ pub use value::Value;
 
 use core::cell::Cell;
 use core::marker::PhantomData;
-use core::ops::ControlFlow;
 use core::ops::RangeFull;
+use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
@@ -24,6 +24,7 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor::CursorMut;
 use crate::raw::cursor::path;
+use crate::raw::edge::Meta as _;
 use crate::raw::iter::PostorderIter;
 use crate::stat;
 
@@ -48,14 +49,14 @@ where
     }
 }
 
-pub enum Update<'g, V, B>
-where
-    V: Value + 'g,
-{
-    Absent { value: Option<V> },
-    Success { old: V },
-    Break { old: V::Borrow<'g>, r#break: B },
-}
+// pub enum Update<'g, V, B>
+// where
+//     V: Value + 'g,
+// {
+//     Absent { value: Option<V> },
+//     Success { old: V },
+//     Break { old: V::Borrow<'g>, r#break: B },
+// }
 
 impl<K, V> Map<K, V>
 where
@@ -71,19 +72,25 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<V::Borrow<'_>> {
+    pub fn get(&self, key: K::Borrow<'_>) -> Option<&V::Target> {
         let reader = K::Read::from(key);
-        let value =
-            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
-        Some(unsafe { V::borrow_from_raw(value) })
+        unsafe {
+            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            cursor.traverse_get()?;
+            let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
+            Some(V::target_from_raw(value))
+        }
     }
 
     #[inline]
-    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<V::BorrowMut<'_>> {
+    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<&mut V::Target> {
         let reader = K::Read::from(key);
-        let value =
-            unsafe { Cursor::<K, path::Discard>::new(self.root(), reader) }.traverse_get()?;
-        Some(unsafe { V::borrow_mut_from_raw(value) })
+        unsafe {
+            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            cursor.traverse_get()?;
+            let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
+            Some(V::target_mut_from_raw(value))
+        }
     }
 
     #[inline]
@@ -105,59 +112,61 @@ where
                         return old_value.map(|old| unsafe { V::from_raw(old) });
                     }
                 },
-                crate::raw::cursor::Insert::Smo(Ok((_, old, new))) => {
+                crate::raw::cursor::Insert::Smo { old_node, old } => {
+                    validate!(!old.meta().is_frozen());
+                    // FIXME: implement separate `replace_mut` that does not freeze/CAS
+                    let (_smo, new) = unsafe { old_node.replace(old.meta()) };
                     cursor.edge_mut().set_packed(new);
                     if let Some(node) = old.as_node() {
                         unsafe { node.deallocate(stat::Counter::FreeRetire) };
                     }
                 }
-                crate::raw::cursor::Insert::Smo(Err(Frozen)) => unreachable!(),
             }
         }
     }
 
-    #[inline]
-    pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
-        match self.update_with_impl(key, |_| ControlFlow::<(), _>::Continue(None)) {
-            Update::Absent { value: None } => None,
-            Update::Success { old } => Some(old),
-            Update::Absent { value: Some(_) } | Update::Break { .. } => unreachable!(),
-        }
-    }
-
-    #[inline]
-    fn update_with_impl<F, B>(&mut self, key: K::Borrow<'_>, with: F) -> Update<'_, V, B>
-    where
-        F: FnOnce(V::Borrow<'_>) -> ControlFlow<B, Option<V>>,
-    {
-        let reader = K::Read::from(key);
-        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
-
-        let old = match cursor.traverse_update() {
-            None => return Update::Absent { value: None },
-            Some(Err(Frozen)) => unreachable!(),
-            Some(Ok(old)) => old,
-        };
-
-        let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
-            ControlFlow::Continue(None) => Edge::DEFAULT,
-            ControlFlow::Continue(Some(new)) => unsafe {
-                old.with_value_unchecked(V::into_raw(new))
-            },
-            ControlFlow::Break(r#break) => {
-                return Update::Break {
-                    old: unsafe { V::borrow_from_raw(old.into_raw()) },
-                    r#break,
-                };
-            }
-        };
-
-        cursor.edge_mut().set_packed(new);
-
-        Update::Success {
-            old: unsafe { V::from_raw(old.into_raw()) },
-        }
-    }
+    // #[inline]
+    // pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
+    //     match self.update_with_impl(key, |_| ControlFlow::<(), _>::Continue(None)) {
+    //         Update::Absent { value: None } => None,
+    //         Update::Success { old } => Some(old),
+    //         Update::Absent { value: Some(_) } | Update::Break { .. } => unreachable!(),
+    //     }
+    // }
+    //
+    // #[inline]
+    // fn update_with_impl<F, B>(&mut self, key: K::Borrow<'_>, with: F) -> Update<'_, V, B>
+    // where
+    //     F: FnOnce(&mut V::Target) -> ControlFlow<B, V>,
+    // {
+    //     let reader = K::Read::from(key);
+    //     let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+    //
+    //     let old = match cursor.traverse_update() {
+    //         None => return Update::Absent { value: None },
+    //         Some(Err(Frozen)) => unreachable!(),
+    //         Some(Ok(old)) => old,
+    //     };
+    //
+    //     let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
+    //         ControlFlow::Continue(None) => Edge::DEFAULT,
+    //         ControlFlow::Continue(Some(new)) => unsafe {
+    //             old.with_value_unchecked(V::into_raw(new))
+    //         },
+    //         ControlFlow::Break(r#break) => {
+    //             return Update::Break {
+    //                 old: unsafe { V::borrow_from_raw(old.into_raw()) },
+    //                 r#break,
+    //             };
+    //         }
+    //     };
+    //
+    //     cursor.edge_mut().set_packed(new);
+    //
+    //     Update::Success {
+    //         old: unsafe { V::from_raw(old.into_raw()) },
+    //     }
+    // }
 
     pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
         unsafe { Prefix::new(raw::iter::Prefix::<K>::new_all(self.root())) }
@@ -218,7 +227,7 @@ where
     K: Key,
     V: Value,
 {
-    type Item = (K, V::Borrow<'g>);
+    type Item = (K, &'g V::Target);
     type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all().entries::<Ascend>()
@@ -230,7 +239,7 @@ where
     K: Key,
     V: Value,
 {
-    type Item = (K, V::BorrowMut<'g>);
+    type Item = (K, &'g mut V::Target);
     type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all_mut().entries_mut::<Ascend>()

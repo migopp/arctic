@@ -37,7 +37,7 @@ macro_rules! impl_trivial {
     };
 }
 
-impl_trivial!(u64, u32);
+impl_trivial!(u64, i64);
 
 pub struct Owned<G: smr::Guard<V>, V: Value> {
     guard: V::Guard<G>,

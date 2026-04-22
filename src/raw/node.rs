@@ -137,7 +137,7 @@ where
 
         let len = self
             .entries(Unbound, Unbound)
-            .map(|(key, edge)| (key, edge.load_packed(Ordering::Relaxed)))
+            .map(|(key, edge)| (key, unsafe { edge.as_ref() }.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {
                 validate!(
@@ -308,7 +308,7 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn len<'g>(self) -> u8 {
+    pub(crate) unsafe fn len(self) -> u8 {
         self.dispatch(
             |node| unsafe { node.as_ref() }.len(),
             |node| unsafe { node.as_ref() }.len(),

@@ -1,17 +1,4 @@
-//! We divide all value types into two categories. A value type is **inline**
-//! if is (1) [`Copy`], and (2) can be packed into 8 bytes. Otherwise, it is
-//! **indirect**, and must be encapsulated in a smart pointer type like
-//! [`Box`] or [`std::sync::Arc`].
-
 pub unsafe trait Value {
-    type Borrow<'l>: Copy
-    where
-        Self: 'l;
-
-    type BorrowMut<'l>
-    where
-        Self: 'l;
-
     type Target;
 
     fn into_raw(self) -> u64;
@@ -24,46 +11,12 @@ pub unsafe trait Value {
     /// 3. There are no live borrows from [`Value::borrow_raw`] when [`Value::from_raw`] is called.
     unsafe fn from_raw(raw: u64) -> Self;
 
-    fn borrow<'l>(&'l self) -> Self::Borrow<'l>;
-
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
-    where
-        Self: 'l;
-
-    /// # Safety
-    ///
-    /// Caller must guarantee that:
-    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
-    /// 2. There are no live borrows from [`Value::borrow_mut_raw`] during lifetime `'l`.
-    /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
-    where
-        Self: 'l;
-
-    /// # Safety
-    ///
-    /// Caller must guarantee that:
-    /// 1. `raw` was created by a previous [`Value::into_raw`] call.
-    /// 2. There are no live borrows from [`Value::borrow_raw`] or [`Value::borrow_mut_raw`] during lifetime `'l`.
-    /// 3. There is no call to [`Value::from_raw`] during lifetime `'l`.
-    unsafe fn borrow_mut_from_raw<'l>(raw: u64) -> Self::BorrowMut<'l>
-    where
-        Self: 'l;
-
+    fn as_target(&self) -> &Self::Target;
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target;
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target;
 }
 
 unsafe impl<T: Sized> Value for Box<T> {
-    type Borrow<'l>
-        = &'l T
-    where
-        Self: 'l;
-
-    type BorrowMut<'l>
-        = &'l mut T
-    where
-        Self: 'l;
-
     type Target = T;
 
     #[inline]
@@ -77,63 +30,33 @@ unsafe impl<T: Sized> Value for Box<T> {
     }
 
     #[inline]
-    fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
+    fn as_target(&self) -> &Self::Target {
         self
     }
 
     #[inline]
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
-    where
-        Self: 'l,
-    {
-        // FIXME: strict provenance
-        (borrow as *const T) as u64
-    }
-
-    #[inline]
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
-    where
-        Self: 'l,
-    {
-        let borrow = unsafe { (raw as *const T).as_ref() };
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
-    }
-
-    #[inline]
-    unsafe fn borrow_mut_from_raw<'l>(raw: u64) -> Self::BorrowMut<'l>
-    where
-        Self: 'l,
-    {
-        let borrow = unsafe { (raw as *mut T).as_mut() };
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
-    }
-
-    #[inline]
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
-        unsafe { Self::borrow_from_raw(*raw) }
+        let borrow = unsafe { (*raw as *const T).as_ref() };
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
+    }
+
+    #[inline]
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
+        let borrow = unsafe { (*raw as *mut T).as_mut() };
+        if cfg!(feature = "validate") {
+            borrow.unwrap()
+        } else {
+            unsafe { borrow.unwrap_unchecked() }
+        }
     }
 }
 
 unsafe impl<'v, T: 'v + Sized> Value for &'v T {
-    type Borrow<'l>
-        = &'v T
-    where
-        Self: 'l;
-
-    type BorrowMut<'l>
-        = &'v T
-    where
-        Self: 'l;
-
-    type Target = &'v T;
+    type Target = Self;
 
     #[inline]
     fn into_raw(self) -> u64 {
@@ -152,42 +75,17 @@ unsafe impl<'v, T: 'v + Sized> Value for &'v T {
     }
 
     #[inline]
-    fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
+    fn as_target(&self) -> &Self::Target {
         self
     }
 
     #[inline]
-    fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
-    where
-        Self: 'l,
-    {
-        // FIXME: strict provenance
-        (borrow as *const T) as u64
-    }
-
-    #[inline]
-    unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
-    where
-        Self: 'l,
-    {
-        let borrow = unsafe { (raw as *const T).as_ref() };
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
-    }
-
-    #[inline]
-    unsafe fn borrow_mut_from_raw<'l>(raw: u64) -> Self::BorrowMut<'l>
-    where
-        Self: 'l,
-    {
-        unsafe { Self::borrow_from_raw(raw) }
-    }
-
-    #[inline]
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+        unsafe { core::mem::transmute(raw) }
+    }
+
+    #[inline]
+    unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
         unsafe { core::mem::transmute(raw) }
     }
 }
@@ -196,16 +94,7 @@ macro_rules! impl_integer {
     ($($ty:ty),*) => {
         $(
             unsafe impl Value for $ty {
-                type Borrow<'l> = Self;
-
-                type BorrowMut<'l> = Self;
-
                 type Target = Self;
-
-                #[inline]
-                fn borrow<'l>(&'l self) -> Self::Borrow<'l> {
-                    *self
-                }
 
                 #[inline]
                 unsafe fn from_raw(raw: u64) -> Self {
@@ -218,32 +107,19 @@ macro_rules! impl_integer {
                 }
 
                 #[inline]
-                unsafe fn borrow_from_raw<'l>(raw: u64) -> Self::Borrow<'l>
-                where
-                    Self: 'l,
-                {
-                    raw as $ty
-                }
-
-                #[inline]
-                fn borrow_into_raw<'l>(borrow: Self::Borrow<'l>) -> u64
-                where
-                    Self: 'l,
-                {
-                    borrow as u64
-                }
-
-                #[inline]
-                unsafe fn borrow_mut_from_raw<'l>(raw: u64) -> Self::BorrowMut<'l>
-                where
-                    Self: 'l,
-                {
-                    unsafe { Self::borrow_from_raw(raw) }
+                fn as_target(&self) -> &Self::Target {
+                    self
                 }
 
                 #[inline]
                 unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
-                    // FIXME: broken for non-64 bit
+                    // TODO: supporting non-8-byte values requires
+                    // changes due to endianness
+                    unsafe { core::mem::transmute(raw) }
+                }
+
+                #[inline]
+                unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
                     unsafe { core::mem::transmute(raw) }
                 }
             }
@@ -251,4 +127,4 @@ macro_rules! impl_integer {
     };
 }
 
-impl_integer!(u64, u32, u16, u8, i64, i32, i16, i8);
+impl_integer!(u64, i64);

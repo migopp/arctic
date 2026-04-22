@@ -16,6 +16,9 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor;
 use crate::raw::cursor::path;
+use crate::raw::edge;
+use crate::raw::edge::Key as _;
+use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::sequential;
 use crate::stat;
@@ -157,7 +160,7 @@ where
         mut update: F,
     ) -> Update<K, V, S>
     where
-        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let initial = if cfg!(feature = "opt-no-path") {
             initial
@@ -179,7 +182,7 @@ where
         update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
     where
-        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         self.update_with_impl::<path::Discard, _>(key, initial, update)
     }
@@ -192,7 +195,7 @@ where
         update: F,
     ) -> Update<K, V, S>
     where
-        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         stat::increment(stat::Counter::UpdatePessimistic);
         match self.update_with_impl::<path::Retain<_>, _>(key, initial, update) {
@@ -210,7 +213,7 @@ where
     ) -> Result<Update<K, V, S>, Option<V>>
     where
         H: path::History<'k, K>,
-        F: FnMut(V::Borrow<'_>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -233,7 +236,7 @@ where
             validate!(old.meta().is_value());
 
             let old_value = unsafe { old.into_value_unchecked() };
-            let new_value = match update(unsafe { V::borrow_from_raw(old_value) }, &mut initial) {
+            let new_value = match update(unsafe { V::target_from_raw(&old_value) }, &mut initial) {
                 ControlFlow::Continue(new) => V::into_raw(new),
                 ControlFlow::Break(()) => {
                     return Ok(Update::Break {
@@ -277,7 +280,7 @@ where
         mut with: F,
     ) -> Remove<'_, K, V, S>
     where
-        F: FnMut(V::Borrow<'_>) -> ControlFlow<(), ()>,
+        F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         match self.remove_non_recursive_with_optimistic(key, &mut with) {
             Ok(remove) => remove,
@@ -292,7 +295,7 @@ where
         with: &mut F,
     ) -> Result<Remove<'_, K, V, S>, ()>
     where
-        F: FnMut(V::Borrow<'_>) -> ControlFlow<(), ()>,
+        F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         self.remove_with_impl::<false, path::Discard, _>(key, with)
     }
@@ -304,7 +307,7 @@ where
         with: &mut F,
     ) -> Remove<'_, K, V, S>
     where
-        F: FnMut(V::Borrow<'_>) -> ControlFlow<(), ()>,
+        F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let Ok(remove) = self.remove_with_impl::<false, path::Retain<'k, K>, _>(key, with);
         remove
@@ -322,7 +325,7 @@ where
     #[inline]
     pub fn remove_with<'k, F>(&self, key: K::Borrow<'k>, mut with: F) -> Remove<K, V, S>
     where
-        F: FnMut(V::Borrow<'_>) -> ControlFlow<(), ()>,
+        F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let Ok(remove) = self.remove_with_impl::<true, path::Retain<'k, K>, _>(key, &mut with);
         remove
@@ -336,7 +339,7 @@ where
     ) -> Result<Remove<K, V, S>, H::PopError>
     where
         H: path::History<'k, K>,
-        F: FnMut(V::Borrow<'_>) -> ControlFlow<(), ()>,
+        F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -359,7 +362,7 @@ where
 
             let old_value = unsafe { old.into_value_unchecked() };
 
-            match remove(unsafe { V::borrow_from_raw(old_value) }) {
+            match remove(unsafe { V::target_from_raw(&old_value) }) {
                 ControlFlow::Continue(()) => (),
                 ControlFlow::Break(()) => {
                     return Ok(Remove::Break {
@@ -373,16 +376,63 @@ where
                 .compare_exchange_packed(old, Edge::DEFAULT, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
-                break unsafe { old.into_value_unchecked() };
+                break old;
             }
         };
 
         if RECURSIVE {
-            cursor.reclaim()?;
+            let mut trim = old.meta().key().len();
+
+            'outer: while let Some(target) = cursor
+                .pop()
+                .unwrap_or_else(|_| panic!("Recursive remove requires path"))
+            {
+                if unsafe { target.len() } > 0 {
+                    break 'outer;
+                }
+
+                cursor.trim(trim.bits() + 8);
+
+                loop {
+                    let Some(old) = cursor.traverse_prefix() else {
+                        break 'outer;
+                    };
+
+                    let new = match old.child() {
+                        None => break 'outer,
+                        Some(edge::Child::Value(_)) => unreachable!(),
+                        Some(edge::Child::Node(node)) if node == target => {
+                            unsafe { node.replace(old.meta()) }.1
+                        }
+                        // Must have been replaced by someone else
+                        Some(edge::Child::Node(_)) => break 'outer,
+                    };
+
+                    match cursor.edge().compare_exchange_packed(
+                        old,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(old) => {
+                            unsafe { guard.retire_node(cursor.bits(), target) };
+                            trim = old.meta().key().len();
+                            continue 'outer;
+                        }
+                        // FIXME: help freeze
+                        Err(conflict) if conflict.meta().is_frozen() => todo!(),
+                        Err(_) => {
+                            if let Some(node) = new.as_node() {
+                                unsafe { node.deallocate(stat::Counter::FreeConflict) };
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Ok(Remove::Success {
-            old: unsafe { Owned::<K, V, S>::wrap(guard, old) },
+            old: unsafe { Owned::<K, V, S>::wrap(guard, old.into_value_unchecked()) },
         })
     }
 
@@ -440,7 +490,7 @@ where
         mut upsert: F,
     ) -> Upsert<K, V, S>
     where
-        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let initial = if cfg!(feature = "opt-no-path") {
             initial
@@ -462,7 +512,7 @@ where
         upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
     where
-        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         self.upsert_with_impl::<path::Discard, _>(key, initial, upsert)
     }
@@ -475,7 +525,7 @@ where
         upsert: F,
     ) -> Upsert<K, V, S>
     where
-        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         stat::increment(stat::Counter::InsertPessimistic);
         match self.upsert_with_impl::<path::Retain<_>, _>(key, initial, upsert) {
@@ -493,7 +543,7 @@ where
     ) -> Result<Upsert<K, V, S>, Option<V>>
     where
         H: path::History<'k, K>,
-        F: FnMut(Option<V::Borrow<'_>>, &mut Option<V>) -> ControlFlow<(), V>,
+        F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
@@ -507,7 +557,9 @@ where
                     key,
                 } => {
                     let new_value = match upsert(
-                        old_value.map(|old| unsafe { V::borrow_from_raw(old) }),
+                        old_value
+                            .as_ref()
+                            .map(|old| unsafe { V::target_from_raw(old) }),
                         &mut initial,
                     ) {
                         ControlFlow::Continue(value) => V::into_raw(value),
@@ -549,9 +601,8 @@ where
                         },
                     }
                 }
-                cursor::Insert::Smo(Ok((smo, old, new))) => {
-                    validate!(!old.meta().is_frozen());
-
+                cursor::Insert::Smo { old_node, old } if !old.meta().is_frozen() => {
+                    let (smo, new) = unsafe { old_node.replace(old.meta()) };
                     match cursor.edge().compare_exchange_packed(
                         old,
                         new,
@@ -578,7 +629,7 @@ where
                 }
 
                 // Fall through to freeze
-                cursor::Insert::Smo(Err(Frozen)) => (),
+                cursor::Insert::Smo { .. } => (),
             }
 
             match cursor.freeze() {

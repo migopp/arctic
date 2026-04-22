@@ -117,6 +117,11 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 
     #[inline]
+    fn trim(&mut self, bits: usize) {
+        self.bits -= bits as u8;
+    }
+
+    #[inline]
     fn prefix(self, bits: usize) -> Self {
         validate!(bits <= U::BITS as usize);
 
@@ -246,6 +251,11 @@ impl key::Read for Slow {
         self.buffer.copy_within(len.., 0);
         self.len -= len;
         (key, len == len_prefix)
+    }
+
+    #[inline]
+    fn trim(&mut self, bits: usize) {
+        self.len -= bits >> 3;
     }
 
     #[inline]
