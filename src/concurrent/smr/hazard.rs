@@ -76,23 +76,8 @@ use crate::stat;
 #[cfg(feature = "opt-hazard-epochs")]
 use core::sync::atomic::AtomicUsize;
 
-#[cfg(any(
-    feature = "opt-amortized-free-guard",
-    feature = "opt-amortized-free-retire"
-))]
-use std::collections::VecDeque;
-
 #[cfg(feature = "opt-batch")]
 use crossbeam_queue::ArrayQueue;
-
-#[cfg(all(
-    any(
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire"
-    ),
-    feature = "opt-batch"
-))]
-compile_error!("`opt-amortized-*` and `opt-batch` are mutually exclusive");
 
 pub struct Hazard;
 
@@ -148,32 +133,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
         }
     }
 
-    #[cfg(any(
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire"
-    ))]
-    fn default() -> Self {
-        Self {
-            hazards: core::array::from_fn(|_| {
-                Cache(ribbit::Atomic::new_packed(
-                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
-                ))
-            }),
-            locals: core::array::from_fn(|_| {
-                UnsafeCell::new(Local {
-                    cycle: 0,
-                    snapshot: Vec::new(),
-                    retired: Vec::new(),
-                    condemned: VecDeque::new(),
-                    _value: PhantomData,
-                })
-            }),
-            membarrier: AtomicBool::new(false),
-            reclaim_threshold: 64,
-            value: PhantomData,
-        }
-    }
-
     #[cfg(feature = "opt-batch")]
     fn default() -> Self {
         Self {
@@ -197,12 +156,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
         }
     }
 
-    #[cfg(not(any(
-        feature = "opt-hazard-epochs",
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire",
-        feature = "opt-batch"
-    )))]
+    #[cfg(not(any(feature = "opt-hazard-epochs", feature = "opt-batch")))]
     fn default() -> Self {
         Self {
             hazards: core::array::from_fn(|_| {
@@ -239,26 +193,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     /// Eagerly reclaim all retired allocations
-    #[cfg(any(
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire"
-    ))]
-    pub fn reclaim(&mut self) {
-        self.locals
-            .iter_mut()
-            .take(smr::thread::count())
-            .map(|local| local.get_mut())
-            .flat_map(|local| local.retired.drain(..).chain(local.condemned.drain(..)))
-            .for_each(|(prefix, raw)| {
-                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
-            });
-    }
-
-    /// Eagerly reclaim all retired allocations
-    #[cfg(not(any(
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire",
-    )))]
     pub fn reclaim(&mut self) {
         self.locals
             .iter_mut()
@@ -313,12 +247,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
             self.epochs[id].0.store(global_epoch, Ordering::Relaxed);
         }
 
-        #[cfg(feature = "opt-amortized-free-guard")]
-        {
-            let local = unsafe { &mut *local.get() };
-            local.deallocate_one();
-        }
-
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
         hazard.store_packed(prefix, membarrier::fast_store_ordering(membarrier));
         membarrier::fast_barrier(membarrier);
@@ -342,11 +270,6 @@ pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<Retired<P>>,
-    #[cfg(any(
-        feature = "opt-amortized-free-guard",
-        feature = "opt-amortized-free-retire"
-    ))]
-    condemned: VecDeque<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
 }
 
@@ -443,24 +366,12 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 }
             }
 
-            #[cfg(any(
-                feature = "opt-amortized-free-guard",
-                feature = "opt-amortized-free-retire"
-            ))]
-            {
-                local.condemned.push_back((*prefix, *raw));
-            }
-
             #[cfg(feature = "opt-batch")]
             {
                 batch.push((*prefix, *raw));
             }
 
-            #[cfg(not(any(
-                feature = "opt-amortized-free-guard",
-                feature = "opt-amortized-free-retire",
-                feature = "opt-batch"
-            )))]
+            #[cfg(not(feature = "opt-batch"))]
             {
                 deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
             }
@@ -493,19 +404,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         local.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
-    }
-}
-
-#[cfg(any(
-    feature = "opt-amortized-free-guard",
-    feature = "opt-amortized-free-retire"
-))]
-impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Local<P, V> {
-    #[inline]
-    pub fn deallocate_one(&mut self) {
-        if let Some((prefix, raw)) = self.condemned.pop_front() {
-            deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
-        }
     }
 }
 
@@ -542,11 +440,6 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             local.retired.push((prefix, node.raw().get(), global_epoch));
         }
-
-        #[cfg(feature = "opt-amortized-free-retire")]
-        {
-            local.deallocate_one();
-        }
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -568,11 +461,6 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             local.retired.push((prefix, value, global_epoch));
-        }
-
-        #[cfg(feature = "opt-amortized-free-retire")]
-        {
-            local.deallocate_one();
         }
     }
 }

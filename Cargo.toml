@@ -21,8 +21,8 @@ opt-no-path = []
 opt-no-dispatch = []
 opt-hazard-epochs = []
 opt-batch = []
-opt-amortized-free-guard = ["seize/amortized-free-guard"]
-opt-amortized-free-retire = ["seize/amortized-free-retire"]
+# opt-amortized-free-guard = ["seize/amortized-free-guard"]
+# opt-amortized-free-retire = ["seize/amortized-free-retire"]
 
 smr-disable = []
 # FIXME: make these dependencies optional
