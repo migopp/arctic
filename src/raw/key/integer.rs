@@ -294,9 +294,9 @@ impl key::Read for Slow {
     }
 }
 
-impl From<u64> for Slow {
-    fn from(value: u64) -> Self {
-        unsafe { Slow::new_unchecked(value, 64) }
+impl<'k> From<&'k u64> for Slow {
+    fn from(key: &'k u64) -> Self {
+        unsafe { Slow::new_unchecked(*key, 64) }
     }
 }
 
@@ -308,13 +308,7 @@ impl From<Slow> for crate::raw::key::dynamic::Writer {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Writer<U>(U);
-
-impl<U> Writer<U> {
-    pub(super) fn into_key_unchecked(self) -> U {
-        self.0
-    }
-}
+pub struct Writer<U>(pub(super) U);
 
 impl<U: Uint> key::Write for Writer<U> {
     type Edge = edge::Be;
@@ -370,11 +364,11 @@ impl<U> From<Reader<U>> for Writer<U> {
 macro_rules! impl_unsigned_int {
     ($($ty:ty: $bits:expr, $into_u64:expr, $from_u64:expr, $into_u128:expr),* $(,)?) => {
         $(
-            impl From<$ty> for Reader<$ty> {
+            impl<'k> From<&'k $ty> for Reader<$ty> {
                 #[inline]
-                fn from(value: $ty) -> Self {
+                fn from(value: &'k $ty) -> Self {
                     Self {
-                        buffer: value,
+                        buffer: *value,
                         bits: $bits,
                     }
                 }
@@ -490,6 +484,6 @@ mod tests {
     }
 
     fn take_all_u64(key: u64, lens: &[usize]) {
-        take_all::<u64>(key.to_be_bytes().as_slice(), key, lens)
+        take_all::<u64>(&key.to_be_bytes().as_slice(), &key, lens)
     }
 }

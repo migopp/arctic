@@ -6,11 +6,11 @@ use core::marker::PhantomData;
 
 use crate::raw::edge;
 
-pub trait Key {
-    type Borrow<'k>: Copy;
+pub trait Key: core::borrow::Borrow<Self::Borrowed> {
+    type Borrowed: 'static + ?Sized;
 
     #[expect(private_bounds)]
-    type Read<'k>: Read<Edge = Self::Edge> + From<Self::Borrow<'k>>;
+    type Read<'k>: Read<Edge = Self::Edge> + From<&'k Self::Borrowed>;
 
     #[expect(private_bounds)]
     type Write: Write<Edge = Self::Edge> + for<'k> From<Self::Read<'k>>;
@@ -18,16 +18,14 @@ pub trait Key {
     #[expect(private_bounds)]
     type Edge: ribbit::Pack<Packed: edge::Meta>;
 
-    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w>;
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed;
 
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
-    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self;
-
-    fn borrow<'k>(&'k self) -> Self::Borrow<'k>;
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self;
 
     // Key length in bytes
-    fn len(borrow: Self::Borrow<'_>) -> usize;
+    fn len(borrow: &Self::Borrowed) -> usize;
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
@@ -174,32 +172,27 @@ macro_rules! impl_unsigned_int {
             impl Key for $ty {
                 type Read<'k> = integer::Reader<$ty>;
                 type Write = integer::Writer<$ty>;
-                type Borrow<'k> = Self;
+                type Borrowed = Self;
 
                 type Edge = edge::Be;
 
                 #[inline]
-                fn borrow(&self) -> Self {
-                    *self
+                fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+                    *borrow
                 }
 
                 #[inline]
-                fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
-                    borrow
-                }
-
-                #[inline]
-                unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-                    writer.into_key_unchecked()
+                unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
+                    &writer.0
                 }
 
                 #[inline]
                 unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-                    writer.into_key_unchecked()
+                    writer.0
                 }
 
                 #[inline]
-                fn len(_: Self::Borrow<'_>) -> usize {
+                fn len(_: &Self::Borrowed) -> usize {
                     <$ty as integer::Uint>::BYTES as usize
                 }
             }
@@ -213,34 +206,31 @@ impl_unsigned_int!(u16, u32, u128);
 impl Key for u64 {
     type Read<'k> = integer::Slow;
     type Write = dynamic::Writer;
-    type Borrow<'k> = Self;
+    type Borrowed = Self;
 
     type Edge = edge::Le;
 
     #[inline]
-    fn borrow(&self) -> Self {
-        *self
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+        *borrow
     }
 
     #[inline]
-    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
-        borrow
-    }
-
-    #[inline]
-    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
-        let buffer: &[u8; 8] = writer.0.as_slice().try_into().unwrap();
-        u64::from_be_bytes(*buffer)
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
+        todo!()
+        // let buffer: &[u8; 8] = writer.0.as_slice().try_into().unwrap();
+        // u64::from_be_bytes(*buffer)
     }
 
     #[inline]
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-        let buffer: [u8; 8] = writer.0.try_into().unwrap();
-        u64::from_be_bytes(buffer)
+        todo!()
+        // let buffer: [u8; 8] = writer.0.try_into().unwrap();
+        // u64::from_be_bytes(buffer)
     }
 
     #[inline]
-    fn len(_: Self::Borrow<'_>) -> usize {
+    fn len(_: &Self::Borrowed) -> usize {
         <u64 as integer::Uint>::BYTES as usize
     }
 }
@@ -251,22 +241,17 @@ impl_unsigned_int!(u64);
 impl Key for Vec<u8> {
     type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
-    type Borrow<'k> = &'k [u8];
+    type Borrowed = [u8];
 
     type Edge = edge::Le;
 
     #[inline]
-    fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
-        self
-    }
-
-    #[inline]
-    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
         Vec::from(borrow)
     }
 
     #[inline]
-    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
         &writer.0
     }
 
@@ -276,7 +261,7 @@ impl Key for Vec<u8> {
     }
 
     #[inline]
-    fn len(slice: Self::Borrow<'_>) -> usize {
+    fn len(slice: &Self::Borrowed) -> usize {
         slice.len()
     }
 }
@@ -298,22 +283,17 @@ impl From<dynamic::Writer> for Vec<u8> {
 impl Key for String {
     type Read<'k> = dynamic::Reader<'k>;
     type Write = dynamic::Writer;
-    type Borrow<'k> = &'k str;
+    type Borrowed = str;
 
     type Edge = edge::Le;
 
     #[inline]
-    fn borrow<'k>(&'k self) -> Self::Borrow<'k> {
-        self
-    }
-
-    #[inline]
-    fn clone_from_borrow<'k>(borrow: Self::Borrow<'k>) -> Self {
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
         String::from(borrow)
     }
 
     #[inline]
-    unsafe fn borrow_writer_unchecked<'w>(writer: &'w Self::Write) -> Self::Borrow<'w> {
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
         if cfg!(feature = "validate") {
             core::str::from_utf8(&writer.0).unwrap()
         } else {
@@ -331,7 +311,7 @@ impl Key for String {
     }
 
     #[inline]
-    fn len(string: Self::Borrow<'_>) -> usize {
+    fn len(string: &Self::Borrowed) -> usize {
         string.len()
     }
 }
@@ -350,11 +330,7 @@ mod tests {
     use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
 
-    pub(super) fn take_all<'k, K: Key>(
-        array: &[u8],
-        key: impl Into<K::Borrow<'k>>,
-        lens: &[usize],
-    ) {
+    pub(super) fn take_all<'k, K: Key>(array: &[u8], key: &'k K::Borrowed, lens: &[usize]) {
         let mut reader = K::Read::from(key.into());
         let mut index = 0;
         let mut actual = Vec::new();

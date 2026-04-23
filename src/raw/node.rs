@@ -136,7 +136,7 @@ where
         self.freeze();
 
         let len = self
-            .entries(Unbound, Unbound)
+            .entries(Unbound::<()>::default(), Unbound::<()>::default())
             .map(|(key, edge)| (key, unsafe { edge.as_ref() }.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
             .map(|(key, edge)| {

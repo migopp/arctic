@@ -345,7 +345,7 @@ pub(crate) trait Upper: Copy + Default {
     fn check(self, byte: u8) -> bool;
 }
 
-impl Lower for Unbound {
+impl<T> Lower for Unbound<T> {
     const UNBOUND: bool = true;
 
     #[inline]
@@ -358,7 +358,7 @@ impl Lower for Unbound {
     }
 }
 
-impl Upper for Unbound {
+impl<T> Upper for Unbound<T> {
     const UNBOUND: bool = true;
 
     #[inline]

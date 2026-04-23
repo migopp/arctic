@@ -17,7 +17,7 @@ impl<'k, 'g, K, V, R, G> Prefix<'k, 'g, K, V, R, G>
 where
     K: Key,
     V: Value,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::range::Prefix<'k, K>,
     G: smr::Guard<V>,
 {
     #[inline]
@@ -37,11 +37,11 @@ impl<'k, 'g, K, V, R, G> Prefix<'k, 'g, K, V, R, G>
 where
     K: Key,
     V: Value,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::range::Prefix<'k, K>,
     G: smr::Guard<V>,
 {
     #[inline]
-    pub fn entries<O: Order>(&self) -> EntryIter<'k, '_, K, V, R, O, G> {
+    pub fn entries<O: Order>(&self) -> EntryIter<'_, K, V, R, O, G> {
         EntryIter {
             inner: self.inner.entries::<O>(),
             value: 0,
@@ -51,7 +51,7 @@ where
     }
 
     #[inline]
-    pub fn values<O: Order>(&self) -> ValueIter<'k, '_, K, V, R, O, G> {
+    pub fn values<O: Order>(&self) -> ValueIter<'_, K, V, R, O, G> {
         ValueIter {
             inner: self.inner.values::<O>(),
             value: 0,
@@ -62,23 +62,23 @@ where
 }
 
 /// Iterator over keys and values
-pub struct EntryIter<'k, 'l, K: Key, V: Value, R: raw::iter::Range<'k, K>, O, G> {
-    inner: raw::iter::EntryIter<'k, 'l, K, R, O>,
+pub struct EntryIter<'l, K: Key, V: Value, R: raw::iter::Range<K>, O, G> {
+    inner: raw::iter::EntryIter<'l, K, R, O>,
     value: u64,
     _guard: PhantomData<&'l G>,
     _value: PhantomData<V>,
 }
 
-impl<'k, 'l, K, V, R, O, G> EntryIter<'k, 'l, K, V, R, O, G>
+impl<'l, K, V, R, O, G> EntryIter<'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::Range<K>,
     O: Order,
     G: smr::Guard<V>,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(K::Borrow<'_>, &V::Target)> {
+    pub fn lend(&mut self) -> Option<(&K::Borrowed, &V::Target)> {
         self.inner.lend().map(|(key, value, _)| {
             self.value = value;
             (key, unsafe { V::target_from_raw(&self.value) })
@@ -86,7 +86,7 @@ where
     }
 
     #[inline]
-    pub fn for_each_internal<F: FnMut((K::Borrow<'_>, &V::Target)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((&K::Borrowed, &V::Target)) -> ControlFlow<()>>(
         mut self,
         mut apply: F,
     ) {
@@ -97,12 +97,12 @@ where
     }
 }
 
-impl<'k, 'l, K, V, R, O, G> Iterator for EntryIter<'k, 'l, K, V, R, O, G>
+impl<'l, K, V, R, O, G> Iterator for EntryIter<'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     V::Target: Clone,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::Range<K>,
     O: Order,
     G: smr::Guard<V>,
 {
@@ -115,18 +115,18 @@ where
 }
 
 /// Iterator over values only
-pub struct ValueIter<'k, 'l, K: Key, V: Value, R: raw::iter::Range<'k, K>, O, G> {
-    inner: raw::iter::ValueIter<'k, 'l, K, R, O>,
+pub struct ValueIter<'l, K: Key, V: Value, R: raw::iter::Range<K>, O, G> {
+    inner: raw::iter::ValueIter<'l, K, R, O>,
     value: u64,
     _guard: PhantomData<&'l G>,
     _value: PhantomData<V>,
 }
 
-impl<'k, 'l, K, V, R, O, G> ValueIter<'k, 'l, K, V, R, O, G>
+impl<'l, K, V, R, O, G> ValueIter<'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::Range<K>,
     O: Order,
     G: smr::Guard<V>,
 {
@@ -147,12 +147,12 @@ where
     }
 }
 
-impl<'k, 'l, K, V, R, O, G> Iterator for ValueIter<'k, 'l, K, V, R, O, G>
+impl<'l, K, V, R, O, G> Iterator for ValueIter<'l, K, V, R, O, G>
 where
     K: Key,
     V: Value,
     V::Target: Clone,
-    R: raw::iter::Range<'k, K>,
+    R: raw::iter::Range<K>,
     O: Order,
     G: smr::Guard<V>,
 {

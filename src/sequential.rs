@@ -72,7 +72,7 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<&V::Target> {
+    pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
         let reader = K::Read::from(key);
         unsafe {
             let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
@@ -83,7 +83,7 @@ where
     }
 
     #[inline]
-    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<&mut V::Target> {
+    pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
         let reader = K::Read::from(key);
         unsafe {
             let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
@@ -94,7 +94,7 @@ where
     }
 
     #[inline]
-    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V> {
+    pub fn upsert(&mut self, key: &K::Borrowed, value: V) -> Option<V> {
         let reader = K::Read::from(key);
         let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
         let new_value = V::into_raw(value);
@@ -183,7 +183,7 @@ where
 
     pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
-        R: raw::iter::Range<'k, K>,
+        R: raw::iter::range::Prefix<'k, K>,
     {
         let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
         Some(unsafe { iter::Prefix::new(prefix) })
@@ -202,18 +202,18 @@ where
 
     pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
     where
-        R: raw::iter::Range<'k, K>,
+        R: raw::iter::range::Prefix<'k, K>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
     }
 }
 
-impl<'k, K, V> FromIterator<(K::Borrow<'k>, V)> for Map<K, V>
+impl<'k, K, V> FromIterator<(&'k K::Borrowed, V)> for Map<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn from_iter<T: IntoIterator<Item = (K::Borrow<'k>, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (&'k K::Borrowed, V)>>(iter: T) -> Self {
         let mut map = Map::default();
         for (key, value) in iter {
             map.upsert(key, value);
@@ -228,7 +228,7 @@ where
     V: Value,
 {
     type Item = (K, &'g V::Target);
-    type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
+    type IntoIter = EntryIter<'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all().entries::<Ascend>()
     }
@@ -240,7 +240,7 @@ where
     V: Value,
 {
     type Item = (K, &'g mut V::Target);
-    type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
+    type IntoIter = EntryIterMut<'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all_mut().entries_mut::<Ascend>()
     }

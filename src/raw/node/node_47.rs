@@ -292,7 +292,7 @@ impl Header {
 impl Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let meta = self.meta.load_packed(Ordering::Relaxed);
-        let iter = self.keys(Unbound, Unbound);
+        let iter = self.keys(Unbound::<()>::default(), Unbound::<()>::default());
 
         let len = meta.len().value();
         let mut keys = [0u8; 47];

@@ -131,7 +131,7 @@ where
     S: Smr,
 {
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<Shared<K, V, S>> {
+    pub fn get(&self, key: &K::Borrowed) -> Option<Shared<K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
         let value =
@@ -140,7 +140,7 @@ where
     }
 
     #[inline]
-    pub fn update(&self, key: K::Borrow<'_>, value: V) -> Result<Updated<K, V, S>, V> {
+    pub fn update(&self, key: &K::Borrowed, value: V) -> Result<Updated<K, V, S>, V> {
         match self.update_with(key, Some(value), |_, initial| {
             ControlFlow::<(), _>::Continue(initial.take().expect("Value is always initialized"))
         }) {
@@ -155,7 +155,7 @@ where
     #[inline]
     pub fn update_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         mut update: F,
     ) -> Update<K, V, S>
@@ -177,7 +177,7 @@ where
     #[inline]
     fn update_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
@@ -190,7 +190,7 @@ where
     #[cold]
     fn update_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         update: F,
     ) -> Update<K, V, S>
@@ -207,7 +207,7 @@ where
     #[inline]
     fn update_with_impl<'k, H, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
@@ -265,7 +265,7 @@ where
     }
 
     #[inline]
-    pub fn remove_non_recursive(&self, key: K::Borrow<'_>) -> Option<Owned<'_, K, V, S>> {
+    pub fn remove_non_recursive(&self, key: &K::Borrowed) -> Option<Owned<'_, K, V, S>> {
         match self.remove_non_recursive_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
             Remove::Success { old } => Some(old),
@@ -276,7 +276,7 @@ where
     #[inline]
     pub fn remove_non_recursive_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         mut with: F,
     ) -> Remove<'_, K, V, S>
     where
@@ -291,7 +291,7 @@ where
     #[inline]
     fn remove_non_recursive_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         with: &mut F,
     ) -> Result<Remove<'_, K, V, S>, ()>
     where
@@ -301,20 +301,20 @@ where
     }
 
     #[cold]
-    fn remove_non_recursive_with_pessimistic<'k, F>(
+    fn remove_non_recursive_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &K::Borrowed,
         with: &mut F,
     ) -> Remove<'_, K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
-        let Ok(remove) = self.remove_with_impl::<false, path::Retain<'k, K>, _>(key, with);
+        let Ok(remove) = self.remove_with_impl::<false, path::Retain<_>, _>(key, with);
         remove
     }
 
     #[inline]
-    pub fn remove(&self, key: K::Borrow<'_>) -> Option<Owned<K, V, S>> {
+    pub fn remove(&self, key: &K::Borrowed) -> Option<Owned<K, V, S>> {
         match self.remove_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
             Remove::Success { old } => Some(old),
@@ -323,18 +323,18 @@ where
     }
 
     #[inline]
-    pub fn remove_with<'k, F>(&self, key: K::Borrow<'k>, mut with: F) -> Remove<K, V, S>
+    pub fn remove_with<F>(&self, key: &K::Borrowed, mut with: F) -> Remove<K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
-        let Ok(remove) = self.remove_with_impl::<true, path::Retain<'k, K>, _>(key, &mut with);
+        let Ok(remove) = self.remove_with_impl::<true, path::Retain<_>, _>(key, &mut with);
         remove
     }
 
     #[inline]
     fn remove_with_impl<'k, const RECURSIVE: bool, H, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         remove: &mut F,
     ) -> Result<Remove<K, V, S>, H::PopError>
     where
@@ -437,7 +437,7 @@ where
     }
 
     #[inline]
-    pub fn upsert(&self, key: K::Borrow<'_>, value: V) -> Upserted<'_, K, V, S> {
+    pub fn upsert(&self, key: &K::Borrowed, value: V) -> Upserted<'_, K, V, S> {
         match self.upsert_with(key, Some(value), |_, new| {
             ControlFlow::<(), _>::Continue(new.take().expect("Value is always initialized"))
         }) {
@@ -449,7 +449,7 @@ where
     #[inline]
     pub fn insert(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         value: V,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, V)> {
         let mut value = Some(value);
@@ -467,7 +467,7 @@ where
     #[inline]
     pub fn insert_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         insert: F,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, Option<V>)>
     where
@@ -492,7 +492,7 @@ where
     #[inline]
     pub fn upsert_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         mut upsert: F,
     ) -> Upsert<K, V, S>
@@ -514,7 +514,7 @@ where
     #[inline]
     fn upsert_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
@@ -527,7 +527,7 @@ where
     #[cold]
     fn upsert_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         upsert: F,
     ) -> Upsert<K, V, S>
@@ -544,7 +544,7 @@ where
     #[inline]
     fn upsert_with_impl<'k, H, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
@@ -668,7 +668,7 @@ where
         range: R,
     ) -> Option<iter::Prefix<'k, '_, K, V, R, Guard<'_, K, V, S>>>
     where
-        R: crate::raw::iter::Range<'k, K>,
+        R: crate::raw::iter::range::Prefix<'k, K>,
     {
         // FIXME: avoid recomputing common prefix?
         let guard = self.smr.guard(K::hazard(range.common_prefix()));
