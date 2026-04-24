@@ -29,7 +29,7 @@ where
 {
     type PopError;
 
-    fn trim(&mut self, bits: usize);
+    fn trim(&mut self, len: R::Len);
 
     fn push(&mut self, segment: Segment<R>);
     fn pop(&mut self) -> Result<Option<Segment<R>>, Self::PopError>;
@@ -45,7 +45,7 @@ where
     type PopError = ();
 
     #[inline]
-    fn trim(&mut self, _: usize) {}
+    fn trim(&mut self, _: R::Len) {}
 
     #[inline]
     fn push(&mut self, _segment: Segment<R>) {}
@@ -65,8 +65,8 @@ where
     type PopError = Infallible;
 
     #[inline]
-    fn trim(&mut self, bits: usize) {
-        self.0.iter_mut().for_each(|segment| segment.key.trim(bits))
+    fn trim(&mut self, len: R::Len) {
+        self.0.iter_mut().for_each(|segment| segment.key.trim(len))
     }
 
     #[inline]

@@ -1,16 +1,25 @@
 use core::fmt;
+use core::ops::Add;
+use core::ops::AddAssign;
+use core::ops::Sub;
+use core::ops::SubAssign;
+
+use ribbit::u6;
 
 use crate::raw::Key;
 use crate::raw::edge;
+use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
+use crate::raw::key::Read as _;
 
 impl Key for Vec<u8> {
     type Read<'k> = Reader<'k>;
     type Write = Writer;
     type Borrowed = [u8];
     type Edge = edge::Le;
+    type Len = Len;
 
     #[inline]
     fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
@@ -28,8 +37,8 @@ impl Key for Vec<u8> {
     }
 
     #[inline]
-    fn len(slice: &Self::Borrowed) -> usize {
-        slice.len()
+    fn len(slice: &Self::Borrowed) -> Self::Len {
+        Len(slice.len())
     }
 }
 
@@ -38,6 +47,7 @@ impl Key for String {
     type Write = Writer;
     type Borrowed = str;
     type Edge = edge::Le;
+    type Len = Len;
 
     #[inline]
     fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
@@ -63,8 +73,8 @@ impl Key for String {
     }
 
     #[inline]
-    fn len(string: &Self::Borrowed) -> usize {
-        string.len()
+    fn len(string: &Self::Borrowed) -> Self::Len {
+        Len(string.len())
     }
 }
 
@@ -117,10 +127,11 @@ impl key::Read for Reader<'_> {
     const BITS: Option<usize> = None;
 
     type Edge = edge::Le;
+    type Len = Len;
 
     #[inline]
-    fn bits(&self) -> usize {
-        self.0.len() << 3
+    fn len(&self) -> Self::Len {
+        Len(self.0.len())
     }
 
     #[inline]
@@ -152,20 +163,20 @@ impl key::Read for Reader<'_> {
     }
 
     #[inline]
-    fn trim(&mut self, bits: usize) {
-        self.0 = &self.0[..self.0.len() - (bits >> 3)]
+    fn trim(&mut self, len: Self::Len) {
+        self.0 = &self.0[..(self.len() - len).0]
     }
 
     #[inline]
-    fn prefix(self, bits: usize) -> Self {
-        validate!(self.bits() >= bits);
-        Reader(&self.0[..bits >> 3])
+    fn prefix(self, end: Self::Len) -> Self {
+        validate!(end <= self.len());
+        Reader(&self.0[..end.0])
     }
 
     #[inline]
-    fn suffix(self, bits: usize) -> Self {
-        validate!(self.bits() >= bits);
-        Self(&self.0[bits >> 3..])
+    fn suffix(self, start: Self::Len) -> Self {
+        validate!(start <= self.len());
+        Self(&self.0[start.0..])
     }
 
     #[inline]
@@ -181,34 +192,25 @@ impl key::Read for Reader<'_> {
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer(pub(super) Vec<u8>);
 
-impl key::Write for Writer {
-    type Edge = edge::Le;
-    type Len = usize;
+impl<'k> key::Write<Reader<'k>> for Writer {
+    type Len = Len;
 
     #[inline]
-    fn len_from_bits(bits: usize) -> Self::Len {
-        bits >> 3
+    fn new(prefix: Reader<'k>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
+        let len = prefix.len() + key.len();
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(prefix.0);
+        buffer.extend(key);
+        (Writer(buffer), len)
     }
 
     #[inline]
-    fn write(&mut self, len: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len {
-        validate_eq!(len, self.0.len());
-        self.0.extend(edge);
-        self.0.len()
-    }
-
-    #[inline]
-    fn replace(
-        &mut self,
-        start: Self::Len,
-        node: u8,
-        edge: ribbit::Packed<Self::Edge>,
-    ) -> Self::Len {
-        validate!(start <= self.0.len());
-        self.0.truncate(start);
+    fn replace(&mut self, start: Self::Len, node: u8, edge: ribbit::Packed<edge::Le>) -> Self::Len {
+        validate!(start.0 <= self.0.len());
+        self.0.truncate(start.0);
         self.0.push(node);
         self.0.extend(edge);
-        self.0.len()
+        Len(self.0.len())
     }
 }
 
@@ -222,6 +224,91 @@ impl<'k> From<Reader<'k>> for Writer {
     #[inline]
     fn from(reader: Reader<'k>) -> Self {
         Self(reader.0.to_vec())
+    }
+}
+
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Len(pub(super) usize);
+
+impl key::Len<u6> for Len {
+    const ZERO: Self = Self(0);
+    const BYTE: Self = Self(1);
+
+    #[inline]
+    fn bits(self) -> usize {
+        self.0 << 3
+    }
+
+    #[inline]
+    fn bytes(self) -> usize {
+        self.0
+    }
+}
+
+impl Add for Len {
+    type Output = Self;
+    #[inline]
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for Len {
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl Add<u6> for Len {
+    type Output = Self;
+    #[inline]
+    fn add(self, rhs: u6) -> Self::Output {
+        Self(self.0 + rhs.bytes())
+    }
+}
+
+impl Sub for Len {
+    type Output = Self;
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl SubAssign for Len {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+impl SubAssign<u6> for Len {
+    #[inline]
+    fn sub_assign(&mut self, rhs: u6) {
+        self.0 -= rhs.bytes();
+    }
+}
+
+impl Sub<u6> for Len {
+    type Output = Self;
+    #[inline]
+    fn sub(self, rhs: u6) -> Self::Output {
+        Self(self.0 - rhs.bytes())
+    }
+}
+
+impl PartialOrd<u6> for Len {
+    #[inline]
+    fn partial_cmp(&self, other: &u6) -> Option<std::cmp::Ordering> {
+        Some(self.0.cmp(&other.bytes()))
+    }
+}
+
+impl PartialEq<u6> for Len {
+    #[inline]
+    fn eq(&self, other: &u6) -> bool {
+        self.0.eq(&other.bytes())
     }
 }
 

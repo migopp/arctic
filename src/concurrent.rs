@@ -19,8 +19,8 @@ use crate::raw::cursor::Path;
 use crate::raw::cursor::path;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
-use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
+use crate::raw::key::Len as _;
 use crate::sequential;
 use crate::stat;
 
@@ -229,7 +229,7 @@ where
                     Err(_) => return Err(initial),
                     Ok(None) => continue,
                     Ok(Some(node)) => unsafe {
-                        guard.retire_node(cursor.bits(), node);
+                        guard.retire_node(cursor.len().bits(), node);
                         continue;
                     },
                 },
@@ -354,7 +354,7 @@ where
                 Some(Err(Frozen)) => match cursor.freeze()? {
                     None => continue,
                     Some(node) => unsafe {
-                        guard.retire_node(cursor.bits(), node);
+                        guard.retire_node(cursor.len().bits(), node);
                         continue;
                     },
                 },
@@ -393,7 +393,7 @@ where
                     break 'outer;
                 }
 
-                cursor.trim(trim.bits() + 8);
+                cursor.trim(K::Len::BYTE + trim);
 
                 loop {
                     let Some(old) = cursor.traverse_prefix() else {
@@ -417,7 +417,7 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(old) => {
-                            unsafe { guard.retire_node(cursor.bits(), target) };
+                            unsafe { guard.retire_node(cursor.len().bits(), target) };
                             trim = old.meta().key().len();
                             continue 'outer;
                         }
@@ -620,7 +620,7 @@ where
                     ) {
                         Ok(_) => {
                             if let Some(node) = old.as_node() {
-                                unsafe { guard.retire_node(cursor.bits(), node) };
+                                unsafe { guard.retire_node(cursor.len().bits(), node) };
                             }
                         }
                         Err(_) => {
@@ -644,7 +644,7 @@ where
             match cursor.freeze() {
                 Err(_) => return Err(initial),
                 Ok(None) => (),
-                Ok(Some(node)) => unsafe { guard.retire_node(cursor.bits(), node) },
+                Ok(Some(node)) => unsafe { guard.retire_node(cursor.len().bits(), node) },
             }
         }
     }

@@ -11,9 +11,9 @@ use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
-use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
+use crate::raw::key::Len as _;
 use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::stat;
@@ -49,8 +49,7 @@ impl<'g, R: key::Read> core::ops::DerefMut for CursorMut<'g, R> {
 
 /// Tree traversal state.
 pub(crate) struct Cursor<'g, R: key::Read, P> {
-    /// Total number of bits read from `key`
-    bits: usize,
+    len: R::Len,
 
     /// Current key reader
     key: R,
@@ -90,7 +89,7 @@ where
     #[inline]
     pub(crate) unsafe fn new(root: &'g Atomic<Edge<R::Edge>>, key: R) -> Self {
         Self {
-            bits: 0,
+            len: R::Len::ZERO,
             edge: NonNull::from(root),
             key,
             path: P::default(),
@@ -104,8 +103,8 @@ where
     }
 
     #[inline]
-    pub(crate) fn bits(&self) -> usize {
-        self.bits
+    pub(crate) fn len(&self) -> R::Len {
+        self.len
     }
 
     /// Traverse to the value associated with the key, if it exists.
@@ -358,7 +357,7 @@ where
         edge: &'g Atomic<Edge<R::Edge>>,
     ) {
         // 1 extra byte for node
-        self.bits += len.bits() + 8;
+        self.len += R::Len::BYTE + len;
         self.path.push(path::Segment {
             key,
             len,
@@ -374,15 +373,15 @@ where
         let Some(segment) = self.path.pop()? else {
             return Ok(None);
         };
-        self.bits -= segment.len.bits() + 8;
+        self.len -= R::Len::BYTE + segment.len;
         self.key = segment.key;
         self.edge = segment.edge;
         Ok(Some(segment.node))
     }
 
     #[inline]
-    pub(crate) fn trim(&mut self, bits: usize) {
-        self.path.trim(bits);
-        self.key.trim(bits);
+    pub(crate) fn trim(&mut self, len: R::Len) {
+        self.path.trim(len);
+        self.key.trim(len);
     }
 }

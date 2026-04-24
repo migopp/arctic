@@ -307,15 +307,21 @@ pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u
 pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
 
-    #[cfg_attr(not(test), expect(unused))]
+    #[cfg(test)]
     fn new(bits: usize) -> Self;
+
     fn bits(self) -> usize;
+
+    #[inline]
+    fn bytes(self) -> usize {
+        self.bits() >> 3
+    }
 }
 
 impl Len for u6 {
     const MAX: Self = u6::new(56);
 
-    #[inline]
+    #[cfg(test)]
     fn new(bits: usize) -> Self {
         validate_eq!(bits & 0b111, 0);
         validate!(bits <= u8::MAX as usize);

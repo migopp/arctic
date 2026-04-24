@@ -49,8 +49,8 @@ where
         let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
         let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
+        let len = cursor.len();
+        let prefix = prefix.prefix(len);
         Some(unsafe { Prefix::new(root, prefix, ..) })
     }
 
@@ -66,8 +66,8 @@ where
         cursor.traverse_prefix()?;
 
         let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
+        let len = cursor.len();
+        let prefix = prefix.prefix(len);
 
         Some(unsafe { Prefix::new(root, prefix, range) })
     }
@@ -129,7 +129,7 @@ where
 
 /// Iterator over raw values only
 pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
-    RangeIter<'g, K::Read<'k>, key::Discard<K::Edge>, R, O>,
+    RangeIter<'g, K::Read<'k>, key::Discard<K::Read<'k>>, R, O>,
 );
 
 impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>

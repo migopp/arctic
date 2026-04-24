@@ -4,6 +4,10 @@ pub mod vec;
 use core::borrow::Borrow;
 use core::fmt;
 use core::marker::PhantomData;
+use core::ops::Add;
+use core::ops::AddAssign;
+use core::ops::Sub;
+use core::ops::SubAssign;
 
 use crate::raw::edge;
 
@@ -11,22 +15,25 @@ pub trait Key: Borrow<Self::Borrowed> {
     type Borrowed: 'static + ?Sized;
 
     #[expect(private_bounds)]
-    type Read<'k>: Read<Edge = Self::Edge> + From<&'k Self::Borrowed>;
+    type Read<'k>: Read<Edge = Self::Edge, Len = Self::Len> + From<&'k Self::Borrowed>;
 
     #[expect(private_bounds)]
-    type Write: Write<Edge = Self::Edge> + for<'k> From<Self::Read<'k>>;
+    type Write: for<'k> Write<Self::Read<'k>>;
 
     #[expect(private_bounds)]
     type Edge: ribbit::Pack<Packed: edge::Meta>;
+
+    #[expect(private_bounds)]
+    type Len: Len<<<ribbit::Packed<Self::Edge> as edge::Meta>::Key as edge::Key>::Len>;
 
     unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed;
 
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
-    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self;
+    fn clone_from_borrow(borrowed: &Self::Borrowed) -> Self;
 
     // Key length in bytes
-    fn len(borrow: &Self::Borrowed) -> usize;
+    fn len(borrowed: &Self::Borrowed) -> Self::Len;
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
@@ -34,13 +41,9 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
     const BITS: Option<usize>;
 
     type Edge: ribbit::Pack<Packed: edge::Meta>;
+    type Len: Len<<<ribbit::Packed<Self::Edge> as edge::Meta>::Key as edge::Key>::Len>;
 
-    fn bits(&self) -> usize;
-
-    #[inline]
-    fn bytes(&self) -> usize {
-        self.bits() >> 3
-    }
+    fn len(&self) -> Self::Len;
 
     // Linear reads for cursor traversal
     fn next(&mut self) -> Option<u8>;
@@ -83,79 +86,72 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
         (read, read == key)
     }
 
-    fn trim(&mut self, bits: usize);
+    fn trim(&mut self, len: Self::Len);
 
     // Prefix operations for prefix and range iteration
-    fn prefix(self, bits: usize) -> Self;
-    fn suffix(self, bits: usize) -> Self;
+    fn prefix(self, end: Self::Len) -> Self;
+    fn suffix(self, start: Self::Len) -> Self;
     fn common_prefix(self, other: Self) -> Self;
 }
 
-pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
+pub(crate) trait Write<R: Read>: Clone + fmt::Debug + Default + Ord {
     type Len: Copy;
-    type Edge: ribbit::Pack<Packed: edge::Meta>;
 
-    fn len_from_bits(bits: usize) -> Self::Len;
-
-    /// Write bytes starting at `start` with bytes from `edge`
-    ///
-    /// Caller must ensure `start` is equal to the current length of this writer
-    fn write(&mut self, start: Self::Len, edge: ribbit::Packed<Self::Edge>) -> Self::Len;
+    fn new(prefix: R, key: <ribbit::Packed<R::Edge> as edge::Meta>::Key) -> (Self, Self::Len);
 
     /// Replace bytes starting at `start` with bytes from `node` and `edge`
-    fn replace(
-        &mut self,
-        start: Self::Len,
-        node: u8,
-        edge: ribbit::Packed<Self::Edge>,
-    ) -> Self::Len;
+    fn replace(&mut self, start: Self::Len, node: u8, edge: ribbit::Packed<R::Edge>) -> Self::Len;
+}
+
+pub trait Len<L: edge::Len>:
+    Sized + Copy + AddAssign + Add<L, Output = Self> + SubAssign + Sub<L, Output = Self> + PartialOrd<L>
+{
+    const ZERO: Self;
+    const BYTE: Self;
+
+    fn bits(self) -> usize;
+    fn bytes(self) -> usize;
 }
 
 #[derive(Clone)]
-pub(crate) struct Discard<M>(PhantomData<M>);
+pub(crate) struct Discard<R>(PhantomData<R>);
 
-impl<M> Default for Discard<M> {
+impl<R> Default for Discard<R> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
-impl<M> core::fmt::Debug for Discard<M> {
+impl<R> core::fmt::Debug for Discard<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Ignore")
+        write!(f, "Discard")
     }
 }
-impl<M> PartialEq for Discard<M> {
+impl<R> PartialEq for Discard<R> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
-impl<M> Eq for Discard<M> {}
-impl<M> Ord for Discard<M> {
+impl<R> Eq for Discard<R> {}
+impl<R> Ord for Discard<R> {
     fn cmp(&self, _: &Self) -> core::cmp::Ordering {
         core::cmp::Ordering::Equal
     }
 }
-impl<M> PartialOrd for Discard<M> {
+impl<R> PartialOrd for Discard<R> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<M> Write for Discard<M>
-where
-    M: ribbit::Pack<Packed: edge::Meta>,
-{
+impl<R: Read> Write<R> for Discard<R> {
     type Len = ();
-    type Edge = M;
+
+    fn new(_: R, _: <ribbit::Packed<R::Edge> as edge::Meta>::Key) -> (Self, Self::Len) {
+        (Self(PhantomData), ())
+    }
 
     #[inline]
-    fn len_from_bits(_bits: usize) -> Self::Len {}
-
-    #[inline]
-    fn write(&mut self, (): Self::Len, _edge: ribbit::Packed<Self::Edge>) -> Self::Len {}
-
-    #[inline]
-    fn replace(&mut self, _start: Self::Len, _node: u8, _edge: ribbit::Packed<Self::Edge>) {}
+    fn replace(&mut self, _: Self::Len, _: u8, _: ribbit::Packed<R::Edge>) -> Self::Len {}
 }
 
 impl<R, M> From<R> for Discard<M>
@@ -172,6 +168,7 @@ mod tests {
     use crate::raw::Key;
     use crate::raw::edge;
     use crate::raw::edge::Len as _;
+    use crate::raw::key::Len as _;
     use crate::raw::key::Read as _;
 
     pub(super) fn take_all<K: Key>(array: &[u8], key: &K::Borrowed, lens: &[usize]) {
@@ -184,7 +181,7 @@ mod tests {
                 <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len::new,
             )
         {
-            assert_eq!(reader.bytes(), array.len() - index);
+            assert_eq!(reader.len().bytes(), array.len() - index);
 
             let bytes = len.bits() >> 3;
 
@@ -195,7 +192,7 @@ mod tests {
             index += bytes;
         }
 
-        assert_eq!(reader.bytes(), array.len() - index);
+        assert_eq!(reader.len().bytes(), array.len() - index);
         assert_eq!(reader.next(), array.get(index).copied());
     }
 }

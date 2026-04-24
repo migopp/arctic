@@ -15,13 +15,12 @@ use crate::raw;
 use crate::raw::Edge;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
-use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 
-pub(crate) enum RangeIter<'g, K: key::Read, W: key::Write, R: Range<K>, O> {
+pub(crate) enum RangeIter<'g, K: key::Read, W: key::Write<K>, R: Range<K>, O> {
     Root {
         writer: W,
         next: Option<(u64, NonNull<Atomic<Edge<K::Edge>>>)>,
@@ -32,7 +31,7 @@ pub(crate) enum RangeIter<'g, K: key::Read, W: key::Write, R: Range<K>, O> {
 impl<'g, K, W, R, O> Default for RangeIter<'g, K, W, R, O>
 where
     K: key::Read,
-    W: key::Write,
+    W: key::Write<K>,
     R: Range<K>,
     O: Order,
 {
@@ -47,7 +46,7 @@ where
 impl<'g, K, W, R, O> RangeIter<'g, K, W, R, O>
 where
     K: key::Read,
-    W: key::Write<Edge = K::Edge> + From<K>,
+    W: key::Write<K>,
     R: Range<K>,
     O: Order,
 {
@@ -62,17 +61,16 @@ where
             return Self::default();
         };
 
-        let key = edge.meta();
-        let bits = prefix.bits();
-        let mut writer = W::from(prefix);
-        let len = writer.write(W::len_from_bits(bits), key);
+        let meta = edge.meta();
+        let len = prefix.len();
+        let mut lower = range.lower(len);
+        let mut upper = range.upper(len);
 
-        let mut lower = range.lower(bits);
-        let mut upper = range.upper(bits);
-
-        let Some((lower_byte, upper_byte)) = lower.check(key).zip(upper.check(key)) else {
+        let Some((lower_byte, upper_byte)) = lower.check(meta).zip(upper.check(meta)) else {
             return Self::default();
         };
+
+        let (writer, len) = W::new(prefix, meta.key());
 
         match child {
             edge::Child::Value(value) => Self::Root {
@@ -128,7 +126,7 @@ where
 pub(crate) struct NodeIter<'g, K, W, R, O>
 where
     K: key::Read,
-    W: key::Write,
+    W: key::Write<K>,
     R: Range<K>,
 {
     lower: R::Lower,
@@ -150,7 +148,7 @@ impl<'g, K, W, R, O> NodeIter<'g, K, W, R, O>
 where
     K: key::Read,
     R: Range<K>,
-    W: key::Write<Edge = K::Edge>,
+    W: key::Write<K>,
     O: Order,
 {
     #[inline]
@@ -295,8 +293,10 @@ where
     #[expect(private_bounds)]
     type Upper: Upper<R::Edge>;
 
-    fn lower(&self, bits: usize) -> Self::Lower;
-    fn upper(&self, bits: usize) -> Self::Upper;
+    #[expect(private_interfaces)]
+    fn lower(&self, start: R::Len) -> Self::Lower;
+    #[expect(private_interfaces)]
+    fn upper(&self, start: R::Len) -> Self::Upper;
 
     #[inline]
     fn common_prefix(&self) -> R {
@@ -309,13 +309,15 @@ impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeInclusive<T> {
     type Upper = Include<R>;
 
     #[inline]
-    fn lower(&self, bits: usize) -> Self::Lower {
-        Include((*self.start()).into().suffix(bits))
+    #[expect(private_interfaces)]
+    fn lower(&self, start: R::Len) -> Self::Lower {
+        Include((*self.start()).into().suffix(start))
     }
 
     #[inline]
-    fn upper(&self, bits: usize) -> Self::Upper {
-        Include((*self.end()).into().suffix(bits))
+    #[expect(private_interfaces)]
+    fn upper(&self, start: R::Len) -> Self::Upper {
+        Include((*self.end()).into().suffix(start))
     }
 
     #[inline]
@@ -331,12 +333,14 @@ impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeFrom<T> {
     type Upper = Unbound<R>;
 
     #[inline]
-    fn lower(&self, bits: usize) -> Self::Lower {
-        Include(self.start.into().suffix(bits))
+    #[expect(private_interfaces)]
+    fn lower(&self, start: R::Len) -> Self::Lower {
+        Include(self.start.into().suffix(start))
     }
 
     #[inline]
-    fn upper(&self, _bits: usize) -> Self::Upper {
+    #[expect(private_interfaces)]
+    fn upper(&self, _start: R::Len) -> Self::Upper {
         Unbound::default()
     }
 }
@@ -346,30 +350,34 @@ impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeToInclusive<T> {
     type Upper = Include<R>;
 
     #[inline]
-    fn lower(&self, _bits: usize) -> Self::Lower {
+    #[expect(private_interfaces)]
+    fn lower(&self, _start: R::Len) -> Self::Lower {
         Unbound::default()
     }
 
     #[inline]
-    fn upper(&self, bits: usize) -> Self::Upper {
-        Include(self.end.into().suffix(bits))
+    #[expect(private_interfaces)]
+    fn upper(&self, start: R::Len) -> Self::Upper {
+        Include(self.end.into().suffix(start))
     }
 }
 
-impl<K> Range<K> for RangeFull
+impl<R> Range<R> for RangeFull
 where
-    K: key::Read,
+    R: key::Read,
 {
-    type Lower = Unbound<K>;
-    type Upper = Unbound<K>;
+    type Lower = Unbound<R>;
+    type Upper = Unbound<R>;
 
     #[inline]
-    fn lower(&self, _: usize) -> Self::Lower {
+    #[expect(private_interfaces)]
+    fn lower(&self, _: R::Len) -> Self::Lower {
         Unbound::default()
     }
 
     #[inline]
-    fn upper(&self, _: usize) -> Self::Upper {
+    #[expect(private_interfaces)]
+    fn upper(&self, _: R::Len) -> Self::Upper {
         Unbound::default()
     }
 }
@@ -404,9 +412,11 @@ impl<R: key::Read> Lower<R::Edge> for Include<R> {
         // We can skip this check for fixed-size keys because
         // the bounds will always be the full key length, which
         // is at least as long as the bytes along any path.
-        validate!(R::BITS.is_none() || R::BITS.is_some() && self.0.bits() >= len.bits());
+        validate!(
+            const { R::BITS.is_none() } || (const { R::BITS.is_some() } && self.0.len() >= len)
+        );
 
-        if const { R::BITS.is_none() } && self.0.bits() < len.bits() {
+        if const { R::BITS.is_none() } && self.0.len() < len {
             return None;
         }
 
