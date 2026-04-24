@@ -312,6 +312,21 @@ mod tests {
         map.insert(&0u64, 1u64).unwrap_err();
     }
 
+    #[test]
+    fn regression_range_upper() {
+        let map = crate::concurrent::Map::<String, u64>::new();
+        let key = "a".repeat(100);
+        let upper = "a".repeat(200);
+        map.insert(&key, 0).unwrap();
+        assert_eq!(
+            map.range(..=&upper)
+                .unwrap()
+                .entries::<crate::Ascend>()
+                .count(),
+            1
+        );
+    }
+
     fn insert_all<I, K>(iter: I) -> Map<K, u64>
     where
         I: IntoIterator<Item = K>,

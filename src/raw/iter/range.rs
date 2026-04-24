@@ -399,15 +399,21 @@ impl<R: key::Read> Lower<R::Edge> for Include<R> {
         let key = edge.key();
         let len = key.len();
 
-        // Skip check for fixed-length keys
-        if R::BITS.is_none() && self.0.bits() < len.bits() {
+        // Ensure bound has at least as many bytes as edge
+        //
+        // We can skip this check for fixed-size keys because
+        // the bounds will always be the full key length, which
+        // is at least as long as the bytes along any path.
+        validate!(R::BITS.is_none() || R::BITS.is_some() && self.0.bits() >= len.bits());
+
+        if const { R::BITS.is_none() } && self.0.bits() < len.bits() {
             return None;
         }
 
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => Some(None),
+        match key.cmp(&self.0.read(len)) {
+            cmp::Ordering::Less => None,
             cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => None,
+            cmp::Ordering::Greater => Some(None),
         }
     }
 }
@@ -419,15 +425,14 @@ impl<R: key::Read> Upper<R::Edge> for Include<R> {
         let key = edge.key();
         let len = key.len();
 
-        // Skip check for fixed-length keys
-        if R::BITS.is_none() && self.0.bits() > len.bits() {
-            return None;
-        }
+        // Note: not symmetric with lower bound!
+        // We can't check `self.0.bits() > len.bits()` here because
+        // this edge may have children with more bytes to compare.
 
-        match self.0.read(len).cmp(&key) {
-            cmp::Ordering::Less => None,
+        match key.cmp(&self.0.read(len)) {
+            cmp::Ordering::Less => Some(None),
             cmp::Ordering::Equal => Some(self.0.next()),
-            cmp::Ordering::Greater => Some(None),
+            cmp::Ordering::Greater => None,
         }
     }
 }

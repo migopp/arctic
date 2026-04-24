@@ -85,17 +85,24 @@ impl<'k> From<&'k [u8]> for Reader<'k> {
     }
 }
 
-impl<'k, const N: usize> From<&'k [u8; N]> for Reader<'k> {
+impl<'k> From<&'k Vec<u8>> for Reader<'k> {
     #[inline]
-    fn from(value: &'k [u8; N]) -> Self {
-        Self::from(value.as_slice())
+    fn from(key: &'k Vec<u8>) -> Self {
+        Self(key)
     }
 }
 
 impl<'k> From<&'k str> for Reader<'k> {
     #[inline]
     fn from(value: &'k str) -> Self {
-        Self::from(value.as_bytes())
+        Self(value.as_bytes())
+    }
+}
+
+impl<'k> From<&'k String> for Reader<'k> {
+    #[inline]
+    fn from(key: &'k String) -> Self {
+        Self(key.as_bytes())
     }
 }
 
