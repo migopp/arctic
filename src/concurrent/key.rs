@@ -81,15 +81,15 @@ fn hazard_integer<U: key::int::Uint>(
 #[inline]
 fn hazard_vec(reader: key::vec::Reader<'_>) -> ribbit::Packed<Le> {
     let reader = reader.as_ref();
+    let len = reader.len();
 
-    // let mut buffer = [0u8; 8];
-    // let len = reader.len().min(7);
+    let prefix = if len >= 16 {
+        unsafe { reader.as_ptr().cast::<u128>().read_unaligned() }
+    } else {
+        let mut buffer = [0u8; 16];
+        buffer[..len].copy_from_slice(reader);
+        u128::from_le_bytes(buffer)
+    };
 
-    let mut buffer = [0u8; 16];
-    let len = reader.len().min(15);
-
-    buffer[..len].copy_from_slice(&reader[..len]);
-
-    // hazard::prefix::Le::new_hazard(u64::from_le_bytes(buffer), len << 3)
-    Le::new_hazard(u128::from_le_bytes(buffer), len << 3)
+    Le::new_hazard(prefix, len.min(15) << 3)
 }
