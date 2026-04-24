@@ -30,6 +30,15 @@ impl Key for String {
     }
 }
 
+impl<const N: usize> Key for [u8; N] {
+    type Prefix = Le;
+
+    #[inline]
+    fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
+        hazard_vec(reader)
+    }
+}
+
 macro_rules! impl_integer {
     ($($integer:ty),* $(,)?) => {
         $(

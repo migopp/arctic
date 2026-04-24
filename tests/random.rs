@@ -169,6 +169,62 @@ mod vec {
     }
 }
 
+mod array {
+    use core::hash::Hasher as _;
+
+    use arctic::raw::Key;
+
+    use super::Workload;
+    use super::test_map;
+
+    struct Array<const N: usize>;
+
+    #[test]
+    fn many() {
+        test_map(&Array::<12>, 100, 10_000_000, false);
+    }
+
+    #[test]
+    fn two() {
+        test_map(&Array::<19>, 2, 1_000_000, false);
+    }
+
+    #[test]
+    fn one() {
+        test_map(&Array::<21>, 1, 1_000_000, false);
+    }
+
+    impl<const N: usize> Workload for Array<N> {
+        type Key = [u8; N];
+        type Value = u64;
+
+        fn key(&self, index: usize) -> Self::Key {
+            let mut hasher = rapidhash::fast::RapidHasher::default_const();
+            hasher.write_usize(index);
+            let mut buffer = [0u8; N];
+            for (i, byte) in buffer.iter_mut().enumerate() {
+                hasher.write_usize(i);
+                *byte = hasher.finish() as u8;
+            }
+            buffer
+        }
+
+        fn value(&self, index: usize) -> Self::Value {
+            index as u64
+        }
+
+        fn validate(
+            &self,
+            index: usize,
+            key: &<Self::Key as Key>::Borrowed,
+            value: &<Self::Value as arctic::sequential::Value>::Target,
+        ) {
+            assert_eq!(*key, self.key(index));
+            assert_eq!(*value, index as u64);
+        }
+    }
+}
+
 trait Workload: Sized + Sync {
     type Key: arctic::concurrent::Key + Sync;
 

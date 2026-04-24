@@ -369,12 +369,6 @@ impl<'k> From<&'k u64> for Slow {
     }
 }
 
-impl From<Slow> for crate::raw::key::vec::Writer {
-    fn from(slow: Slow) -> Self {
-        crate::raw::key::vec::Writer(slow.buffer.into_iter().take(slow.len.0).collect())
-    }
-}
-
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer<U>(U);

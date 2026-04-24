@@ -1,3 +1,4 @@
+pub mod array;
 pub mod int;
 pub mod vec;
 
@@ -158,15 +159,6 @@ impl<R: Read> Write<R> for Discard<R> {
 
     #[inline]
     fn replace(&mut self, _: Self::Len, _: u8, _: ribbit::Packed<R::Edge>) -> Self::Len {}
-}
-
-impl<R, M> From<R> for Discard<M>
-where
-    R: Read<Edge = M>,
-{
-    fn from(_: R) -> Self {
-        Self(PhantomData)
-    }
 }
 
 #[cfg(test)]
