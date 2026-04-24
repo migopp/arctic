@@ -413,10 +413,10 @@ impl<R: key::Read> Lower<R::Edge> for Include<R> {
         // the bounds will always be the full key length, which
         // is at least as long as the bytes along any path.
         validate!(
-            const { R::BITS.is_none() } || (const { R::BITS.is_some() } && self.0.len() >= len)
+            const { R::LEN.is_none() } || (const { R::LEN.is_some() } && self.0.len() >= len)
         );
 
-        if const { R::BITS.is_none() } && self.0.len() < len {
+        if const { R::LEN.is_none() } && self.0.len() < len {
             return None;
         }
 

@@ -38,7 +38,7 @@ pub trait Key: Borrow<Self::Borrowed> {
 
 pub(crate) trait Read: Copy + fmt::Debug + Default {
     // Hint for fixed-size keys
-    const BITS: Option<usize>;
+    const LEN: Option<Self::Len>;
 
     type Edge: ribbit::Pack<Packed: edge::Meta>;
     type Len: Len<<<ribbit::Packed<Self::Edge> as edge::Meta>::Key as edge::Key>::Len>;
@@ -104,7 +104,14 @@ pub(crate) trait Write<R: Read>: Clone + fmt::Debug + Default + Ord {
 }
 
 pub trait Len<L: edge::Len>:
-    Sized + Copy + AddAssign + Add<L, Output = Self> + SubAssign + Sub<L, Output = Self> + PartialOrd<L>
+    Sized
+    + Copy
+    + AddAssign
+    + Add<L, Output = Self>
+    + SubAssign
+    + Sub<L, Output = Self>
+    + PartialOrd<L>
+    + PartialOrd
 {
     const ZERO: Self;
     const BYTE: Self;

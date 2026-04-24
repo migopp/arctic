@@ -145,7 +145,7 @@ impl<U: Uint> Reader<U> {
 }
 
 impl<U: Uint> key::Read for Reader<U> {
-    const BITS: Option<usize> = Some(U::BITS as usize);
+    const LEN: Option<Self::Len> = Some(Len(U::BITS));
 
     type Edge = edge::Be;
     type Len = Len;
@@ -246,7 +246,7 @@ impl Slow {
 }
 
 impl key::Read for Slow {
-    const BITS: Option<usize> = Some(64);
+    const LEN: Option<Self::Len> = Some(key::vec::Len(8));
 
     type Edge = edge::Le;
     type Len = key::vec::Len;

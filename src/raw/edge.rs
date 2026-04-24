@@ -14,6 +14,7 @@ use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
 use crate::raw::key;
+use crate::raw::key::Len as _;
 use crate::raw::node;
 use crate::raw::node::Node as _;
 use crate::raw::node::Node3;
@@ -69,19 +70,23 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             return Self::new_value(key, value);
         };
 
-        if const { matches!(R::BITS, Some(..64)) } {
+        // Key always fits in one edge
+        if R::LEN.is_some_and(|len| len <= <<M::Packed as Meta>::Key as Key>::Len::MAX) {
             validate!(false);
             unsafe { core::hint::unreachable_unchecked() }
         }
 
-        if const { matches!(R::BITS, Some(64)) } {
+        // Key fits in one edge except at root
+        if R::LEN
+            .is_some_and(|len| len == R::Len::BYTE + <<M::Packed as Meta>::Key as Key>::Len::MAX)
+        {
             crate::cold();
         }
 
-        Self::new_path_cold(reader, key, byte, value)
+        Self::new_path_recursive(reader, key, byte, value)
     }
 
-    fn new_path_cold<R>(
+    fn new_path_recursive<R>(
         mut reader: R,
         key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
         mut byte: u8,

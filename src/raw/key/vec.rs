@@ -124,7 +124,7 @@ impl Default for Reader<'_> {
 }
 
 impl key::Read for Reader<'_> {
-    const BITS: Option<usize> = None;
+    const LEN: Option<Self::Len> = None;
 
     type Edge = edge::Le;
     type Len = Len;
