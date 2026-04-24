@@ -133,14 +133,6 @@ pub struct Reader<U> {
 #[expect(private_bounds)]
 impl<U: Uint> Reader<U> {
     #[inline]
-    pub fn new_masked(buffer: U, bits: u8) -> Self {
-        unsafe {
-            let bits = bits & !0b111;
-            Self::new_unchecked(buffer.most_significant(bits), bits)
-        }
-    }
-
-    #[inline]
     pub unsafe fn new_unchecked(buffer: U, bits: u8) -> Self {
         validate!(bits <= U::BITS);
         validate_eq!(bits & 0b111, 0);
