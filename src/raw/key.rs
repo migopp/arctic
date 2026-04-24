@@ -1,4 +1,4 @@
-pub mod integer;
+pub mod int;
 pub mod vec;
 
 use core::borrow::Borrow;
@@ -32,7 +32,6 @@ pub trait Key: Borrow<Self::Borrowed> {
 
     fn clone_from_borrow(borrowed: &Self::Borrowed) -> Self;
 
-    // Key length in bytes
     fn len(borrowed: &Self::Borrowed) -> Self::Len;
 }
 
