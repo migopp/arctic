@@ -454,7 +454,14 @@ where
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, V)> {
         let mut value = Some(value);
         self.insert_with(key, || value.take().expect("Call thunk once"))
-            .map_err(|(shared, initial)| (shared, initial.expect("Value is always initialized")))
+            .map_err(|(shared, initial)| {
+                (
+                    shared,
+                    value
+                        .xor(initial)
+                        .expect("Value must be in thunk or initial"),
+                )
+            })
     }
 
     #[inline]

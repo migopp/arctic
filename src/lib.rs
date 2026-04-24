@@ -305,6 +305,13 @@ mod tests {
         assert_eq!(values, (5..10).collect::<Vec<u64>>());
     }
 
+    #[test]
+    fn regression_insert() {
+        let map = crate::concurrent::Map::<u64, u64>::new();
+        map.insert(0u64, 0u64).unwrap();
+        map.insert(0u64, 1u64).unwrap_err();
+    }
+
     fn insert_all<I, K>(iter: I) -> Map<K, u64>
     where
         I: IntoIterator<Item = K>,
