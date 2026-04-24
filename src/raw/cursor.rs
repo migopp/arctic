@@ -52,7 +52,7 @@ pub(crate) struct Cursor<'g, R: key::Read, P> {
     len: R::Len,
 
     /// Current key reader
-    key: R,
+    reader: R,
 
     /// Edge this cursor currently points to
     edge: NonNull<Atomic<Edge<R::Edge>>>,
@@ -70,8 +70,7 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
         key: <E::Packed as edge::Meta>::Key,
     },
 
-    /// Structural modification required
-    Smo {
+    Replace {
         old_node: ribbit::Packed<node::Ptr<E>>,
         old: ribbit::Packed<Edge<E>>,
     },
@@ -85,13 +84,13 @@ where
     /// # Safety
     ///
     /// Caller must ensure that all nodes underneath `root` along the path associated
-    /// with `key` live at least as long as this struct.
+    /// with `reader` live at least as long as this struct.
     #[inline]
-    pub(crate) unsafe fn new(root: &'g Atomic<Edge<R::Edge>>, key: R) -> Self {
+    pub(crate) unsafe fn new(root: &'g Atomic<Edge<R::Edge>>, reader: R) -> Self {
         Self {
             len: R::Len::ZERO,
             edge: NonNull::from(root),
-            key,
+            reader,
             path: P::default(),
             _global: PhantomData,
         }
@@ -113,16 +112,16 @@ where
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
 
-            let _ = self.key.match_exact(edge.meta())?;
+            let _ = self.reader.match_exact(edge.meta())?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {
                     let byte = if const { R::LEN.is_none() } {
-                        self.key
+                        self.reader
                             .next()
                             .expect("Precondition: no key is prefix of another key")
                     } else {
-                        unsafe { self.key.next_unchecked() }
+                        unsafe { self.reader.next_unchecked() }
                     };
 
                     self.edge = unsafe { node.get(byte) }.map(NonNull::from)?;
@@ -139,24 +138,25 @@ where
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
-            let save = self.key;
 
-            let (key, exact) = self.key.match_inexact(meta);
+            let reader = self.reader;
+            let (key, exact) = self.reader.match_inexact(meta);
 
             if exact {
                 if let Some(node) = edge.as_node() {
-                    if let Some(byte) = self.key.next() {
+                    if let Some(byte) = self.reader.next() {
                         let next = unsafe { node.get(byte) }?;
-                        self.push(save, key.len(), node, next);
+                        self.push(reader, key.len(), node, next);
                         continue;
                     }
                 }
             }
 
+            self.reader = reader;
+
             if edge.is_null() || meta.key().prefix(key.len()) != key {
                 return None;
             } else {
-                self.key = save;
                 return Some(edge);
             }
         }
@@ -174,26 +174,25 @@ where
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
             let meta = edge.meta();
-            let save = self.key;
 
-            // Fast path: traversal
-            let len = self.key.match_exact(meta)?;
+            let reader = self.reader;
+            let len = self.reader.match_exact(meta)?;
 
             if let Some(node) = edge.as_node() {
                 let byte = if const { R::LEN.is_none() } {
-                    self.key
+                    self.reader
                         .next()
                         .expect("Precondition: no key is prefix of another key")
                 } else {
-                    unsafe { self.key.next_unchecked() }
+                    unsafe { self.reader.next_unchecked() }
                 };
 
                 let next = unsafe { node.get(byte) }?;
-                self.push(save, len, node, next);
+                self.push(reader, len, node, next);
                 continue;
             }
 
-            self.key = save;
+            self.reader = reader;
 
             return if meta.is_frozen() {
                 Some(Err(Frozen))
@@ -213,38 +212,40 @@ where
     pub(crate) fn traverse_insert(&mut self) -> Insert<R::Edge> {
         loop {
             let old = self.edge().load_packed(Ordering::Acquire);
-            let old_meta = old.meta();
-            let save = self.key;
 
-            let (key, exact) = self.key.match_inexact(old_meta);
+            let reader = self.reader;
+            let (key, exact) = self.reader.match_inexact(old.meta());
 
             if exact {
                 if let Some(node) = old.as_node() {
                     let byte = if const { R::LEN.is_none() } {
-                        self.key
+                        self.reader
                             .next()
                             .expect("Precondition: no key is prefix of another key")
                     } else {
-                        unsafe { self.key.next_unchecked() }
+                        unsafe { self.reader.next_unchecked() }
                     };
 
                     if let Some(next) = unsafe { node.get_or_insert(byte) } {
-                        self.push(save, key.len(), node, next);
+                        self.push(reader, key.len(), node, next);
                         continue;
                     }
                 }
             }
 
             // Revert key to before the current edge
-            self.key = save;
+            self.reader = reader;
 
             let old_value = match (exact, old.child()) {
-                // Edge expansion or node creation
-                (false, _) | (true, None) => None,
+                // Edge expansion
+                (false, _)
+                // Node creation or insertion
+                | (true, None) => None,
+                // Update
                 (true, Some(edge::Child::Value(value))) => Some(value),
-
+                // Node replacement
                 (true, Some(edge::Child::Node(node))) => {
-                    return Insert::Smo {
+                    return Insert::Replace {
                         old_node: node,
                         old,
                     };
@@ -259,11 +260,11 @@ where
         }
     }
 
-    /// Locally create an edge from the current edge
-    /// to the full key. May create nodes recursively if
+    /// Locally create a path from the current edge
+    /// to insert this key value pair. May create nodes recursively if
     /// the remaining key is long.
-    pub(crate) fn insert(
-        &mut self,
+    pub(crate) fn create_path(
+        &self,
         old: ribbit::Packed<Edge<R::Edge>>,
         key: <<R::Edge as ribbit::Pack>::Packed as edge::Meta>::Key,
         value: u64,
@@ -272,17 +273,17 @@ where
             return Err(Frozen);
         }
 
-        let mut save = self.key;
+        let mut reader = self.reader;
 
         let new = match old.meta().expand(key) {
-            Err(_) => Edge::new_path(save, value),
+            Err(_) => Edge::new_path(reader, value),
             Ok((start, middle, end)) => {
-                let _ = save.read(start.len());
-                let byte = unsafe { save.next_unchecked() };
+                let _ = reader.read(start.len());
+                let byte = unsafe { reader.next_unchecked() };
                 Edge::new_node::<Node3<R::Edge>, _, _>(
                     start,
                     [byte, middle],
-                    [Edge::new_path(save, value), old.with_meta(end)],
+                    [Edge::new_path(reader, value), old.with_meta(end)],
                 )
             }
         };
@@ -359,7 +360,7 @@ where
         // 1 extra byte for node
         self.len += R::Len::BYTE + len;
         self.path.push(path::Segment {
-            key,
+            reader: key,
             len,
             edge: core::mem::replace(&mut self.edge, NonNull::from(edge)),
             node,
@@ -374,7 +375,7 @@ where
             return Ok(None);
         };
         self.len -= R::Len::BYTE + segment.len;
-        self.key = segment.key;
+        self.reader = segment.reader;
         self.edge = segment.edge;
         Ok(Some(segment.node))
     }
@@ -382,6 +383,6 @@ where
     #[inline]
     pub(crate) fn trim(&mut self, len: R::Len) {
         self.path.trim(len);
-        self.key.trim(len);
+        self.reader.trim(len);
     }
 }

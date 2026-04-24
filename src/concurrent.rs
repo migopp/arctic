@@ -582,7 +582,7 @@ where
                         }
                     };
 
-                    match cursor.insert(old, key, new_value) {
+                    match cursor.create_path(old, key, new_value) {
                         // Restore value and fall through to freeze
                         Err(Frozen) => initial = Some(unsafe { V::from_raw(new_value) }),
 
@@ -610,7 +610,7 @@ where
                         },
                     }
                 }
-                cursor::Insert::Smo { old_node, old } if !old.meta().is_frozen() => {
+                cursor::Insert::Replace { old_node, old } if !old.meta().is_frozen() => {
                     let (smo, new) = unsafe { old_node.replace::<true>(old.meta()) };
                     match cursor.edge().compare_exchange_packed(
                         old,
@@ -638,7 +638,7 @@ where
                 }
 
                 // Fall through to freeze
-                cursor::Insert::Smo { .. } => (),
+                cursor::Insert::Replace { .. } => (),
             }
 
             match cursor.freeze() {

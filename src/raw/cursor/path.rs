@@ -11,7 +11,7 @@ use crate::raw::node;
 /// A path along the tree is composed of 0 or more path segments.
 pub(crate) struct Segment<R: key::Read> {
     /// Key before matching on `edge`
-    pub(super) key: R,
+    pub(super) reader: R,
 
     /// Edge to match
     pub(super) edge: NonNull<Atomic<Edge<R::Edge>>>,
@@ -66,7 +66,9 @@ where
 
     #[inline]
     fn trim(&mut self, len: R::Len) {
-        self.0.iter_mut().for_each(|segment| segment.key.trim(len))
+        self.0
+            .iter_mut()
+            .for_each(|segment| segment.reader.trim(len))
     }
 
     #[inline]
