@@ -1,8 +1,8 @@
 use crate::concurrent::smr::hazard;
 use crate::raw;
 use crate::raw::key::Read as _;
-use crate::raw::key::dynamic;
 use crate::raw::key::integer;
+use crate::raw::key::vec;
 
 pub trait Key: raw::Key {
     type Prefix: ribbit::Pack<Packed: hazard::Prefix>;
@@ -17,7 +17,7 @@ impl Key for Vec<u8> {
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
-        hazard_dynamic(reader)
+        hazard_vec(reader)
     }
 }
 
@@ -26,7 +26,7 @@ impl Key for String {
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
-        hazard_dynamic(reader)
+        hazard_vec(reader)
     }
 }
 
@@ -79,7 +79,7 @@ fn hazard_integer<U: integer::Uint>(
 }
 
 #[inline]
-fn hazard_dynamic(reader: dynamic::Reader<'_>) -> ribbit::Packed<Le> {
+fn hazard_vec(reader: vec::Reader<'_>) -> ribbit::Packed<Le> {
     let reader = reader.as_ref();
 
     // let mut buffer = [0u8; 8];

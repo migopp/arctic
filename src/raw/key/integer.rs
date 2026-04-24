@@ -51,7 +51,7 @@ impl_unsigned_int!(u64);
 #[cfg(feature = "opt-no-int")]
 impl Key for u64 {
     type Read<'k> = Slow;
-    type Write = key::dynamic::Writer;
+    type Write = key::vec::Writer;
     type Borrowed = Self;
 
     type Edge = edge::Le;
@@ -376,9 +376,9 @@ impl<'k> From<&'k u64> for Slow {
     }
 }
 
-impl From<Slow> for crate::raw::key::dynamic::Writer {
+impl From<Slow> for crate::raw::key::vec::Writer {
     fn from(slow: Slow) -> Self {
-        crate::raw::key::dynamic::Writer(slow.buffer.into_iter().take(slow.len).collect())
+        crate::raw::key::vec::Writer(slow.buffer.into_iter().take(slow.len).collect())
     }
 }
 

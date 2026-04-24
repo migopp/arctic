@@ -1,5 +1,5 @@
-pub mod dynamic;
 pub mod integer;
+pub mod vec;
 
 use core::borrow::Borrow;
 use core::fmt;
