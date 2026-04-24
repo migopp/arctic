@@ -75,7 +75,7 @@ where
     pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
         let reader = K::Read::from(key);
         unsafe {
-            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
             cursor.traverse_get()?;
             let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_from_raw(value))
@@ -86,7 +86,7 @@ where
     pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
         let reader = K::Read::from(key);
         unsafe {
-            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
             cursor.traverse_get()?;
             let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_mut_from_raw(value))
@@ -96,7 +96,7 @@ where
     #[inline]
     pub fn upsert(&mut self, key: &K::Borrowed, value: V) -> Option<V> {
         let reader = K::Read::from(key);
-        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+        let mut cursor = CursorMut::<K::Read<'_>>::new(&mut self.root, reader);
         let new_value = V::into_raw(value);
 
         loop {

@@ -134,8 +134,9 @@ where
     pub fn get(&self, key: &K::Borrowed) -> Option<Shared<K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
-        let value =
-            unsafe { Cursor::<K, path::Discard>::new(self.inner.root(), reader).traverse_get()? };
+        let value = unsafe {
+            Cursor::<K::Read<'_>, path::Discard>::new(self.inner.root(), reader).traverse_get()?
+        };
         Some(unsafe { Shared::<'_, K, V, S>::wrap(guard, value) })
     }
 
@@ -212,7 +213,7 @@ where
         mut update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
     where
-        H: path::History<'k, K>,
+        H: path::History<K::Read<'k>>,
         F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
@@ -338,7 +339,7 @@ where
         remove: &mut F,
     ) -> Result<Remove<K, V, S>, H::PopError>
     where
-        H: path::History<'k, K>,
+        H: path::History<K::Read<'k>>,
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let reader = K::Read::from(key);
@@ -549,7 +550,7 @@ where
         mut upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
     where
-        H: path::History<'k, K>,
+        H: path::History<K::Read<'k>>,
         F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);

@@ -46,7 +46,7 @@ where
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
     ) -> Option<Prefix<'k, 'g, K, RangeFull>> {
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
         let root = cursor.edge();
         let bits = cursor.bits();
@@ -62,7 +62,7 @@ where
         R: Range<K>,
     {
         let prefix = range.common_prefix();
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
 
         let root = cursor.edge();
