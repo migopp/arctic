@@ -13,17 +13,15 @@ use ribbit::Atomic;
 use crate::Order;
 use crate::raw;
 use crate::raw::Edge;
-use crate::raw::Key;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
-use crate::raw::key::Read as _;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 
-pub(crate) enum RangeIter<'g, K: Key, W: key::Write, R: Range<K>, O> {
+pub(crate) enum RangeIter<'g, K: key::Read, W: key::Write, R: Range<K>, O> {
     Root {
         writer: W,
         next: Option<(u64, NonNull<Atomic<Edge<K::Edge>>>)>,
@@ -33,7 +31,7 @@ pub(crate) enum RangeIter<'g, K: Key, W: key::Write, R: Range<K>, O> {
 
 impl<'g, K, W, R, O> Default for RangeIter<'g, K, W, R, O>
 where
-    K: Key,
+    K: key::Read,
     W: key::Write,
     R: Range<K>,
     O: Order,
@@ -48,15 +46,15 @@ where
 
 impl<'g, K, W, R, O> RangeIter<'g, K, W, R, O>
 where
-    K: Key,
-    W: key::Write<Edge = K::Edge> + for<'k> From<K::Read<'k>>,
+    K: key::Read,
+    W: key::Write<Edge = K::Edge> + From<K>,
     R: Range<K>,
     O: Order,
 {
     pub(crate) unsafe fn new_unchecked(
         root: NonNull<Atomic<Edge<K::Edge>>>,
-        prefix: K::Read<'_>,
-        range: R,
+        prefix: K,
+        range: &R,
     ) -> Self {
         let edge = unsafe { root.as_ref() }.load_packed(Ordering::Acquire);
 
@@ -129,7 +127,7 @@ where
 
 pub(crate) struct NodeIter<'g, K, W, R, O>
 where
-    K: Key,
+    K: key::Read,
     W: key::Write,
     R: Range<K>,
 {
@@ -150,7 +148,7 @@ where
 
 impl<'g, K, W, R, O> NodeIter<'g, K, W, R, O>
 where
-    K: Key,
+    K: key::Read,
     R: Range<K>,
     W: key::Write<Edge = K::Edge>,
     O: Order,
@@ -286,57 +284,55 @@ impl<T> Default for Unbound<T> {
     }
 }
 
-pub trait Range<K>: Clone
+#[expect(private_bounds)]
+pub trait Range<R>
 where
-    K: Key,
+    R: key::Read,
 {
     #[expect(private_bounds)]
-    type Lower: Lower<K::Edge>;
+    type Lower: Lower<R::Edge>;
 
     #[expect(private_bounds)]
-    type Upper: Upper<K::Edge>;
+    type Upper: Upper<R::Edge>;
 
     fn lower(&self, bits: usize) -> Self::Lower;
     fn upper(&self, bits: usize) -> Self::Upper;
-}
 
-pub trait Prefix<'k, K>: Range<K>
-where
-    K: Key,
-{
-    fn common_prefix(&self) -> K::Read<'k> {
-        K::Read::default()
+    #[inline]
+    fn common_prefix(&self) -> R {
+        R::default()
     }
 }
 
-impl<'k, K: Key> Range<K> for RangeInclusive<&'k K::Borrowed> {
-    type Lower = Include<K::Read<'k>>;
-    type Upper = Include<K::Read<'k>>;
+impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeInclusive<T> {
+    type Lower = Include<R>;
+    type Upper = Include<R>;
 
     #[inline]
     fn lower(&self, bits: usize) -> Self::Lower {
-        Include(K::Read::from(*self.start()).suffix(bits))
+        Include((*self.start()).into().suffix(bits))
     }
 
     #[inline]
     fn upper(&self, bits: usize) -> Self::Upper {
-        Include(K::Read::from(*self.end()).suffix(bits))
+        Include((*self.end()).into().suffix(bits))
+    }
+
+    #[inline]
+    fn common_prefix(&self) -> R {
+        let lower = (*self.start()).into();
+        let upper = (*self.end()).into();
+        lower.common_prefix(upper)
     }
 }
 
-impl<'k, K: Key> Prefix<'k, K> for RangeInclusive<&'k K::Borrowed> {
-    fn common_prefix(&self) -> <K as Key>::Read<'k> {
-        K::Read::from(*self.start()).common_prefix(K::Read::from(*self.end()))
-    }
-}
-
-impl<'k, K: Key> Range<K> for RangeFrom<&'k K::Borrowed> {
-    type Lower = Include<K::Read<'k>>;
-    type Upper = Unbound<K::Read<'k>>;
+impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeFrom<T> {
+    type Lower = Include<R>;
+    type Upper = Unbound<R>;
 
     #[inline]
     fn lower(&self, bits: usize) -> Self::Lower {
-        Include(K::Read::from(self.start).suffix(bits))
+        Include(self.start.into().suffix(bits))
     }
 
     #[inline]
@@ -345,11 +341,9 @@ impl<'k, K: Key> Range<K> for RangeFrom<&'k K::Borrowed> {
     }
 }
 
-impl<'k, K: Key> Prefix<'k, K> for RangeFrom<&'k K::Borrowed> {}
-
-impl<'k, K: Key> Range<K> for RangeToInclusive<&'k K::Borrowed> {
-    type Lower = Unbound<K::Read<'k>>;
-    type Upper = Include<K::Read<'k>>;
+impl<R: key::Read, T: Into<R> + Copy> Range<R> for RangeToInclusive<T> {
+    type Lower = Unbound<R>;
+    type Upper = Include<R>;
 
     #[inline]
     fn lower(&self, _bits: usize) -> Self::Lower {
@@ -358,18 +352,16 @@ impl<'k, K: Key> Range<K> for RangeToInclusive<&'k K::Borrowed> {
 
     #[inline]
     fn upper(&self, bits: usize) -> Self::Upper {
-        Include(K::Read::from(self.end).suffix(bits))
+        Include(self.end.into().suffix(bits))
     }
 }
 
-impl<'k, K: Key> Prefix<'k, K> for RangeToInclusive<&'k K::Borrowed> {}
-
 impl<K> Range<K> for RangeFull
 where
-    K: Key,
+    K: key::Read,
 {
-    type Lower = Unbound<K::Read<'static>>;
-    type Upper = Unbound<K::Read<'static>>;
+    type Lower = Unbound<K>;
+    type Upper = Unbound<K>;
 
     #[inline]
     fn lower(&self, _: usize) -> Self::Lower {
@@ -381,8 +373,6 @@ where
         Unbound::default()
     }
 }
-
-impl<'k, K: Key> Prefix<'k, K> for RangeFull {}
 
 trait Lower<M>
 where

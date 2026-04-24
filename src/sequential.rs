@@ -183,7 +183,7 @@ where
 
     pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
-        R: raw::iter::range::Prefix<'k, K>,
+        R: raw::iter::Range<K::Read<'k>>,
     {
         let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
         Some(unsafe { iter::Prefix::new(prefix) })
@@ -202,7 +202,7 @@ where
 
     pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
     where
-        R: raw::iter::range::Prefix<'k, K>,
+        R: raw::iter::Range<K::Read<'k>>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
     }
@@ -228,7 +228,7 @@ where
     V: Value,
 {
     type Item = (K, &'g V::Target);
-    type IntoIter = EntryIter<'g, K, V, RangeFull, Ascend>;
+    type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all().entries::<Ascend>()
     }
@@ -240,7 +240,7 @@ where
     V: Value,
 {
     type Item = (K, &'g mut V::Target);
-    type IntoIter = EntryIterMut<'g, K, V, RangeFull, Ascend>;
+    type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all_mut().entries_mut::<Ascend>()
     }

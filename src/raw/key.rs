@@ -1,12 +1,13 @@
 pub mod dynamic;
 pub mod integer;
 
+use core::borrow::Borrow;
 use core::fmt;
 use core::marker::PhantomData;
 
 use crate::raw::edge;
 
-pub trait Key: core::borrow::Borrow<Self::Borrowed> {
+pub trait Key: Borrow<Self::Borrowed> {
     type Borrowed: 'static + ?Sized;
 
     #[expect(private_bounds)]
@@ -330,8 +331,8 @@ mod tests {
     use crate::raw::edge::Len as _;
     use crate::raw::key::Read as _;
 
-    pub(super) fn take_all<'k, K: Key>(array: &[u8], key: &'k K::Borrowed, lens: &[usize]) {
-        let mut reader = K::Read::from(key.into());
+    pub(super) fn take_all<K: Key>(array: &[u8], key: &K::Borrowed, lens: &[usize]) {
+        let mut reader = K::Read::from(key);
         let mut index = 0;
         let mut actual = Vec::new();
 

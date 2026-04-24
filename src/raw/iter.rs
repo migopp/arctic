@@ -35,7 +35,7 @@ where
 impl<'k, 'g, K, R> Prefix<'k, 'g, K, R>
 where
     K: Key,
-    R: raw::iter::range::Prefix<'k, K>,
+    R: raw::iter::Range<K::Read<'k>>,
 {
     #[inline]
     pub(crate) unsafe fn new_all(root: &'g Atomic<Edge<K::Edge>>) -> Prefix<'k, 'g, K, RangeFull> {
@@ -59,7 +59,7 @@ where
         range: R,
     ) -> Option<Prefix<'k, 'g, K, R>>
     where
-        R: Range<K>,
+        R: Range<K::Read<'k>>,
     {
         let prefix = range.common_prefix();
         let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
@@ -87,22 +87,24 @@ where
     }
 
     #[inline]
-    pub(crate) fn entries<O: Order>(&self) -> EntryIter<'g, K, R, O> {
-        EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
+    pub(crate) fn entries<O: Order>(&self) -> EntryIter<'k, 'g, K, R, O> {
+        EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, &self.range) })
     }
 
     #[inline]
-    pub(crate) fn values<O: Order>(&self) -> ValueIter<'g, K, R, O> {
-        ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
+    pub(crate) fn values<O: Order>(&self) -> ValueIter<'k, 'g, K, R, O> {
+        ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, &self.range) })
     }
 }
 
-pub(crate) struct EntryIter<'g, K: Key, R: Range<K>, O>(RangeIter<'g, K, K::Write, R, O>);
+pub(crate) struct EntryIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
+    RangeIter<'g, K::Read<'k>, K::Write, R, O>,
+);
 
-impl<'g, K, R, O> EntryIter<'g, K, R, O>
+impl<'k, 'g, K, R, O> EntryIter<'k, 'g, K, R, O>
 where
     K: Key,
-    R: Range<K>,
+    R: Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]
@@ -126,14 +128,14 @@ where
 }
 
 /// Iterator over raw values only
-pub(crate) struct ValueIter<'g, K: Key, R: Range<K>, O>(
-    RangeIter<'g, K, key::Ignore<K::Edge>, R, O>,
+pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
+    RangeIter<'g, K::Read<'k>, key::Ignore<K::Edge>, R, O>,
 );
 
-impl<'g, K, R, O> ValueIter<'g, K, R, O>
+impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>
 where
     K: Key,
-    R: Range<K>,
+    R: Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]

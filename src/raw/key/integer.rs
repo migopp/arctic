@@ -294,6 +294,12 @@ impl key::Read for Slow {
     }
 }
 
+impl From<u64> for Slow {
+    fn from(key: u64) -> Self {
+        unsafe { Slow::new_unchecked(key, 64) }
+    }
+}
+
 impl<'k> From<&'k u64> for Slow {
     fn from(key: &'k u64) -> Self {
         unsafe { Slow::new_unchecked(*key, 64) }
@@ -364,13 +370,20 @@ impl<U> From<Reader<U>> for Writer<U> {
 macro_rules! impl_unsigned_int {
     ($($ty:ty: $bits:expr, $into_u64:expr, $from_u64:expr, $into_u128:expr),* $(,)?) => {
         $(
+            impl From<$ty> for Reader<$ty> {
+                #[inline]
+                fn from(value: $ty) -> Self {
+                    Self {
+                        buffer: value,
+                        bits: $bits,
+                    }
+                }
+            }
+
             impl<'k> From<&'k $ty> for Reader<$ty> {
                 #[inline]
                 fn from(value: &'k $ty) -> Self {
-                    Self {
-                        buffer: *value,
-                        bits: $bits,
-                    }
+                    Self::from(*value)
                 }
             }
 
@@ -484,6 +497,6 @@ mod tests {
     }
 
     fn take_all_u64(key: u64, lens: &[usize]) {
-        take_all::<u64>(&key.to_be_bytes().as_slice(), &key, lens)
+        take_all::<u64>(key.to_be_bytes().as_slice(), &key, lens)
     }
 }

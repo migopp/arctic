@@ -160,7 +160,7 @@ mod tests {
         let map = Map::<u64, _>::default();
         let key = 1u64;
         map.upsert(&key, 2u64);
-        let range = map.range(&1u64..=&1u64).unwrap();
+        let range = map.range(1u64..=1u64).unwrap();
         assert_eq!(range.entries::<Ascend>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
 
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn scan_gap() {
         let map = insert_all((0u64..512).step_by(2));
-        let range = map.range(&256u64..=&511u64).unwrap();
+        let range = map.range(256u64..=511u64).unwrap();
         assert_eq!(
             range.entries::<Ascend>().collect::<Vec<_>>(),
             (256..512)
@@ -256,7 +256,7 @@ mod tests {
             map.upsert(&key, key);
             assert_eq!(map.get(&key).as_deref().copied(), Some(key));
         }
-        let range = map.range(&2..=&4).unwrap();
+        let range = map.range(2..=4).unwrap();
 
         assert_eq!(
             range.entries::<Descend>().collect::<Vec<_>>(),
@@ -299,9 +299,7 @@ mod tests {
 
         let map = insert_all((0..10i64).map(key));
 
-        let low = key(5);
-        let high = key(i64::MAX);
-        let prefix = map.range(&low..=&high).unwrap();
+        let prefix = map.range(key(5)..=key(i64::MAX)).unwrap();
 
         let values = prefix.values::<Ascend>().collect::<Vec<_>>();
         assert_eq!(values, (5..10).collect::<Vec<u64>>());

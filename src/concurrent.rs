@@ -669,7 +669,7 @@ where
         range: R,
     ) -> Option<iter::Prefix<'k, '_, K, V, R, Guard<'_, K, V, S>>>
     where
-        R: crate::raw::iter::range::Prefix<'k, K>,
+        R: crate::raw::iter::Range<K::Read<'k>>,
     {
         // FIXME: avoid recomputing common prefix?
         let guard = self.smr.guard(K::hazard(range.common_prefix()));
