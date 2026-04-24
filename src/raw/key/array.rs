@@ -8,7 +8,7 @@ use crate::raw::key::Len as _;
 use crate::raw::key::Read as _;
 
 impl<const N: usize> Key for [u8; N] {
-    type Read<'k> = key::vec::Reader<'k>;
+    type Read<'k> = key::vec::Reader<'k, N>;
     type Write = Writer<N>;
     type Borrowed = [u8; N];
     type Edge = edge::Le;
@@ -35,9 +35,9 @@ impl<const N: usize> Key for [u8; N] {
     }
 }
 
-impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k> {
+impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
     fn from(array: &'k [u8; N]) -> Self {
-        key::vec::Reader::from(array.as_slice())
+        key::vec::Reader(array)
     }
 }
 
@@ -51,11 +51,11 @@ impl<const N: usize> Default for Writer<N> {
     }
 }
 
-impl<'k, const N: usize> key::Write<key::vec::Reader<'k>> for Writer<N> {
+impl<'k, const N: usize> key::Write<key::vec::Reader<'k, N>> for Writer<N> {
     type Len = key::vec::Len;
 
     #[inline]
-    fn new(prefix: key::vec::Reader<'k>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
+    fn new(prefix: key::vec::Reader<'k, N>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
         let len = prefix.len() + key.len();
         let mut buffer = [0u8; N];
         buffer[..prefix.len().bytes()].copy_from_slice(prefix.as_ref());

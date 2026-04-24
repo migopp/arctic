@@ -15,7 +15,7 @@ use crate::raw::key;
 use crate::raw::key::Read as _;
 
 impl Key for Vec<u8> {
-    type Read<'k> = Reader<'k>;
+    type Read<'k> = Reader<'k, { usize::MAX }>;
     type Write = Writer;
     type Borrowed = [u8];
     type Edge = edge::Le;
@@ -43,7 +43,7 @@ impl Key for Vec<u8> {
 }
 
 impl Key for String {
-    type Read<'k> = Reader<'k>;
+    type Read<'k> = Reader<'k, { usize::MAX }>;
     type Write = Writer;
     type Borrowed = str;
     type Edge = edge::Le;
@@ -79,52 +79,52 @@ impl Key for String {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Reader<'k>(&'k [u8]);
+pub struct Reader<'k, const N: usize>(pub(super) &'k [u8]);
 
-impl<'k> AsRef<[u8]> for Reader<'k> {
+impl<'k, const N: usize> AsRef<[u8]> for Reader<'k, N> {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         self.0
     }
 }
 
-impl<'k> From<&'k [u8]> for Reader<'k> {
+impl<'k> From<&'k [u8]> for Reader<'k, { usize::MAX }> {
     #[inline]
     fn from(key: &'k [u8]) -> Self {
         Self(key)
     }
 }
 
-impl<'k> From<&'k Vec<u8>> for Reader<'k> {
+impl<'k> From<&'k Vec<u8>> for Reader<'k, { usize::MAX }> {
     #[inline]
     fn from(key: &'k Vec<u8>) -> Self {
         Self(key)
     }
 }
 
-impl<'k> From<&'k str> for Reader<'k> {
+impl<'k> From<&'k str> for Reader<'k, { usize::MAX }> {
     #[inline]
     fn from(value: &'k str) -> Self {
         Self(value.as_bytes())
     }
 }
 
-impl<'k> From<&'k String> for Reader<'k> {
+impl<'k> From<&'k String> for Reader<'k, { usize::MAX }> {
     #[inline]
     fn from(key: &'k String) -> Self {
         Self(key.as_bytes())
     }
 }
 
-impl Default for Reader<'_> {
+impl<const N: usize> Default for Reader<'_, N> {
     #[inline]
     fn default() -> Self {
         Self(&[])
     }
 }
 
-impl key::Read for Reader<'_> {
-    const LEN: Option<Self::Len> = None;
+impl<const N: usize> key::Read for Reader<'_, N> {
+    const LEN: Option<Self::Len> = if N == usize::MAX { None } else { Some(Len(N)) };
 
     type Edge = edge::Le;
     type Len = Len;
@@ -192,11 +192,11 @@ impl key::Read for Reader<'_> {
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer(pub(super) Vec<u8>);
 
-impl<'k> key::Write<Reader<'k>> for Writer {
+impl<'k> key::Write<Reader<'k, { usize::MAX }>> for Writer {
     type Len = Len;
 
     #[inline]
-    fn new(prefix: Reader<'k>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
+    fn new(prefix: Reader<'k, { usize::MAX }>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
         let len = prefix.len() + key.len();
         let mut buffer = Vec::new();
         buffer.extend_from_slice(prefix.0);
@@ -220,9 +220,9 @@ impl fmt::Debug for Writer {
     }
 }
 
-impl<'k> From<Reader<'k>> for Writer {
+impl<'k> From<Reader<'k, { usize::MAX }>> for Writer {
     #[inline]
-    fn from(reader: Reader<'k>) -> Self {
+    fn from(reader: Reader<'k, { usize::MAX }>) -> Self {
         Self(reader.0.to_vec())
     }
 }

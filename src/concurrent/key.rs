@@ -88,7 +88,7 @@ fn hazard_integer<U: key::int::Uint>(
 }
 
 #[inline]
-fn hazard_vec(reader: key::vec::Reader<'_>) -> ribbit::Packed<Le> {
+fn hazard_vec<const N: usize>(reader: key::vec::Reader<'_, N>) -> ribbit::Packed<Le> {
     let reader = reader.as_ref();
     let len = reader.len();
 
