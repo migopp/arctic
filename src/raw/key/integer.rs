@@ -2,11 +2,81 @@ use core::fmt;
 
 use ribbit::u6;
 
+use crate::raw::Key;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::key;
 use crate::raw::key::Read as _;
+
+macro_rules! impl_unsigned_int {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl Key for $ty {
+                type Read<'k> = Reader<$ty>;
+                type Write = Writer<$ty>;
+                type Borrowed = Self;
+
+                type Edge = edge::Be;
+
+                #[inline]
+                fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+                    *borrow
+                }
+
+                #[inline]
+                unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
+                    &writer.0
+                }
+
+                #[inline]
+                unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+                    writer.0
+                }
+
+                #[inline]
+                fn len(_: &Self::Borrowed) -> usize {
+                    <$ty as Uint>::BYTES as usize
+                }
+            }
+        )*
+    };
+}
+
+impl_unsigned_int!(u16, u32, u128);
+
+#[cfg(not(feature = "opt-no-int"))]
+impl_unsigned_int!(u64);
+
+#[cfg(feature = "opt-no-int")]
+impl Key for u64 {
+    type Read<'k> = Slow;
+    type Write = key::dynamic::Writer;
+    type Borrowed = Self;
+
+    type Edge = edge::Le;
+
+    #[inline]
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+        *borrow
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked(_: &Self::Write) -> &Self::Borrowed {
+        unimplemented!("Can't get little-endian integer from big-endian slice")
+    }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        let buffer: [u8; 8] = writer.0.try_into().unwrap();
+        u64::from_be_bytes(buffer)
+    }
+
+    #[inline]
+    fn len(_: &Self::Borrowed) -> usize {
+        <u64 as Uint>::BYTES as usize
+    }
+}
 
 pub(crate) trait Uint:
     'static
@@ -314,7 +384,7 @@ impl From<Slow> for crate::raw::key::dynamic::Writer {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Writer<U>(pub(super) U);
+pub struct Writer<U>(U);
 
 impl<U: Uint> key::Write for Writer<U> {
     type Edge = edge::Be;

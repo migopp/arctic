@@ -1,9 +1,72 @@
 use core::fmt;
 
+use crate::raw::Key;
 use crate::raw::edge;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
+
+impl Key for Vec<u8> {
+    type Read<'k> = Reader<'k>;
+    type Write = Writer;
+    type Borrowed = [u8];
+    type Edge = edge::Le;
+
+    #[inline]
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+        Vec::from(borrow)
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
+        &writer.0
+    }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        writer.0
+    }
+
+    #[inline]
+    fn len(slice: &Self::Borrowed) -> usize {
+        slice.len()
+    }
+}
+
+impl Key for String {
+    type Read<'k> = Reader<'k>;
+    type Write = Writer;
+    type Borrowed = str;
+    type Edge = edge::Le;
+
+    #[inline]
+    fn clone_from_borrow(borrow: &Self::Borrowed) -> Self {
+        String::from(borrow)
+    }
+
+    #[inline]
+    unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
+        if cfg!(feature = "validate") {
+            core::str::from_utf8(&writer.0).unwrap()
+        } else {
+            unsafe { core::str::from_utf8_unchecked(&writer.0) }
+        }
+    }
+
+    #[inline]
+    unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
+        if cfg!(feature = "validate") {
+            String::from_utf8(writer.0).unwrap()
+        } else {
+            unsafe { String::from_utf8_unchecked(writer.0) }
+        }
+    }
+
+    #[inline]
+    fn len(string: &Self::Borrowed) -> usize {
+        string.len()
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Reader<'k>(&'k [u8]);
