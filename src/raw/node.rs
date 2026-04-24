@@ -116,12 +116,13 @@ where
 
     fn freeze_header(&self) -> usize;
 
-    fn replace<const LEN_: usize>(
+    fn replace<const LEN: usize, const FREEZE: bool>(
         &self,
         meta: ribbit::Packed<M>,
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
         const {
-            assert!(Self::LEN == LEN_);
+            // HACK: can't use generic associated type as array length
+            assert!(Self::LEN == LEN);
         }
 
         // Caller must not call replace if doomed to fail CAS
@@ -130,22 +131,34 @@ where
         // Can only call replace on nodes
         validate!(!meta.is_value());
 
-        let mut keys = [0u8; LEN_];
-        let mut edges = [Edge::DEFAULT; LEN_];
+        let mut keys = [0u8; LEN];
+        let mut edges = [Edge::DEFAULT; LEN];
 
-        self.freeze();
+        if FREEZE {
+            self.freeze();
+        }
 
         let len = self
             .entries(Unbound::<()>::default(), Unbound::<()>::default())
             .map(|(key, edge)| (key, unsafe { edge.as_ref() }.load_packed(Ordering::Relaxed)))
             .filter(|(_, edge)| !edge.is_null())
-            .map(|(key, edge)| {
-                validate!(
-                    edge.meta().is_frozen(),
-                    "{} edge must be frozen before replace",
-                    core::any::type_name::<Self>(),
-                );
-                (key, edge.unfreeze())
+            .map(|(key, edge)| match FREEZE {
+                true => {
+                    validate!(
+                        edge.meta().is_frozen(),
+                        "{} edge must be frozen before replace",
+                        core::any::type_name::<Self>(),
+                    );
+                    (key, edge.unfreeze())
+                }
+                false => {
+                    validate!(
+                        !edge.meta().is_frozen(),
+                        "{} edge must not be frozen",
+                        core::any::type_name::<Self>(),
+                    );
+                    (key, edge)
+                }
             })
             .zip(&mut keys)
             .zip(&mut edges)
@@ -155,33 +168,45 @@ where
             })
             .count();
 
-        if len == 0 {
-            return (Smo::DeleteNode, Edge::DEFAULT);
-        } else if len == 1 {
-            let key = keys[0];
-            let edge = edges[0];
-            if let Some(meta) = meta.compress(key, edge.meta()) {
-                return (Smo::CompressEdge, edge.with_meta(meta));
-            }
-        }
-
-        let keys = keys.into_iter().take(len);
-        let edges = edges.into_iter().take(len);
-
-        let edge = if len == Self::LEN {
-            unsafe { Edge::new_node_unchecked::<Self::Grow, _, _>(meta, keys, edges) }
-        } else if len < 4 {
-            unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
-        } else if len < 16 {
-            unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
-        } else if len < 48 {
-            unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
-        } else {
-            unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
-        };
-
-        (Smo::ReplaceNode, edge)
+        replace::<M, Self>(meta, &keys[..len], &edges[..len])
     }
+}
+
+fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
+    meta: ribbit::Packed<M>,
+    keys: &[u8],
+    edges: &[ribbit::Packed<Edge<M>>],
+) -> (Smo, ribbit::Packed<Edge<M>>) {
+    validate_eq!(keys.len(), edges.len());
+
+    let len = keys.len();
+
+    if len == 0 {
+        return (Smo::DeleteNode, Edge::DEFAULT);
+    } else if len == 1 {
+        let key = keys[0];
+        let edge = edges[0];
+        if let Some(meta) = meta.compress(key, edge.meta()) {
+            return (Smo::CompressEdge, edge.with_meta(meta));
+        }
+    }
+
+    let keys = keys.iter().copied();
+    let edges = edges.iter().copied();
+
+    let edge = if len == N::LEN {
+        unsafe { Edge::new_node_unchecked::<N::Grow, _, _>(meta, keys, edges) }
+    } else if len < 4 {
+        unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
+    } else if len < 16 {
+        unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
+    } else if len < 48 {
+        unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
+    } else {
+        unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
+    };
+
+    (Smo::ReplaceNode, edge)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
@@ -338,15 +363,15 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn replace(
+    pub(crate) unsafe fn replace<const FREEZE: bool>(
         self,
         parent: ribbit::Packed<M>,
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
         self.dispatch(
-            |node| unsafe { node.as_ref() }.replace::<3>(parent),
-            |node| unsafe { node.as_ref() }.replace::<15>(parent),
-            |node| unsafe { node.as_ref() }.replace::<47>(parent),
-            |node| unsafe { node.as_ref() }.replace::<256>(parent),
+            |node| unsafe { node.as_ref() }.replace::<3, FREEZE>(parent),
+            |node| unsafe { node.as_ref() }.replace::<15, FREEZE>(parent),
+            |node| unsafe { node.as_ref() }.replace::<47, FREEZE>(parent),
+            |node| unsafe { node.as_ref() }.replace::<256, FREEZE>(parent),
         )
     }
 

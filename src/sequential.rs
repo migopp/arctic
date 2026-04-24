@@ -114,8 +114,7 @@ where
                 },
                 crate::raw::cursor::Insert::Smo { old_node, old } => {
                     validate!(!old.meta().is_frozen());
-                    // FIXME: implement separate `replace_mut` that does not freeze/CAS
-                    let (_smo, new) = unsafe { old_node.replace(old.meta()) };
+                    let (_smo, new) = unsafe { old_node.replace::<false>(old.meta()) };
                     cursor.edge_mut().set_packed(new);
                     if let Some(node) = old.as_node() {
                         unsafe { node.deallocate(stat::Counter::FreeRetire) };

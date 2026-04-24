@@ -404,7 +404,7 @@ where
                         None => break 'outer,
                         Some(edge::Child::Value(_)) => unreachable!(),
                         Some(edge::Child::Node(node)) if node == target => {
-                            unsafe { node.replace(old.meta()) }.1
+                            unsafe { node.replace::<true>(old.meta()) }.1
                         }
                         // Must have been replaced by someone else
                         Some(edge::Child::Node(_)) => break 'outer,
@@ -611,7 +611,7 @@ where
                     }
                 }
                 cursor::Insert::Smo { old_node, old } if !old.meta().is_frozen() => {
-                    let (smo, new) = unsafe { old_node.replace(old.meta()) };
+                    let (smo, new) = unsafe { old_node.replace::<true>(old.meta()) };
                     match cursor.edge().compare_exchange_packed(
                         old,
                         new,

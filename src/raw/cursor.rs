@@ -321,7 +321,7 @@ where
                 None | Some(_) => break None,
             };
 
-            let (op, new) = unsafe { node.replace(meta) };
+            let (op, new) = unsafe { node.replace::<true>(meta) };
 
             match self.edge().compare_exchange_packed(
                 edge,
