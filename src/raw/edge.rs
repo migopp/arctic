@@ -68,10 +68,19 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         let Some(byte) = reader.next() else {
             return Self::new_value(key, value);
         };
+
+        if const { matches!(R::BITS, Some(..64)) } {
+            validate!(false);
+            unsafe { core::hint::unreachable_unchecked() }
+        }
+
+        if const { matches!(R::BITS, Some(64)) } {
+            crate::cold();
+        }
+
         Self::new_path_cold(reader, key, byte, value)
     }
 
-    #[cold]
     fn new_path_cold<R>(
         mut reader: R,
         key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
