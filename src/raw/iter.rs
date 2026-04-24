@@ -129,7 +129,7 @@ where
 
 /// Iterator over raw values only
 pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
-    RangeIter<'g, K::Read<'k>, key::Ignore<K::Edge>, R, O>,
+    RangeIter<'g, K::Read<'k>, key::Discard<K::Edge>, R, O>,
 );
 
 impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>

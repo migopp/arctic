@@ -112,36 +112,36 @@ pub(crate) trait Write: Clone + fmt::Debug + Default + Ord {
 }
 
 #[derive(Clone)]
-pub(crate) struct Ignore<M>(PhantomData<M>);
+pub(crate) struct Discard<M>(PhantomData<M>);
 
-impl<M> Default for Ignore<M> {
+impl<M> Default for Discard<M> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
-impl<M> core::fmt::Debug for Ignore<M> {
+impl<M> core::fmt::Debug for Discard<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Ignore")
     }
 }
-impl<M> PartialEq for Ignore<M> {
+impl<M> PartialEq for Discard<M> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
-impl<M> Eq for Ignore<M> {}
-impl<M> Ord for Ignore<M> {
+impl<M> Eq for Discard<M> {}
+impl<M> Ord for Discard<M> {
     fn cmp(&self, _: &Self) -> core::cmp::Ordering {
         core::cmp::Ordering::Equal
     }
 }
-impl<M> PartialOrd for Ignore<M> {
+impl<M> PartialOrd for Discard<M> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<M> Write for Ignore<M>
+impl<M> Write for Discard<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -158,7 +158,7 @@ where
     fn replace(&mut self, _start: Self::Len, _node: u8, _edge: ribbit::Packed<Self::Edge>) {}
 }
 
-impl<R, M> From<R> for Ignore<M>
+impl<R, M> From<R> for Discard<M>
 where
     R: Read<Edge = M>,
 {
