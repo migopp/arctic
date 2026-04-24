@@ -23,7 +23,7 @@ pub(crate) struct Segment<R: key::Read> {
     pub(super) node: ribbit::Packed<node::Ptr<R::Edge>>,
 }
 
-pub(crate) trait History<R>: Default
+pub(crate) trait Path<R>: Default
 where
     R: key::Read,
 {
@@ -38,7 +38,7 @@ where
 #[derive(Default)]
 pub(crate) struct Discard;
 
-impl<R> History<R> for Discard
+impl<R> Path<R> for Discard
 where
     R: key::Read,
 {
@@ -58,7 +58,7 @@ where
 
 pub(crate) struct Retain<R: key::Read>(Vec<Segment<R>>);
 
-impl<R> History<R> for Retain<R>
+impl<R> Path<R> for Retain<R>
 where
     R: key::Read,
 {

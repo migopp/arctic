@@ -1,4 +1,5 @@
 pub(crate) mod path;
+pub(crate) use path::Path;
 
 use core::marker::PhantomData;
 use core::ptr::NonNull;
@@ -47,7 +48,7 @@ impl<'g, R: key::Read> core::ops::DerefMut for CursorMut<'g, R> {
 }
 
 /// Tree traversal state.
-pub(crate) struct Cursor<'g, R: key::Read, H> {
+pub(crate) struct Cursor<'g, R: key::Read, P> {
     /// Total number of bits read from `key`
     bits: usize,
 
@@ -57,8 +58,8 @@ pub(crate) struct Cursor<'g, R: key::Read, H> {
     /// Edge this cursor currently points to
     edge: NonNull<Atomic<Edge<R::Edge>>>,
 
-    /// Path history of this cursor (sequence of path segments)
-    history: H,
+    /// Path this cursor has taken
+    path: P,
 
     _global: PhantomData<&'g Atomic<Edge<R::Edge>>>,
 }
@@ -77,10 +78,10 @@ pub(crate) enum Insert<E: ribbit::Pack<Packed: edge::Meta>> {
     },
 }
 
-impl<'g, R, H> Cursor<'g, R, H>
+impl<'g, R, P> Cursor<'g, R, P>
 where
     R: key::Read,
-    H: path::History<R>,
+    P: Path<R>,
 {
     /// # Safety
     ///
@@ -92,7 +93,7 @@ where
             bits: 0,
             edge: NonNull::from(root),
             key,
-            history: H::default(),
+            path: P::default(),
             _global: PhantomData,
         }
     }
@@ -292,7 +293,7 @@ where
 
     /// Freeze and replace the node containing `self.edge`.
     ///
-    /// Returns `Err(_)` if the path history `H` does not support popping,
+    /// Returns `Err(_)` if the path does not support popping,
     /// `Ok(Some(node))` if this thread successfully replaced `node`,
     /// or `Ok(None)` if this thread did not replace the node (e.g.,
     /// another thread won the CAS race or an edge expansion SMO pushed
@@ -300,7 +301,7 @@ where
     #[cold]
     pub(crate) fn freeze(
         &mut self,
-    ) -> Result<Option<ribbit::Packed<node::Ptr<R::Edge>>>, H::PopError> {
+    ) -> Result<Option<ribbit::Packed<node::Ptr<R::Edge>>>, P::PopError> {
         let mut node = self.pop()?.expect("Root edge cannot be frozen");
         let mut edge = self.edge().load_packed(Ordering::Acquire);
         let mut pop = 1;
@@ -358,7 +359,7 @@ where
     ) {
         // 1 extra byte for node
         self.bits += len.bits() + 8;
-        self.history.push(path::Segment {
+        self.path.push(path::Segment {
             key,
             len,
             edge: core::mem::replace(&mut self.edge, NonNull::from(edge)),
@@ -369,8 +370,8 @@ where
     #[inline]
     pub(crate) fn pop(
         &mut self,
-    ) -> Result<Option<ribbit::Packed<node::Ptr<R::Edge>>>, H::PopError> {
-        let Some(segment) = self.history.pop()? else {
+    ) -> Result<Option<ribbit::Packed<node::Ptr<R::Edge>>>, P::PopError> {
+        let Some(segment) = self.path.pop()? else {
             return Ok(None);
         };
         self.bits -= segment.len.bits() + 8;
@@ -381,7 +382,7 @@ where
 
     #[inline]
     pub(crate) fn trim(&mut self, bits: usize) {
-        self.history.trim(bits);
+        self.path.trim(bits);
         self.key.trim(bits);
     }
 }

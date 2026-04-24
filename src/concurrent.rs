@@ -15,6 +15,7 @@ use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor;
+use crate::raw::cursor::Path;
 use crate::raw::cursor::path;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
@@ -206,19 +207,19 @@ where
     }
 
     #[inline]
-    fn update_with_impl<'k, H, F>(
+    fn update_with_impl<'k, P, F>(
         &self,
         key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
     where
-        H: path::History<K::Read<'k>>,
+        P: Path<K::Read<'k>>,
         F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         loop {
             let old = match cursor.traverse_update() {
@@ -333,18 +334,18 @@ where
     }
 
     #[inline]
-    fn remove_with_impl<'k, const RECURSIVE: bool, H, F>(
+    fn remove_with_impl<'k, const RECURSIVE: bool, P, F>(
         &self,
         key: &'k K::Borrowed,
         remove: &mut F,
-    ) -> Result<Remove<K, V, S>, H::PopError>
+    ) -> Result<Remove<K, V, S>, P::PopError>
     where
-        H: path::History<K::Read<'k>>,
+        P: Path<K::Read<'k>>,
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         let old = loop {
             let old = match cursor.traverse_update() {
@@ -543,19 +544,19 @@ where
     }
 
     #[inline]
-    fn upsert_with_impl<'k, H, F>(
+    fn upsert_with_impl<'k, P, F>(
         &self,
         key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
     where
-        H: path::History<K::Read<'k>>,
+        P: Path<K::Read<'k>>,
         F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         loop {
             match cursor.traverse_insert() {
