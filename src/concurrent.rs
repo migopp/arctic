@@ -15,11 +15,12 @@ use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor;
+use crate::raw::cursor::Path;
 use crate::raw::cursor::path;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
-use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
+use crate::raw::key::Len as _;
 use crate::sequential;
 use crate::stat;
 
@@ -131,16 +132,17 @@ where
     S: Smr,
 {
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<Shared<K, V, S>> {
+    pub fn get(&self, key: &K::Borrowed) -> Option<Shared<K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
-        let value =
-            unsafe { Cursor::<K, path::Discard>::new(self.inner.root(), reader).traverse_get()? };
+        let value = unsafe {
+            Cursor::<K::Read<'_>, path::Discard>::new(self.inner.root(), reader).traverse_get()?
+        };
         Some(unsafe { Shared::<'_, K, V, S>::wrap(guard, value) })
     }
 
     #[inline]
-    pub fn update(&self, key: K::Borrow<'_>, value: V) -> Result<Updated<K, V, S>, V> {
+    pub fn update(&self, key: &K::Borrowed, value: V) -> Result<Updated<K, V, S>, V> {
         match self.update_with(key, Some(value), |_, initial| {
             ControlFlow::<(), _>::Continue(initial.take().expect("Value is always initialized"))
         }) {
@@ -155,7 +157,7 @@ where
     #[inline]
     pub fn update_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         mut update: F,
     ) -> Update<K, V, S>
@@ -177,7 +179,7 @@ where
     #[inline]
     fn update_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
@@ -190,7 +192,7 @@ where
     #[cold]
     fn update_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         update: F,
     ) -> Update<K, V, S>
@@ -205,19 +207,19 @@ where
     }
 
     #[inline]
-    fn update_with_impl<'k, H, F>(
+    fn update_with_impl<'k, P, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut update: F,
     ) -> Result<Update<K, V, S>, Option<V>>
     where
-        H: path::History<'k, K>,
+        P: Path<K::Read<'k>>,
         F: FnMut(&V::Target, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         loop {
             let old = match cursor.traverse_update() {
@@ -227,7 +229,7 @@ where
                     Err(_) => return Err(initial),
                     Ok(None) => continue,
                     Ok(Some(node)) => unsafe {
-                        guard.retire_node(cursor.bits(), node);
+                        guard.retire_node(cursor.len().bits(), node);
                         continue;
                     },
                 },
@@ -265,7 +267,7 @@ where
     }
 
     #[inline]
-    pub fn remove_non_recursive(&self, key: K::Borrow<'_>) -> Option<Owned<'_, K, V, S>> {
+    pub fn remove_non_recursive(&self, key: &K::Borrowed) -> Option<Owned<'_, K, V, S>> {
         match self.remove_non_recursive_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
             Remove::Success { old } => Some(old),
@@ -276,7 +278,7 @@ where
     #[inline]
     pub fn remove_non_recursive_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         mut with: F,
     ) -> Remove<'_, K, V, S>
     where
@@ -291,7 +293,7 @@ where
     #[inline]
     fn remove_non_recursive_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         with: &mut F,
     ) -> Result<Remove<'_, K, V, S>, ()>
     where
@@ -301,20 +303,20 @@ where
     }
 
     #[cold]
-    fn remove_non_recursive_with_pessimistic<'k, F>(
+    fn remove_non_recursive_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &K::Borrowed,
         with: &mut F,
     ) -> Remove<'_, K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
-        let Ok(remove) = self.remove_with_impl::<false, path::Retain<'k, K>, _>(key, with);
+        let Ok(remove) = self.remove_with_impl::<false, path::Retain<_>, _>(key, with);
         remove
     }
 
     #[inline]
-    pub fn remove(&self, key: K::Borrow<'_>) -> Option<Owned<K, V, S>> {
+    pub fn remove(&self, key: &K::Borrowed) -> Option<Owned<K, V, S>> {
         match self.remove_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
             Remove::Success { old } => Some(old),
@@ -323,27 +325,27 @@ where
     }
 
     #[inline]
-    pub fn remove_with<'k, F>(&self, key: K::Borrow<'k>, mut with: F) -> Remove<K, V, S>
+    pub fn remove_with<F>(&self, key: &K::Borrowed, mut with: F) -> Remove<K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
-        let Ok(remove) = self.remove_with_impl::<true, path::Retain<'k, K>, _>(key, &mut with);
+        let Ok(remove) = self.remove_with_impl::<true, path::Retain<_>, _>(key, &mut with);
         remove
     }
 
     #[inline]
-    fn remove_with_impl<'k, const RECURSIVE: bool, H, F>(
+    fn remove_with_impl<'k, const RECURSIVE: bool, P, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         remove: &mut F,
-    ) -> Result<Remove<K, V, S>, H::PopError>
+    ) -> Result<Remove<K, V, S>, P::PopError>
     where
-        H: path::History<'k, K>,
+        P: Path<K::Read<'k>>,
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         let old = loop {
             let old = match cursor.traverse_update() {
@@ -352,7 +354,7 @@ where
                 Some(Err(Frozen)) => match cursor.freeze()? {
                     None => continue,
                     Some(node) => unsafe {
-                        guard.retire_node(cursor.bits(), node);
+                        guard.retire_node(cursor.len().bits(), node);
                         continue;
                     },
                 },
@@ -391,7 +393,7 @@ where
                     break 'outer;
                 }
 
-                cursor.trim(trim.bits() + 8);
+                cursor.trim(K::Len::BYTE + trim);
 
                 loop {
                     let Some(old) = cursor.traverse_prefix() else {
@@ -402,7 +404,7 @@ where
                         None => break 'outer,
                         Some(edge::Child::Value(_)) => unreachable!(),
                         Some(edge::Child::Node(node)) if node == target => {
-                            unsafe { node.replace(old.meta()) }.1
+                            unsafe { node.replace::<true>(old.meta()) }.1
                         }
                         // Must have been replaced by someone else
                         Some(edge::Child::Node(_)) => break 'outer,
@@ -415,7 +417,7 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(old) => {
-                            unsafe { guard.retire_node(cursor.bits(), target) };
+                            unsafe { guard.retire_node(cursor.len().bits(), target) };
                             trim = old.meta().key().len();
                             continue 'outer;
                         }
@@ -437,7 +439,7 @@ where
     }
 
     #[inline]
-    pub fn upsert(&self, key: K::Borrow<'_>, value: V) -> Upserted<'_, K, V, S> {
+    pub fn upsert(&self, key: &K::Borrowed, value: V) -> Upserted<'_, K, V, S> {
         match self.upsert_with(key, Some(value), |_, new| {
             ControlFlow::<(), _>::Continue(new.take().expect("Value is always initialized"))
         }) {
@@ -449,7 +451,7 @@ where
     #[inline]
     pub fn insert(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         value: V,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, V)> {
         let mut value = Some(value);
@@ -467,7 +469,7 @@ where
     #[inline]
     pub fn insert_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         insert: F,
     ) -> Result<Shared<K, V, S>, (Shared<K, V, S>, Option<V>)>
     where
@@ -492,7 +494,7 @@ where
     #[inline]
     pub fn upsert_with<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         mut upsert: F,
     ) -> Upsert<K, V, S>
@@ -514,7 +516,7 @@ where
     #[inline]
     fn upsert_with_optimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
@@ -527,7 +529,7 @@ where
     #[cold]
     fn upsert_with_pessimistic<F>(
         &self,
-        key: K::Borrow<'_>,
+        key: &K::Borrowed,
         initial: Option<V>,
         upsert: F,
     ) -> Upsert<K, V, S>
@@ -542,19 +544,19 @@ where
     }
 
     #[inline]
-    fn upsert_with_impl<'k, H, F>(
+    fn upsert_with_impl<'k, P, F>(
         &self,
-        key: K::Borrow<'k>,
+        key: &'k K::Borrowed,
         mut initial: Option<V>,
         mut upsert: F,
     ) -> Result<Upsert<K, V, S>, Option<V>>
     where
-        H: path::History<'k, K>,
+        P: Path<K::Read<'k>>,
         F: FnMut(Option<&V::Target>, &mut Option<V>) -> ControlFlow<(), V>,
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, H>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
 
         loop {
             match cursor.traverse_insert() {
@@ -580,7 +582,7 @@ where
                         }
                     };
 
-                    match cursor.insert(old, key, new_value) {
+                    match cursor.create_path(old, key, new_value) {
                         // Restore value and fall through to freeze
                         Err(Frozen) => initial = Some(unsafe { V::from_raw(new_value) }),
 
@@ -608,8 +610,8 @@ where
                         },
                     }
                 }
-                cursor::Insert::Smo { old_node, old } if !old.meta().is_frozen() => {
-                    let (smo, new) = unsafe { old_node.replace(old.meta()) };
+                cursor::Insert::Replace { old_node, old } if !old.meta().is_frozen() => {
+                    let (smo, new) = unsafe { old_node.replace::<true>(old.meta()) };
                     match cursor.edge().compare_exchange_packed(
                         old,
                         new,
@@ -618,7 +620,7 @@ where
                     ) {
                         Ok(_) => {
                             if let Some(node) = old.as_node() {
-                                unsafe { guard.retire_node(cursor.bits(), node) };
+                                unsafe { guard.retire_node(cursor.len().bits(), node) };
                             }
                         }
                         Err(_) => {
@@ -636,13 +638,13 @@ where
                 }
 
                 // Fall through to freeze
-                cursor::Insert::Smo { .. } => (),
+                cursor::Insert::Replace { .. } => (),
             }
 
             match cursor.freeze() {
                 Err(_) => return Err(initial),
                 Ok(None) => (),
-                Ok(Some(node)) => unsafe { guard.retire_node(cursor.bits(), node) },
+                Ok(Some(node)) => unsafe { guard.retire_node(cursor.len().bits(), node) },
             }
         }
     }
@@ -668,7 +670,7 @@ where
         range: R,
     ) -> Option<iter::Prefix<'k, '_, K, V, R, Guard<'_, K, V, S>>>
     where
-        R: crate::raw::iter::Range<'k, K>,
+        R: crate::raw::iter::Range<K::Read<'k>>,
     {
         // FIXME: avoid recomputing common prefix?
         let guard = self.smr.guard(K::hazard(range.common_prefix()));

@@ -14,6 +14,7 @@ use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
 use crate::raw::key;
+use crate::raw::key::Len as _;
 use crate::raw::node;
 use crate::raw::node::Node as _;
 use crate::raw::node::Node3;
@@ -68,11 +69,24 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         let Some(byte) = reader.next() else {
             return Self::new_value(key, value);
         };
-        Self::new_path_cold(reader, key, byte, value)
+
+        // Key always fits in one edge
+        if R::LEN.is_some_and(|len| len <= <<M::Packed as Meta>::Key as Key>::Len::MAX) {
+            validate!(false);
+            unsafe { core::hint::unreachable_unchecked() }
+        }
+
+        // Key fits in one edge except at root
+        if R::LEN
+            .is_some_and(|len| len == R::Len::BYTE + <<M::Packed as Meta>::Key as Key>::Len::MAX)
+        {
+            crate::cold();
+        }
+
+        Self::new_path_recursive(reader, key, byte, value)
     }
 
-    #[cold]
-    fn new_path_cold<R>(
+    fn new_path_recursive<R>(
         mut reader: R,
         key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
         mut byte: u8,
@@ -307,15 +321,21 @@ pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u
 pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
 
-    #[cfg_attr(not(test), expect(unused))]
+    #[cfg(test)]
     fn new(bits: usize) -> Self;
+
     fn bits(self) -> usize;
+
+    #[inline]
+    fn bytes(self) -> usize {
+        self.bits() >> 3
+    }
 }
 
 impl Len for u6 {
     const MAX: Self = u6::new(56);
 
-    #[inline]
+    #[cfg(test)]
     fn new(bits: usize) -> Self {
         validate_eq!(bits & 0b111, 0);
         validate!(bits <= u8::MAX as usize);

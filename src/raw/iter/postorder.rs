@@ -23,8 +23,8 @@ where
         Self {
             stack: vec![RepeatIter::new(unsafe {
                 node::NodeIter::new(
-                    Unbound,
-                    Unbound,
+                    Unbound::default(),
+                    Unbound::default(),
                     node::KeyIter::ROOT,
                     core::slice::from_ref(root),
                 )
@@ -59,7 +59,7 @@ where
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
                             self.stack.push(RepeatIter::new(unsafe {
-                                node.entries::<_, _>(Unbound, Unbound)
+                                node.entries::<_, _>(Unbound::default(), Unbound::default())
                             }));
                             continue 'vertical;
                         }

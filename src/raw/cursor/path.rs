@@ -4,84 +4,85 @@ use core::ptr::NonNull;
 use ribbit::Atomic;
 
 use crate::raw::Edge;
-use crate::raw::Key;
 use crate::raw::edge;
-use crate::raw::key::Read as _;
+use crate::raw::key;
 use crate::raw::node;
 
 /// A path along the tree is composed of 0 or more path segments.
-pub(crate) struct Segment<'k, K: Key> {
+pub(crate) struct Segment<R: key::Read> {
     /// Key before matching on `edge`
-    pub(super) key: K::Read<'k>,
+    pub(super) reader: R,
 
     /// Edge to match
-    pub(super) edge: NonNull<Atomic<Edge<K::Edge>>>,
+    pub(super) edge: NonNull<Atomic<Edge<R::Edge>>>,
 
     /// Number of bytes matched along `edge`
-    pub(super) len: <<<K::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    pub(super) len: <<<R::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
 
     /// Node underneath `edge`
-    pub(super) node: ribbit::Packed<node::Ptr<K::Edge>>,
+    pub(super) node: ribbit::Packed<node::Ptr<R::Edge>>,
 }
 
-pub(crate) trait History<'k, K>: Default
+pub(crate) trait Path<R>: Default
 where
-    K: Key,
+    R: key::Read,
 {
     type PopError;
 
-    fn trim(&mut self, bits: usize);
+    fn trim(&mut self, len: R::Len);
 
-    fn push(&mut self, segment: Segment<'k, K>);
-    fn pop(&mut self) -> Result<Option<Segment<'k, K>>, Self::PopError>;
+    fn push(&mut self, segment: Segment<R>);
+    fn pop(&mut self) -> Result<Option<Segment<R>>, Self::PopError>;
 }
 
 #[derive(Default)]
 pub(crate) struct Discard;
 
-impl<'k, K> History<'k, K> for Discard
+impl<R> Path<R> for Discard
 where
-    K: Key,
+    R: key::Read,
 {
     type PopError = ();
 
     #[inline]
-    fn trim(&mut self, _: usize) {}
+    fn trim(&mut self, _: R::Len) {}
 
     #[inline]
-    fn push(&mut self, _segment: Segment<'k, K>) {}
+    fn push(&mut self, _segment: Segment<R>) {}
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'k, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<R>>, Self::PopError> {
         Err(())
     }
 }
 
-pub(crate) struct Retain<'k, K: Key>(Vec<Segment<'k, K>>);
+pub(crate) struct Retain<R: key::Read>(Vec<Segment<R>>);
 
-impl<'k, K> History<'k, K> for Retain<'k, K>
+impl<R> Path<R> for Retain<R>
 where
-    K: Key,
+    R: key::Read,
 {
     type PopError = Infallible;
 
     #[inline]
-    fn trim(&mut self, bits: usize) {
-        self.0.iter_mut().for_each(|segment| segment.key.trim(bits))
+    fn trim(&mut self, len: R::Len) {
+        self.0
+            .iter_mut()
+            .for_each(|segment| segment.reader.trim(len))
     }
 
     #[inline]
-    fn push(&mut self, segment: Segment<'k, K>) {
+    fn push(&mut self, segment: Segment<R>) {
         self.0.push(segment);
     }
 
     #[inline]
-    fn pop(&mut self) -> Result<Option<Segment<'k, K>>, Self::PopError> {
+    fn pop(&mut self) -> Result<Option<Segment<R>>, Self::PopError> {
         Ok(self.0.pop())
     }
 }
 
-impl<'k, K: Key> Default for Retain<'k, K> {
+impl<R: key::Read> Default for Retain<R> {
     fn default() -> Self {
         Self(Vec::new())
     }

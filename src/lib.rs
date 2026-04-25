@@ -114,12 +114,12 @@ mod tests {
         let map = Map::<u64, &u64>::default();
 
         for (key, value) in values.iter().enumerate() {
-            map.upsert(key as u64, value);
+            map.upsert(&(key as u64), value);
         }
 
         #[expect(clippy::needless_range_loop)]
         for key in 0..values.len() {
-            let value = map.get(key as u64).as_deref().copied().unwrap();
+            let value = map.get(&(key as u64)).as_deref().copied().unwrap();
             assert!(core::ptr::eq(value, &values[key]));
         }
     }
@@ -130,14 +130,14 @@ mod tests {
         let map = Map::<u64, Box<u64>>::default();
 
         for (key, value) in values.iter().enumerate() {
-            map.upsert(key as u64, Box::new(*value));
+            map.upsert(&(key as u64), Box::new(*value));
         }
 
         std::thread::scope(|scope| {
             for _ in 0..8 {
                 scope.spawn(|| {
                     for key in (0..values.len()).cycle().take(100_000) {
-                        let value = map.get(key as u64).as_deref().copied().unwrap();
+                        let value = map.get(&(key as u64)).as_deref().copied().unwrap();
                         assert_eq!(key, value as usize);
                     }
                 });
@@ -150,7 +150,7 @@ mod tests {
         // assert_ne!(a.as_deref(), b.as_deref());
 
         for key in 0..values.len() {
-            let value = map.get(key as u64).as_deref().copied().unwrap();
+            let value = map.get(&(key as u64)).as_deref().copied().unwrap();
             assert_eq!(key, value as usize);
         }
     }
@@ -159,7 +159,7 @@ mod tests {
     fn scan_value() {
         let map = Map::<u64, _>::default();
         let key = 1u64;
-        map.upsert(key, 2u64);
+        map.upsert(&key, 2u64);
         let range = map.range(1u64..=1u64).unwrap();
         assert_eq!(range.entries::<Ascend>().collect::<Vec<_>>(), vec![(1, 2)]);
     }
@@ -192,8 +192,8 @@ mod tests {
         let mut map = Map::<u64, _>::default();
 
         for value in [1u64, 2, 3] {
-            map.upsert(1, value);
-            assert_eq!(map.get(1).as_deref().copied(), Some(value));
+            map.upsert(&1, value);
+            assert_eq!(map.get(&1).as_deref().copied(), Some(value));
         }
 
         assert_eq!(map.as_sequential().all().entries::<Ascend>().count(), 1);
@@ -202,7 +202,7 @@ mod tests {
             .all()
             .entries::<Ascend>()
             .for_each_internal(|(key, value)| {
-                assert_eq!(key, 1);
+                assert_eq!(*key, 1);
                 assert_eq!(*value, 3);
                 core::ops::ControlFlow::Continue(())
             });
@@ -253,8 +253,8 @@ mod tests {
         let map = Map::<u64, _>::default();
 
         for key in [5, 1, 4, 3, 2] {
-            map.upsert(key, key);
-            assert_eq!(map.get(key).as_deref().copied(), Some(key));
+            map.upsert(&key, key);
+            assert_eq!(map.get(&key).as_deref().copied(), Some(key));
         }
         let range = map.range(2..=4).unwrap();
 
@@ -308,8 +308,23 @@ mod tests {
     #[test]
     fn regression_insert() {
         let map = crate::concurrent::Map::<u64, u64>::new();
-        map.insert(0u64, 0u64).unwrap();
-        map.insert(0u64, 1u64).unwrap_err();
+        map.insert(&0u64, 0u64).unwrap();
+        map.insert(&0u64, 1u64).unwrap_err();
+    }
+
+    #[test]
+    fn regression_range_upper() {
+        let map = crate::concurrent::Map::<String, u64>::new();
+        let key = "a".repeat(100);
+        let upper = "a".repeat(200);
+        map.insert(&key, 0).unwrap();
+        assert_eq!(
+            map.range(..=&upper)
+                .unwrap()
+                .entries::<crate::Ascend>()
+                .count(),
+            1
+        );
     }
 
     fn insert_all<I, K>(iter: I) -> Map<K, u64>

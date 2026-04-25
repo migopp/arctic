@@ -51,13 +51,14 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
                         node::Kind::Node256 => &mut node_256,
                     };
 
-                    let children = unsafe { node.entries(Unbound, Unbound) }
-                        .filter(|(_, edge)| {
-                            !unsafe { edge.as_ref() }
-                                .load_packed(Ordering::Relaxed)
-                                .is_null()
-                        })
-                        .count();
+                    let children =
+                        unsafe { node.entries(Unbound::<()>::default(), Unbound::<()>::default()) }
+                            .filter(|(_, edge)| {
+                                !unsafe { edge.as_ref() }
+                                    .load_packed(Ordering::Relaxed)
+                                    .is_null()
+                            })
+                            .count();
 
                     histogram.record(children as u64);
                 }

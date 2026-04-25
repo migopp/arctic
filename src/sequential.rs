@@ -72,10 +72,10 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: K::Borrow<'_>) -> Option<&V::Target> {
+    pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
         let reader = K::Read::from(key);
         unsafe {
-            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
             cursor.traverse_get()?;
             let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_from_raw(value))
@@ -83,10 +83,10 @@ where
     }
 
     #[inline]
-    pub fn get_mut(&mut self, key: K::Borrow<'_>) -> Option<&mut V::Target> {
+    pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
         let reader = K::Read::from(key);
         unsafe {
-            let mut cursor = Cursor::<K, path::Discard>::new(self.root(), reader);
+            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
             cursor.traverse_get()?;
             let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_mut_from_raw(value))
@@ -94,9 +94,9 @@ where
     }
 
     #[inline]
-    pub fn upsert(&mut self, key: K::Borrow<'_>, value: V) -> Option<V> {
+    pub fn upsert(&mut self, key: &K::Borrowed, value: V) -> Option<V> {
         let reader = K::Read::from(key);
-        let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
+        let mut cursor = CursorMut::<K::Read<'_>>::new(&mut self.root, reader);
         let new_value = V::into_raw(value);
 
         loop {
@@ -105,17 +105,16 @@ where
                     old_value,
                     old,
                     key,
-                } => match cursor.insert(old, key, new_value) {
+                } => match cursor.create_path(old, key, new_value) {
                     Err(Frozen) => unreachable!(),
                     Ok(new) => {
                         cursor.edge_mut().set_packed(new);
                         return old_value.map(|old| unsafe { V::from_raw(old) });
                     }
                 },
-                crate::raw::cursor::Insert::Smo { old_node, old } => {
+                crate::raw::cursor::Insert::Replace { old_node, old } => {
                     validate!(!old.meta().is_frozen());
-                    // FIXME: implement separate `replace_mut` that does not freeze/CAS
-                    let (_smo, new) = unsafe { old_node.replace(old.meta()) };
+                    let (_smo, new) = unsafe { old_node.replace::<false>(old.meta()) };
                     cursor.edge_mut().set_packed(new);
                     if let Some(node) = old.as_node() {
                         unsafe { node.deallocate(stat::Counter::FreeRetire) };
@@ -183,7 +182,7 @@ where
 
     pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
-        R: raw::iter::Range<'k, K>,
+        R: raw::iter::Range<K::Read<'k>>,
     {
         let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
         Some(unsafe { iter::Prefix::new(prefix) })
@@ -202,18 +201,18 @@ where
 
     pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
     where
-        R: raw::iter::Range<'k, K>,
+        R: raw::iter::Range<K::Read<'k>>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
     }
 }
 
-impl<'k, K, V> FromIterator<(K::Borrow<'k>, V)> for Map<K, V>
+impl<'k, K, V> FromIterator<(&'k K::Borrowed, V)> for Map<K, V>
 where
     K: Key,
     V: Value,
 {
-    fn from_iter<T: IntoIterator<Item = (K::Borrow<'k>, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (&'k K::Borrowed, V)>>(iter: T) -> Self {
         let mut map = Map::default();
         for (key, value) in iter {
             map.upsert(key, value);

@@ -1,5 +1,5 @@
 mod postorder;
-mod range;
+pub(crate) mod range;
 
 pub(crate) use postorder::PostorderIter;
 pub use range::Range;
@@ -14,6 +14,7 @@ use core::ptr::NonNull;
 use ribbit::Atomic;
 
 use crate::Order;
+use crate::raw;
 use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Key;
@@ -21,7 +22,10 @@ use crate::raw::cursor::path;
 use crate::raw::key;
 use crate::raw::key::Read as _;
 
-pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
+pub(crate) struct Prefix<'k, 'g, K, R = RangeFull>
+where
+    K: Key,
+{
     root: NonNull<Atomic<Edge<K::Edge>>>,
     prefix: K::Read<'k>,
     range: R,
@@ -31,7 +35,7 @@ pub(crate) struct Prefix<'k, 'g, K: Key, R = RangeFull> {
 impl<'k, 'g, K, R> Prefix<'k, 'g, K, R>
 where
     K: Key,
-    R: Range<'k, K>,
+    R: raw::iter::Range<K::Read<'k>>,
 {
     #[inline]
     pub(crate) unsafe fn new_all(root: &'g Atomic<Edge<K::Edge>>) -> Prefix<'k, 'g, K, RangeFull> {
@@ -42,11 +46,11 @@ where
         root: &'g Atomic<Edge<K::Edge>>,
         prefix: K::Read<'k>,
     ) -> Option<Prefix<'k, 'g, K, RangeFull>> {
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
         let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
+        let len = cursor.len();
+        let prefix = prefix.prefix(len);
         Some(unsafe { Prefix::new(root, prefix, ..) })
     }
 
@@ -55,15 +59,15 @@ where
         range: R,
     ) -> Option<Prefix<'k, 'g, K, R>>
     where
-        R: Range<'k, K>,
+        R: Range<K::Read<'k>>,
     {
         let prefix = range.common_prefix();
-        let mut cursor = unsafe { Cursor::<K, path::Discard>::new(root, prefix) };
+        let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
 
         let root = cursor.edge();
-        let bits = cursor.bits();
-        let prefix = prefix.prefix(bits);
+        let len = cursor.len();
+        let prefix = prefix.prefix(len);
 
         Some(unsafe { Prefix::new(root, prefix, range) })
     }
@@ -84,27 +88,27 @@ where
 
     #[inline]
     pub(crate) fn entries<O: Order>(&self) -> EntryIter<'k, 'g, K, R, O> {
-        EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
+        EntryIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, &self.range) })
     }
 
     #[inline]
     pub(crate) fn values<O: Order>(&self) -> ValueIter<'k, 'g, K, R, O> {
-        ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, self.range.clone()) })
+        ValueIter(unsafe { RangeIter::new_unchecked(self.root, self.prefix, &self.range) })
     }
 }
 
-pub(crate) struct EntryIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
-    RangeIter<'k, 'g, K, K::Write, R, O>,
+pub(crate) struct EntryIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
+    RangeIter<'g, K::Read<'k>, K::Write, R, O>,
 );
 
 impl<'k, 'g, K, R, O> EntryIter<'k, 'g, K, R, O>
 where
     K: Key,
-    R: Range<'k, K>,
+    R: Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]
-    pub(crate) fn lend(&mut self) -> Option<(K::Borrow<'_>, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
+    pub(crate) fn lend(&mut self) -> Option<(&K::Borrowed, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
         self.0.lend().map(|(writer, value, edge)| {
             (unsafe { K::borrow_writer_unchecked(writer) }, value, edge)
         })
@@ -112,7 +116,7 @@ where
 
     #[inline]
     pub(crate) fn for_each_internal<
-        F: FnMut((K::Borrow<'_>, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
+        F: FnMut((&K::Borrowed, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
     >(
         self,
         mut apply: F,
@@ -124,14 +128,14 @@ where
 }
 
 /// Iterator over raw values only
-pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<'k, K>, O>(
-    RangeIter<'k, 'g, K, key::Ignore<K::Edge>, R, O>,
+pub(crate) struct ValueIter<'k, 'g, K: Key, R: Range<K::Read<'k>>, O>(
+    RangeIter<'g, K::Read<'k>, key::Discard<K::Read<'k>>, R, O>,
 );
 
 impl<'k, 'g, K, R, O> ValueIter<'k, 'g, K, R, O>
 where
     K: Key,
-    R: Range<'k, K>,
+    R: Range<K::Read<'k>>,
     O: Order,
 {
     #[inline]
