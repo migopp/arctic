@@ -2,10 +2,10 @@ use core::fmt::Debug;
 
 use ribbit::Atomic;
 
-use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
+use crate::raw::node::Node;
 
 #[repr(C, align(4096))]
 pub(crate) struct Node256<M: ribbit::Pack>([Atomic<Edge<M>>; 256]);
@@ -27,6 +27,14 @@ where
 {
     const TYPE: node::Type = node::Type::Node256;
     const CAPACITY: usize = 256;
+
+    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        let mut node = Box::new(Self::default());
+        for (key, edge) in keys.iter().zip(edges) {
+            node.0[*key as usize].set_packed(*edge);
+        }
+        node
+    }
 
     #[inline]
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(

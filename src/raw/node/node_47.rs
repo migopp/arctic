@@ -7,10 +7,10 @@ use ribbit::Atomic;
 use ribbit::u6;
 
 use crate::raw::Edge;
-use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
+use crate::raw::node::Node;
 use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 use crate::stat;
@@ -41,6 +41,15 @@ where
 {
     const TYPE: node::Type = node::Type::Node47;
     const CAPACITY: usize = 47;
+
+    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        let mut node = Box::new(Self::default());
+        node.header.initialize(keys);
+        for (out, r#in) in node.edges.iter_mut().zip(edges) {
+            out.set_packed(*r#in);
+        }
+        node
+    }
 
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(
         &self,
@@ -111,6 +120,20 @@ impl Default for Header {
 const _: [(); 272] = [(); core::mem::size_of::<Header>()];
 
 impl Header {
+    fn initialize(&mut self, keys: &[u8]) {
+        for (i, key) in keys.iter().enumerate() {
+            let (row, col) = Self::key_to_row_col(*key);
+            let row = unsafe { self.data_unchecked_mut(row) };
+            *row.get_mut() ^= (0x7F ^ i as u64) << col;
+        }
+
+        self.meta.set_packed(ribbit::Packed::<Meta>::new(
+            keys.last().copied().unwrap(),
+            false,
+            u6::new(keys.len() as u8),
+        ));
+    }
+
     fn freeze(&self) -> u8 {
         let mut old = self.meta.load_packed(Ordering::Relaxed);
         while !old.frozen() {
@@ -128,7 +151,6 @@ impl Header {
         old.len().value()
     }
 
-    #[inline]
     fn get(&self, key: u8) -> Option<u8> {
         let (row, col) = Self::key_to_row_col(key);
         let data = unsafe { self.data_unchecked(row) };

@@ -1,13 +1,11 @@
 use ribbit::u4;
 use ribbit::u120;
 
-use crate::raw::edge;
 use crate::raw::node;
-use crate::raw::node::Node3;
-use crate::raw::node::Node47;
+use crate::raw::node::Linear;
 use crate::raw::node::linear;
 
-pub(crate) type Node15<C> = super::Linear<15, Header, C>;
+pub(crate) type Node15<M> = Linear<15, Header, M>;
 
 const_assert_size_align!(Node15::<()>, 256, 64);
 
@@ -34,14 +32,15 @@ impl linear::Header for ribbit::Packed<Header> {
     const TYPE: node::Type = node::Type::Node15;
     const CAPACITY: usize = 15;
 
-    type Grow<M>
-        = Node47<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-    type Shrink<M>
-        = Node3<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
+    fn new(keys: &[u8]) -> Self {
+        let mut buffer = [0u8; 16];
+        buffer[..keys.len()].copy_from_slice(keys);
+        Self::new(
+            u120::new(u128::from_le_bytes(buffer)),
+            false,
+            u4::new(keys.len() as u8),
+        )
+    }
 
     #[inline]
     fn freeze(self) -> Self {

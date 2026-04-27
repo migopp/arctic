@@ -15,7 +15,6 @@ use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::node;
-use crate::raw::node::Node3;
 use crate::stat;
 
 pub(crate) struct CursorMut<'g, R: key::Read>(Cursor<'g, R, path::Discard>);
@@ -280,11 +279,12 @@ where
             Ok((start, middle, end)) => {
                 let _ = reader.read(start.len());
                 let byte = unsafe { reader.next_unchecked() };
-                Edge::new_node::<Node3<R::Edge>, _, _>(
-                    start,
-                    [byte, middle],
-                    [Edge::new_path(reader, value), old.with_meta(end)],
-                )
+                let node = node::Ptr::new(
+                    false,
+                    &[byte, middle],
+                    &[Edge::new_path(reader, value), old.with_meta(end)],
+                );
+                Edge::new_node(start, node)
             }
         };
 

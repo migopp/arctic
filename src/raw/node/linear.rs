@@ -3,10 +3,10 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
+use crate::raw::node::Node;
 
 #[repr(C, align(64))]
 pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack>
@@ -39,6 +39,19 @@ where
 {
     const TYPE: node::Type = <H::Packed as Header>::TYPE;
     const CAPACITY: usize = <H::Packed as Header>::CAPACITY;
+
+    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        let mut node = Box::new(Self::default());
+        let header = ribbit::Packed::<H>::new(keys);
+
+        node.header.set_packed(header);
+
+        for (out, r#in) in node.edges.iter_mut().zip(edges) {
+            out.set_packed(*r#in);
+        }
+
+        node
+    }
 
     #[inline]
     fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
@@ -146,17 +159,11 @@ where
     }
 }
 
-pub(crate) trait Header: ribbit::Unpack {
+pub(crate) trait Header: ribbit::Unpack + core::fmt::Debug {
     const TYPE: node::Type;
     const CAPACITY: usize;
 
-    type Grow<M>: Node<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-
-    type Shrink<M>: Node<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
+    fn new(keys: &[u8]) -> Self;
 
     fn freeze(self) -> Self;
 

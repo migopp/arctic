@@ -40,7 +40,7 @@ use linear::Linear;
 ///
 /// Implementations must ensure that all returned key indices are within
 /// `self.edges()` and `self.edges_mut()`.
-pub(crate) unsafe trait Node<M>: Default
+unsafe trait Node<M>: Default
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
@@ -49,6 +49,8 @@ where
 
     /// The maximum number of entries this node can contain.
     const CAPACITY: usize;
+
+    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self>;
 
     /// Returns the number of non-null edges this node contains.
     fn len(&self) -> u8 {
@@ -199,22 +201,9 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
         }
     }
 
-    let keys = keys.iter().copied();
-    let edges = edges.iter().copied();
-
     // Heuristic: assume a full node should be expanded
-    let len = if len == N::CAPACITY { len + 1 } else { len };
-
-    let edge = if len < 4 {
-        unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
-    } else if len < 16 {
-        unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
-    } else if len < 48 {
-        unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
-    } else {
-        unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
-    };
-
+    let node = Ptr::new(len == N::CAPACITY, keys, edges);
+    let edge = Edge::new_node(meta.key(), node);
     (Smo::ReplaceNode, edge)
 }
 
@@ -298,16 +287,35 @@ impl<M> Ptr<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    #[inline]
-    pub(super) fn new<N: Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
-        let ptr = NonNull::from(Box::leak(node));
-        let r#type = N::TYPE as u64;
+    pub(super) fn new(
+        grow: bool,
+        keys: &[u8],
+        edges: &[ribbit::Packed<Edge<M>>],
+    ) -> ribbit::Packed<Self> {
+        validate_eq!(keys.len(), edges.len());
 
-        validate_eq!(ptr.addr().get() as u64 & Self::MASK_TAG, 0);
+        let len = keys.len();
+        let len = if grow { len + 1 } else { len };
+
+        let (r#type, ptr) = if len < 4 {
+            let ptr = NonNull::from(Box::leak(Node3::new(keys, edges))).addr();
+            (Type::Node3, ptr)
+        } else if len < 16 {
+            let ptr = NonNull::from(Box::leak(Node15::new(keys, edges))).addr();
+            (Type::Node15, ptr)
+        } else if len < 48 {
+            let ptr = NonNull::from(Box::leak(Node47::new(keys, edges))).addr();
+            (Type::Node47, ptr)
+        } else {
+            let ptr = NonNull::from(Box::leak(Node256::new(keys, edges))).addr();
+            (Type::Node256, ptr)
+        };
+
+        validate_eq!(ptr.get() as u64 & Self::MASK_TAG, 0);
 
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                r#type | ptr.addr().get() as u64,
+                r#type as u64 | ptr.get() as u64,
             ))
         }
     }
