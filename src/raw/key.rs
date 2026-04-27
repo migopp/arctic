@@ -1,10 +1,12 @@
 pub mod array;
+mod discard;
 pub mod int;
 pub mod vec;
 
+pub(crate) use discard::Discard;
+
 use core::borrow::Borrow;
 use core::fmt;
-use core::marker::PhantomData;
 use core::ops::Add;
 use core::ops::AddAssign;
 use core::ops::Sub;
@@ -94,7 +96,7 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
     fn common_prefix(self, other: Self) -> Self;
 }
 
-pub(crate) trait Write<R: Read>: Clone + fmt::Debug + Default + Ord {
+pub(crate) trait Write<R: Read>: fmt::Debug + Default {
     type Len: Copy;
 
     fn new(prefix: R, key: <ribbit::Packed<R::Edge> as edge::Meta>::Key) -> (Self, Self::Len);
@@ -118,47 +120,6 @@ pub trait Len<L: edge::Len>:
 
     fn bits(self) -> usize;
     fn bytes(self) -> usize;
-}
-
-#[derive(Clone)]
-pub(crate) struct Discard<R>(PhantomData<R>);
-
-impl<R> Default for Discard<R> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-impl<R> core::fmt::Debug for Discard<R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Discard")
-    }
-}
-impl<R> PartialEq for Discard<R> {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-impl<R> Eq for Discard<R> {}
-impl<R> Ord for Discard<R> {
-    fn cmp(&self, _: &Self) -> core::cmp::Ordering {
-        core::cmp::Ordering::Equal
-    }
-}
-impl<R> PartialOrd for Discard<R> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<R: Read> Write<R> for Discard<R> {
-    type Len = ();
-
-    fn new(_: R, _: <ribbit::Packed<R::Edge> as edge::Meta>::Key) -> (Self, Self::Len) {
-        (Self(PhantomData), ())
-    }
-
-    #[inline]
-    fn replace(&mut self, _: Self::Len, _: u8, _: ribbit::Packed<R::Edge>) -> Self::Len {}
 }
 
 #[cfg(test)]

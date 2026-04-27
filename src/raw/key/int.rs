@@ -370,7 +370,7 @@ impl<'k> From<&'k u64> for Slow {
 }
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
 pub struct Writer<U>(U);
 
 impl<U: Uint> key::Write<Reader<U>> for Writer<U> {

@@ -189,7 +189,7 @@ impl<const N: usize> key::Read for Reader<'_, N> {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
 pub struct Writer(pub(super) Vec<u8>);
 
 impl<'k> key::Write<Reader<'k, { usize::MAX }>> for Writer {

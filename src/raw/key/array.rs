@@ -42,7 +42,6 @@ impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
 }
 
 #[repr(transparent)]
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Writer<const N: usize>([u8; N]);
 
 impl<const N: usize> Default for Writer<N> {
