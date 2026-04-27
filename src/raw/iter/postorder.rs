@@ -22,12 +22,7 @@ where
         // so we can use an arbitrary byte.
         Self {
             stack: vec![RepeatIter::new(unsafe {
-                node::NodeIter::new(
-                    Unbound::default(),
-                    Unbound::default(),
-                    node::KeyIter::ROOT,
-                    core::slice::from_ref(root),
-                )
+                node::NodeIter::new(node::KeyIter::ROOT, core::slice::from_ref(root))
             })],
         }
     }
@@ -59,7 +54,10 @@ where
                         // Visit children before node
                         Some(edge::Child::Node(node)) => {
                             self.stack.push(RepeatIter::new(unsafe {
-                                node.entries::<_, _>(Unbound::default(), Unbound::default())
+                                node.entries::<_, _>(
+                                    Unbound::<()>::default(),
+                                    Unbound::<()>::default(),
+                                )
                             }));
                             continue 'vertical;
                         }
@@ -75,7 +73,7 @@ where
 struct RepeatIter<'g, M: ribbit::Pack> {
     first: bool,
     edge: ribbit::Packed<Edge<M>>,
-    iter: node::NodeIter<'g, Unbound, Unbound, M>,
+    iter: node::NodeIter<'g, M>,
 }
 
 impl<'g, M> RepeatIter<'g, M>
@@ -83,7 +81,7 @@ where
     M: ribbit::Pack<Packed: edge::Meta> + 'g,
 {
     #[inline]
-    fn new(iter: node::NodeIter<'g, Unbound, Unbound, M>) -> Self {
+    fn new(iter: node::NodeIter<'g, M>) -> Self {
         Self {
             first: true,
             edge: Edge::DEFAULT,

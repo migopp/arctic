@@ -53,8 +53,8 @@ where
 
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
-    fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<L, U, M> {
-        unsafe { NodeIter::new(lower, upper, self.keys(lower, upper), self.edges()) }
+    fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<M> {
+        unsafe { NodeIter::new(self.keys(lower, upper), self.edges()) }
     }
 
     fn edges(&self) -> &[Atomic<Edge<M>>];
@@ -380,7 +380,7 @@ where
         self,
         lower: L,
         upper: U,
-    ) -> NodeIter<'g, L, U, M> {
+    ) -> NodeIter<'g, M> {
         self.dispatch(
             |node| unsafe { node.as_ref() }.entries(lower, upper),
             |node| unsafe { node.as_ref() }.entries(lower, upper),

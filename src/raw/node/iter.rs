@@ -12,10 +12,7 @@ use crate::raw::node;
 use crate::raw::node::linear;
 use crate::raw::node::node_256;
 
-pub(crate) struct NodeIter<'g, L, U, M: ribbit::Pack> {
-    lower: L,
-    upper: U,
-
+pub(crate) struct NodeIter<'g, M: ribbit::Pack> {
     keys: KeyIter,
     edges: NonNull<Atomic<Edge<M>>>,
 
@@ -25,21 +22,13 @@ pub(crate) struct NodeIter<'g, L, U, M: ribbit::Pack> {
     _slice: PhantomData<&'g [Atomic<Edge<M>>]>,
 }
 
-impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
+impl<'g, M: ribbit::Pack> NodeIter<'g, M> {
     /// # SAFETY
     ///
     /// Caller must guarantee all indices produced by `keys` are < `edges.len()`.
     #[inline]
-    pub(crate) unsafe fn new(
-        lower: L,
-        upper: U,
-        keys: KeyIter,
-        edges: &'g [Atomic<Edge<M>>],
-    ) -> Self {
+    pub(crate) unsafe fn new(keys: KeyIter, edges: &'g [Atomic<Edge<M>>]) -> Self {
         Self {
-            lower,
-            upper,
-
             keys,
             edges: NonNull::from(edges).cast(),
 
@@ -49,53 +38,20 @@ impl<'g, L, U, M: ribbit::Pack> NodeIter<'g, L, U, M> {
             _slice: PhantomData,
         }
     }
+}
 
+impl<'g, M: ribbit::Pack> NodeIter<'g, M> {
     #[inline]
-    pub(crate) fn lower(&self) -> &L {
-        &self.lower
-    }
-
-    #[inline]
-    pub(crate) fn upper(&self) -> &U {
-        &self.upper
+    pub(crate) fn try_into_single(mut self) -> Result<(u8, NonNull<Atomic<Edge<M>>>), Self> {
+        if self.size_hint().0 == 1 {
+            Ok(self.next().expect("Size hint is exact"))
+        } else {
+            Err(self)
+        }
     }
 }
 
-impl<'g, L: Lower, U: Upper, M: ribbit::Pack> NodeIter<'g, L, U, M> {
-    #[inline]
-    pub(crate) fn try_into_single(
-        self,
-    ) -> Result<(bool, bool, u8, NonNull<Atomic<Edge<M>>>), Self> {
-        self.keys
-            .try_into_single()
-            .map(|KeyIndex { key, index }| {
-                let lower = self.lower.check(key);
-                let upper = self.upper.check(key);
-
-                #[cfg(feature = "validate")]
-                validate!(
-                    (index as u16) < self.len,
-                    "index is {} but len is {}",
-                    index,
-                    self.len,
-                );
-
-                let edge = unsafe { self.edges.add(index as usize) };
-                (lower, upper, key, edge)
-            })
-            .map_err(|keys| Self {
-                lower: self.lower,
-                upper: self.upper,
-                keys,
-                edges: self.edges,
-                #[cfg(feature = "validate")]
-                len: self.len,
-                _slice: PhantomData,
-            })
-    }
-}
-
-impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
+impl<'g, M: ribbit::Pack> Iterator for NodeIter<'g, M> {
     type Item = (u8, NonNull<Atomic<Edge<M>>>);
 
     #[inline]
@@ -120,7 +76,7 @@ impl<'g, L, U, M: ribbit::Pack> Iterator for NodeIter<'g, L, U, M> {
     }
 }
 
-impl<'g, L, U, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, L, U, M> {
+impl<'g, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, M> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         let KeyIndex { key, index } = self.keys.next_back()?;
@@ -138,7 +94,7 @@ impl<'g, L, U, M: ribbit::Pack> DoubleEndedIterator for NodeIter<'g, L, U, M> {
     }
 }
 
-impl<'g, L, U, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, L, U, M> {
+impl<'g, M: ribbit::Pack> ExactSizeIterator for NodeIter<'g, M> {
     #[inline]
     fn len(&self) -> usize {
         let (lower, upper) = self.size_hint();
@@ -199,17 +155,6 @@ impl KeyIter {
             // SAFETY: shifting u64 by 62 bits, so only 2 bits can remain
             ribbit::Packed::<node::Kind>::new_unchecked(u2::new_unchecked((self.raw >> 62) as u8))
         }
-    }
-
-    #[inline]
-    pub(super) fn try_into_single(self) -> Result<KeyIndex, Self> {
-        let kind = self.kind();
-        if kind == node::Kind::Node3.pack() {
-            if let Some(index) = unsafe { self.node_3 }.try_into_single() {
-                return Ok(index);
-            }
-        }
-        Err(self)
     }
 
     #[inline]

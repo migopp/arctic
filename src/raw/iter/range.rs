@@ -79,7 +79,9 @@ where
             },
             edge::Child::Node(node) => {
                 let mut stack = Vec::with_capacity(7);
-                stack.push((len, unsafe { node.entries(lower_byte, upper_byte) }));
+                stack.push((len, lower_byte, upper_byte, unsafe {
+                    node.entries(lower_byte, upper_byte)
+                }));
 
                 Self::Node(NodeIter {
                     lower,
@@ -134,12 +136,9 @@ where
     writer: W,
     stack: Vec<(
         W::Len,
-        raw::node::NodeIter<
-            'g,
-            <R::Lower as Lower<K::Edge>>::Bound,
-            <R::Upper as Upper<K::Edge>>::Bound,
-            K::Edge,
-        >,
+        <R::Lower as Lower<K::Edge>>::Bound,
+        <R::Upper as Upper<K::Edge>>::Bound,
+        raw::node::NodeIter<'g, K::Edge>,
     )>,
     _order: PhantomData<O>,
 }
@@ -173,7 +172,7 @@ where
         mut apply: F,
     ) -> Option<(&W, u64, NonNull<Atomic<Edge<K::Edge>>>)> {
         'vertical: loop {
-            let (len, iter) = self.stack.last_mut()?;
+            let (len, lower, upper, iter) = self.stack.last_mut()?;
             let len = *len;
 
             'horizontal: loop {
@@ -187,8 +186,8 @@ where
                 };
 
                 let mut len = len;
-                let mut check_lower = iter.lower().check(byte);
-                let mut check_upper = iter.upper().check(byte);
+                let mut lower = *lower;
+                let mut upper = *upper;
 
                 'compress: loop {
                     let (meta, child) = {
@@ -202,7 +201,7 @@ where
 
                     len = self.writer.replace(len, byte, meta);
 
-                    let lower = if check_lower {
+                    let lower_next = if lower.check(byte) {
                         match self.lower.check(meta) {
                             Some(lower) => lower,
                             None if O::ASCEND => continue 'horizontal,
@@ -215,7 +214,7 @@ where
                         Default::default()
                     };
 
-                    let upper = if check_upper {
+                    let upper_next = if upper.check(byte) {
                         match self.upper.check(meta) {
                             Some(upper) => upper,
                             None if O::ASCEND => {
@@ -240,17 +239,18 @@ where
                             }
                         },
                         edge::Child::Node(node) => {
+                            lower = lower_next;
+                            upper = upper_next;
+
                             // Avoid pushing and popping iterators with only one child
                             match unsafe { node.entries(lower, upper) }.try_into_single() {
-                                Ok((check_lower_, check_upper_, byte_, edge_)) => {
-                                    check_lower = check_lower_;
-                                    check_upper = check_upper_;
+                                Ok((byte_, edge_)) => {
                                     byte = byte_;
                                     edge = edge_;
                                     continue 'compress;
                                 }
                                 Err(iter) => {
-                                    self.stack.push((len, iter));
+                                    self.stack.push((len, lower, upper, iter));
                                     continue 'vertical;
                                 }
                             }
