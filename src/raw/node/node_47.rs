@@ -11,8 +11,6 @@ use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::iter::Unbound;
 use crate::raw::node;
-use crate::raw::node::Node15;
-use crate::raw::node::Node256;
 use crate::raw::node::iter::KeyIndex;
 use crate::raw::node::linear;
 use crate::stat;
@@ -42,10 +40,7 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const TYPE: node::Type = node::Type::Node47;
-    const LEN: usize = 47;
-
-    type Grow = Node256<M>;
-    type Shrink = Node15<M>;
+    const CAPACITY: usize = 47;
 
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(
         &self,

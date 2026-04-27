@@ -35,17 +35,22 @@ use crate::stat;
 use linear::Linear;
 
 /// A node is a partial mapping from `u8` to [`crate::raw::Edge`].
+///
+/// # Safety
+///
+/// Implementations must ensure that all returned key indices are within
+/// `self.edges()` and `self.edges_mut()`.
 pub(crate) unsafe trait Node<M>: Default
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     /// A runtime representation of the node type.
     const TYPE: Type;
-    const LEN: usize;
 
-    type Grow: Node<M>;
-    type Shrink: Node<M>;
+    /// The maximum number of entries this node can contain.
+    const CAPACITY: usize;
 
+    /// Returns the number of non-null edges this node contains.
     fn len(&self) -> u8 {
         self.edges()
             .iter()
@@ -53,8 +58,10 @@ where
             .count() as u8
     }
 
+    /// Returns a sorted iterator over this node's keys.
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
+    /// Returns a sorted iterator over this node's keys and edges.
     fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<M> {
         unsafe { NodeIter::new(self.keys(lower, upper), self.edges()) }
     }
@@ -111,11 +118,9 @@ where
         })
     }
 
-    fn freeze(&self) {
-        let len = self.freeze_header();
-        self.edges().iter().take(len).for_each(Edge::freeze)
-    }
-
+    /// Freeze this node's header (i.e., its non-edge metadata).
+    ///
+    /// Returns the number of edges that must be frozen.
     fn freeze_header(&self) -> usize;
 
     fn replace<const LEN: usize, const FREEZE: bool>(
@@ -124,7 +129,7 @@ where
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
         const {
             // HACK: can't use generic associated type as array length
-            assert!(Self::LEN == LEN);
+            assert!(Self::CAPACITY == LEN);
         }
 
         // Caller must not call replace if doomed to fail CAS
@@ -137,7 +142,8 @@ where
         let mut edges = [Edge::DEFAULT; LEN];
 
         if FREEZE {
-            self.freeze();
+            let len = self.freeze_header();
+            self.edges().iter().take(len).for_each(Edge::freeze)
         }
 
         let len = self
@@ -196,9 +202,10 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
     let keys = keys.iter().copied();
     let edges = edges.iter().copied();
 
-    let edge = if len == N::LEN {
-        unsafe { Edge::new_node_unchecked::<N::Grow, _, _>(meta, keys, edges) }
-    } else if len < 4 {
+    // Heuristic: assume a full node should be expanded
+    let len = if len == N::CAPACITY { len + 1 } else { len };
+
+    let edge = if len < 4 {
         unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
     } else if len < 16 {
         unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }

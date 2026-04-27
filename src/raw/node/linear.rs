@@ -38,10 +38,7 @@ where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
     const TYPE: node::Type = <H::Packed as Header>::TYPE;
-    const LEN: usize = <H::Packed as Header>::LEN;
-
-    type Grow = <H::Packed as Header>::Grow<M>;
-    type Shrink = <H::Packed as Header>::Shrink<M>;
+    const CAPACITY: usize = <H::Packed as Header>::CAPACITY;
 
     #[inline]
     fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
@@ -151,7 +148,7 @@ where
 
 pub(crate) trait Header: ribbit::Unpack {
     const TYPE: node::Type;
-    const LEN: usize;
+    const CAPACITY: usize;
 
     type Grow<M>: Node<M>
     where

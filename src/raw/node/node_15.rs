@@ -32,7 +32,7 @@ impl Default for HeaderPacked {
 
 impl linear::Header for ribbit::Packed<Header> {
     const TYPE: node::Type = node::Type::Node15;
-    const LEN: usize = 15;
+    const CAPACITY: usize = 15;
 
     type Grow<M>
         = Node47<M>
@@ -73,7 +73,7 @@ impl linear::Header for ribbit::Packed<Header> {
             return Ok(index);
         }
 
-        if len >= Self::LEN as u8 || self.is_frozen() {
+        if len >= Self::CAPACITY as u8 || self.is_frozen() {
             return Err(None);
         }
 
