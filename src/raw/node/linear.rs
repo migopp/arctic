@@ -37,7 +37,7 @@ where
     <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = <H::Packed as Header>::KIND;
+    const TYPE: node::Type = <H::Packed as Header>::TYPE;
     const LEN: usize = <H::Packed as Header>::LEN;
 
     type Grow = <H::Packed as Header>::Grow<M>;
@@ -150,7 +150,7 @@ where
 }
 
 pub(crate) trait Header: ribbit::Unpack {
-    const KIND: node::Kind;
+    const TYPE: node::Type;
     const LEN: usize;
 
     type Grow<M>: Node<M>

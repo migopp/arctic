@@ -31,7 +31,7 @@ impl Default for HeaderPacked {
 }
 
 impl linear::Header for ribbit::Packed<Header> {
-    const KIND: node::Kind = node::Kind::Node15;
+    const TYPE: node::Type = node::Type::Node15;
     const LEN: usize = 15;
 
     type Grow<M>

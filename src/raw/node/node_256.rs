@@ -26,7 +26,7 @@ unsafe impl<M> Node<M> for Node256<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = node::Kind::Node256;
+    const TYPE: node::Type = node::Type::Node256;
     const LEN: usize = 256;
 
     type Grow = Node256<M>;
@@ -97,7 +97,7 @@ pub(crate) struct KeyIter {
 #[repr(u32)]
 #[derive(Copy, Clone)]
 enum Tag {
-    Node256 = (node::Kind::Node256 as u32) << 30,
+    Node256 = (node::Type::Node256 as u32) << 30,
 }
 
 impl KeyIter {

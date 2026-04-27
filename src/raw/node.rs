@@ -34,11 +34,13 @@ use crate::raw::iter::Unbound;
 use crate::stat;
 use linear::Linear;
 
+/// A node is a partial mapping from `u8` to [`crate::raw::Edge`].
 pub(crate) unsafe trait Node<M>: Default
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: Kind;
+    /// A runtime representation of the node type.
+    const TYPE: Type;
     const LEN: usize;
 
     type Grow: Node<M>;
@@ -210,15 +212,15 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 2, eq, debug, packed(rename = "KindPacked"))]
-pub(crate) enum Kind {
+#[ribbit(size = 2, eq, debug, packed(rename = "TypePacked"))]
+pub(crate) enum Type {
     Node3 = 0,
     Node15 = 1,
     Node47 = 2,
     Node256 = 3,
 }
 
-impl Default for Kind {
+impl Default for Type {
     fn default() -> Self {
         Self::Node3
     }
@@ -234,20 +236,20 @@ impl Default for Kind {
 // exclusive closures as parameters. We sometimes need $node3, $node15, $node47, and
 // $node256 to borrow the same data mutably.
 macro_rules! dispatch {
-    ($kind:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
+    ($type:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
         if cfg!(feature = "opt-no-dispatch") {
-            use crate::raw::node::Kind;
+            use crate::raw::node::Type;
             use ribbit::Unpack as _;
-            match $kind.unpack() {
-                Kind::Node3 => $node3,
-                Kind::Node15 => $node15,
-                Kind::Node47 => $node47,
-                Kind::Node256 => $node256,
+            match $type.unpack() {
+                Type::Node3 => $node3,
+                Type::Node15 => $node15,
+                Type::Node47 => $node47,
+                Type::Node256 => $node256,
             }
         } else {
-            let kind = $kind.value.value();
-            let hi = kind & 0b10;
-            let lo = kind & 0b01;
+            let r#type = $type.value.value();
+            let hi = r#type & 0b10;
+            let lo = r#type & 0b01;
 
             if hi == 0 {
                 if lo == 0 { $node3 } else { $node15 }
@@ -265,7 +267,7 @@ pub(super) use dispatch;
 #[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
 pub(crate) struct Ptr<M> {
     #[ribbit(size = 2, get(vis = "pub(crate)"))]
-    kind: Kind,
+    r#type: Type,
 
     #[ribbit(with(skip))]
     _placeholder: NonZeroU32,
@@ -292,13 +294,13 @@ where
     #[inline]
     pub(super) fn new<N: Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
         let ptr = NonNull::from(Box::leak(node));
-        let kind = N::KIND as u64;
+        let r#type = N::TYPE as u64;
 
         validate_eq!(ptr.addr().get() as u64 & Self::MASK_TAG, 0);
 
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                kind | ptr.addr().get() as u64,
+                r#type | ptr.addr().get() as u64,
             ))
         }
     }
@@ -307,7 +309,7 @@ where
     pub(super) fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                Node3::<M>::KIND as u64 | ptr.addr().get() as u64,
+                Node3::<M>::TYPE as u64 | ptr.addr().get() as u64,
             ))
         }
     }
@@ -408,7 +410,7 @@ where
     pub(crate) unsafe fn deallocate_recursive(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        validate_eq!(self.kind(), Kind::Node3.pack());
+        validate_eq!(self.r#type(), Type::Node3.pack());
 
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
@@ -437,7 +439,7 @@ where
     {
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         dispatch!(
-            self.kind(),
+            self.r#type(),
             node_3(unsafe { Self::as_ptr(ptr) }),
             node_15(unsafe { Self::as_ptr(ptr) }),
             node_47(unsafe { Self::as_ptr(ptr) }),
@@ -462,7 +464,7 @@ where
 impl<M> Debug for PtrPacked<M> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
-            .field("kind", &self.kind())
+            .field("type", &self.r#type())
             .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
     }

@@ -44,11 +44,11 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
                     depth.record(depth_ as u64);
                 }
                 edge::Child::Node(node) => {
-                    let histogram = match node.kind().unpack() {
-                        node::Kind::Node3 => &mut node_3,
-                        node::Kind::Node15 => &mut node_15,
-                        node::Kind::Node47 => &mut node_47,
-                        node::Kind::Node256 => &mut node_256,
+                    let histogram = match node.r#type().unpack() {
+                        node::Type::Node3 => &mut node_3,
+                        node::Type::Node15 => &mut node_15,
+                        node::Type::Node47 => &mut node_47,
+                        node::Type::Node256 => &mut node_256,
                     };
 
                     let children =

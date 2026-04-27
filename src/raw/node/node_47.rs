@@ -41,7 +41,7 @@ unsafe impl<M> Node<M> for Node47<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = node::Kind::Node47;
+    const TYPE: node::Type = node::Type::Node47;
     const LEN: usize = 47;
 
     type Grow = Node256<M>;
