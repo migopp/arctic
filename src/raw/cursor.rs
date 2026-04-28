@@ -15,6 +15,7 @@ use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::node;
+use crate::raw::node::Node3;
 use crate::stat;
 
 pub(crate) struct CursorMut<'g, R: key::Read>(Cursor<'g, R, path::Discard>);
@@ -283,16 +284,13 @@ where
                 let byte = unsafe { reader.next_unchecked() };
                 validate_ne!(middle, byte);
 
-                let node = unsafe {
-                    // NOTE: must put new allocation first because
-                    // `deallocate_recursive` recurses on first edge
-                    node::Ptr::new_unchecked(
-                        false,
-                        &[byte, middle],
-                        &[Edge::new_path(reader, value), old.with_meta(end)],
-                    )
-                };
-                Edge::new_node(start, node)
+                // NOTE: must put new allocation first because
+                // `deallocate_recursive` recurses on first edge
+                Node3::new_expand(
+                    start,
+                    [byte, middle],
+                    [Edge::new_path(reader, value), old.with_meta(end)],
+                )
             }
         };
 

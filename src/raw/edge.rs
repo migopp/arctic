@@ -7,6 +7,7 @@ use ribbit::u6;
 
 use core::fmt::Debug;
 use core::ops::Add;
+use core::ops::ControlFlow;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
@@ -83,55 +84,23 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             crate::cold();
         }
 
-        Self::new_path_recursive(reader, key, byte, value)
-    }
-
-    fn new_path_recursive<R>(
-        mut reader: R,
-        key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
-        mut byte: u8,
-        value: u64,
-    ) -> ribbit::Packed<Self>
-    where
-        R: key::Read<Edge = M>,
-    {
-        let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
-        let head = ribbit::Packed::<Self>::new(
-            <M::Packed as Meta>::new(key, false),
-            node::Ptr::new_ptr(tail).raw().get(),
-        );
-
-        loop {
-            let edge = unsafe { tail.as_mut().insert(byte) };
-            let edge = if_validate!(edge.expect("Node3 fits one edge"), unsafe {
-                edge.unwrap_unchecked()
-            });
-
+        Node3::new_path(key, byte, || {
             let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
-
-            let Some(next_byte) = reader.next() else {
-                edge.set_packed(Self::new_value(key, value));
-                return head;
-            };
-            byte = next_byte;
-
-            let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
-            edge.set_packed(ribbit::Packed::<Self>::new(
-                <M::Packed as Meta>::new(key, false),
-                node::Ptr::new_ptr(next_node).raw().get(),
-            ));
-            tail = next_node;
-        }
+            match reader.next() {
+                Some(byte) => ControlFlow::Continue((key, byte)),
+                None => ControlFlow::Break((key, value)),
+            }
+        })
     }
 
-    pub(crate) fn new_node(
+    pub(super) fn new_node(
         key: <<M as ribbit::Pack>::Packed as Meta>::Key,
         node: ribbit::Packed<node::Ptr<M>>,
     ) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(<M::Packed as Meta>::new(key, false), node.raw().get())
     }
 
-    fn new_value(
+    pub(super) fn new_value(
         key: <<M as ribbit::Pack>::Packed as Meta>::Key,
         value: u64,
     ) -> ribbit::Packed<Self> {

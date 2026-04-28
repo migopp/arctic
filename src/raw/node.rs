@@ -115,6 +115,7 @@ where
     fn insert_key(&mut self, key: u8) -> Option<u8>;
 
     #[inline]
+    #[expect(unused)]
     fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         let index = self.insert_key(key)? as usize;
         let edges = self.edges_mut();
@@ -290,7 +291,7 @@ impl<M> Ptr<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    pub(super) unsafe fn new_unchecked(
+    unsafe fn new_unchecked(
         grow: bool,
         keys: &[u8],
         edges: &[ribbit::Packed<Edge<M>>],
@@ -327,7 +328,8 @@ where
     }
 
     #[inline]
-    pub(super) fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
+    pub(super) fn new_node_3(node: Box<Node3<M>>) -> ribbit::Packed<Self> {
+        let ptr = NonNull::from(Box::leak(node));
         unsafe {
             ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
                 Node3::<M>::TYPE as u64 | ptr.addr().get() as u64,
