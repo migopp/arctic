@@ -65,6 +65,7 @@ pub(crate) use prefix::Prefix;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use crate::concurrent::Smr;
@@ -88,6 +89,8 @@ impl Smr for Hazard {
 struct Cache<T>(T);
 
 pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
+    garbage: AtomicU64,
+
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
@@ -99,6 +102,7 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     fn default() -> Self {
         Self {
+            garbage: AtomicU64::new(0),
             hazards: core::array::from_fn(|_| {
                 Cache(ribbit::Atomic::new_packed(
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
@@ -106,6 +110,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
@@ -178,10 +183,15 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
             global: self,
         }
     }
+
+    fn garbage(&self) -> u32 {
+        self.garbage.load(Ordering::Relaxed) as u32
+    }
 }
 
 #[repr(align(64))]
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
+    garbage: i32,
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<(ribbit::Packed<P>, u64)>,
@@ -242,6 +252,24 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             false
         });
 
+        if cfg!(feature = "stat-garbage") {
+            local.garbage -= 1;
+
+            if local.garbage <= -(global.reclaim_threshold as i32) {
+                global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count - (local.garbage as u64);
+                        Some(new_count << 32 | (old_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
+
         local.snapshot.clear();
         stat::record(stat::Record::Flush, freed);
     }
@@ -268,9 +296,28 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
 
-        unsafe { &mut *self.local.get() }
-            .retired
-            .push((prefix, node.raw().get()));
+        let local = unsafe { &mut *self.local.get() };
+
+        if cfg!(feature = "stat-garbage") {
+            local.garbage += 1;
+
+            if local.garbage >= self.global.reclaim_threshold as i32 {
+                self.global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count + local.garbage as u64;
+                        let new_max = old_max.max(new_count as u32);
+                        Some(new_count << 32 | (new_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
+
+        local.retired.push((prefix, node.raw().get()));
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -281,9 +328,28 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
 
-        unsafe { &mut *self.local.get() }
-            .retired
-            .push((prefix, value));
+        let local = unsafe { &mut *self.local.get() };
+
+        if cfg!(feature = "stat-garbage") {
+            local.garbage += 1;
+
+            if local.garbage >= self.global.reclaim_threshold as i32 {
+                self.global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count + local.garbage as u64;
+                        let new_max = old_max.max(new_count as u32);
+                        Some(new_count << 32 | (new_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
+
+        local.retired.push((prefix, value));
     }
 }
 

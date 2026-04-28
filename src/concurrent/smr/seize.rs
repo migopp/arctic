@@ -39,6 +39,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global {
     {
         self.0.enter()
     }
+
+    fn garbage(&self) -> u32 {
+        self.0.garbage()
+    }
 }
 
 impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {

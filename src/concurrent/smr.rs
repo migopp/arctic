@@ -30,6 +30,8 @@ pub trait Global<P: ribbit::Pack<Packed: Prefix>, V: Value>: Default {
     fn guard<'g>(&'g self, hazard: ribbit::Packed<P>) -> Self::Guard<'g>
     where
         V: 'g;
+
+    fn garbage(&self) -> u32;
 }
 
 pub trait Guard<V: Value> {

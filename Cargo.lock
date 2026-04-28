@@ -94,7 +94,7 @@ dependencies = [
 [[package]]
 name = "crossbeam-epoch"
 version = "0.9.13"
-source = "git+https://github.com/kaist-cp/crossbeam?branch=smr-benchmark#ee760604650f37e9bef5ebcd55a1c6403c6dfe0c"
+source = "git+https://github.com/nwtnni/crossbeam.git?branch=smr-benchmark#d7f027a7ed633323f065a8b8974f2d546e00303c"
 dependencies = [
  "autocfg",
  "cfg-if",
@@ -106,7 +106,7 @@ dependencies = [
 [[package]]
 name = "crossbeam-utils"
 version = "0.8.14"
-source = "git+https://github.com/kaist-cp/crossbeam?branch=smr-benchmark#ee760604650f37e9bef5ebcd55a1c6403c6dfe0c"
+source = "git+https://github.com/nwtnni/crossbeam.git?branch=smr-benchmark#d7f027a7ed633323f065a8b8974f2d546e00303c"
 dependencies = [
  "cfg-if",
 ]
@@ -469,8 +469,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "seize"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
+source = "git+https://github.com/migopp/seize.git#863ff99645223c778ae20ec8fee5e0f20f324391"
 dependencies = [
  "libc",
  "windows-sys",
