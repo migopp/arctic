@@ -50,7 +50,16 @@ where
     /// The maximum number of entries this node can contain.
     const CAPACITY: usize;
 
-    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self>;
+    /// Returns a new node populated with `keys` and `edges`.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the following:
+    /// - `keys.len() == edges.len()`
+    /// - `keys.len() <= Self::CAPACITY`
+    /// - Keys are unique
+    /// - Edges are unique
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self>;
 
     /// Returns the number of non-null edges this node contains.
     fn len(&self) -> u8 {
@@ -81,11 +90,9 @@ where
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.get_key(key)? as usize;
         let edges = self.edges();
-        Some(if cfg!(feature = "validate") {
-            &edges[index]
-        } else {
-            unsafe { edges.get_unchecked(index) }
-        })
+        Some(if_validate!(&edges[index], unsafe {
+            edges.get_unchecked(index)
+        }))
     }
 
     /// # Safety
@@ -97,11 +104,9 @@ where
     fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.get_or_insert_key(key)? as usize;
         let edges = self.edges();
-        Some(if cfg!(feature = "validate") {
-            &edges[index]
-        } else {
-            unsafe { edges.get_unchecked(index) }
-        })
+        Some(if_validate!(&edges[index], unsafe {
+            edges.get_unchecked(index)
+        }))
     }
 
     /// # Safety
@@ -113,11 +118,9 @@ where
     fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         let index = self.insert_key(key)? as usize;
         let edges = self.edges_mut();
-        Some(if cfg!(feature = "validate") {
-            &mut edges[index]
-        } else {
-            unsafe { edges.get_unchecked_mut(index) }
-        })
+        Some(if_validate!(&mut edges[index], unsafe {
+            edges.get_unchecked_mut(index)
+        }))
     }
 
     /// Freeze this node's header (i.e., its non-edge metadata).
@@ -202,7 +205,7 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
     }
 
     // Heuristic: assume a full node should be expanded
-    let node = Ptr::new(len == N::CAPACITY, keys, edges);
+    let node = unsafe { Ptr::new_unchecked(len == N::CAPACITY, keys, edges) };
     let edge = Edge::new_node(meta.key(), node);
     (Smo::ReplaceNode, edge)
 }
@@ -287,7 +290,7 @@ impl<M> Ptr<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    pub(super) fn new(
+    pub(super) unsafe fn new_unchecked(
         grow: bool,
         keys: &[u8],
         edges: &[ribbit::Packed<Edge<M>>],
@@ -298,16 +301,19 @@ where
         let len = if grow { len + 1 } else { len };
 
         let (r#type, ptr) = if len < 4 {
-            let ptr = NonNull::from(Box::leak(Node3::new(keys, edges))).addr();
+            let ptr = NonNull::from(Box::leak(unsafe { Node3::new_unchecked(keys, edges) })).addr();
             (Type::Node3, ptr)
         } else if len < 16 {
-            let ptr = NonNull::from(Box::leak(Node15::new(keys, edges))).addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node15::new_unchecked(keys, edges) })).addr();
             (Type::Node15, ptr)
         } else if len < 48 {
-            let ptr = NonNull::from(Box::leak(Node47::new(keys, edges))).addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node47::new_unchecked(keys, edges) })).addr();
             (Type::Node47, ptr)
         } else {
-            let ptr = NonNull::from(Box::leak(Node256::new(keys, edges))).addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node256::new_unchecked(keys, edges) })).addr();
             (Type::Node256, ptr)
         };
 
@@ -330,13 +336,9 @@ where
     }
 
     #[inline]
-    pub(crate) unsafe fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
+    pub(crate) unsafe fn from_raw_unchecked(raw: u64) -> ribbit::Packed<Self> {
         let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
-        if cfg!(feature = "validate") {
-            node.unwrap()
-        } else {
-            unsafe { node.unwrap_unchecked() }
-        }
+        if_validate!(node.unwrap(), unsafe { node.unwrap_unchecked() })
     }
 }
 
@@ -468,11 +470,7 @@ where
         N: Node<M>,
     {
         let node = NonNull::new(ptr as *mut N);
-        if cfg!(feature = "validate") {
-            node.unwrap()
-        } else {
-            unsafe { node.unwrap_unchecked() }
-        }
+        if_validate!(node.unwrap(), unsafe { node.unwrap_unchecked() })
     }
 }
 

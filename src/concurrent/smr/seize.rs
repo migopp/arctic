@@ -53,7 +53,7 @@ impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {
 
         unsafe {
             self.defer_retire(node.raw().get() as *mut (), |ptr, _| {
-                node::Ptr::<M>::new_unchecked(ptr as u64).deallocate(stat::Counter::FreeRetire)
+                node::Ptr::<M>::from_raw_unchecked(ptr as u64).deallocate(stat::Counter::FreeRetire)
             })
         }
     }

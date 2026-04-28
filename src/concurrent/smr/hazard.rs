@@ -319,7 +319,8 @@ fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
     if prefix.is_node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
-            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
+            crate::raw::node::Ptr::<crate::raw::edge::Be>::from_raw_unchecked(raw)
+                .deallocate(counter);
         }
     } else {
         unsafe {

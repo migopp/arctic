@@ -277,13 +277,21 @@ where
         let new = match old.meta().expand(key) {
             Err(_) => Edge::new_path(reader, value),
             Ok((start, middle, end)) => {
-                let _ = reader.read(start.len());
+                let start_ = reader.read(start.len());
+                validate_eq!(start, start_);
+
                 let byte = unsafe { reader.next_unchecked() };
-                let node = node::Ptr::new(
-                    false,
-                    &[byte, middle],
-                    &[Edge::new_path(reader, value), old.with_meta(end)],
-                );
+                validate_ne!(middle, byte);
+
+                let node = unsafe {
+                    // NOTE: must put new allocation first because
+                    // `deallocate_recursive` recurses on first edge
+                    node::Ptr::new_unchecked(
+                        false,
+                        &[byte, middle],
+                        &[Edge::new_path(reader, value), old.with_meta(end)],
+                    )
+                };
                 Edge::new_node(start, node)
             }
         };

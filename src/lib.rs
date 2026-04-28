@@ -5,6 +5,15 @@ macro_rules! const_assert_size_align {
     };
 }
 
+macro_rules! if_validate {
+    ($if:expr $(, $else:expr)?) => {
+        if cfg!(any(feature = "validate", debug_assertions, test)) {
+            $if
+        }
+        $(else { $else })?
+    };
+}
+
 macro_rules! validate {
     ($($tt:tt)*) => {
         if cfg!(any(feature = "validate", debug_assertions, test)) {
@@ -17,6 +26,14 @@ macro_rules! validate_eq {
     ($($tt:tt)*) => {
         if cfg!(any(feature = "validate", debug_assertions, test)) {
             assert_eq!($($tt)*);
+        }
+    };
+}
+
+macro_rules! validate_ne {
+    ($($tt:tt)*) => {
+        if cfg!(any(feature = "validate", debug_assertions, test)) {
+            assert_ne!($($tt)*);
         }
     };
 }
@@ -70,6 +87,19 @@ mod seal {
 #[inline]
 #[cold]
 pub(crate) fn cold() {}
+
+fn assert_unique(keys: &[u8]) {
+    let mut seen = [0u128; 2];
+    for key in keys {
+        let row = key / 128;
+        let col = key % 128;
+        let bit = 1 << col;
+        if seen[row as usize] & bit > 0 {
+            panic!("Duplicate key {key:#02x?}");
+        }
+        seen[row as usize] |= bit;
+    }
+}
 
 #[cfg(test)]
 mod tests {

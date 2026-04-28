@@ -32,7 +32,7 @@ impl linear::Header for ribbit::Packed<Header> {
     const TYPE: node::Type = node::Type::Node15;
     const CAPACITY: usize = 15;
 
-    fn new(keys: &[u8]) -> Self {
+    unsafe fn new_unchecked(keys: &[u8]) -> Self {
         let mut buffer = [0u8; 16];
         buffer[..keys.len()].copy_from_slice(keys);
         Self::new(

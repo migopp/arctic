@@ -42,7 +42,11 @@ where
     const TYPE: node::Type = node::Type::Node47;
     const CAPACITY: usize = 47;
 
-    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        if_validate!(crate::assert_unique(keys));
+        validate!(keys.len() == edges.len());
+        validate!(keys.len() <= Self::CAPACITY);
+
         let mut node = Box::new(Self::default());
         node.header.initialize(keys);
         for (out, r#in) in node.edges.iter_mut().zip(edges) {
@@ -277,11 +281,7 @@ impl Header {
                 .add(row as usize)
                 .as_ref()
         };
-        if cfg!(feature = "validate") {
-            data.unwrap()
-        } else {
-            unsafe { data.unwrap_unchecked() }
-        }
+        if_validate!(data.unwrap(), unsafe { data.unwrap_unchecked() })
     }
 
     unsafe fn data_unchecked_mut(&mut self, row: u8) -> &mut AtomicU64 {
@@ -292,11 +292,7 @@ impl Header {
                 .add(row as usize)
                 .as_mut()
         };
-        if cfg!(feature = "validate") {
-            data.unwrap()
-        } else {
-            unsafe { data.unwrap_unchecked() }
-        }
+        if_validate!(data.unwrap(), unsafe { data.unwrap_unchecked() })
     }
 
     fn key_to_row_col(key: u8) -> (u8, u8) {

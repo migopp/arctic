@@ -40,9 +40,13 @@ where
     const TYPE: node::Type = <H::Packed as Header>::TYPE;
     const CAPACITY: usize = <H::Packed as Header>::CAPACITY;
 
-    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        if_validate!(crate::assert_unique(keys));
+        validate!(keys.len() == edges.len());
+        validate!(keys.len() <= Self::CAPACITY);
+
         let mut node = Box::new(Self::default());
-        let header = ribbit::Packed::<H>::new(keys);
+        let header = unsafe { <ribbit::Packed<H> as Header>::new_unchecked(keys) };
 
         node.header.set_packed(header);
 
@@ -159,11 +163,11 @@ where
     }
 }
 
-pub(crate) trait Header: ribbit::Unpack + core::fmt::Debug {
+pub(super) trait Header: ribbit::Unpack + core::fmt::Debug {
     const TYPE: node::Type;
     const CAPACITY: usize;
 
-    fn new(keys: &[u8]) -> Self;
+    unsafe fn new_unchecked(keys: &[u8]) -> Self;
 
     fn freeze(self) -> Self;
 

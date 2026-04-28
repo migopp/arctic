@@ -28,7 +28,11 @@ where
     const TYPE: node::Type = node::Type::Node256;
     const CAPACITY: usize = 256;
 
-    fn new(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        if_validate!(crate::assert_unique(keys));
+        validate!(keys.len() == edges.len());
+        validate!(keys.len() <= Self::CAPACITY);
+
         let mut node = Box::new(Self::default());
         for (key, edge) in keys.iter().zip(edges) {
             node.0[*key as usize].set_packed(*edge);

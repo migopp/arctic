@@ -44,7 +44,7 @@ impl linear::Header for ribbit::Packed<Header> {
     const CAPACITY: usize = 3;
 
     #[expect(clippy::get_first)]
-    fn new(keys: &[u8]) -> Self {
+    unsafe fn new_unchecked(keys: &[u8]) -> Self {
         let mut buffer = 0u64;
         buffer |= keys.get(0).copied().unwrap_or(0) as u64;
         buffer |= (keys.get(1).copied().unwrap_or(0) as u64) << 16;

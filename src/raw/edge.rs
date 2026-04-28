@@ -19,6 +19,7 @@ use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::stat;
 
+/// A fat pointer to a value or a node.
 #[derive(Copy, Clone, Default, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
 pub(crate) struct Edge<M> {
@@ -102,11 +103,9 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
 
         loop {
             let edge = unsafe { tail.as_mut().insert(byte) };
-            let edge = if cfg!(feature = "validate") {
-                edge.expect("Node3 fits one edge")
-            } else {
-                unsafe { edge.unwrap_unchecked() }
-            };
+            let edge = if_validate!(edge.expect("Node3 fits one edge"), unsafe {
+                edge.unwrap_unchecked()
+            });
 
             let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
 
@@ -228,8 +227,9 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
         F: FnOnce(u64),
     {
         match self.child() {
-            None if cfg!(feature = "validate") => unreachable!(),
-            None => unsafe { core::hint::unreachable_unchecked() },
+            None => if_validate!(unreachable!(), unsafe {
+                core::hint::unreachable_unchecked()
+            }),
             Some(Child::Node(node)) => unsafe { node.deallocate(counter) },
             Some(Child::Value(value)) => deallocate_value(value),
         }
@@ -238,8 +238,9 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     #[inline]
     pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         match self.child() {
-            None if cfg!(feature = "validate") => unreachable!(),
-            None => unsafe { core::hint::unreachable_unchecked() },
+            None => if_validate!(unreachable!(), unsafe {
+                core::hint::unreachable_unchecked()
+            }),
             Some(Child::Node(node)) => unsafe { node.deallocate_recursive(counter) },
             Some(Child::Value(_)) => (),
         }
