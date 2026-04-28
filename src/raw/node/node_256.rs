@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
@@ -28,15 +29,35 @@ where
     const TYPE: node::Type = node::Type::Node256;
     const CAPACITY: usize = 256;
 
-    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> NonNull<Self> {
         if_validate!(crate::assert_unique(keys));
         validate!(keys.len() == edges.len());
         validate!(keys.len() <= Self::CAPACITY);
 
-        let mut node = Box::new(Self::default());
+        #[cfg(not(feature = "opt-node256-mmap"))]
+        let mut node = NonNull::from(Box::leak(Box::new(Self::default())));
+
+        #[cfg(feature = "opt-node256-mmap")]
+        let mut node = unsafe {
+            match libc::mmap64(
+                core::ptr::null_mut(),
+                4096,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_POPULATE,
+                -1,
+                0,
+            ) {
+                libc::MAP_FAILED => panic!("mmap: {}", std::io::Error::last_os_error()),
+                ptr => NonNull::new(ptr)
+                    .expect("mmap should not return null")
+                    .cast::<Node256<_>>(),
+            }
+        };
+
         for (key, edge) in keys.iter().zip(edges) {
-            node.0[*key as usize].set_packed(*edge);
+            unsafe { node.as_mut() }.0[*key as usize].set_packed(*edge);
         }
+
         node
     }
 

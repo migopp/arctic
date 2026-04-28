@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
@@ -40,7 +41,7 @@ where
     const TYPE: node::Type = <H::Packed as Header>::TYPE;
     const CAPACITY: usize = <H::Packed as Header>::CAPACITY;
 
-    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> NonNull<Self> {
         if_validate!(crate::assert_unique(keys));
         validate!(keys.len() == edges.len());
         validate!(keys.len() <= Self::CAPACITY);
@@ -54,7 +55,7 @@ where
             out.set_packed(*r#in);
         }
 
-        node
+        NonNull::from(Box::leak(node))
     }
 
     #[inline]
