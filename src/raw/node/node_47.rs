@@ -1,6 +1,5 @@
 use core::fmt::Debug;
 use core::ops::Shr;
-use core::ptr::NonNull;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
@@ -43,7 +42,7 @@ where
     const TYPE: node::Type = node::Type::Node47;
     const CAPACITY: usize = 47;
 
-    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> NonNull<Self> {
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
         if_validate!(crate::assert_unique(keys));
         validate!(keys.len() == edges.len());
         validate!(keys.len() <= Self::CAPACITY);
@@ -53,8 +52,7 @@ where
         for (out, r#in) in node.edges.iter_mut().zip(edges) {
             out.set_packed(*r#in);
         }
-
-        NonNull::from(Box::leak(node))
+        node
     }
 
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(

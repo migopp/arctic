@@ -59,7 +59,7 @@ where
     /// - `keys.len() <= Self::CAPACITY`
     /// - Keys are unique
     /// - Edges are unique
-    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> NonNull<Self>;
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self>;
 
     /// Returns the number of non-null edges this node contains.
     fn len(&self) -> u8 {
@@ -302,16 +302,19 @@ where
         let len = if grow { len + 1 } else { len };
 
         let (r#type, ptr) = if len < 4 {
-            let ptr = unsafe { Node3::new_unchecked(keys, edges) }.addr();
+            let ptr = NonNull::from(Box::leak(unsafe { Node3::new_unchecked(keys, edges) })).addr();
             (Type::Node3, ptr)
         } else if len < 16 {
-            let ptr = unsafe { Node15::new_unchecked(keys, edges) }.addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node15::new_unchecked(keys, edges) })).addr();
             (Type::Node15, ptr)
         } else if len < 48 {
-            let ptr = unsafe { Node47::new_unchecked(keys, edges) }.addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node47::new_unchecked(keys, edges) })).addr();
             (Type::Node47, ptr)
         } else {
-            let ptr = unsafe { Node256::new_unchecked(keys, edges) }.addr();
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node256::new_unchecked(keys, edges) })).addr();
             (Type::Node256, ptr)
         };
 
@@ -416,18 +419,7 @@ where
             |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
             |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
             |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
-            |node| {
-                #[cfg(not(feature = "opt-node256-mmap"))]
-                drop(unsafe { Box::from_raw(node.as_ptr()) });
-
-                #[cfg(feature = "opt-node256-mmap")]
-                unsafe {
-                    match libc::munmap(node.as_ptr().cast::<core::ffi::c_void>(), 4096) {
-                        0 => (),
-                        _ => panic!("munmap: {}", std::io::Error::last_os_error()),
-                    };
-                }
-            },
+            |node| drop(unsafe { Box::from_raw(node.as_ptr()) }),
         )
     }
 
