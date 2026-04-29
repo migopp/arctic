@@ -99,6 +99,9 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     value: PhantomData<V>,
 }
 
+unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Send for Global<P, V> {}
+unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Sync for Global<P, V> {}
+
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     fn default() -> Self {
         Self {

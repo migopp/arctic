@@ -24,6 +24,9 @@ pub struct Global {
     locals: [UnsafeCell<Option<LocalHandle>>; smr::thread::MAX],
 }
 
+unsafe impl Send for Global {}
+unsafe impl Sync for Global {}
+
 impl Default for Global {
     fn default() -> Self {
         Self {
