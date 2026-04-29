@@ -253,7 +253,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         });
 
         if cfg!(feature = "stat-garbage") {
-            local.garbage -= 1;
+            local.garbage -= freed;
 
             if local.garbage <= -(global.reclaim_threshold as i32) {
                 global
@@ -262,7 +262,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                         let old_count = garbage >> 32;
                         let old_max = garbage as u32;
 
-                        let new_count = old_count - (local.garbage as u64);
+                        let new_count = old_count - ((-local.garbage) as u64);
                         Some(new_count << 32 | (old_max as u64))
                     })
                     .unwrap();
@@ -271,7 +271,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         }
 
         local.snapshot.clear();
-        stat::record(stat::Record::Flush, freed);
+        stat::record(stat::Record::Flush, freed as u64);
     }
 }
 
