@@ -39,6 +39,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Global {
     {
         self.0.enter()
     }
+
+    fn garbage(&self) -> u32 {
+        self.0.garbage()
+    }
 }
 
 impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {
@@ -53,7 +57,7 @@ impl<'g, V: Value> smr::Guard<V> for seize::LocalGuard<'g> {
 
         unsafe {
             self.defer_retire(node.raw().get() as *mut (), |ptr, _| {
-                node::Ptr::<M>::new_unchecked(ptr as u64).deallocate(stat::Counter::FreeRetire)
+                node::Ptr::<M>::from_raw_unchecked(ptr as u64).deallocate(stat::Counter::FreeRetire)
             })
         }
     }

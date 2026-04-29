@@ -34,16 +34,34 @@ use crate::raw::iter::Unbound;
 use crate::stat;
 use linear::Linear;
 
-pub(crate) unsafe trait Node<M>: Default
+/// A node is a partial mapping from `u8` to [`crate::raw::Edge`].
+///
+/// # Safety
+///
+/// Implementations must ensure that all returned key indices are within
+/// `self.edges()` and `self.edges_mut()`.
+unsafe trait Node<M>: Default
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: Kind;
-    const LEN: usize;
+    /// A runtime representation of the node type.
+    const TYPE: Type;
 
-    type Grow: Node<M>;
-    type Shrink: Node<M>;
+    /// The maximum number of entries this node can contain.
+    const CAPACITY: usize;
 
+    /// Returns a new node populated with `keys` and `edges`.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the following:
+    /// - `keys.len() == edges.len()`
+    /// - `keys.len() <= Self::CAPACITY`
+    /// - Keys are unique
+    /// - Edges are unique
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self>;
+
+    /// Returns the number of non-null edges this node contains.
     fn len(&self) -> u8 {
         self.edges()
             .iter()
@@ -51,10 +69,12 @@ where
             .count() as u8
     }
 
+    /// Returns a sorted iterator over this node's keys.
     fn keys<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> KeyIter;
 
-    fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<L, U, M> {
-        unsafe { NodeIter::new(lower, upper, self.keys(lower, upper), self.edges()) }
+    /// Returns a sorted iterator over this node's keys and edges.
+    fn entries<L: iter::Lower, U: iter::Upper>(&self, lower: L, upper: U) -> NodeIter<M> {
+        unsafe { NodeIter::new(self.keys(lower, upper), self.edges()) }
     }
 
     fn edges(&self) -> &[Atomic<Edge<M>>];
@@ -70,11 +90,9 @@ where
     fn get(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.get_key(key)? as usize;
         let edges = self.edges();
-        Some(if cfg!(feature = "validate") {
-            &edges[index]
-        } else {
-            unsafe { edges.get_unchecked(index) }
-        })
+        Some(if_validate!(&edges[index], unsafe {
+            edges.get_unchecked(index)
+        }))
     }
 
     /// # Safety
@@ -86,11 +104,9 @@ where
     fn get_or_insert(&self, key: u8) -> Option<&Atomic<Edge<M>>> {
         let index = self.get_or_insert_key(key)? as usize;
         let edges = self.edges();
-        Some(if cfg!(feature = "validate") {
-            &edges[index]
-        } else {
-            unsafe { edges.get_unchecked(index) }
-        })
+        Some(if_validate!(&edges[index], unsafe {
+            edges.get_unchecked(index)
+        }))
     }
 
     /// # Safety
@@ -99,21 +115,18 @@ where
     fn insert_key(&mut self, key: u8) -> Option<u8>;
 
     #[inline]
+    #[expect(unused)]
     fn insert(&mut self, key: u8) -> Option<&mut Atomic<Edge<M>>> {
         let index = self.insert_key(key)? as usize;
         let edges = self.edges_mut();
-        Some(if cfg!(feature = "validate") {
-            &mut edges[index]
-        } else {
-            unsafe { edges.get_unchecked_mut(index) }
-        })
+        Some(if_validate!(&mut edges[index], unsafe {
+            edges.get_unchecked_mut(index)
+        }))
     }
 
-    fn freeze(&self) {
-        let len = self.freeze_header();
-        self.edges().iter().take(len).for_each(Edge::freeze)
-    }
-
+    /// Freeze this node's header (i.e., its non-edge metadata).
+    ///
+    /// Returns the number of edges that must be frozen.
     fn freeze_header(&self) -> usize;
 
     fn replace<const LEN: usize, const FREEZE: bool>(
@@ -122,7 +135,7 @@ where
     ) -> (Smo, ribbit::Packed<Edge<M>>) {
         const {
             // HACK: can't use generic associated type as array length
-            assert!(Self::LEN == LEN);
+            assert!(Self::CAPACITY == LEN);
         }
 
         // Caller must not call replace if doomed to fail CAS
@@ -135,7 +148,8 @@ where
         let mut edges = [Edge::DEFAULT; LEN];
 
         if FREEZE {
-            self.freeze();
+            let len = self.freeze_header();
+            self.edges().iter().take(len).for_each(Edge::freeze)
         }
 
         let len = self
@@ -191,34 +205,22 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
         }
     }
 
-    let keys = keys.iter().copied();
-    let edges = edges.iter().copied();
-
-    let edge = if len == N::LEN {
-        unsafe { Edge::new_node_unchecked::<N::Grow, _, _>(meta, keys, edges) }
-    } else if len < 4 {
-        unsafe { Edge::new_node_unchecked::<Node3<_>, _, _>(meta, keys, edges) }
-    } else if len < 16 {
-        unsafe { Edge::new_node_unchecked::<Node15<_>, _, _>(meta, keys, edges) }
-    } else if len < 48 {
-        unsafe { Edge::new_node_unchecked::<Node47<_>, _, _>(meta, keys, edges) }
-    } else {
-        unsafe { Edge::new_node_unchecked::<Node256<_>, _, _>(meta, keys, edges) }
-    };
-
+    // Heuristic: assume a full node should be expanded
+    let node = unsafe { Ptr::new_unchecked(len == N::CAPACITY, keys, edges) };
+    let edge = Edge::new_node(meta.key(), node);
     (Smo::ReplaceNode, edge)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ribbit::Pack)]
-#[ribbit(size = 2, eq, debug, packed(rename = "KindPacked"))]
-pub(crate) enum Kind {
+#[ribbit(size = 2, eq, debug, packed(rename = "TypePacked"))]
+pub(crate) enum Type {
     Node3 = 0,
     Node15 = 1,
     Node47 = 2,
     Node256 = 3,
 }
 
-impl Default for Kind {
+impl Default for Type {
     fn default() -> Self {
         Self::Node3
     }
@@ -234,20 +236,20 @@ impl Default for Kind {
 // exclusive closures as parameters. We sometimes need $node3, $node15, $node47, and
 // $node256 to borrow the same data mutably.
 macro_rules! dispatch {
-    ($kind:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
+    ($type:expr, $node3:expr, $node15:expr, $node47:expr, $node256:expr $(,)?) => {{
         if cfg!(feature = "opt-no-dispatch") {
-            use crate::raw::node::Kind;
+            use crate::raw::node::Type;
             use ribbit::Unpack as _;
-            match $kind.unpack() {
-                Kind::Node3 => $node3,
-                Kind::Node15 => $node15,
-                Kind::Node47 => $node47,
-                Kind::Node256 => $node256,
+            match $type.unpack() {
+                Type::Node3 => $node3,
+                Type::Node15 => $node15,
+                Type::Node47 => $node47,
+                Type::Node256 => $node256,
             }
         } else {
-            let kind = $kind.value.value();
-            let hi = kind & 0b10;
-            let lo = kind & 0b01;
+            let r#type = $type.value.value();
+            let hi = r#type & 0b10;
+            let lo = r#type & 0b01;
 
             if hi == 0 {
                 if lo == 0 { $node3 } else { $node15 }
@@ -265,7 +267,7 @@ pub(super) use dispatch;
 #[ribbit(size = 64, packed(rename = PtrPacked), eq, nonzero)]
 pub(crate) struct Ptr<M> {
     #[ribbit(size = 2, get(vis = "pub(crate)"))]
-    kind: Kind,
+    r#type: Type,
 
     #[ribbit(with(skip))]
     _placeholder: NonZeroU32,
@@ -289,37 +291,56 @@ impl<M> Ptr<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    #[inline]
-    pub(super) fn new<N: Node<M>>(node: Box<N>) -> ribbit::Packed<Self> {
-        let ptr = NonNull::from(Box::leak(node));
-        let kind = N::KIND as u64;
+    unsafe fn new_unchecked(
+        grow: bool,
+        keys: &[u8],
+        edges: &[ribbit::Packed<Edge<M>>],
+    ) -> ribbit::Packed<Self> {
+        validate_eq!(keys.len(), edges.len());
 
-        validate_eq!(ptr.addr().get() as u64 & Self::MASK_TAG, 0);
+        let len = keys.len();
+        let len = if grow { len + 1 } else { len };
 
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                kind | ptr.addr().get() as u64,
-            ))
-        }
-    }
-
-    #[inline]
-    pub(super) fn new_ptr(ptr: NonNull<Node3<M>>) -> ribbit::Packed<Self> {
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
-                Node3::<M>::KIND as u64 | ptr.addr().get() as u64,
-            ))
-        }
-    }
-
-    #[inline]
-    pub(crate) unsafe fn new_unchecked(raw: u64) -> ribbit::Packed<Self> {
-        let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
-        if cfg!(feature = "validate") {
-            node.unwrap()
+        let (r#type, ptr) = if len < 4 {
+            let ptr = NonNull::from(Box::leak(unsafe { Node3::new_unchecked(keys, edges) })).addr();
+            (Type::Node3, ptr)
+        } else if len < 16 {
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node15::new_unchecked(keys, edges) })).addr();
+            (Type::Node15, ptr)
+        } else if len < 48 {
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node47::new_unchecked(keys, edges) })).addr();
+            (Type::Node47, ptr)
         } else {
-            unsafe { node.unwrap_unchecked() }
+            let ptr =
+                NonNull::from(Box::leak(unsafe { Node256::new_unchecked(keys, edges) })).addr();
+            (Type::Node256, ptr)
+        };
+
+        validate_eq!(ptr.get() as u64 & Self::MASK_TAG, 0);
+
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
+                r#type as u64 | ptr.get() as u64,
+            ))
         }
+    }
+
+    #[inline]
+    pub(super) fn new_node_3(node: Box<Node3<M>>) -> ribbit::Packed<Self> {
+        let ptr = NonNull::from(Box::leak(node));
+        unsafe {
+            ribbit::Packed::<Self>::new_unchecked(NonZeroU64::new_unchecked(
+                Node3::<M>::TYPE as u64 | ptr.addr().get() as u64,
+            ))
+        }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn from_raw_unchecked(raw: u64) -> ribbit::Packed<Self> {
+        let node = unsafe { ribbit::Packed::<Option<Ptr<M>>>::new_unchecked(raw) };
+        if_validate!(node.unwrap(), unsafe { node.unwrap_unchecked() })
     }
 }
 
@@ -380,7 +401,7 @@ where
         self,
         lower: L,
         upper: U,
-    ) -> NodeIter<'g, L, U, M> {
+    ) -> NodeIter<'g, M> {
         self.dispatch(
             |node| unsafe { node.as_ref() }.entries(lower, upper),
             |node| unsafe { node.as_ref() }.entries(lower, upper),
@@ -408,7 +429,7 @@ where
     pub(crate) unsafe fn deallocate_recursive(self, counter: stat::Counter) {
         stat::increment(counter);
 
-        validate_eq!(self.kind(), Kind::Node3.pack());
+        validate_eq!(self.r#type(), Type::Node3.pack());
 
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         let mut node = unsafe { Box::from_raw(Self::as_ptr::<Node3<M>>(ptr).as_ptr()) };
@@ -437,7 +458,7 @@ where
     {
         let ptr = self.value.get() & Ptr::<M>::MASK_PTR;
         dispatch!(
-            self.kind(),
+            self.r#type(),
             node_3(unsafe { Self::as_ptr(ptr) }),
             node_15(unsafe { Self::as_ptr(ptr) }),
             node_47(unsafe { Self::as_ptr(ptr) }),
@@ -451,18 +472,14 @@ where
         N: Node<M>,
     {
         let node = NonNull::new(ptr as *mut N);
-        if cfg!(feature = "validate") {
-            node.unwrap()
-        } else {
-            unsafe { node.unwrap_unchecked() }
-        }
+        if_validate!(node.unwrap(), unsafe { node.unwrap_unchecked() })
     }
 }
 
 impl<M> Debug for PtrPacked<M> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Node")
-            .field("kind", &self.kind())
+            .field("type", &self.r#type())
             .field("ptr", &(self.value.get() & Ptr::<M>::MASK_PTR))
             .finish()
     }

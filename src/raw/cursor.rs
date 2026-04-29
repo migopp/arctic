@@ -278,9 +278,15 @@ where
         let new = match old.meta().expand(key) {
             Err(_) => Edge::new_path(reader, value),
             Ok((start, middle, end)) => {
-                let _ = reader.read(start.len());
+                let start_ = reader.read(start.len());
+                validate_eq!(start, start_);
+
                 let byte = unsafe { reader.next_unchecked() };
-                Edge::new_node::<Node3<R::Edge>, _, _>(
+                validate_ne!(middle, byte);
+
+                // NOTE: must put new allocation first because
+                // `deallocate_recursive` recurses on first edge
+                Node3::new_expand(
                     start,
                     [byte, middle],
                     [Edge::new_path(reader, value), old.with_meta(end)],

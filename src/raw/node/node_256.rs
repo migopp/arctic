@@ -2,11 +2,10 @@ use core::fmt::Debug;
 
 use ribbit::Atomic;
 
-use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
-use crate::raw::node::Node47;
+use crate::raw::node::Node;
 
 #[repr(C, align(4096))]
 pub(crate) struct Node256<M: ribbit::Pack>([Atomic<Edge<M>>; 256]);
@@ -26,11 +25,20 @@ unsafe impl<M> Node<M> for Node256<M>
 where
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = node::Kind::Node256;
-    const LEN: usize = 256;
+    const TYPE: node::Type = node::Type::Node256;
+    const CAPACITY: usize = 256;
 
-    type Grow = Node256<M>;
-    type Shrink = Node47<M>;
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        if_validate!(crate::assert_unique(keys));
+        validate!(keys.len() == edges.len());
+        validate!(keys.len() <= Self::CAPACITY);
+
+        let mut node = Box::new(Self::default());
+        for (key, edge) in keys.iter().zip(edges) {
+            node.0[*key as usize].set_packed(*edge);
+        }
+        node
+    }
 
     #[inline]
     fn keys<L: node::iter::Lower, U: node::iter::Upper>(
@@ -68,7 +76,7 @@ where
 
     #[inline]
     fn freeze_header(&self) -> usize {
-        Self::LEN
+        Self::CAPACITY
     }
 }
 
@@ -97,7 +105,7 @@ pub(crate) struct KeyIter {
 #[repr(u32)]
 #[derive(Copy, Clone)]
 enum Tag {
-    Node256 = (node::Kind::Node256 as u32) << 30,
+    Node256 = (node::Type::Node256 as u32) << 30,
 }
 
 impl KeyIter {

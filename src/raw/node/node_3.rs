@@ -1,14 +1,17 @@
+use core::ops::ControlFlow;
+use core::ptr::NonNull;
+
 use ribbit::u2;
 use ribbit::u48;
 
+use crate::raw::Edge;
 use crate::raw::edge;
 use crate::raw::node;
+use crate::raw::node::Linear;
 use crate::raw::node::linear;
 use crate::raw::node::simd;
 
-use super::Node15;
-
-pub(crate) type Node3<C> = super::Linear<3, Header, C>;
+pub(crate) type Node3<M> = Linear<3, Header, M>;
 
 const_assert_size_align!(Node3::<()>, 64, 64);
 
@@ -34,17 +37,17 @@ impl Default for HeaderPacked {
 }
 
 impl linear::Header for ribbit::Packed<Header> {
-    const KIND: node::Kind = node::Kind::Node3;
-    const LEN: usize = 3;
+    const TYPE: node::Type = node::Type::Node3;
+    const CAPACITY: usize = 3;
 
-    type Grow<M>
-        = Node15<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-    type Shrink<M>
-        = Node3<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
+    #[expect(clippy::get_first)]
+    unsafe fn new_unchecked(keys: &[u8]) -> Self {
+        let mut buffer = 0u64;
+        buffer |= keys.get(0).copied().unwrap_or(0) as u64;
+        buffer |= (keys.get(1).copied().unwrap_or(0) as u64) << 16;
+        buffer |= (keys.get(2).copied().unwrap_or(0) as u64) << 32;
+        Self::new(u48::new(buffer), false, u2::new(keys.len() as u8))
+    }
 
     #[inline]
     fn freeze(self) -> Self {
@@ -76,7 +79,7 @@ impl linear::Header for ribbit::Packed<Header> {
             return Ok(index);
         }
 
-        if len >= Self::LEN as u8 || self.is_frozen() {
+        if len >= Self::CAPACITY as u8 || self.is_frozen() {
             return Err(None);
         }
 
@@ -96,5 +99,71 @@ impl linear::Header for ribbit::Packed<Header> {
         let len = self.len();
         let iter = node::simd::compress_3(self.value, len, lower, upper);
         node::KeyIter::new_3(iter)
+    }
+}
+
+impl<M: ribbit::Pack<Packed: edge::Meta>> Linear<3, Header, M> {
+    pub(crate) fn new_expand(
+        key: <M::Packed as edge::Meta>::Key,
+        keys: [u8; 2],
+        edges: [ribbit::Packed<Edge<M>>; 2],
+    ) -> ribbit::Packed<Edge<M>> {
+        let mut node = Box::new(Self::default());
+
+        node.header.set_packed(ribbit::Packed::<Header>::new(
+            u48::new(keys[0] as u64 | ((keys[1] as u64) << 16)),
+            false,
+            const { u2::new(2) },
+        ));
+        node.edges[0].set_packed(edges[0]);
+        node.edges[1].set_packed(edges[1]);
+
+        Edge::new_node(key, node::Ptr::new_node_3(node))
+    }
+
+    pub(crate) fn new_path<F>(
+        key: <M::Packed as edge::Meta>::Key,
+        byte: u8,
+        mut next: F,
+    ) -> ribbit::Packed<Edge<M>>
+    where
+        F: FnMut() -> ControlFlow<
+            (<M::Packed as edge::Meta>::Key, u64),
+            (<M::Packed as edge::Meta>::Key, u8),
+        >,
+    {
+        let mut head = Box::new(Self::default());
+        head.header.set_packed(ribbit::Packed::<Header>::new(
+            u48::new(byte as u64),
+            false,
+            const { u2::new(1) },
+        ));
+
+        let mut tail = NonNull::from(&head.as_ref().edges[0]);
+
+        loop {
+            match next() {
+                ControlFlow::Continue((key, byte)) => {
+                    let mut node = Box::new(Self::default());
+                    node.header.set_packed(ribbit::Packed::<Header>::new(
+                        u48::new(byte as u64),
+                        false,
+                        const { u2::new(1) },
+                    ));
+
+                    let next = NonNull::from(&node.edges[0]);
+
+                    unsafe { tail.as_mut() }
+                        .set_packed(Edge::<M>::new_node(key, node::Ptr::new_node_3(node)));
+                    tail = next;
+                }
+                ControlFlow::Break((key, value)) => {
+                    unsafe { tail.as_mut() }.set_packed(Edge::<M>::new_value(key, value));
+                    break;
+                }
+            }
+        }
+
+        Edge::<M>::new_node(key, node::Ptr::new_node_3(head))
     }
 }

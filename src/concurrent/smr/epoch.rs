@@ -1,4 +1,5 @@
 use core::cell::UnsafeCell;
+use core::sync::atomic::Ordering;
 
 use crossbeam_epoch::LocalHandle;
 
@@ -22,6 +23,9 @@ pub struct Global {
     collector: crossbeam_epoch::Collector,
     locals: [UnsafeCell<Option<LocalHandle>>; smr::thread::MAX],
 }
+
+unsafe impl Send for Global {}
+unsafe impl Sync for Global {}
 
 impl Default for Global {
     fn default() -> Self {
@@ -67,6 +71,11 @@ impl<P: ribbit::Pack<Packed: smr::hazard::Prefix>, V: Value> smr::Global<P, V> f
         V: 'g,
     {
         self.local().pin()
+    }
+
+    fn garbage(&self) -> u32 {
+        let garbage = crossbeam_epoch::GLOBAL_GARBAGE_COUNT.load(Ordering::Relaxed);
+        garbage as u32
     }
 }
 

@@ -1,14 +1,17 @@
-//! This module contains the types defining the structure of the tree
-//! ([`crate::raw::edge`] and [`crate::raw::node`]) and (b) the core
-//! iteration ([`crate::raw::iter`]) and traversal ([`crate::raw::cursor`]) logic.
-//! It is "raw" with respect to safe memory reclamation ([`crate::smr`])
-//! and value types ([`crate::value`]): users of this module must (a) ensure
-//! that memory is not reclaimed while iterating or traversing the tree,
-//! and (b) provide meaning to the raw u64 values.
+//! This module contains:
+//! - The structure of the tree ([`crate::raw::edge`], [`crate::raw::node`], [`crate::raw::key`])
+//! - Range iteration over the tree ([`crate::raw::iter`])
+//! - Point traversal over the tree ([`crate::raw::cursor`])
 //!
-//! This separation has two benefits:
-//! - Reduced compilation time and code duplication from monomorphization (esp. of value types).
-//! - Reuse of iteration and traversal code between the concurrent and sequential maps.
+//! This module is "raw" with respect to:
+//! - Safe memory reclamation ([`crate::concurrent::smr`])
+//! - Mutable vs. immutable access
+//! - Value types ([`crate::sequential::Value`], [`crate::concurrent::Value`])
+//!
+//! The purpose of this module is to re-use as much code as possible between the
+//! sequential ([`crate::sequential::Map`]) and concurrent ([`crate::concurrent::Map`])
+//! tree implementations, and between instantiations of these trees with different
+//! value types.
 
 pub(crate) mod cursor;
 pub(crate) mod edge;
@@ -19,7 +22,6 @@ pub(crate) mod node;
 pub(crate) use cursor::Cursor;
 pub(crate) use edge::Edge;
 pub use key::Key;
-pub(crate) use node::Node;
 
 pub(crate) struct Frozen;
 

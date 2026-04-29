@@ -87,10 +87,10 @@ fn compress_3_fallback<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
         .count();
 
     buffer[..len].sort_unstable();
-    if cfg!(feature = "validate") {
+    if_validate!(
         // HACK: AVX2 implementation pads with 0xFF bytes
-        buffer[len..].fill(0xFF_FF);
-    }
+        buffer[len..].fill(0xFF_FF)
+    );
     let buffer = unsafe { core::mem::transmute::<[u16; 3], [KeyIndex; 3]>(buffer) };
     KeyIter3::new_3(buffer, len as u8)
 }

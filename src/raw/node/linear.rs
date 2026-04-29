@@ -3,10 +3,10 @@ use core::sync::atomic::Ordering;
 
 use ribbit::Atomic;
 
-use crate::raw::Node;
 use crate::raw::edge;
 use crate::raw::node;
 use crate::raw::node::Edge;
+use crate::raw::node::Node;
 
 #[repr(C, align(64))]
 pub(crate) struct Linear<const LEN: usize, H: ribbit::Pack, M: ribbit::Pack>
@@ -37,11 +37,25 @@ where
     <H::Packed as ribbit::Unpack>::Loose: ribbit::atomic::Loose,
     M: ribbit::Pack<Packed: edge::Meta>,
 {
-    const KIND: node::Kind = <H::Packed as Header>::KIND;
-    const LEN: usize = <H::Packed as Header>::LEN;
+    const TYPE: node::Type = <H::Packed as Header>::TYPE;
+    const CAPACITY: usize = <H::Packed as Header>::CAPACITY;
 
-    type Grow = <H::Packed as Header>::Grow<M>;
-    type Shrink = <H::Packed as Header>::Shrink<M>;
+    unsafe fn new_unchecked(keys: &[u8], edges: &[ribbit::Packed<Edge<M>>]) -> Box<Self> {
+        if_validate!(crate::assert_unique(keys));
+        validate!(keys.len() == edges.len());
+        validate!(keys.len() <= Self::CAPACITY);
+
+        let mut node = Box::new(Self::default());
+        let header = unsafe { <ribbit::Packed<H> as Header>::new_unchecked(keys) };
+
+        node.header.set_packed(header);
+
+        for (out, r#in) in node.edges.iter_mut().zip(edges) {
+            out.set_packed(*r#in);
+        }
+
+        node
+    }
 
     #[inline]
     fn keys<L: crate::raw::node::Lower, U: crate::raw::node::Upper>(
@@ -149,17 +163,11 @@ where
     }
 }
 
-pub(crate) trait Header: ribbit::Unpack {
-    const KIND: node::Kind;
-    const LEN: usize;
+pub(super) trait Header: ribbit::Unpack + core::fmt::Debug {
+    const TYPE: node::Type;
+    const CAPACITY: usize;
 
-    type Grow<M>: Node<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
-
-    type Shrink<M>: Node<M>
-    where
-        M: ribbit::Pack<Packed: edge::Meta>;
+    unsafe fn new_unchecked(keys: &[u8]) -> Self;
 
     fn freeze(self) -> Self;
 
@@ -184,13 +192,6 @@ pub(super) struct KeyIter3 {
     head: u8,
     pub(super) entries: [node::iter::KeyIndex; 3],
     pub(super) tail: u8,
-}
-
-impl KeyIter3 {
-    #[inline]
-    pub(super) fn try_into_single(self) -> Option<node::iter::KeyIndex> {
-        (self.tail == 1).then_some(self.entries[0])
-    }
 }
 
 const _: [(); 8] = [(); core::mem::size_of::<KeyIter3>()];

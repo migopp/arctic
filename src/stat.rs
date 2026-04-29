@@ -6,6 +6,7 @@ use ribbit::Unpack as _;
 use crate::Key;
 use crate::Value;
 use crate::concurrent::Smr;
+use crate::concurrent::smr::Global as _;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
@@ -44,11 +45,11 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
                     depth.record(depth_ as u64);
                 }
                 edge::Child::Node(node) => {
-                    let histogram = match node.kind().unpack() {
-                        node::Kind::Node3 => &mut node_3,
-                        node::Kind::Node15 => &mut node_15,
-                        node::Kind::Node47 => &mut node_47,
-                        node::Kind::Node256 => &mut node_256,
+                    let histogram = match node.r#type().unpack() {
+                        node::Type::Node3 => &mut node_3,
+                        node::Type::Node15 => &mut node_15,
+                        node::Type::Node47 => &mut node_47,
+                        node::Type::Node256 => &mut node_256,
                     };
 
                     let children =
@@ -72,6 +73,7 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
         node_15,
         node_47,
         node_256,
+        garbage: map.smr().garbage(),
     }
 }
 
@@ -118,6 +120,7 @@ pub struct Process {
     node_15: Histogram,
     node_47: Histogram,
     node_256: Histogram,
+    garbage: u32,
 }
 
 #[derive(Copy, Clone)]

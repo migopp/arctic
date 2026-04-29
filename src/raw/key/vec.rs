@@ -56,20 +56,16 @@ impl Key for String {
 
     #[inline]
     unsafe fn borrow_writer_unchecked(writer: &Self::Write) -> &Self::Borrowed {
-        if cfg!(feature = "validate") {
-            core::str::from_utf8(&writer.0).unwrap()
-        } else {
-            unsafe { core::str::from_utf8_unchecked(&writer.0) }
-        }
+        if_validate!(core::str::from_utf8(&writer.0).unwrap(), unsafe {
+            core::str::from_utf8_unchecked(&writer.0)
+        })
     }
 
     #[inline]
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
-        if cfg!(feature = "validate") {
-            String::from_utf8(writer.0).unwrap()
-        } else {
-            unsafe { String::from_utf8_unchecked(writer.0) }
-        }
+        if_validate!(String::from_utf8(writer.0).unwrap(), unsafe {
+            String::from_utf8_unchecked(writer.0)
+        })
     }
 
     #[inline]
@@ -189,7 +185,7 @@ impl<const N: usize> key::Read for Reader<'_, N> {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
 pub struct Writer(pub(super) Vec<u8>);
 
 impl<'k> key::Write<Reader<'k, { usize::MAX }>> for Writer {

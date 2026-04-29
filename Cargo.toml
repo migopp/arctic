@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 stat = ["dep:serde", "dep:base64", "dep:hdrhistogram"]
+stat-garbage = ["crossbeam-epoch/stat-garbage", "seize/stat-garbage"]
 opt-no-node3-get = []
 opt-no-node3-compress = []
 opt-no-node3-iter = []
@@ -39,15 +40,20 @@ crossbeam-queue = "0.3.12"
 hdrhistogram = { version = "7.5.4", optional = true, default-features = false, features = ["serialization"] }
 libc = { version = "0.2.176", optional = true }
 ribbit = { git = "https://github.com/nwtnni/ribbit.git", features = ["atomic-u128"] }
-seize = { git = "https://github.com/migopp/seize.git", default-features = false, features = ["libc"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 
 # https://github.com/kaist-cp/smr-benchmark/blob/00b4e4d06d9b91f289b4644163f0cac0660d4af7/Cargo.toml#L42-L45
 [dependencies.crossbeam-epoch]
-git = "https://github.com/kaist-cp/crossbeam"
+git = "https://github.com/nwtnni/crossbeam.git"
 branch = "smr-benchmark"
 # version = "0.9.18"
 # optional = true
+
+[dependencies.seize]
+git = "https://github.com/migopp/seize.git"
+default-features = false
+features = ["libc"]
+# version = "0.5.1"
 
 [dev-dependencies]
 proptest = "1.9.0"

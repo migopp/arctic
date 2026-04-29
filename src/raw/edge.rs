@@ -7,6 +7,7 @@ use ribbit::u6;
 
 use core::fmt::Debug;
 use core::ops::Add;
+use core::ops::ControlFlow;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
 
@@ -16,10 +17,10 @@ use ribbit::OptionExt as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::node;
-use crate::raw::node::Node as _;
 use crate::raw::node::Node3;
 use crate::stat;
 
+/// A fat pointer to a value or a node.
 #[derive(Copy, Clone, Default, ribbit::Pack)]
 #[ribbit(size = 128, packed(rename = EdgePacked))]
 pub(crate) struct Edge<M> {
@@ -83,91 +84,23 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
             crate::cold();
         }
 
-        Self::new_path_recursive(reader, key, byte, value)
-    }
-
-    fn new_path_recursive<R>(
-        mut reader: R,
-        key: <<R::Edge as ribbit::Pack>::Packed as Meta>::Key,
-        mut byte: u8,
-        value: u64,
-    ) -> ribbit::Packed<Self>
-    where
-        R: key::Read<Edge = M>,
-    {
-        let mut tail = NonNull::from(Box::leak(Box::new(Node3::default())));
-        let head = ribbit::Packed::<Self>::new(
-            <M::Packed as Meta>::new(key, false),
-            node::Ptr::new_ptr(tail).raw().get(),
-        );
-
-        loop {
-            let edge = unsafe { tail.as_mut().insert(byte) };
-            let edge = if cfg!(feature = "validate") {
-                edge.expect("Node3 fits one edge")
-            } else {
-                unsafe { edge.unwrap_unchecked() }
-            };
-
+        Node3::new_path(key, byte, || {
             let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
-
-            let Some(next_byte) = reader.next() else {
-                edge.set_packed(Self::new_value(key, value));
-                return head;
-            };
-            byte = next_byte;
-
-            let next_node = NonNull::from(Box::leak(Box::new(Node3::default())));
-            edge.set_packed(ribbit::Packed::<Self>::new(
-                <M::Packed as Meta>::new(key, false),
-                node::Ptr::new_ptr(next_node).raw().get(),
-            ));
-            tail = next_node;
-        }
+            match reader.next() {
+                Some(byte) => ControlFlow::Continue((key, byte)),
+                None => ControlFlow::Break((key, value)),
+            }
+        })
     }
 
-    #[cold]
-    pub(crate) fn new_node<N, K, E>(
+    pub(super) fn new_node(
         key: <<M as ribbit::Pack>::Packed as Meta>::Key,
-        keys: K,
-        edges: E,
-    ) -> ribbit::Packed<Self>
-    where
-        N: node::Node<M>,
-        K: IntoIterator<Item = u8>,
-        E: IntoIterator<Item = ribbit::Packed<Edge<M>>>,
-    {
-        unsafe {
-            Self::new_node_unchecked::<N, K, E>(<M::Packed as Meta>::new(key, false), keys, edges)
-        }
+        node: ribbit::Packed<node::Ptr<M>>,
+    ) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(<M::Packed as Meta>::new(key, false), node.raw().get())
     }
 
-    #[cold]
-    pub(crate) unsafe fn new_node_unchecked<N, K, E>(
-        meta: ribbit::Packed<M>,
-        keys: K,
-        edges: E,
-    ) -> ribbit::Packed<Self>
-    where
-        N: node::Node<M>,
-        K: IntoIterator<Item = u8>,
-        E: IntoIterator<Item = ribbit::Packed<Edge<M>>>,
-    {
-        validate!(!meta.is_frozen());
-        validate!(!meta.is_value());
-
-        let mut node = Box::new(N::default());
-
-        for (key, edge) in keys.into_iter().zip(edges) {
-            node.insert(key)
-                .expect("Node can fit all edges")
-                .set_packed(edge);
-        }
-
-        ribbit::Packed::<Self>::new(meta, node::Ptr::new(node).raw().get())
-    }
-
-    fn new_value(
+    pub(super) fn new_value(
         key: <<M as ribbit::Pack>::Packed as Meta>::Key,
         value: u64,
     ) -> ribbit::Packed<Self> {
@@ -263,8 +196,9 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
         F: FnOnce(u64),
     {
         match self.child() {
-            None if cfg!(feature = "validate") => unreachable!(),
-            None => unsafe { core::hint::unreachable_unchecked() },
+            None => if_validate!(unreachable!(), unsafe {
+                core::hint::unreachable_unchecked()
+            }),
             Some(Child::Node(node)) => unsafe { node.deallocate(counter) },
             Some(Child::Value(value)) => deallocate_value(value),
         }
@@ -273,8 +207,9 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     #[inline]
     pub(crate) unsafe fn deallocate_recursive_unchecked(self, counter: stat::Counter) {
         match self.child() {
-            None if cfg!(feature = "validate") => unreachable!(),
-            None => unsafe { core::hint::unreachable_unchecked() },
+            None => if_validate!(unreachable!(), unsafe {
+                core::hint::unreachable_unchecked()
+            }),
             Some(Child::Node(node)) => unsafe { node.deallocate_recursive(counter) },
             Some(Child::Value(_)) => (),
         }

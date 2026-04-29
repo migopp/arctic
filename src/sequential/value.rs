@@ -37,21 +37,13 @@ unsafe impl<T: Sized> Value for Box<T> {
     #[inline]
     unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
         let borrow = unsafe { (*raw as *const T).as_ref() };
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
+        if_validate!(borrow.unwrap(), unsafe { borrow.unwrap_unchecked() })
     }
 
     #[inline]
     unsafe fn target_mut_from_raw(raw: &mut u64) -> &mut Self::Target {
         let borrow = unsafe { (*raw as *mut T).as_mut() };
-        if cfg!(feature = "validate") {
-            borrow.unwrap()
-        } else {
-            unsafe { borrow.unwrap_unchecked() }
-        }
+        if_validate!(borrow.unwrap(), unsafe { borrow.unwrap_unchecked() })
     }
 }
 

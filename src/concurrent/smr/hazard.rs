@@ -65,6 +65,7 @@ pub(crate) use prefix::Prefix;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 use crate::concurrent::Smr;
@@ -94,6 +95,8 @@ impl Smr for Hazard {
 struct Cache<T>(T);
 
 pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
+    garbage: AtomicU64,
+
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
     #[cfg(feature = "opt-hazard-epochs")]
@@ -107,6 +110,9 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     condemned: ArrayQueue<Batch<P, V>>,
     value: PhantomData<V>,
 }
+
+unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Send for Global<P, V> {}
+unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Sync for Global<P, V> {}
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     #[cfg(feature = "opt-hazard-epochs")]
@@ -159,6 +165,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     #[cfg(not(any(feature = "opt-hazard-epochs", feature = "opt-batch")))]
     fn default() -> Self {
         Self {
+            garbage: AtomicU64::new(0),
             hazards: core::array::from_fn(|_| {
                 Cache(ribbit::Atomic::new_packed(
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
@@ -166,6 +173,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
@@ -257,6 +265,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
             global: self,
         }
     }
+
+    fn garbage(&self) -> u32 {
+        self.garbage.load(Ordering::Relaxed) as u32
+    }
 }
 
 #[cfg(feature = "opt-hazard-epochs")]
@@ -267,6 +279,7 @@ type Retired<P> = (ribbit::Packed<P>, u64);
 
 #[repr(align(64))]
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
+    garbage: i32,
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: Vec<Retired<P>>,
@@ -378,6 +391,24 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             false
         });
 
+        if cfg!(feature = "stat-garbage") {
+            local.garbage -= freed;
+
+            if local.garbage <= -(global.reclaim_threshold as i32) {
+                global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count - ((-local.garbage) as u64);
+                        Some(new_count << 32 | (old_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
+
         #[cfg(feature = "opt-batch")]
         {
             // First, unconditionally push batch to the condemned queue.
@@ -403,7 +434,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         }
 
         local.snapshot.clear();
-        stat::record(stat::Record::Flush, freed);
+        stat::record(stat::Record::Flush, freed as u64);
     }
 }
 
@@ -423,13 +454,31 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
     ) {
         stat::increment(stat::Counter::Retire);
 
-        let local = unsafe { &mut *self.local.get() };
-
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
 
+        let local = unsafe { &mut *self.local.get() };
+
+        if cfg!(feature = "stat-garbage") {
+            local.garbage += 1;
+
+            if local.garbage >= self.global.reclaim_threshold as i32 {
+                self.global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count + local.garbage as u64;
+                        let new_max = old_max.max(new_count as u32);
+                        Some(new_count << 32 | (new_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
         #[cfg(not(feature = "opt-hazard-epochs"))]
         {
             local.retired.push((prefix, node.raw().get()));
@@ -445,12 +494,31 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
     unsafe fn retire_value(&mut self, value: u64) {
         stat::increment(stat::Counter::Retire);
 
-        let local = unsafe { &mut *self.local.get() };
-
         let prefix = self
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
+
+        let local = unsafe { &mut *self.local.get() };
+
+        if cfg!(feature = "stat-garbage") {
+            local.garbage += 1;
+
+            if local.garbage >= self.global.reclaim_threshold as i32 {
+                self.global
+                    .garbage
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |garbage| {
+                        let old_count = garbage >> 32;
+                        let old_max = garbage as u32;
+
+                        let new_count = old_count + local.garbage as u64;
+                        let new_max = old_max.max(new_count as u32);
+                        Some(new_count << 32 | (new_max as u64))
+                    })
+                    .unwrap();
+                local.garbage = 0;
+            }
+        }
 
         #[cfg(not(feature = "opt-hazard-epochs"))]
         {
@@ -505,7 +573,8 @@ fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
     if prefix.is_node() {
         unsafe {
             // FIXME: type of edge meta is irrelevant here
-            crate::raw::node::Ptr::<crate::raw::edge::Be>::new_unchecked(raw).deallocate(counter);
+            crate::raw::node::Ptr::<crate::raw::edge::Be>::from_raw_unchecked(raw)
+                .deallocate(counter);
         }
     } else {
         unsafe {
