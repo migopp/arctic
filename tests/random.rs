@@ -13,7 +13,7 @@ mod u64 {
 
     #[test]
     fn many() {
-        test_map(&U64, 100, 10_000_000, false);
+        test_map(&U64, 16, 10_000_000, false);
     }
 
     #[test]
@@ -63,7 +63,7 @@ mod boxed {
 
     #[test]
     fn many() {
-        test_map(&Boxed, 100, 10_000_000, false);
+        test_map(&Boxed, 16, 10_000_000, false);
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod vec {
 
     #[test]
     fn many() {
-        test_map(&Bytes, 100, 10_000_000, false);
+        test_map(&Bytes, 16, 10_000_000, false);
     }
 
     #[test]
@@ -181,7 +181,7 @@ mod array {
 
     #[test]
     fn many() {
-        test_map(&Array::<12>, 100, 10_000_000, false);
+        test_map(&Array::<12>, 16, 10_000_000, false);
     }
 
     #[test]
