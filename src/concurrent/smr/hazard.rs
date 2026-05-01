@@ -565,7 +565,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         #[cfg(feature = "opt-hazard-epochs")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
-            for (batch, epoch) in local.retired.iter_mut() {
+            if let Some((batch, epoch)) = local.retired.back_mut() {
                 if *epoch == global_epoch {
                     batch.inner.push((prefix, node.raw().get()));
                     return;
@@ -618,7 +618,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         #[cfg(feature = "opt-hazard-epochs")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
-            for (batch, epoch) in local.retired.iter_mut() {
+            if let Some((batch, epoch)) = local.retired.back_mut() {
                 if *epoch == global_epoch {
                     batch.inner.push((prefix, value));
                     return;
