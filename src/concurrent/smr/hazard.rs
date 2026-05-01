@@ -68,6 +68,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
+use std::collections::VecDeque;
+
 use crate::concurrent::Smr;
 use crate::concurrent::Value;
 use crate::concurrent::smr;
@@ -118,6 +120,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     #[cfg(feature = "opt-hazard-epochs")]
     fn default() -> Self {
         Self {
+            garbage: AtomicU64::new(0),
             hazards: core::array::from_fn(|_| {
                 Cache(ribbit::Atomic::new_packed(
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
@@ -127,9 +130,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             epochs: core::array::from_fn(|_| Cache(AtomicUsize::new(usize::MAX))),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
-                    retired: Vec::new(),
+                    retired: VecDeque::new(),
                     _value: PhantomData,
                 })
             }),
@@ -142,6 +146,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
     #[cfg(feature = "opt-batch")]
     fn default() -> Self {
         Self {
+            garbage: AtomicU64::new(0),
             hazards: core::array::from_fn(|_| {
                 Cache(ribbit::Atomic::new_packed(
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
@@ -149,6 +154,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
+                    garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
@@ -176,7 +182,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
-                    retired: Vec::new(),
+                    retired: VecDeque::new(),
                     _value: PhantomData,
                 })
             }),
@@ -207,10 +213,18 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .take(smr::thread::count())
             .map(|local| local.get_mut())
             .flat_map(|local| local.retired.drain(..))
-            .for_each(|retired| {
-                let prefix = retired.0;
-                let raw = retired.1;
-                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+            .for_each(|mut retired| {
+                #[cfg(not(feature = "opt-hazard-epochs"))]
+                {
+                    let prefix = retired.0;
+                    let raw = retired.1;
+                    deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
+                }
+
+                #[cfg(feature = "opt-hazard-epochs")]
+                {
+                    Batch::deallocate(&mut retired.0);
+                }
             });
 
         #[cfg(feature = "opt-batch")]
@@ -272,17 +286,17 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 }
 
 #[cfg(feature = "opt-hazard-epochs")]
-type Retired<P> = (ribbit::Packed<P>, u64, usize);
+type Retired<P, V> = (Batch<P, V>, usize);
 
 #[cfg(not(feature = "opt-hazard-epochs"))]
-type Retired<P> = (ribbit::Packed<P>, u64);
+type Retired<P, V> = (ribbit::Packed<P>, u64, PhantomData<V>);
 
 #[repr(align(64))]
-pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
+pub struct Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     garbage: i32,
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
-    retired: Vec<Retired<P>>,
+    retired: VecDeque<Retired<P, V>>,
     _value: PhantomData<V>,
 }
 
@@ -329,28 +343,84 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         validate!(leftover.is_empty());
 
         #[cfg(feature = "opt-batch")]
-        let mut batch = Vec::with_capacity(global.reclaim_threshold);
+        let mut batch = Vec::new();
 
         local.retired.retain_mut(|retired| {
-            let prefix = &mut retired.0;
-            let raw = &mut retired.1;
-
             #[cfg(feature = "opt-hazard-epochs")]
             {
-                let retired_epoch = retired.2;
-                if global_epoch < retired_epoch + 2
-                    && chunks.iter().any(|chunk| prefix.is_conflict(chunk))
-                {
-                    stat::increment(stat::Counter::HazardMatch);
-                    if cfg!(feature = "stat") {
-                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
-                    }
-                    return true;
+                let retired_batch = &mut retired.0.inner;
+                let retired_batch_epoch = retired.1;
+                if global_epoch >= retired_batch_epoch + 2 {
+                    // The junk is sufficiently old: we can free the whole batch.
+                    retired_batch.drain(..).for_each(|(prefix, raw)| {
+                        if cfg!(feature = "stat") {
+                            stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
+                        }
+                        freed += 1;
+
+                        validate!(prefix.is_value() ^ prefix.is_node());
+
+                        if cfg!(feature = "stat") {
+                            if let Some(record) = match prefix.bytes() {
+                                0 => Some(stat::Record::ReclaimAge0),
+                                1 => Some(stat::Record::ReclaimAge1),
+                                2 => Some(stat::Record::ReclaimAge2),
+                                3 => Some(stat::Record::ReclaimAge3),
+                                _ => None,
+                            } {
+                                stat::record(record, prefix.age() as u64 + 1);
+                            }
+                        }
+
+                        deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
+                    });
+                    false
+                } else {
+                    // Only some might be able to be freed, we must check for prefix conflicts in
+                    // active hazards.
+                    retired_batch.retain_mut(|retired| {
+                        let prefix = &mut retired.0;
+                        let raw = &mut retired.1;
+
+                        if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
+                            stat::increment(stat::Counter::HazardMatch);
+                            if cfg!(feature = "stat") {
+                                *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                            }
+                            return true;
+                        }
+
+                        if cfg!(feature = "stat") {
+                            stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
+                        }
+                        freed += 1;
+
+                        validate!(prefix.is_value() ^ prefix.is_node());
+
+                        if cfg!(feature = "stat") {
+                            if let Some(record) = match prefix.bytes() {
+                                0 => Some(stat::Record::ReclaimAge0),
+                                1 => Some(stat::Record::ReclaimAge1),
+                                2 => Some(stat::Record::ReclaimAge2),
+                                3 => Some(stat::Record::ReclaimAge3),
+                                _ => None,
+                            } {
+                                stat::record(record, prefix.age() as u64 + 1);
+                            }
+                        }
+
+                        deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                        false
+                    });
+                    true
                 }
             }
 
             #[cfg(not(feature = "opt-hazard-epochs"))]
             {
+                let prefix = &mut retired.0;
+                let raw = &mut retired.1;
+
                 if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
                     stat::increment(stat::Counter::HazardMatch);
                     if cfg!(feature = "stat") {
@@ -358,37 +428,37 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     }
                     return true;
                 }
-            }
 
-            if cfg!(feature = "stat") {
-                stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
-            }
-            freed += 1;
-
-            validate!(prefix.is_value() ^ prefix.is_node());
-
-            if cfg!(feature = "stat") {
-                if let Some(record) = match prefix.bytes() {
-                    0 => Some(stat::Record::ReclaimAge0),
-                    1 => Some(stat::Record::ReclaimAge1),
-                    2 => Some(stat::Record::ReclaimAge2),
-                    3 => Some(stat::Record::ReclaimAge3),
-                    _ => None,
-                } {
-                    stat::record(record, prefix.age() as u64 + 1);
+                if cfg!(feature = "stat") {
+                    stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                 }
-            }
+                freed += 1;
 
-            #[cfg(feature = "opt-batch")]
-            {
-                batch.push((*prefix, *raw));
-            }
+                validate!(prefix.is_value() ^ prefix.is_node());
 
-            #[cfg(not(feature = "opt-batch"))]
-            {
-                deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                if cfg!(feature = "stat") {
+                    if let Some(record) = match prefix.bytes() {
+                        0 => Some(stat::Record::ReclaimAge0),
+                        1 => Some(stat::Record::ReclaimAge1),
+                        2 => Some(stat::Record::ReclaimAge2),
+                        3 => Some(stat::Record::ReclaimAge3),
+                        _ => None,
+                    } {
+                        stat::record(record, prefix.age() as u64 + 1);
+                    }
+                }
+
+                #[cfg(feature = "opt-batch")]
+                {
+                    batch.push((*prefix, *raw));
+                }
+
+                #[cfg(not(feature = "opt-batch"))]
+                {
+                    deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                }
+                false
             }
-            false
         });
 
         if cfg!(feature = "stat-garbage") {
@@ -481,13 +551,26 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         }
         #[cfg(not(feature = "opt-hazard-epochs"))]
         {
-            local.retired.push((prefix, node.raw().get()));
+            local
+                .retired
+                .push_back((prefix, node.raw().get(), PhantomData));
         }
 
         #[cfg(feature = "opt-hazard-epochs")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
-            local.retired.push((prefix, node.raw().get(), global_epoch));
+            for (batch, epoch) in local.retired.iter_mut() {
+                if *epoch == global_epoch {
+                    batch.inner.push((prefix, node.raw().get()));
+                    return;
+                }
+            }
+
+            let batch = Batch {
+                inner: vec![(prefix, node.raw().get())],
+                _value: PhantomData,
+            };
+            local.retired.push_back((batch, global_epoch));
         }
     }
 
@@ -522,13 +605,24 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         #[cfg(not(feature = "opt-hazard-epochs"))]
         {
-            local.retired.push((prefix, value));
+            local.retired.push_back((prefix, value, PhantomData));
         }
 
         #[cfg(feature = "opt-hazard-epochs")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
-            local.retired.push((prefix, value, global_epoch));
+            for (batch, epoch) in local.retired.iter_mut() {
+                if *epoch == global_epoch {
+                    batch.inner.push((prefix, value));
+                    return;
+                }
+            }
+
+            let batch = Batch {
+                inner: vec![(prefix, value)],
+                _value: PhantomData,
+            };
+            local.retired.push_back((batch, global_epoch));
         }
     }
 }
@@ -584,13 +678,13 @@ fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
     }
 }
 
-#[cfg(feature = "opt-batch")]
+#[cfg(any(feature = "opt-batch", feature = "opt-hazard-epochs"))]
 struct Batch<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     inner: Vec<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
 }
 
-#[cfg(feature = "opt-batch")]
+#[cfg(any(feature = "opt-batch", feature = "opt-hazard-epochs"))]
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Batch<P, V> {
     fn deallocate(batch: &mut Batch<P, V>) {
         batch
