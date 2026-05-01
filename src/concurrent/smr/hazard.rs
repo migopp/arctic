@@ -134,6 +134,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: VecDeque::new(),
+                    num_retired: 0,
                     _value: PhantomData,
                 })
             }),
@@ -158,6 +159,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: Vec::new(),
+                    num_retired: 0,
                     _value: PhantomData,
                 })
             }),
@@ -183,6 +185,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     cycle: 0,
                     snapshot: Vec::new(),
                     retired: VecDeque::new(),
+                    num_retired: 0,
                     _value: PhantomData,
                 })
             }),
@@ -297,6 +300,7 @@ pub struct Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: VecDeque<Retired<P, V>>,
+    num_retired: usize,
     _value: PhantomData<V>,
 }
 
@@ -308,7 +312,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
     #[cold]
     fn flush(global: &Global<P, V>, local: &mut Local<P, V>) {
-        stat::max(stat::Max::RetireCache, local.retired.len() as u64);
+        stat::max(stat::Max::RetireCache, local.num_retired as u64);
 
         membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
@@ -504,6 +508,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         }
 
         local.snapshot.clear();
+        local.num_retired -= freed as usize;
         stat::record(stat::Record::Flush, freed as u64);
     }
 }
@@ -530,6 +535,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .into_prefix(false, Some(_bits));
 
         let local = unsafe { &mut *self.local.get() };
+        local.num_retired += 1;
 
         if cfg!(feature = "stat-garbage") {
             local.garbage += 1;
@@ -583,6 +589,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .into_prefix(true, None);
 
         let local = unsafe { &mut *self.local.get() };
+        local.num_retired += 1;
 
         if cfg!(feature = "stat-garbage") {
             local.garbage += 1;
@@ -641,7 +648,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
         }
 
         let local = unsafe { &mut *self.local.get() };
-        if local.retired.len() < self.global.reclaim_threshold {
+        if local.num_retired < self.global.reclaim_threshold {
             local.cycle = 0;
             return;
         }
