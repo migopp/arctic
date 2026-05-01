@@ -1,5 +1,6 @@
 use crate::concurrent::smr::hazard;
 use crate::raw;
+use crate::raw::Int;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::key::Read as _;
@@ -74,12 +75,10 @@ impl Key for u64 {
 impl_integer!(u64);
 
 #[inline]
-fn hazard_integer<U: key::int::Uint>(
-    reader: key::int::Reader<U>,
-) -> ribbit::Packed<hazard::prefix::Be> {
+fn hazard_integer<I: Int>(reader: key::int::Reader<I>) -> ribbit::Packed<hazard::prefix::Be> {
     hazard::prefix::Be::new_hazard(
         reader.buffer.most_significant_u64(),
-        if U::BITS < 64 {
+        if I::BITS < 64 {
             reader.len().bits()
         } else {
             reader.len().bits().min(56)

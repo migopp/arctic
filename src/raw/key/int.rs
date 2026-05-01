@@ -1,4 +1,3 @@
-use core::fmt;
 use core::ops::Add;
 use core::ops::AddAssign;
 use core::ops::Sub;
@@ -6,6 +5,7 @@ use core::ops::SubAssign;
 
 use ribbit::u6;
 
+use crate::raw::Int;
 use crate::raw::Key;
 use crate::raw::edge;
 use crate::raw::edge::Key as _;
@@ -42,7 +42,24 @@ macro_rules! impl_key {
 
                 #[inline]
                 fn len(_: &Self::Borrowed) -> Self::Len {
-                    Len(<$ty as Uint>::BITS)
+                    Len(<$ty as Int>::BITS)
+                }
+            }
+
+            impl From<$ty> for Reader<$ty> {
+                #[inline]
+                fn from(value: $ty) -> Self {
+                    Self {
+                        buffer: value,
+                        len: Len(<$ty as Int>::BITS),
+                    }
+                }
+            }
+
+            impl<'k> From<&'k $ty> for Reader<$ty> {
+                #[inline]
+                fn from(value: &'k $ty) -> Self {
+                    Self::from(*value)
                 }
             }
         )*
@@ -80,61 +97,21 @@ impl Key for u64 {
 
     #[inline]
     fn len(_: &Self::Borrowed) -> usize {
-        <u64 as Uint>::BYTES as usize
+        <u64 as Int>::BYTES as usize
     }
-}
-
-pub(crate) trait Uint:
-    'static
-    + Sized
-    + Copy
-    + Default
-    + fmt::Debug
-    + Ord
-    + Eq
-    + core::ops::Shl<u8, Output = Self>
-    + core::ops::ShlAssign<u8>
-    + core::ops::Shr<u8, Output = Self>
-    + core::ops::BitXor<Output = Self>
-    + core::ops::BitOr<Output = Self>
-    + core::ops::BitOrAssign
-    + core::ops::Not<Output = Self>
-    + core::ops::BitAnd<Output = Self>
-{
-    const MSB: Self;
-    const MAX: Self;
-    const BITS: u8;
-
-    fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
-
-    fn most_significant_u64(self) -> u64;
-    fn most_significant_u8(self) -> u8;
-
-    #[inline]
-    fn most_significant(self, bits: u8) -> Self {
-        Self::MAX.unbounded_shr(bits).not().bitand(self)
-    }
-
-    fn shl_at_most_56(self, bits: u8) -> Self;
-    fn unbounded_shl(self, bits: u8) -> Self;
-    fn unbounded_shr(self, bits: u8) -> Self;
-    fn leading_zeros(self) -> u8;
-
-    fn from_most_significant_u64(value: u64) -> Self;
-    fn from_u8(value: u8) -> Self;
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Reader<U> {
-    pub(crate) buffer: U,
+pub struct Reader<I> {
+    pub(crate) buffer: I,
     len: Len,
 }
 
 #[expect(private_bounds)]
-impl<U: Uint> Reader<U> {
+impl<I: Int> Reader<I> {
     #[inline]
-    pub unsafe fn new_unchecked(buffer: U, bits: u8) -> Self {
-        validate!(bits <= U::BITS);
+    pub unsafe fn new_unchecked(buffer: I, bits: u8) -> Self {
+        validate!(bits <= I::BITS);
         validate_eq!(bits & 0b111, 0);
         validate_eq!(buffer.most_significant(bits), buffer);
         Self {
@@ -144,8 +121,8 @@ impl<U: Uint> Reader<U> {
     }
 }
 
-impl<U: Uint> key::Read for Reader<U> {
-    const LEN: Option<Self::Len> = Some(Len(U::BITS));
+impl<I: Int> key::Read for Reader<I> {
+    const LEN: Option<Self::Len> = Some(Len(I::BITS));
 
     type Edge = edge::Be;
     type Len = Len;
@@ -217,7 +194,7 @@ impl<U: Uint> key::Read for Reader<U> {
     }
 }
 
-impl<U: Uint> core::fmt::Debug for Reader<U> {
+impl<I: Int> core::fmt::Debug for Reader<I> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let bytes = self.len().bytes();
         self.buffer
@@ -371,18 +348,18 @@ impl<'k> From<&'k u64> for Slow {
 
 #[repr(transparent)]
 #[derive(Default)]
-pub struct Writer<U>(U);
+pub struct Writer<I>(I);
 
-impl<U: Uint> key::Write<Reader<U>> for Writer<U> {
+impl<I: Int> key::Write<Reader<I>> for Writer<I> {
     type Len = Len;
 
     #[inline]
-    fn new(prefix: Reader<U>, key: ribbit::Packed<edge::Be>) -> (Self, Self::Len) {
+    fn new(prefix: Reader<I>, key: ribbit::Packed<edge::Be>) -> (Self, Self::Len) {
         let len = prefix.len() + key.len();
 
-        validate!(len.0 <= U::BITS);
+        validate!(len.0 <= I::BITS);
 
-        let writer = Self(prefix.buffer | U::from_most_significant_u64(key.raw()) >> prefix.len.0);
+        let writer = Self(prefix.buffer | I::from_most_significant_u64(key.raw()) >> prefix.len.0);
 
         (writer, len)
     }
@@ -390,14 +367,14 @@ impl<U: Uint> key::Write<Reader<U>> for Writer<U> {
     #[inline]
     fn replace(&mut self, start: Self::Len, node: u8, edge: ribbit::Packed<edge::Be>) -> Self::Len {
         self.0 = self.0.most_significant(start.0)
-            | (U::from_u8(node) >> start.0)
-            | (U::from_most_significant_u64(edge.raw() & !0xFFu64).unbounded_shr(8 + start.0));
+            | (I::from_u8(node) >> start.0)
+            | (I::from_most_significant_u64(edge.raw() & !0xFFu64).unbounded_shr(8 + start.0));
 
         start + Len::BYTE + edge.len()
     }
 }
 
-impl<U: Uint> core::fmt::Debug for Writer<U> {
+impl<I: Int> core::fmt::Debug for Writer<I> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.0
             .with_be_bytes(|bytes| f.debug_list().entries(bytes).finish())
@@ -488,115 +465,6 @@ impl PartialEq<u6> for Len {
         self.0.eq(&other.value())
     }
 }
-
-macro_rules! impl_uint {
-    ($($ty:ty: $bits:expr, $into_u64:expr, $from_u64:expr, $into_u128:expr),* $(,)?) => {
-        $(
-            impl From<$ty> for Reader<$ty> {
-                #[inline]
-                fn from(value: $ty) -> Self {
-                    Self {
-                        buffer: value,
-                        len: Len($bits),
-                    }
-                }
-            }
-
-            impl<'k> From<&'k $ty> for Reader<$ty> {
-                #[inline]
-                fn from(value: &'k $ty) -> Self {
-                    Self::from(*value)
-                }
-            }
-
-            impl Uint for $ty {
-                const MSB: Self = (1 as $ty).rotate_right(1);
-                const MAX: Self = <$ty>::MAX;
-                const BITS: u8 = <$ty>::BITS as u8;
-
-                #[inline]
-                fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T {
-                    apply(&self.to_be_bytes())
-                }
-
-                #[inline]
-                fn most_significant_u64(self) -> u64 {
-                    $into_u64(self)
-                }
-
-                #[inline]
-                fn most_significant_u8(self) -> u8 {
-                    <$ty>::rotate_left(self, 8) as u8
-                }
-
-                #[inline]
-                fn shl_at_most_56(self, bits: u8) -> Self {
-                    validate!(bits <= 56);
-                    unsafe { core::hint::assert_unchecked(bits <= 56) };
-
-                    if <$ty>::BITS <= 56 {
-                        self.unbounded_shl(bits as u32)
-                    } else {
-                        self << bits
-                    }
-                }
-
-                #[inline]
-                fn unbounded_shl(self, bits: u8) -> Self {
-                    <$ty>::unbounded_shl(self, bits as u32)
-                }
-
-                #[inline]
-                fn unbounded_shr(self, bits: u8) -> Self {
-                    <$ty>::unbounded_shr(self, bits as u32)
-                }
-
-                #[inline]
-                fn leading_zeros(self) -> u8 {
-                    <$ty>::leading_zeros(self) as u8
-                }
-
-                #[inline]
-                fn from_most_significant_u64(value: u64) -> Self {
-                    $from_u64(value)
-                }
-
-                #[inline]
-                fn from_u8(value: u8) -> Self {
-                    (value as $ty).rotate_right(8)
-                }
-            }
-        )*
-    };
-}
-
-impl_uint!(
-    u16: 16, |from: Self| {
-        (from as u64) << 48
-    }, |into: u64| {
-        (into >> 48) as Self
-    }, |from: Self| {
-        (from as u128) << 112
-    },
-
-    u32: 32, |from: Self| {
-        (from as u64) << 32
-    }, |into: u64| {
-        (into >> 32) as Self
-    }, |from: Self| {
-        (from as u128) << 96
-    },
-
-    u64: 64, core::convert::identity, core::convert::identity, |from: Self| {
-        (from as u128) << 64
-    },
-
-    u128: 128, |into: u128| {
-        (into >> 64) as u64
-    }, |from: u64| {
-        (from as u128) << 64
-    }, core::convert::identity,
-);
 
 #[cfg(test)]
 mod tests {
