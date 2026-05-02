@@ -1,7 +1,6 @@
 use ribbit::u6;
 
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
@@ -62,72 +61,59 @@ impl key::Read for Reader {
     type Edge = edge::Le;
     type Len = key::vec::Len;
 
+    #[inline]
     fn len(&self) -> Self::Len {
         self.len
     }
 
     #[inline]
-    fn next(&mut self) -> Option<u8> {
-        (self.len > key::vec::Len::ZERO).then(|| unsafe { self.next_unchecked() })
+    fn get_edge(
+        &self,
+        len: <ribbit::Packed<Self::Edge> as edge::Meta>::Len,
+    ) -> ribbit::Packed<Self::Edge> {
+        todo!()
     }
 
     #[inline]
-    unsafe fn next_unchecked(&mut self) -> u8 {
-        let byte = self.buffer[0];
-        self.buffer.copy_within(1.., 0);
-        self.len -= key::vec::Len::BYTE;
-        byte
+    fn get_byte(&self, index: u6) -> Option<u8> {
+        self.buffer.get(index.bytes()).copied()
     }
 
-    #[inline]
-    fn read(
-        &mut self,
-        len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
-        let len = self.len.min(key::vec::Len(len.bytes()));
-        let key = edge::Le::key_from_u64_truncate(
-            u64::from_le_bytes(self.buffer),
-            u6::new(len.bits() as u8),
-        );
-        self.buffer.copy_within(len.0.., 0);
-        self.len -= len;
-        key
-    }
+    // #[inline]
+    // fn read(
+    //     &mut self,
+    //     len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
+    // ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
+    //     let len = self.len.min(key::vec::Len(len.bytes()));
+    //     let key = edge::Le::key_from_u64_truncate(
+    //         u64::from_le_bytes(self.buffer),
+    //         u6::new(len.bits() as u8),
+    //     );
+    //     self.buffer.copy_within(len.0.., 0);
+    //     self.len -= len;
+    //     key
+    // }
 
     #[inline]
-    fn match_exact(
-        &mut self,
-        edge: <Self::Edge as ribbit::Pack>::Packed,
-    ) -> Option<<<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len> {
-        let (key, exact) = self.match_inexact(edge);
-        exact.then_some(key.len())
-    }
-
-    #[inline]
-    fn match_inexact(
-        &mut self,
-        edge: <Self::Edge as ribbit::Pack>::Packed,
-    ) -> (
-        <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key,
-        bool,
-    ) {
-        let len = self.len.min(key::vec::Len(edge.len().bytes()));
-        let len_prefix = self
-            .buffer
-            .into_iter()
-            .zip(edge.raw().to_le_bytes())
-            .take(len.0)
-            .position(|(l, r)| l != r)
-            .unwrap_or(len.0);
-
-        let key = edge::Le::key_from_u64_truncate(
-            u64::from_le_bytes(self.buffer),
-            u6::new(len.bits() as u8),
-        );
-
-        self.buffer.copy_within(len.0.., 0);
-        self.len -= len;
-        (key, len.0 == len_prefix)
+    fn match_prefix(&self, edge: <Self::Edge as ribbit::Pack>::Packed) -> key::vec::Len {
+        todo!()
+        // let len = self.len.min(key::vec::Len(edge.len().bytes()));
+        // let len_prefix = self
+        //     .buffer
+        //     .into_iter()
+        //     .zip(edge.raw().to_le_bytes())
+        //     .take(len.0)
+        //     .position(|(l, r)| l != r)
+        //     .unwrap_or(len.0);
+        //
+        // let key = edge::Le::key_from_u64_truncate(
+        //     u64::from_le_bytes(self.buffer),
+        //     u6::new(len.bits() as u8),
+        // );
+        //
+        // self.buffer.copy_within(len.0.., 0);
+        // self.len -= len;
+        // (key, len.0 == len_prefix)
     }
 
     #[inline]
@@ -165,6 +151,21 @@ impl key::Read for Reader {
             buffer,
             len: len_prefix,
         }
+    }
+
+    fn expand(
+        &self,
+        key: ribbit::Packed<Self::Edge>,
+    ) -> Result<
+        (
+            ribbit::Packed<Self::Edge>,
+            u8,
+            u8,
+            ribbit::Packed<Self::Edge>,
+        ),
+        (),
+    > {
+        todo!()
     }
 }
 

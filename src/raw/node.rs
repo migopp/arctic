@@ -207,7 +207,7 @@ fn replace<M: ribbit::Pack<Packed: edge::Meta>, N: Node<M>>(
 
     // Heuristic: assume a full node should be expanded
     let node = unsafe { Ptr::new_unchecked(len == N::CAPACITY, keys, edges) };
-    let edge = Edge::new_node(meta.key(), node);
+    let edge = Edge::new_node(meta, node);
     (Smo::ReplaceNode, edge)
 }
 

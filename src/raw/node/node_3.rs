@@ -104,7 +104,7 @@ impl linear::Header for ribbit::Packed<Header> {
 
 impl<M: ribbit::Pack<Packed: edge::Meta>> Linear<3, Header, M> {
     pub(crate) fn new_expand(
-        key: <M::Packed as edge::Meta>::Key,
+        meta: ribbit::Packed<M>,
         keys: [u8; 2],
         edges: [ribbit::Packed<Edge<M>>; 2],
     ) -> ribbit::Packed<Edge<M>> {
@@ -118,19 +118,16 @@ impl<M: ribbit::Pack<Packed: edge::Meta>> Linear<3, Header, M> {
         node.edges[0].set_packed(edges[0]);
         node.edges[1].set_packed(edges[1]);
 
-        Edge::new_node(key, node::Ptr::new_node_3(node))
+        Edge::new_node(meta, node::Ptr::new_node_3(node))
     }
 
     pub(crate) fn new_path<F>(
-        key: <M::Packed as edge::Meta>::Key,
+        meta: ribbit::Packed<M>,
         byte: u8,
         mut next: F,
     ) -> ribbit::Packed<Edge<M>>
     where
-        F: FnMut() -> ControlFlow<
-            (<M::Packed as edge::Meta>::Key, u64),
-            (<M::Packed as edge::Meta>::Key, u8),
-        >,
+        F: FnMut() -> ControlFlow<(ribbit::Packed<M>, u64), (ribbit::Packed<M>, u8)>,
     {
         let mut head = Box::new(Self::default());
         head.header.set_packed(ribbit::Packed::<Header>::new(
@@ -164,6 +161,6 @@ impl<M: ribbit::Pack<Packed: edge::Meta>> Linear<3, Header, M> {
             }
         }
 
-        Edge::<M>::new_node(key, node::Ptr::new_node_3(head))
+        Edge::<M>::new_node(meta, node::Ptr::new_node_3(head))
     }
 }

@@ -14,6 +14,7 @@ use core::sync::atomic::Ordering;
 use ribbit::Atomic;
 use ribbit::OptionExt as _;
 
+use crate::raw::edge;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::node;
@@ -66,45 +67,49 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     where
         R: key::Read<Edge = M>,
     {
-        let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
-        let Some(byte) = reader.next() else {
-            return Self::new_value(key, value);
+        let edge = reader.get_edge(<ribbit::Packed<M> as edge::Meta>::Len::MAX);
+        let Some(byte) = reader.get_byte(edge.len()) else {
+            return Self::new_value(edge, value);
         };
 
+        reader = reader.suffix(R::Len::BYTE + edge.len().into());
+
         // Key always fits in one edge
-        if R::LEN.is_some_and(|len| len <= <<M::Packed as Meta>::Key as Key>::Len::MAX) {
+        if R::LEN.is_some_and(|len| len <= <ribbit::Packed<M> as edge::Meta>::Len::MAX.into()) {
             validate!(false);
             unsafe { core::hint::unreachable_unchecked() }
         }
 
         // Key fits in one edge except at root
-        if R::LEN
-            .is_some_and(|len| len == R::Len::BYTE + <<M::Packed as Meta>::Key as Key>::Len::MAX)
-        {
+        if R::LEN.is_some_and(|len| {
+            len == R::Len::BYTE + <ribbit::Packed<M> as edge::Meta>::Len::MAX.into()
+        }) {
             crate::cold();
         }
 
-        Node3::new_path(key, byte, || {
-            let key = reader.read(<<M::Packed as Meta>::Key as Key>::Len::MAX);
-            match reader.next() {
-                Some(byte) => ControlFlow::Continue((key, byte)),
-                None => ControlFlow::Break((key, value)),
+        Node3::new_path(edge, byte, || {
+            let edge = reader.get_edge(<ribbit::Packed<M> as edge::Meta>::Len::MAX);
+            match reader.get_byte(edge.len()) {
+                None => ControlFlow::Break((edge, value)),
+                Some(byte) => {
+                    reader = reader.suffix(R::Len::BYTE + edge.len().into());
+                    ControlFlow::Continue((edge, byte))
+                }
             }
         })
     }
 
+    #[inline]
     pub(super) fn new_node(
-        key: <<M as ribbit::Pack>::Packed as Meta>::Key,
+        meta: ribbit::Packed<M>,
         node: ribbit::Packed<node::Ptr<M>>,
     ) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(<M::Packed as Meta>::new(key, false), node.raw().get())
+        ribbit::Packed::<Self>::new(meta.with_value(false), node.raw().get())
     }
 
-    pub(super) fn new_value(
-        key: <<M as ribbit::Pack>::Packed as Meta>::Key,
-        value: u64,
-    ) -> ribbit::Packed<Self> {
-        ribbit::Packed::<Self>::new(<M::Packed as Meta>::new(key, true), value)
+    #[inline]
+    pub(super) fn new_value(meta: ribbit::Packed<M>, value: u64) -> ribbit::Packed<Self> {
+        ribbit::Packed::<Self>::new(meta.with_value(true), value)
     }
 
     #[inline]
@@ -230,27 +235,22 @@ where
     }
 }
 
-pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug {
+pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug + IntoIterator<Item = u8> {
     const DEFAULT: Self;
 
-    type Key: Key;
-
-    fn new(key: Self::Key, value: bool) -> Self;
-    fn with_frozen(self, frozen: bool) -> Self;
-
-    fn key(self) -> Self::Key;
-    fn is_value(self) -> bool;
-    fn is_frozen(self) -> bool;
-
-    fn expand(self, new: Self::Key) -> Result<(Self::Key, u8, Self), ()>;
-    fn compress(self, byte: u8, child: Self) -> Option<Self>;
-}
-
-pub(crate) trait Key: Copy + Eq + Ord + core::fmt::Debug + IntoIterator<Item = u8> {
     type Len: Len;
 
+    fn with_value(self, value: bool) -> Self;
+    fn with_frozen(self, frozen: bool) -> Self;
+    fn with_key(self, key: Self) -> Self;
+
     fn len(self) -> Self::Len;
-    fn prefix(self, len: Self::Len) -> Self;
+
+    fn is_value(self) -> bool;
+    fn is_frozen(self) -> bool;
+    fn is_less_than(self, other: Self) -> bool;
+
+    fn compress(self, byte: u8, child: Self) -> Option<Self>;
 }
 
 pub(crate) trait Len: Copy + Eq + Add<Output = Self> {

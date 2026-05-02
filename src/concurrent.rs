@@ -18,7 +18,6 @@ use crate::raw::cursor;
 use crate::raw::cursor::Path;
 use crate::raw::cursor::path;
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Len as _;
 use crate::sequential;
@@ -383,7 +382,7 @@ where
         };
 
         if RECURSIVE {
-            let mut trim = old.meta().key().len();
+            let mut trim = old.meta().len();
 
             'outer: while let Some(target) = cursor
                 .pop()
@@ -393,7 +392,7 @@ where
                     break 'outer;
                 }
 
-                cursor.trim(K::Len::BYTE + trim);
+                cursor.trim(K::Len::BYTE + trim.into());
 
                 loop {
                     let Some(old) = cursor.traverse_prefix() else {
@@ -418,7 +417,7 @@ where
                     ) {
                         Ok(old) => {
                             unsafe { guard.retire_node(cursor.len().bits(), target) };
-                            trim = old.meta().key().len();
+                            trim = old.meta().len();
                             continue 'outer;
                         }
                         // FIXME: help freeze
@@ -560,11 +559,7 @@ where
 
         loop {
             match cursor.traverse_insert() {
-                cursor::Insert::Value {
-                    old_value,
-                    old,
-                    key,
-                } => {
+                cursor::Insert::Value { old_value, old } => {
                     let new_value = match upsert(
                         old_value
                             .as_ref()
@@ -582,7 +577,7 @@ where
                         }
                     };
 
-                    match cursor.create_path(old, key, new_value) {
+                    match cursor.create_path(old, new_value) {
                         // Restore value and fall through to freeze
                         Err(Frozen) => initial = Some(unsafe { V::from_raw(new_value) }),
 
@@ -619,9 +614,7 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
-                            if let Some(node) = old.as_node() {
-                                unsafe { guard.retire_node(cursor.len().bits(), node) };
-                            }
+                            unsafe { guard.retire_node(cursor.len().bits(), old_node) };
                         }
                         Err(_) => {
                             // Does not go through SMR because `new` is still thread-local

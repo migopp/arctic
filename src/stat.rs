@@ -8,7 +8,6 @@ use crate::Value;
 use crate::concurrent::Smr;
 use crate::concurrent::smr::Global as _;
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
 use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::iter::Unbound;
@@ -37,7 +36,7 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
             };
 
             let meta = edge.meta();
-            let bits = meta.key().len().bits();
+            let bits = meta.len().bits();
             compression.record((bits >> 3) as u64);
 
             match child {

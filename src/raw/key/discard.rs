@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
 
-use crate::raw::edge;
 use crate::raw::key::Read;
 use crate::raw::key::Write;
 
@@ -22,7 +21,7 @@ impl<R> core::fmt::Debug for Discard<R> {
 impl<R: Read> Write<R> for Discard<R> {
     type Len = ();
 
-    fn new(_: R, _: <ribbit::Packed<R::Edge> as edge::Meta>::Key) -> (Self, Self::Len) {
+    fn new(_: R, _: ribbit::Packed<R::Edge>) -> (Self, Self::Len) {
         (Self(PhantomData), ())
     }
 

@@ -2,7 +2,7 @@ use crate::concurrent::smr::hazard;
 use crate::raw;
 use crate::raw::Int;
 use crate::raw::key;
-use crate::raw::key::Len as _;
+use crate::raw::key::Len;
 use crate::raw::key::Read as _;
 
 pub trait Key: raw::Key {
@@ -79,9 +79,9 @@ fn hazard_integer<I: Int>(reader: key::int::Reader<I>) -> ribbit::Packed<hazard:
     hazard::prefix::Be::new_hazard(
         reader.buffer.most_significant_u64(),
         if I::BITS < 64 {
-            reader.len().bits()
+            Len::bits(reader.len())
         } else {
-            reader.len().bits().min(56)
+            Len::bits(reader.len()).min(56)
         },
     )
 }

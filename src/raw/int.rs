@@ -22,14 +22,14 @@ pub(crate) trait Int:
     fn with_be_bytes<F: FnOnce(&[u8]) -> T, T>(self, apply: F) -> T;
 
     fn most_significant_u64(self) -> u64;
-    fn most_significant_u8(self) -> u8;
+
+    fn get_u8(self, bits: u8) -> u8;
 
     #[inline]
     fn most_significant(self, bits: u8) -> Self {
         Self::MAX.unbounded_shr(bits).not().bitand(self)
     }
 
-    fn shl_at_most_56(self, bits: u8) -> Self;
     fn unbounded_shl(self, bits: u8) -> Self;
     fn unbounded_shr(self, bits: u8) -> Self;
     fn leading_zeros(self) -> u8;
@@ -57,20 +57,8 @@ macro_rules! impl_int {
                 }
 
                 #[inline]
-                fn most_significant_u8(self) -> u8 {
-                    <$ty>::rotate_left(self, 8) as u8
-                }
-
-                #[inline]
-                fn shl_at_most_56(self, bits: u8) -> Self {
-                    validate!(bits <= 56);
-                    unsafe { core::hint::assert_unchecked(bits <= 56) };
-
-                    if <$ty>::BITS <= 56 {
-                        self.unbounded_shl(bits as u32)
-                    } else {
-                        self << bits
-                    }
+                fn get_u8(self, bits: u8) -> u8 {
+                    <$ty>::rotate_left(self, 8 + bits as u32) as u8
                 }
 
                 #[inline]

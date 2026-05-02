@@ -30,14 +30,6 @@ macro_rules! validate_eq {
     };
 }
 
-macro_rules! validate_ne {
-    ($($tt:tt)*) => {
-        if cfg!(any(feature = "validate", debug_assertions, test)) {
-            assert_ne!($($tt)*);
-        }
-    };
-}
-
 macro_rules! simd {
     ($flag:expr, $avx2:expr, $fallback:expr $(, $fmt:expr)* $(,)?) => {{
         #[cfg(all(not(feature = $flag), target_feature = "avx2"))]

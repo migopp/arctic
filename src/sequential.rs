@@ -101,17 +101,15 @@ where
 
         loop {
             match cursor.traverse_insert() {
-                crate::raw::cursor::Insert::Value {
-                    old_value,
-                    old,
-                    key,
-                } => match cursor.create_path(old, key, new_value) {
-                    Err(Frozen) => unreachable!(),
-                    Ok(new) => {
-                        cursor.edge_mut().set_packed(new);
-                        return old_value.map(|old| unsafe { V::from_raw(old) });
+                crate::raw::cursor::Insert::Value { old_value, old } => {
+                    match cursor.create_path(old, new_value) {
+                        Err(Frozen) => unreachable!(),
+                        Ok(new) => {
+                            cursor.edge_mut().set_packed(new);
+                            return old_value.map(|old| unsafe { V::from_raw(old) });
+                        }
                     }
-                },
+                }
                 crate::raw::cursor::Insert::Replace { old_node, old } => {
                     validate!(!old.meta().is_frozen());
                     let (_smo, new) = unsafe { old_node.replace::<false>(old.meta()) };
