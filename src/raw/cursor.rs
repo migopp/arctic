@@ -17,35 +17,6 @@ use crate::raw::node;
 use crate::raw::node::Node3;
 use crate::stat;
 
-pub(crate) struct CursorMut<'g, R: key::Read>(Cursor<'g, R, path::Discard>);
-
-impl<'g, R: key::Read> CursorMut<'g, R> {
-    #[inline]
-    pub(crate) fn new(root: &'g mut Atomic<Edge<R::Edge>>, key: R) -> Self {
-        Self(unsafe { Cursor::new(root, key) })
-    }
-
-    #[inline]
-    pub(crate) fn edge_mut(&mut self) -> &'g mut Atomic<Edge<R::Edge>> {
-        unsafe { self.0.edge.as_mut() }
-    }
-}
-
-impl<'g, R: key::Read> core::ops::Deref for CursorMut<'g, R> {
-    type Target = Cursor<'g, R, path::Discard>;
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'g, R: key::Read> core::ops::DerefMut for CursorMut<'g, R> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 /// Tree traversal state.
 pub(crate) struct Cursor<'g, R: key::Read, P> {
     len: R::Len,
@@ -97,6 +68,11 @@ where
     #[inline]
     pub(crate) fn edge(&self) -> &'g Atomic<Edge<R::Edge>> {
         unsafe { self.edge.as_ref() }
+    }
+
+    #[inline]
+    pub(crate) unsafe fn edge_mut(&mut self) -> &'g mut Atomic<Edge<R::Edge>> {
+        unsafe { self.edge.as_mut() }
     }
 
     #[inline]

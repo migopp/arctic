@@ -108,7 +108,7 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
     }
 
     #[inline]
-    pub(super) fn new_value(meta: ribbit::Packed<M>, value: u64) -> ribbit::Packed<Self> {
+    pub(crate) fn new_value(meta: ribbit::Packed<M>, value: u64) -> ribbit::Packed<Self> {
         ribbit::Packed::<Self>::new(meta.with_value(true), value)
     }
 
