@@ -14,6 +14,7 @@ use crate::raw::edge::Len as _;
 pub struct Be {
     value: bool,
     frozen: bool,
+    inline: bool,
     #[ribbit(offset = 3)]
     len: u3,
     #[ribbit(offset = 8)]
@@ -53,7 +54,7 @@ impl IntoIterator for BePacked {
 }
 
 impl edge::Meta for BePacked {
-    const DEFAULT: Self = Self::new(false, false, u3::new(0), u56::new(0));
+    const DEFAULT: Self = Self::new(false, false, false, u3::new(0), u56::new(0));
 
     type Len = u6;
 
@@ -80,6 +81,11 @@ impl edge::Meta for BePacked {
     #[inline]
     fn with_frozen(self, frozen: bool) -> Self {
         self.with_frozen(frozen)
+    }
+
+    #[inline]
+    fn with_inline(self, inline: bool) -> Self {
+        self.with_inline(inline)
     }
 
     #[inline]

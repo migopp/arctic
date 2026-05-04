@@ -14,6 +14,7 @@ pub struct Le {
     prefix: u56,
     value: bool,
     frozen: bool,
+    inline: bool,
     #[ribbit(offset = 59)]
     len: u3,
 }
@@ -53,7 +54,7 @@ impl IntoIterator for LePacked {
 }
 
 impl edge::Meta for LePacked {
-    const DEFAULT: Self = Self::new(u56::new(0), false, false, u3::new(0));
+    const DEFAULT: Self = Self::new(u56::new(0), false, false, false, u3::new(0));
 
     type Len = u6;
 
@@ -80,6 +81,11 @@ impl edge::Meta for LePacked {
     #[inline]
     fn with_frozen(self, frozen: bool) -> Self {
         self.with_frozen(frozen)
+    }
+
+    #[inline]
+    fn with_inline(self, inline: bool) -> Self {
+        self.with_inline(inline)
     }
 
     #[inline]

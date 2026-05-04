@@ -245,6 +245,8 @@ pub(crate) trait Meta:
     fn with_value(self, value: bool) -> Self;
     fn with_frozen(self, frozen: bool) -> Self;
     fn with_key(self, key: Self) -> Self;
+    #[expect(unused)]
+    fn with_inline(self, inline: bool) -> Self;
 
     fn len(self) -> Self::Len;
 
