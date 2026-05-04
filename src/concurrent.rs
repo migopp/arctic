@@ -654,10 +654,14 @@ where
     where
         R: crate::raw::iter::Range<K::Read<'k>>,
     {
-        // FIXME: avoid recomputing common prefix?
-        let guard = self.smr.guard(K::hazard(range.common_prefix()));
-        let prefix = unsafe { raw::iter::Prefix::new_range(self.inner.root(), range) }?;
-        Some(unsafe { Prefix::new(guard, prefix) })
+        let prefix = range.common_prefix();
+        let guard = self.smr.guard(K::hazard(prefix));
+        Some(unsafe {
+            Prefix::new(
+                guard,
+                raw::iter::Prefix::new_range(self.inner.root(), range, prefix)?,
+            )
+        })
     }
 }
 

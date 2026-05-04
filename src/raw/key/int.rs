@@ -70,7 +70,7 @@ impl_key!(u16, u32, u128);
 #[cfg(not(feature = "opt-no-int"))]
 impl_key!(u64);
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct Reader<I> {
     pub(crate) buffer: I,
     len: Len,

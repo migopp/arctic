@@ -57,11 +57,12 @@ where
     pub(crate) unsafe fn new_range(
         root: &'g Atomic<Edge<K::Edge>>,
         range: R,
+        prefix: K::Read<'k>,
     ) -> Option<Prefix<'k, 'g, K, R>>
     where
         R: Range<K::Read<'k>>,
     {
-        let prefix = range.common_prefix();
+        validate_eq!(prefix, range.common_prefix());
         let mut cursor = unsafe { Cursor::<_, path::Discard>::new(root, prefix) };
         cursor.traverse_prefix()?;
 

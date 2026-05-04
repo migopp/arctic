@@ -74,7 +74,7 @@ impl Key for String {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Reader<'k, const N: usize>(pub(super) &'k [u8]);
 
 impl<'k, const N: usize> Reader<'k, N> {

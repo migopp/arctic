@@ -182,8 +182,10 @@ where
     where
         R: raw::iter::Range<K::Read<'k>>,
     {
-        let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
-        Some(unsafe { iter::Prefix::new(prefix) })
+        let prefix = range.common_prefix();
+        Some(unsafe {
+            iter::Prefix::new(raw::iter::Prefix::new_range(self.root(), range, prefix)?)
+        })
     }
 
     pub fn all_mut(&mut self) -> PrefixMut<'static, '_, K, V, RangeFull> {

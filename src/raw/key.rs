@@ -40,7 +40,7 @@ pub trait Key: Borrow<Self::Borrowed> {
     fn len(borrowed: &Self::Borrowed) -> Self::Len;
 }
 
-pub(crate) trait Read: Copy + fmt::Debug + Default {
+pub(crate) trait Read: Copy + fmt::Debug + Default + Eq {
     // Hint for fixed-size keys
     const LEN: Option<Self::Len>;
 
