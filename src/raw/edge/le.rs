@@ -1,3 +1,4 @@
+use core::cmp;
 use core::ops::BitOr as _;
 
 use ribbit::u3;
@@ -69,11 +70,6 @@ impl edge::Meta for LePacked {
     #[inline]
     fn is_frozen(self) -> bool {
         self.frozen()
-    }
-
-    #[inline]
-    fn is_less_than(self, rhs: Self) -> bool {
-        self.value.swap_bytes() < rhs.value.swap_bytes()
     }
 
     #[inline]
@@ -171,5 +167,32 @@ impl edge::Meta for LePacked {
             )
             .with_value(child.value()),
         )
+    }
+}
+
+impl Eq for LePacked {}
+
+impl PartialEq for LePacked {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        ((self.value ^ other.value) & !Le::MASK_FLAG) == 0
+    }
+}
+
+impl Ord for LePacked {
+    #[inline]
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        if self == other {
+            return cmp::Ordering::Equal;
+        }
+
+        self.value.swap_bytes().cmp(&other.value.swap_bytes())
+    }
+}
+
+impl PartialOrd for LePacked {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

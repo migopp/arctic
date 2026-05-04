@@ -1,3 +1,4 @@
+use core::cmp;
 use core::ops::BitOr as _;
 
 use ribbit::u3;
@@ -72,11 +73,6 @@ impl edge::Meta for BePacked {
     }
 
     #[inline]
-    fn is_less_than(self, rhs: Self) -> bool {
-        self.value < rhs.value
-    }
-
-    #[inline]
     fn with_value(self, value: bool) -> Self {
         self.with_value(value)
     }
@@ -111,5 +107,32 @@ impl edge::Meta for BePacked {
             )
             .with_value(child.value()),
         )
+    }
+}
+
+impl Eq for BePacked {}
+
+impl PartialEq for BePacked {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        ((self.value ^ other.value) & !Be::MASK_FLAG) == 0
+    }
+}
+
+impl Ord for BePacked {
+    #[inline]
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        if self == other {
+            return cmp::Ordering::Equal;
+        }
+
+        self.value.cmp(&other.value)
+    }
+}
+
+impl PartialOrd for BePacked {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

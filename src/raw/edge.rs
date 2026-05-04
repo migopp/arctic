@@ -235,7 +235,9 @@ where
     }
 }
 
-pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug + IntoIterator<Item = u8> {
+pub(crate) trait Meta:
+    ribbit::Unpack + core::fmt::Debug + Ord + IntoIterator<Item = u8>
+{
     const DEFAULT: Self;
 
     type Len: Len;
@@ -248,16 +250,12 @@ pub(crate) trait Meta: ribbit::Unpack + core::fmt::Debug + IntoIterator<Item = u
 
     fn is_value(self) -> bool;
     fn is_frozen(self) -> bool;
-    fn is_less_than(self, other: Self) -> bool;
 
     fn compress(self, byte: u8, child: Self) -> Option<Self>;
 }
 
 pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
     const MAX: Self;
-
-    #[cfg(test)]
-    fn new(bits: usize) -> Self;
 
     fn bits(self) -> usize;
 
@@ -269,13 +267,6 @@ pub(crate) trait Len: Copy + Eq + Add<Output = Self> {
 
 impl Len for u6 {
     const MAX: Self = u6::new(56);
-
-    #[cfg(test)]
-    fn new(bits: usize) -> Self {
-        validate_eq!(bits & 0b111, 0);
-        validate!(bits <= u8::MAX as usize);
-        u6::new(bits as u8)
-    }
 
     #[inline]
     fn bits(self) -> usize {

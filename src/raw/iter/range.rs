@@ -403,15 +403,14 @@ where
 #[expect(private_bounds)]
 impl<R: key::Read> Include<R> {
     #[inline]
-    fn check_exact(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Option<u8>> {
-        let len = self.0.match_exact(edge)?;
+    fn check_eq(&mut self, len: <ribbit::Packed<R::Edge> as edge::Meta>::Len) -> Option<u8> {
         let next = self.0.get_byte(len);
         let skip = match next {
             None => R::Len::ZERO,
             Some(_) => R::Len::BYTE,
         };
         self.0 = self.0.suffix(skip + len.into());
-        Some(next)
+        next
     }
 }
 
@@ -419,16 +418,11 @@ impl<R: key::Read> Lower<R::Edge> for Include<R> {
     type Bound = Option<u8>;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        if let Some(exact) = self.check_exact(edge) {
-            return Some(exact);
-        }
-
-        let bound = self.0.get_edge(edge.len());
-
-        if edge.is_less_than(bound) {
-            None
-        } else {
-            Some(None)
+        let len = edge.len();
+        match edge.cmp(&self.0.get_edge(len)) {
+            cmp::Ordering::Less => None,
+            cmp::Ordering::Equal => Some(self.check_eq(len)),
+            cmp::Ordering::Greater => Some(None),
         }
     }
 }
@@ -437,16 +431,11 @@ impl<R: key::Read> Upper<R::Edge> for Include<R> {
     type Bound = Option<u8>;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        if let Some(exact) = self.check_exact(edge) {
-            return Some(exact);
-        }
-
-        let bound = self.0.get_edge(edge.len());
-
-        if edge.is_less_than(bound) {
-            Some(None)
-        } else {
-            None
+        let len = edge.len();
+        match edge.cmp(&self.0.get_edge(len)) {
+            cmp::Ordering::Less => Some(None),
+            cmp::Ordering::Equal => Some(self.check_eq(len)),
+            cmp::Ordering::Greater => None,
         }
     }
 }

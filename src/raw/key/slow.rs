@@ -3,7 +3,6 @@ use ribbit::u6;
 use crate::raw::edge;
 use crate::raw::edge::Len as _;
 use crate::raw::key;
-use crate::raw::key::Len as _;
 
 #[cfg(feature = "opt-no-int")]
 impl Key for u64 {
