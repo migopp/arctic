@@ -8,7 +8,6 @@ use ribbit::u6;
 use crate::raw::Int;
 use crate::raw::Key;
 use crate::raw::edge;
-use crate::raw::edge::Len as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
@@ -137,7 +136,7 @@ impl<I: Int> key::Read for Reader<I> {
         let max = self.len.min(other.len).0;
         let len = Len((self.buffer ^ other.buffer).leading_zeros().min(max) & !0b111);
         Self {
-            buffer: self.buffer,
+            buffer: self.buffer.most_significant(len.0),
             len,
         }
     }

@@ -6,6 +6,7 @@ use ribbit::u56;
 
 use crate::raw::Int;
 use crate::raw::edge;
+use crate::raw::edge::Len as _;
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
 #[ribbit(size = 64, debug)]
@@ -21,14 +22,12 @@ pub struct Be {
 impl Be {
     const MASK_FLAG: u64 = 0b111;
     const MASK_LEN: u64 = 0b11_1000;
-    const MASK_PREFIX: u64 = !0b1111_1111;
 
     #[inline]
     pub(crate) fn new(value: u64, len: u6) -> ribbit::Packed<Self> {
         validate_eq!(len.value() & 0b111, 0);
-        unsafe {
-            ribbit::Packed::<Self>::new_unchecked(value & Self::MASK_PREFIX | len.value() as u64)
-        }
+        let mask = !(u64::MAX >> len.bits());
+        unsafe { ribbit::Packed::<Self>::new_unchecked(value & mask | len.bits() as u64) }
     }
 }
 
@@ -95,6 +94,8 @@ impl edge::Meta for BePacked {
 
     #[inline]
     fn compress(self, byte: u8, child: Self) -> Option<Self> {
+        validate!(!self.frozen());
+
         let parent_bits = (self.value & Be::MASK_LEN) as u8;
         let child_bits = (child.value & Be::MASK_LEN) as u8;
         let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;

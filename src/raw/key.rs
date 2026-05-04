@@ -72,13 +72,13 @@ pub(crate) trait Read: Copy + fmt::Debug + Default {
     #[inline]
     fn match_exact(
         &self,
-        edge: <Self::Edge as ribbit::Pack>::Packed,
+        meta: <Self::Edge as ribbit::Pack>::Packed,
     ) -> Option<<ribbit::Packed<Self::Edge> as edge::Meta>::Len> {
-        let len = self.match_prefix(edge);
-        (len >= edge.len().into()).then_some(edge.len())
+        let len = self.match_prefix(meta);
+        (len >= meta.len().into()).then_some(meta.len())
     }
 
-    fn match_prefix(&self, edge: <Self::Edge as ribbit::Pack>::Packed) -> Self::Len;
+    fn match_prefix(&self, meta: <Self::Edge as ribbit::Pack>::Packed) -> Self::Len;
 
     fn expand(
         &self,

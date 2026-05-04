@@ -105,14 +105,13 @@ where
     }
 
     /// Traverse to the value associated with the key, if it exists.
-    #[inline]
     pub(crate) fn traverse_get(&mut self) -> Option<u64> {
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
-            let len = self.reader.match_exact(edge.meta())?;
 
             match edge.child()? {
                 edge::Child::Node(node) => {
+                    let len = self.reader.match_exact(edge.meta())?;
                     let byte = if const { R::LEN.is_none() } {
                         self.reader
                             .get_byte(len)
@@ -135,13 +134,14 @@ where
     pub(crate) fn traverse_prefix(&mut self) -> Option<ribbit::Packed<Edge<R::Edge>>> {
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
+            let child = edge.child()?;
             let meta = edge.meta();
 
             let len_edge = meta.len();
             let len_prefix = self.reader.match_prefix(meta);
 
             if len_prefix >= len_edge.into() {
-                if let Some(node) = edge.as_node() {
+                if let edge::Child::Node(node) = child {
                     if let Some(byte) = self.reader.get_byte(len_edge) {
                         let next = unsafe { node.get(byte) }?;
                         self.push(len_edge, node, next);
@@ -150,7 +150,7 @@ where
                 }
             }
 
-            if edge.is_null() || len_prefix < self.reader.len() {
+            if len_prefix < self.reader.len() {
                 return None;
             } else {
                 return Some(edge);
@@ -163,87 +163,91 @@ where
     /// Returns `None` if there is no such edge,
     /// `Some(Err(Frozen))` if this edge is frozen,
     /// or `Some(Ok(edge))` otherwise.
-    #[inline]
     pub(crate) fn traverse_update(
         &mut self,
     ) -> Option<Result<ribbit::Packed<Edge<R::Edge>>, Frozen>> {
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
-            let meta = edge.meta();
 
-            let len = self.reader.match_exact(meta)?;
+            match edge.child()? {
+                edge::Child::Node(node) => {
+                    let len = self.reader.match_exact(edge.meta())?;
+                    let byte = if const { R::LEN.is_none() } {
+                        self.reader
+                            .get_byte(len)
+                            .expect("Precondition: no key is prefix of another key")
+                    } else {
+                        unsafe { self.reader.get_byte_unchecked(len) }
+                    };
 
-            if let Some(node) = edge.as_node() {
-                let byte = if const { R::LEN.is_none() } {
-                    self.reader
-                        .get_byte(len)
-                        .expect("Precondition: no key is prefix of another key")
-                } else {
-                    unsafe { self.reader.get_byte_unchecked(len) }
-                };
-
-                let next = unsafe { node.get(byte) }?;
-                self.push(len, node, next);
-                continue;
+                    let next = unsafe { node.get(byte) }?;
+                    self.push(len, node, next);
+                    continue;
+                }
+                edge::Child::Value(_) => {
+                    return Some({
+                        if edge.meta().is_frozen() {
+                            Err(Frozen)
+                        } else {
+                            Ok(edge)
+                        }
+                    });
+                }
             }
-
-            return if meta.is_frozen() {
-                Some(Err(Frozen))
-            } else if meta.is_value() {
-                Some(Ok(edge))
-            } else {
-                validate!(edge.is_null());
-                None
-            };
         }
     }
 
     /// Traverse to the edge associated with the key, or to
     /// the first edge where an SMO would be necessary to
     /// insert the key.
-    #[inline]
     pub(crate) fn traverse_insert(&mut self) -> Insert<R::Edge> {
         loop {
-            let old = self.edge().load_packed(Ordering::Acquire);
+            let edge = self.edge().load_packed(Ordering::Acquire);
 
-            let len_old = old.meta().len();
-            let len_prefix = self.reader.match_prefix(old.meta());
-            let exact = len_prefix >= len_old.into();
-
-            if exact {
-                if let Some(node) = old.as_node() {
-                    let byte = if const { R::LEN.is_none() } {
-                        self.reader
-                            .get_byte(len_old)
-                            .expect("Precondition: no key is prefix of another key")
-                    } else {
-                        unsafe { self.reader.get_byte_unchecked(len_old) }
-                    };
-
-                    if let Some(next) = unsafe { node.get_or_insert(byte) } {
-                        self.push(len_old, node, next);
-                        continue;
-                    }
-                }
-            }
-
-            let old_value = match (exact, old.child()) {
-                // Edge expansion
-                (false, _)
-                // Node creation or insertion
-                | (true, None) => None,
-                // Update
-                (true, Some(edge::Child::Value(value))) => Some(value),
-                // Node replacement
-                (true, Some(edge::Child::Node(node))) => {
-                    return Insert::Replace {
-                        old_node: node,
-                        old,
-                    };
-                }
+            let Some(child) = edge.child() else {
+                return Insert::Value {
+                    old_value: None,
+                    old: edge,
+                };
             };
 
-            return Insert::Value { old_value, old };
+            let Some(len) = self.reader.match_exact(edge.meta()) else {
+                return Insert::Value {
+                    old_value: None,
+                    old: edge,
+                };
+            };
+
+            match child {
+                edge::Child::Node(node) => {
+                    let byte = if const { R::LEN.is_none() } {
+                        self.reader
+                            .get_byte(len)
+                            .expect("Precondition: no key is prefix of another key")
+                    } else {
+                        unsafe { self.reader.get_byte_unchecked(len) }
+                    };
+
+                    match unsafe { node.get_or_insert(byte) } {
+                        None => {
+                            return Insert::Replace {
+                                old_node: node,
+                                old: edge,
+                            };
+                        }
+                        Some(next) => {
+                            self.push(len, node, next);
+                            continue;
+                        }
+                    }
+                }
+                edge::Child::Value(value) => {
+                    return Insert::Value {
+                        old_value: Some(value),
+                        old: edge,
+                    };
+                }
+            }
         }
     }
 
