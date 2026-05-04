@@ -130,7 +130,6 @@ where
     V: Value + Send + Sync,
     S: Smr,
 {
-    #[inline]
     pub fn get(&self, key: &K::Borrowed) -> Option<Shared<K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
@@ -140,7 +139,6 @@ where
         Some(unsafe { Shared::<'_, K, V, S>::wrap(guard, value) })
     }
 
-    #[inline]
     pub fn update(&self, key: &K::Borrowed, value: V) -> Result<Updated<K, V, S>, V> {
         match self.update_with(key, Some(value), |_, initial| {
             ControlFlow::<(), _>::Continue(initial.take().expect("Value is always initialized"))
@@ -153,7 +151,6 @@ where
         }
     }
 
-    #[inline]
     pub fn update_with<F>(
         &self,
         key: &K::Borrowed,
@@ -265,7 +262,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_non_recursive(&self, key: &K::Borrowed) -> Option<Owned<'_, K, V, S>> {
         match self.remove_non_recursive_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
@@ -274,7 +270,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_non_recursive_with<F>(
         &self,
         key: &K::Borrowed,
@@ -314,7 +309,6 @@ where
         remove
     }
 
-    #[inline]
     pub fn remove(&self, key: &K::Borrowed) -> Option<Owned<K, V, S>> {
         match self.remove_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
@@ -323,7 +317,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_with<F>(&self, key: &K::Borrowed, mut with: F) -> Remove<K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
@@ -437,7 +430,6 @@ where
         })
     }
 
-    #[inline]
     pub fn upsert(&self, key: &K::Borrowed, value: V) -> Upserted<'_, K, V, S> {
         match self.upsert_with(key, Some(value), |_, new| {
             ControlFlow::<(), _>::Continue(new.take().expect("Value is always initialized"))
@@ -447,7 +439,6 @@ where
         }
     }
 
-    #[inline]
     pub fn insert(
         &self,
         key: &K::Borrowed,
@@ -465,7 +456,6 @@ where
             })
     }
 
-    #[inline]
     pub fn insert_with<F>(
         &self,
         key: &K::Borrowed,
@@ -490,7 +480,6 @@ where
         }
     }
 
-    #[inline]
     pub fn upsert_with<F>(
         &self,
         key: &K::Borrowed,
@@ -678,6 +667,7 @@ where
     V: Value,
     S: Smr,
 {
+    #[inline]
     fn from(inner: sequential::Map<K, V>) -> Self {
         Self {
             smr: S::Global::default(),
@@ -692,6 +682,7 @@ where
     V: Value,
     S: Smr,
 {
+    #[inline]
     fn from(map: Map<K, V, S>) -> sequential::Map<K, V> {
         map.inner
     }

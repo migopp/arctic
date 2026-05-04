@@ -163,7 +163,6 @@ where
         self.walk::<false, _>(apply);
     }
 
-    #[inline]
     fn walk<
         const YIELD: bool,
         F: FnMut((&W, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,

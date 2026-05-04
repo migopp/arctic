@@ -105,6 +105,7 @@ where
     }
 
     /// Traverse to the value associated with the key, if it exists.
+    #[inline]
     pub(crate) fn traverse_get(&mut self) -> Option<u64> {
         loop {
             let edge = self.edge().load_packed(Ordering::Acquire);
