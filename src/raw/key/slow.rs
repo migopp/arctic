@@ -2,7 +2,9 @@ use ribbit::u6;
 
 use crate::raw::edge;
 use crate::raw::edge::Len as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::key;
+use crate::raw::key::Len as _;
 
 #[cfg(feature = "opt-no-int")]
 impl Key for u64 {
@@ -70,7 +72,8 @@ impl key::Read for Reader {
         &self,
         len: <ribbit::Packed<Self::Edge> as edge::Meta>::Len,
     ) -> ribbit::Packed<Self::Edge> {
-        todo!()
+        let len = u6::new((self.len().bits()).min(len.bits()) as u8);
+        edge::Le::new(u64::from_le_bytes(self.buffer), u6::new(len.bits() as u8))
     }
 
     #[inline]
@@ -78,41 +81,16 @@ impl key::Read for Reader {
         self.buffer.get(index.bytes()).copied()
     }
 
-    // #[inline]
-    // fn read(
-    //     &mut self,
-    //     len: <<<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key as edge::Key>::Len,
-    // ) -> <<Self::Edge as ribbit::Pack>::Packed as edge::Meta>::Key {
-    //     let len = self.len.min(key::vec::Len(len.bytes()));
-    //     let key = edge::Le::key_from_u64_truncate(
-    //         u64::from_le_bytes(self.buffer),
-    //         u6::new(len.bits() as u8),
-    //     );
-    //     self.buffer.copy_within(len.0.., 0);
-    //     self.len -= len;
-    //     key
-    // }
-
     #[inline]
     fn match_prefix(&self, edge: <Self::Edge as ribbit::Pack>::Packed) -> key::vec::Len {
-        todo!()
-        // let len = self.len.min(key::vec::Len(edge.len().bytes()));
-        // let len_prefix = self
-        //     .buffer
-        //     .into_iter()
-        //     .zip(edge.raw().to_le_bytes())
-        //     .take(len.0)
-        //     .position(|(l, r)| l != r)
-        //     .unwrap_or(len.0);
-        //
-        // let key = edge::Le::key_from_u64_truncate(
-        //     u64::from_le_bytes(self.buffer),
-        //     u6::new(len.bits() as u8),
-        // );
-        //
-        // self.buffer.copy_within(len.0.., 0);
-        // self.len -= len;
-        // (key, len.0 == len_prefix)
+        key::vec::Len(
+            self.buffer
+                .into_iter()
+                .zip(edge)
+                .take(self.len.0)
+                .position(|(l, r)| l != r)
+                .unwrap_or(self.len.0),
+        )
     }
 
     #[inline]
@@ -154,7 +132,7 @@ impl key::Read for Reader {
 
     fn expand(
         &self,
-        key: ribbit::Packed<Self::Edge>,
+        edge: ribbit::Packed<Self::Edge>,
     ) -> Result<
         (
             ribbit::Packed<Self::Edge>,
@@ -164,7 +142,28 @@ impl key::Read for Reader {
         ),
         (),
     > {
-        todo!()
+        let len_match = self.match_prefix(edge);
+        if len_match >= edge.len().into() {
+            return Err(());
+        }
+
+        validate!(self.len > len_match);
+        let len_start = u6::new(len_match.bits() as u8);
+        let len_middle = len_start + const { u6::new(8) };
+        let len_end = u6::new((self.len().bits() - len_middle.bits()) as u8);
+
+        let mut start = [0u8; 8];
+        start[..len_start.bytes()].copy_from_slice(&self.buffer[..len_start.bytes()]);
+        let start = edge::Le::new(u64::from_le_bytes(start), len_start);
+
+        let old_middle = (edge.raw() >> len_start.bits()) as u8;
+        let new_middle = self.buffer[len_start.bytes()];
+
+        let mut end = [0u8; 8];
+        end[..len_end.bytes()].copy_from_slice(&self.buffer[len_middle.bytes()..]);
+        let end = edge::Le::new(u64::from_le_bytes(end), len_end);
+
+        Ok((start, old_middle, new_middle, end))
     }
 }
 

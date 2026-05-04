@@ -221,7 +221,7 @@ impl<const N: usize> key::Read for Reader<'_, N> {
             return Err(());
         }
 
-        validate!(self.len().bits() >= len_match as usize);
+        validate!(self.len().bits() > len_match as usize);
 
         let len_start = u6::new(len_match & !0b111);
         let len_middle = len_start + const { u6::new(8) };
