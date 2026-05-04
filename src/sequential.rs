@@ -73,10 +73,9 @@ where
 
     #[inline]
     pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
-        let reader = K::Read::from(key);
+        let mut cursor = self.cursor(key);
+        cursor.traverse_get()?;
         unsafe {
-            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
-            cursor.traverse_get()?;
             let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_from_raw(value))
         }
@@ -84,10 +83,9 @@ where
 
     #[inline]
     pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
-        let reader = K::Read::from(key);
+        let mut cursor = self.cursor_mut(key);
+        cursor.traverse_get()?;
         unsafe {
-            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
-            cursor.traverse_get()?;
             let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_mut_from_raw(value))
         }
@@ -95,8 +93,7 @@ where
 
     #[inline]
     pub fn upsert(&mut self, key: &K::Borrowed, value: V) -> Option<V> {
-        let reader = K::Read::from(key);
-        let mut cursor = CursorMut::<K::Read<'_>>::new(&mut self.root, reader);
+        let mut cursor = self.cursor_mut(key);
         let new_value = V::into_raw(value);
 
         loop {
@@ -204,6 +201,16 @@ where
         R: raw::iter::Range<K::Read<'k>>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
+    }
+
+    #[inline]
+    fn cursor<'k>(&self, key: &'k K::Borrowed) -> Cursor<K::Read<'k>, path::Discard> {
+        unsafe { Cursor::<_, path::Discard>::new(self.root(), K::Read::from(key)) }
+    }
+
+    #[inline]
+    fn cursor_mut<'k>(&mut self, key: &'k K::Borrowed) -> CursorMut<K::Read<'k>> {
+        CursorMut::new(&mut self.root, K::Read::from(key))
     }
 }
 
