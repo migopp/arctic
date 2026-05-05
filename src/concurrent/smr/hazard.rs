@@ -158,7 +158,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     garbage: 0,
                     cycle: 0,
                     snapshot: Vec::new(),
-                    retired: Vec::new(),
+                    retired: VecDeque::new(),
                     retired_count: 0,
                     _value: PhantomData,
                 })
@@ -210,6 +210,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     /// Eagerly reclaim all retired allocations
+    #[cfg(feature = "opt-hazard-epochs")]
     pub fn reclaim(&mut self) {
         self.locals
             .iter_mut()
@@ -217,17 +218,22 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .map(|local| local.get_mut())
             .flat_map(|local| local.retired.drain(..))
             .for_each(|mut retired| {
-                #[cfg(not(feature = "opt-hazard-epochs"))]
-                {
-                    let prefix = retired.0;
-                    let raw = retired.1;
-                    deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
-                }
+                Batch::deallocate(&mut retired.0);
+            });
+    }
 
-                #[cfg(feature = "opt-hazard-epochs")]
-                {
-                    Batch::deallocate(&mut retired.0);
-                }
+    /// Eagerly reclaim all retired allocations
+    #[cfg(not(feature = "opt-hazard-epochs"))]
+    pub fn reclaim(&mut self) {
+        self.locals
+            .iter_mut()
+            .take(smr::thread::count())
+            .map(|local| local.get_mut())
+            .flat_map(|local| local.retired.drain(..))
+            .for_each(|retired| {
+                let prefix = retired.0;
+                let raw = retired.1;
+                deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
             });
 
         #[cfg(feature = "opt-batch")]
