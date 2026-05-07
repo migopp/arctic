@@ -561,6 +561,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
                 local.garbage = 0;
             }
         }
+
         #[cfg(not(feature = "opt-hazard-epochs"))]
         {
             local
