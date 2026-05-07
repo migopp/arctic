@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::raw::Key;
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
+use crate::raw::edge::Meta as _;
 use crate::raw::key;
 use crate::raw::key::Len as _;
 use crate::raw::key::Read as _;
@@ -36,6 +36,7 @@ impl<const N: usize> Key for [u8; N] {
 }
 
 impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
+    #[inline]
     fn from(array: &'k [u8; N]) -> Self {
         key::vec::Reader(array)
     }
@@ -45,6 +46,7 @@ impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
 pub struct Writer<const N: usize>([u8; N]);
 
 impl<const N: usize> Default for Writer<N> {
+    #[inline]
     fn default() -> Self {
         Self([0; N])
     }
@@ -55,7 +57,7 @@ impl<'k, const N: usize> key::Write<key::vec::Reader<'k, N>> for Writer<N> {
 
     #[inline]
     fn new(prefix: key::vec::Reader<'k, N>, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
-        let len = prefix.len() + key.len();
+        let len = prefix.len() + key.len().into();
         let mut buffer = [0u8; N];
         buffer[..prefix.len().bytes()].copy_from_slice(prefix.as_ref());
         buffer[prefix.len().bytes()..]
@@ -76,7 +78,7 @@ impl<'k, const N: usize> key::Write<key::vec::Reader<'k, N>> for Writer<N> {
             .for_each(|(out, r#in)| {
                 *out = r#in;
             });
-        start + key::vec::Len::BYTE + edge.len()
+        start + key::vec::Len::BYTE + edge.len().into()
     }
 }
 

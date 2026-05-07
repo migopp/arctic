@@ -18,7 +18,6 @@ use crate::raw::cursor;
 use crate::raw::cursor::Path;
 use crate::raw::cursor::path;
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key::Len as _;
 use crate::sequential;
@@ -131,7 +130,6 @@ where
     V: Value + Send + Sync,
     S: Smr,
 {
-    #[inline]
     pub fn get(&self, key: &K::Borrowed) -> Option<Shared<K, V, S>> {
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
@@ -141,7 +139,6 @@ where
         Some(unsafe { Shared::<'_, K, V, S>::wrap(guard, value) })
     }
 
-    #[inline]
     pub fn update(&self, key: &K::Borrowed, value: V) -> Result<Updated<K, V, S>, V> {
         match self.update_with(key, Some(value), |_, initial| {
             ControlFlow::<(), _>::Continue(initial.take().expect("Value is always initialized"))
@@ -154,7 +151,6 @@ where
         }
     }
 
-    #[inline]
     pub fn update_with<F>(
         &self,
         key: &K::Borrowed,
@@ -266,7 +262,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_non_recursive(&self, key: &K::Borrowed) -> Option<Owned<'_, K, V, S>> {
         match self.remove_non_recursive_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
@@ -275,7 +270,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_non_recursive_with<F>(
         &self,
         key: &K::Borrowed,
@@ -315,7 +309,6 @@ where
         remove
     }
 
-    #[inline]
     pub fn remove(&self, key: &K::Borrowed) -> Option<Owned<K, V, S>> {
         match self.remove_with(key, |_| ControlFlow::Continue(())) {
             Remove::Absent => None,
@@ -324,7 +317,6 @@ where
         }
     }
 
-    #[inline]
     pub fn remove_with<F>(&self, key: &K::Borrowed, mut with: F) -> Remove<K, V, S>
     where
         F: FnMut(&V::Target) -> ControlFlow<(), ()>,
@@ -383,7 +375,7 @@ where
         };
 
         if RECURSIVE {
-            let mut trim = old.meta().key().len();
+            let mut trim = old.meta().len();
 
             'outer: while let Some(target) = cursor
                 .pop()
@@ -393,7 +385,7 @@ where
                     break 'outer;
                 }
 
-                cursor.trim(K::Len::BYTE + trim);
+                cursor.trim(K::Len::BYTE + trim.into());
 
                 loop {
                     let Some(old) = cursor.traverse_prefix() else {
@@ -418,7 +410,7 @@ where
                     ) {
                         Ok(old) => {
                             unsafe { guard.retire_node(cursor.len().bits(), target) };
-                            trim = old.meta().key().len();
+                            trim = old.meta().len();
                             continue 'outer;
                         }
                         // FIXME: help freeze
@@ -438,7 +430,6 @@ where
         })
     }
 
-    #[inline]
     pub fn upsert(&self, key: &K::Borrowed, value: V) -> Upserted<'_, K, V, S> {
         match self.upsert_with(key, Some(value), |_, new| {
             ControlFlow::<(), _>::Continue(new.take().expect("Value is always initialized"))
@@ -448,7 +439,6 @@ where
         }
     }
 
-    #[inline]
     pub fn insert(
         &self,
         key: &K::Borrowed,
@@ -466,7 +456,6 @@ where
             })
     }
 
-    #[inline]
     pub fn insert_with<F>(
         &self,
         key: &K::Borrowed,
@@ -491,7 +480,6 @@ where
         }
     }
 
-    #[inline]
     pub fn upsert_with<F>(
         &self,
         key: &K::Borrowed,
@@ -560,11 +548,7 @@ where
 
         loop {
             match cursor.traverse_insert() {
-                cursor::Insert::Value {
-                    old_value,
-                    old,
-                    key,
-                } => {
+                cursor::Insert::Value { old_value, old } => {
                     let new_value = match upsert(
                         old_value
                             .as_ref()
@@ -582,7 +566,7 @@ where
                         }
                     };
 
-                    match cursor.create_path(old, key, new_value) {
+                    match cursor.create_path(old, new_value) {
                         // Restore value and fall through to freeze
                         Err(Frozen) => initial = Some(unsafe { V::from_raw(new_value) }),
 
@@ -619,9 +603,7 @@ where
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
-                            if let Some(node) = old.as_node() {
-                                unsafe { guard.retire_node(cursor.len().bits(), node) };
-                            }
+                            unsafe { guard.retire_node(cursor.len().bits(), old_node) };
                         }
                         Err(_) => {
                             // Does not go through SMR because `new` is still thread-local
@@ -672,10 +654,14 @@ where
     where
         R: crate::raw::iter::Range<K::Read<'k>>,
     {
-        // FIXME: avoid recomputing common prefix?
-        let guard = self.smr.guard(K::hazard(range.common_prefix()));
-        let prefix = unsafe { raw::iter::Prefix::new_range(self.inner.root(), range) }?;
-        Some(unsafe { Prefix::new(guard, prefix) })
+        let prefix = range.common_prefix();
+        let guard = self.smr.guard(K::hazard(prefix));
+        Some(unsafe {
+            Prefix::new(
+                guard,
+                raw::iter::Prefix::new_range(self.inner.root(), range, prefix)?,
+            )
+        })
     }
 }
 
@@ -685,6 +671,7 @@ where
     V: Value,
     S: Smr,
 {
+    #[inline]
     fn from(inner: sequential::Map<K, V>) -> Self {
         Self {
             smr: S::Global::default(),
@@ -699,6 +686,7 @@ where
     V: Value,
     S: Smr,
 {
+    #[inline]
     fn from(map: Map<K, V, S>) -> sequential::Map<K, V> {
         map.inner
     }

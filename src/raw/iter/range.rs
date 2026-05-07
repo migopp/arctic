@@ -14,9 +14,9 @@ use crate::Order;
 use crate::raw;
 use crate::raw::Edge;
 use crate::raw::edge;
-use crate::raw::edge::Key as _;
 use crate::raw::edge::Meta as _;
 use crate::raw::key;
+use crate::raw::key::Len as _;
 use crate::raw::node::Lower as _;
 use crate::raw::node::Upper as _;
 
@@ -70,7 +70,7 @@ where
             return Self::default();
         };
 
-        let (writer, len) = W::new(prefix, meta.key());
+        let (writer, len) = W::new(prefix, meta);
 
         match child {
             edge::Child::Value(value) => Self::Root {
@@ -163,7 +163,6 @@ where
         self.walk::<false, _>(apply);
     }
 
-    #[inline]
     fn walk<
         const YIELD: bool,
         F: FnMut((&W, u64, NonNull<Atomic<Edge<K::Edge>>>)) -> ControlFlow<()>,
@@ -400,29 +399,28 @@ where
     fn check(&mut self, edge: ribbit::Packed<M>) -> Option<Self::Bound>;
 }
 
+#[expect(private_bounds)]
+impl<R: key::Read> Include<R> {
+    #[inline]
+    fn check_eq(&mut self, len: <ribbit::Packed<R::Edge> as edge::Meta>::Len) -> Option<u8> {
+        let next = self.0.get_byte(len);
+        let skip = match next {
+            None => R::Len::ZERO,
+            Some(_) => R::Len::BYTE,
+        };
+        self.0 = self.0.suffix(skip + len.into());
+        next
+    }
+}
+
 impl<R: key::Read> Lower<R::Edge> for Include<R> {
     type Bound = Option<u8>;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
-
-        // Ensure bound has at least as many bytes as edge
-        //
-        // We can skip this check for fixed-size keys because
-        // the bounds will always be the full key length, which
-        // is at least as long as the bytes along any path.
-        validate!(
-            const { R::LEN.is_none() } || (const { R::LEN.is_some() } && self.0.len() >= len)
-        );
-
-        if const { R::LEN.is_none() } && self.0.len() < len {
-            return None;
-        }
-
-        match key.cmp(&self.0.read(len)) {
+        let len = edge.len();
+        match edge.cmp(&self.0.get_edge(len)) {
             cmp::Ordering::Less => None,
-            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Equal => Some(self.check_eq(len)),
             cmp::Ordering::Greater => Some(None),
         }
     }
@@ -432,16 +430,10 @@ impl<R: key::Read> Upper<R::Edge> for Include<R> {
     type Bound = Option<u8>;
 
     fn check(&mut self, edge: ribbit::Packed<R::Edge>) -> Option<Self::Bound> {
-        let key = edge.key();
-        let len = key.len();
-
-        // Note: not symmetric with lower bound!
-        // We can't check `self.0.bits() > len.bits()` here because
-        // this edge may have children with more bytes to compare.
-
-        match key.cmp(&self.0.read(len)) {
+        let len = edge.len();
+        match edge.cmp(&self.0.get_edge(len)) {
             cmp::Ordering::Less => Some(None),
-            cmp::Ordering::Equal => Some(self.0.next()),
+            cmp::Ordering::Equal => Some(self.check_eq(len)),
             cmp::Ordering::Greater => None,
         }
     }

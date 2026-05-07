@@ -59,7 +59,7 @@
 //! and values V1 + V2 from reclamation.
 
 mod membarrier;
-pub(crate) mod prefix;
+pub mod prefix;
 pub(crate) use prefix::Prefix;
 
 use core::cell::UnsafeCell;

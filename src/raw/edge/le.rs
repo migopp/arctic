@@ -1,79 +1,66 @@
+use core::cmp;
 use core::ops::BitOr as _;
-use core::ops::BitXor;
 
+use ribbit::u3;
 use ribbit::u6;
 use ribbit::u56;
 
 use crate::raw::edge;
+use crate::raw::edge::Len as _;
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
-#[ribbit(size = 64, debug, eq, ord)]
+#[ribbit(size = 64, debug)]
 pub struct Le {
     prefix: u56,
     value: bool,
     frozen: bool,
-    len: u6,
+    inline: bool,
+    #[ribbit(offset = 59)]
+    len: u3,
 }
 
 impl Le {
-    const MASK_META: u64 = 0b11u64 << 56;
-    const MASK_KEY: u64 = !Self::MASK_META;
+    const MASK_FLAG: u64 = 0b0000_0111u64 << 56;
+    const MASK_LEN: u64 = 0b0011_1000 << 56;
 
     #[inline]
-    pub(crate) fn key_from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
+    pub(crate) fn new(value: u64, len: u6) -> ribbit::Packed<Self> {
         validate_eq!(len.value() & 0b111, 0);
+        let mask = (1 << len.bits()) - 1;
         unsafe {
-            core::hint::assert_unchecked(len.value() < 64);
+            ribbit::Packed::<Self>::new_unchecked(value & mask | ((len.value() as u64) << 56))
         }
-        let mask = (1u64 << len.value()) - 1;
-        ribbit::Packed::<Self>::new(
-            unsafe { u56::new_unchecked(value & mask) },
-            false,
-            false,
-            len,
-        )
-    }
-
-    #[inline]
-    pub(crate) fn min_len(len: u6, bits: usize) -> u6 {
-        unsafe { u6::new_unchecked((len.value() as usize).min(bits) as u8) }
     }
 }
 
 impl LePacked {
+    #[inline]
     pub(crate) fn raw(self) -> u64 {
         self.value
-    }
-
-    fn with_meta(self, meta: Self) -> Self {
-        unsafe { Self::new_unchecked(self.value | (meta.value & Le::MASK_META)) }
     }
 }
 
 impl IntoIterator for LePacked {
     type Item = u8;
     type IntoIter = core::iter::Take<core::array::IntoIter<u8, 8>>;
+
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.value
             .to_le_bytes()
             .into_iter()
-            .take((self.len().value() >> 3) as usize)
+            .take(self.len().value() as usize)
     }
 }
 
 impl edge::Meta for LePacked {
-    const DEFAULT: Self = Self::new(u56::new(0), false, false, u6::new(0));
+    const DEFAULT: Self = Self::new(u56::new(0), false, false, false, u3::new(0));
 
-    type Key = Self;
-
-    #[inline]
-    fn new(key: Self::Key, value: bool) -> Self {
-        key.with_value(value)
-    }
+    type Len = u6;
 
     #[inline]
-    fn key(self) -> Self::Key {
-        unsafe { Self::new_unchecked(self.value & Le::MASK_KEY) }
+    fn len(self) -> u6 {
+        unsafe { u6::new_unchecked(((self.value & Le::MASK_LEN) >> 56) as u8) }
     }
 
     #[inline]
@@ -87,82 +74,37 @@ impl edge::Meta for LePacked {
     }
 
     #[inline]
+    fn with_value(self, value: bool) -> Self {
+        self.with_value(value)
+    }
+
+    #[inline]
     fn with_frozen(self, frozen: bool) -> Self {
         self.with_frozen(frozen)
     }
 
     #[inline]
-    fn expand(self, new: Self::Key) -> Result<(Self, u8, Self), ()> {
-        if self.key() == new {
-            return Err(());
-        }
+    fn with_inline(self, inline: bool) -> Self {
+        self.with_inline(inline)
+    }
 
-        if cfg!(feature = "opt-no-expand") {
-            let len = (new.len().value() >> 3) as usize;
-            let len_parent = self
-                .value
-                .to_le_bytes()
-                .into_iter()
-                .zip(new.value.to_le_bytes())
-                .take(len)
-                .position(|(l, r)| l != r)
-                .unwrap_or(len);
-
-            let bytes = self.value.to_le_bytes();
-            let mut parent = [0u8; 8];
-            parent[..len_parent].copy_from_slice(&bytes[..len_parent]);
-            let parent = Le::key_from_u64_truncate(
-                u64::from_le_bytes(parent),
-                u6::new((len_parent << 3) as u8),
-            );
-
-            let middle = bytes[len_parent];
-
-            let len_total = (self.len().value() as usize) >> 3;
-            let len_child = len_total - len_parent - 1;
-            let mut child = [0u8; 8];
-            child[..len_child].copy_from_slice(&bytes[len_parent + 1..len_total]);
-            let child = Le::key_from_u64_truncate(
-                u64::from_le_bytes(child),
-                u6::new((len_child << 3) as u8),
-            )
-            .with_meta(self);
-
-            return Ok((parent, middle, child));
-        }
-
-        validate!(self.len() >= new.len());
-
-        let len_parent = unsafe {
-            u6::new_unchecked(
-                self.value
-                    .bitxor(new.value)
-                    .bitor(1u64 << new.len().value())
-                    .trailing_zeros() as u8
-                    & !0b111u8,
-            )
-        };
-
-        let len_middle = unsafe { u6::new_unchecked(len_parent.value() + 8) };
-
-        Ok((
-            Le::key_from_u64_truncate(self.value, len_parent).with_value(false),
-            (self.value >> len_parent.value()) as u8,
-            Le::key_from_u64_truncate(self.value >> len_middle.value(), self.len() - len_middle)
-                .with_meta(self),
-        ))
+    #[inline]
+    fn with_key(self, key: Self) -> Self {
+        validate_eq!(key.value & Le::MASK_FLAG, 0);
+        unsafe { Self::new_unchecked(self.value & Le::MASK_FLAG | key.value) }
     }
 
     #[inline]
     fn compress(self, byte: u8, child: Self) -> Option<Self> {
-        validate!(self.frozen());
+        validate!(!self.frozen());
 
-        let parent_bits = self.len().value();
-        let child_bits = child.len().value();
+        let parent_bits = ((self.value & Le::MASK_LEN) >> 56) as u8;
+        let child_bits = ((child.value & Le::MASK_LEN) >> 56) as u8;
         let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;
+
         Some(
-            Le::key_from_u64_truncate(
-                self.value
+            Le::new(
+                (self.value & ((1 << parent_bits) - 1))
                     .bitor((byte as u64) << parent_bits)
                     .bitor(child.value << (parent_bits + 8)),
                 len,
@@ -172,16 +114,29 @@ impl edge::Meta for LePacked {
     }
 }
 
-impl edge::Key for LePacked {
-    type Len = u6;
+impl Eq for LePacked {}
 
+impl PartialEq for LePacked {
     #[inline]
-    fn len(self) -> Self::Len {
-        self.len()
+    fn eq(&self, other: &Self) -> bool {
+        ((self.value ^ other.value) & !Le::MASK_FLAG) == 0
     }
+}
 
+impl Ord for LePacked {
     #[inline]
-    fn prefix(self, len: Self::Len) -> Self {
-        Le::key_from_u64_truncate(self.value, len)
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        if self == other {
+            return cmp::Ordering::Equal;
+        }
+
+        self.value.swap_bytes().cmp(&other.value.swap_bytes())
+    }
+}
+
+impl PartialOrd for LePacked {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

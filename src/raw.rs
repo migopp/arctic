@@ -15,6 +15,7 @@
 
 pub(crate) mod cursor;
 pub(crate) mod edge;
+mod int;
 pub(crate) mod iter;
 pub(crate) mod key;
 pub(crate) mod node;
@@ -23,6 +24,7 @@ pub(crate) use cursor::Cursor;
 pub(crate) use edge::Edge;
 pub use key::Key;
 
+pub(crate) use int::Int;
 pub(crate) struct Frozen;
 
 /// Structural modification operation.

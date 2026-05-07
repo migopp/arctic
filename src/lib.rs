@@ -30,14 +30,6 @@ macro_rules! validate_eq {
     };
 }
 
-macro_rules! validate_ne {
-    ($($tt:tt)*) => {
-        if cfg!(any(feature = "validate", debug_assertions, test)) {
-            assert_ne!($($tt)*);
-        }
-    };
-}
-
 macro_rules! simd {
     ($flag:expr, $avx2:expr, $fallback:expr $(, $fmt:expr)* $(,)?) => {{
         #[cfg(all(not(feature = $flag), target_feature = "avx2"))]
@@ -355,6 +347,22 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn regression_range_common_prefix() {
+        let map = crate::concurrent::Map::<u64, u64>::new();
+        const NEEDLE: u64 = 0xE642_3BB1_ADBB_F000;
+        const LOWER: u64 = 0x39_9100;
+        const UPPER: u64 = 0xFF29_D24D_7E9A_920D;
+        map.insert(&NEEDLE, 0).unwrap();
+        map.range(LOWER..=UPPER)
+            .unwrap()
+            .entries::<crate::Ascend>()
+            .for_each(|(key, value)| {
+                assert_eq!(key, NEEDLE);
+                assert_eq!(value, 0);
+            })
     }
 
     fn insert_all<I, K>(iter: I) -> Map<K, u64>

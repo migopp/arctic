@@ -1,75 +1,66 @@
+use core::cmp;
 use core::ops::BitOr as _;
-use core::ops::BitXor as _;
 
+use ribbit::u3;
 use ribbit::u6;
 use ribbit::u56;
 
+use crate::raw::Int;
 use crate::raw::edge;
+use crate::raw::edge::Len as _;
 
 #[derive(Copy, Clone, Debug, ribbit::Pack)]
-#[ribbit(size = 64, debug, eq, ord)]
+#[ribbit(size = 64, debug)]
 pub struct Be {
-    len: u6,
     value: bool,
     frozen: bool,
+    inline: bool,
+    #[ribbit(offset = 3)]
+    len: u3,
+    #[ribbit(offset = 8)]
     prefix: u56,
 }
 
 impl Be {
-    const MASK_META: u64 = 0b1100_0000;
-    const MASK_KEY: u64 = !Self::MASK_META;
+    const MASK_FLAG: u64 = 0b111;
+    const MASK_LEN: u64 = 0b11_1000;
 
     #[inline]
-    pub(crate) fn key_from_u64_truncate(value: u64, len: u6) -> ribbit::Packed<Self> {
+    pub(crate) fn new(value: u64, len: u6) -> ribbit::Packed<Self> {
         validate_eq!(len.value() & 0b111, 0);
-        let len = len.value();
-        unsafe {
-            core::hint::assert_unchecked(len < 64);
-        }
-        let mask = !(u64::MAX >> len);
-        unsafe { ribbit::Packed::<Self>::new_unchecked(value & mask | (len as u64)) }
-    }
-
-    #[inline]
-    pub(crate) fn min_len(len: u6, bits: usize) -> u6 {
-        unsafe { u6::new_unchecked((len.value() as usize).min(bits) as u8) }
+        let mask = !(u64::MAX >> len.bits());
+        unsafe { ribbit::Packed::<Self>::new_unchecked(value & mask | len.bits() as u64) }
     }
 }
 
 impl BePacked {
+    #[inline]
     pub(crate) fn raw(self) -> u64 {
         self.value
-    }
-
-    fn with_meta(self, meta: Self) -> Self {
-        unsafe { Self::new_unchecked(self.value | (meta.value & Be::MASK_META)) }
     }
 }
 
 impl IntoIterator for BePacked {
     type Item = u8;
     type IntoIter = core::iter::Take<core::array::IntoIter<u8, 8>>;
+
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.value
             .to_be_bytes()
             .into_iter()
-            .take((self.len().value() >> 3) as usize)
+            .take(self.len().value() as usize)
     }
 }
 
 impl edge::Meta for BePacked {
-    const DEFAULT: Self = Self::new(u6::new(0), false, false, u56::new(0));
+    const DEFAULT: Self = Self::new(false, false, false, u3::new(0), u56::new(0));
 
-    type Key = Self;
-
-    #[inline]
-    fn new(key: Self::Key, value: bool) -> Self {
-        key.with_value(value)
-    }
+    type Len = u6;
 
     #[inline]
-    fn key(self) -> Self::Key {
-        unsafe { Self::new_unchecked(self.value & Be::MASK_KEY) }
+    fn len(self) -> Self::Len {
+        unsafe { u6::new_unchecked((self.value & Be::MASK_LEN) as u8) }
     }
 
     #[inline]
@@ -83,46 +74,39 @@ impl edge::Meta for BePacked {
     }
 
     #[inline]
+    fn with_value(self, value: bool) -> Self {
+        self.with_value(value)
+    }
+
+    #[inline]
     fn with_frozen(self, frozen: bool) -> Self {
         self.with_frozen(frozen)
     }
 
     #[inline]
-    fn expand(self, new: Self::Key) -> Result<(Self, u8, Self), ()> {
-        if self.key() == new {
-            return Err(());
-        }
+    fn with_inline(self, inline: bool) -> Self {
+        self.with_inline(inline)
+    }
 
-        validate!(self.len() >= new.len());
-
-        let len_parent = unsafe {
-            u6::new_unchecked(
-                self.value
-                    .bitxor(new.value)
-                    .bitor(1u64.rotate_right(1) >> new.len().value())
-                    .leading_zeros() as u8
-                    & !0b111u8,
-            )
-        };
-
-        let len_middle = unsafe { u6::new_unchecked(len_parent.value() + 8) };
-        Ok((
-            Be::key_from_u64_truncate(self.value, len_parent).with_value(false),
-            self.value.rotate_left(len_middle.value() as u32) as u8,
-            Be::key_from_u64_truncate(self.value << len_middle.value(), self.len() - len_middle)
-                .with_meta(self),
-        ))
+    #[inline]
+    fn with_key(self, key: Self) -> Self {
+        validate_eq!(key.value & Be::MASK_FLAG, 0);
+        unsafe { Self::new_unchecked(self.value & Be::MASK_FLAG | key.value) }
     }
 
     #[inline]
     fn compress(self, byte: u8, child: Self) -> Option<Self> {
-        let parent_bits = self.len().value();
-        let child_bits = child.len().value();
+        validate!(!self.frozen());
+
+        let parent_bits = (self.value & Be::MASK_LEN) as u8;
+        let child_bits = (child.value & Be::MASK_LEN) as u8;
         let len = u6::try_new(parent_bits + 8 + child_bits).ok()?;
         let shift = parent_bits as u32 + 8;
+
         Some(
-            Be::key_from_u64_truncate(
+            Be::new(
                 self.value
+                    .most_significant(parent_bits)
                     .bitor((byte as u64).rotate_right(shift))
                     .bitor(child.value >> shift),
                 len,
@@ -132,16 +116,29 @@ impl edge::Meta for BePacked {
     }
 }
 
-impl edge::Key for BePacked {
-    type Len = u6;
+impl Eq for BePacked {}
 
+impl PartialEq for BePacked {
     #[inline]
-    fn len(self) -> Self::Len {
-        self.len()
+    fn eq(&self, other: &Self) -> bool {
+        ((self.value ^ other.value) & !Be::MASK_FLAG) == 0
     }
+}
 
+impl Ord for BePacked {
     #[inline]
-    fn prefix(self, len: Self::Len) -> Self {
-        Be::key_from_u64_truncate(self.value, len)
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        if self == other {
+            return cmp::Ordering::Equal;
+        }
+
+        self.value.cmp(&other.value)
+    }
+}
+
+impl PartialOrd for BePacked {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

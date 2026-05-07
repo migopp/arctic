@@ -1,6 +1,8 @@
+mod entry;
 mod iter;
 mod value;
 
+pub use entry::Entry;
 pub use iter::EntryIter;
 pub use iter::EntryIterMut;
 pub use iter::Prefix;
@@ -21,10 +23,7 @@ use crate::Key;
 use crate::raw;
 use crate::raw::Cursor;
 use crate::raw::Edge;
-use crate::raw::Frozen;
-use crate::raw::cursor::CursorMut;
 use crate::raw::cursor::path;
-use crate::raw::edge::Meta as _;
 use crate::raw::iter::PostorderIter;
 use crate::stat;
 
@@ -49,15 +48,6 @@ where
     }
 }
 
-// pub enum Update<'g, V, B>
-// where
-//     V: Value + 'g,
-// {
-//     Absent { value: Option<V> },
-//     Success { old: V },
-//     Break { old: V::Borrow<'g>, r#break: B },
-// }
-
 impl<K, V> Map<K, V>
 where
     K: Key,
@@ -73,10 +63,9 @@ where
 
     #[inline]
     pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
-        let reader = K::Read::from(key);
+        let mut cursor = self.cursor(key);
+        cursor.traverse_get()?;
         unsafe {
-            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
-            cursor.traverse_get()?;
             let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_from_raw(value))
         }
@@ -84,10 +73,9 @@ where
 
     #[inline]
     pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
-        let reader = K::Read::from(key);
+        let mut cursor = self.cursor(key);
+        cursor.traverse_get()?;
         unsafe {
-            let mut cursor = Cursor::<_, path::Discard>::new(self.root(), reader);
-            cursor.traverse_get()?;
             let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
             Some(V::target_mut_from_raw(value))
         }
@@ -95,77 +83,36 @@ where
 
     #[inline]
     pub fn upsert(&mut self, key: &K::Borrowed, value: V) -> Option<V> {
-        let reader = K::Read::from(key);
-        let mut cursor = CursorMut::<K::Read<'_>>::new(&mut self.root, reader);
-        let new_value = V::into_raw(value);
-
-        loop {
-            match cursor.traverse_insert() {
-                crate::raw::cursor::Insert::Value {
-                    old_value,
-                    old,
-                    key,
-                } => match cursor.create_path(old, key, new_value) {
-                    Err(Frozen) => unreachable!(),
-                    Ok(new) => {
-                        cursor.edge_mut().set_packed(new);
-                        return old_value.map(|old| unsafe { V::from_raw(old) });
-                    }
-                },
-                crate::raw::cursor::Insert::Replace { old_node, old } => {
-                    validate!(!old.meta().is_frozen());
-                    let (_smo, new) = unsafe { old_node.replace::<false>(old.meta()) };
-                    cursor.edge_mut().set_packed(new);
-                    if let Some(node) = old.as_node() {
-                        unsafe { node.deallocate(stat::Counter::FreeRetire) };
-                    }
-                }
+        match self.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+                None
             }
+            Entry::Occupied(entry) => Some(entry.insert(value)),
         }
     }
 
-    // #[inline]
-    // pub fn remove(&mut self, key: K::Borrow<'_>) -> Option<V> {
-    //     match self.update_with_impl(key, |_| ControlFlow::<(), _>::Continue(None)) {
-    //         Update::Absent { value: None } => None,
-    //         Update::Success { old } => Some(old),
-    //         Update::Absent { value: Some(_) } | Update::Break { .. } => unreachable!(),
-    //     }
-    // }
-    //
-    // #[inline]
-    // fn update_with_impl<F, B>(&mut self, key: K::Borrow<'_>, with: F) -> Update<'_, V, B>
-    // where
-    //     F: FnOnce(&mut V::Target) -> ControlFlow<B, V>,
-    // {
-    //     let reader = K::Read::from(key);
-    //     let mut cursor = CursorMut::<K>::new(&mut self.root, reader);
-    //
-    //     let old = match cursor.traverse_update() {
-    //         None => return Update::Absent { value: None },
-    //         Some(Err(Frozen)) => unreachable!(),
-    //         Some(Ok(old)) => old,
-    //     };
-    //
-    //     let new = match with(unsafe { V::borrow_from_raw(old.into_raw()) }) {
-    //         ControlFlow::Continue(None) => Edge::DEFAULT,
-    //         ControlFlow::Continue(Some(new)) => unsafe {
-    //             old.with_value_unchecked(V::into_raw(new))
-    //         },
-    //         ControlFlow::Break(r#break) => {
-    //             return Update::Break {
-    //                 old: unsafe { V::borrow_from_raw(old.into_raw()) },
-    //                 r#break,
-    //             };
-    //         }
-    //     };
-    //
-    //     cursor.edge_mut().set_packed(new);
-    //
-    //     Update::Success {
-    //         old: unsafe { V::from_raw(old.into_raw()) },
-    //     }
-    // }
+    pub fn entry<'k>(&mut self, key: &'k K::Borrowed) -> Entry<'_, 'k, K, V> {
+        let mut cursor = self.cursor(key);
+
+        match cursor.traverse_insert() {
+            raw::cursor::Insert::Value {
+                old_value: Some(_),
+                old: _,
+            } => Entry::Occupied(entry::Occupied {
+                edge: unsafe { cursor.edge_mut() },
+                _value: PhantomData,
+            }),
+            raw::cursor::Insert::Value {
+                old_value: None,
+                old: _,
+            }
+            | raw::cursor::Insert::Replace { .. } => Entry::Vacant(entry::Vacant {
+                cursor,
+                _value: PhantomData,
+            }),
+        }
+    }
 
     pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
         unsafe { Prefix::new(raw::iter::Prefix::<K>::new_all(self.root())) }
@@ -184,8 +131,10 @@ where
     where
         R: raw::iter::Range<K::Read<'k>>,
     {
-        let prefix = unsafe { raw::iter::Prefix::new_range(self.root(), range) }?;
-        Some(unsafe { iter::Prefix::new(prefix) })
+        let prefix = range.common_prefix();
+        Some(unsafe {
+            iter::Prefix::new(raw::iter::Prefix::new_range(self.root(), range, prefix)?)
+        })
     }
 
     pub fn all_mut(&mut self) -> PrefixMut<'static, '_, K, V, RangeFull> {
@@ -204,6 +153,11 @@ where
         R: raw::iter::Range<K::Read<'k>>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
+    }
+
+    #[inline]
+    fn cursor<'k>(&self, key: &'k K::Borrowed) -> Cursor<K::Read<'k>, path::Discard> {
+        unsafe { Cursor::<_, path::Discard>::new(self.root(), K::Read::from(key)) }
     }
 }
 
