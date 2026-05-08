@@ -28,11 +28,6 @@ impl<const N: usize> Key for [u8; N] {
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
         writer.0
     }
-
-    #[inline]
-    fn len(_: &Self::Borrowed) -> Self::Len {
-        key::vec::Len(N)
-    }
 }
 
 impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
@@ -43,7 +38,7 @@ impl<'k, const N: usize> From<&'k [u8; N]> for key::vec::Reader<'k, N> {
 }
 
 #[repr(transparent)]
-pub struct Writer<const N: usize>([u8; N]);
+pub struct Writer<const N: usize>(pub(super) [u8; N]);
 
 impl<const N: usize> Default for Writer<N> {
     #[inline]

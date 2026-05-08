@@ -216,7 +216,7 @@ pub struct Le {
 
 impl Le {
     #[inline]
-    #[expect(dead_code)]
+    #[cfg_attr(not(feature = "opt-no-int"), expect(dead_code))]
     pub(crate) fn new_hazard(prefix: u64, bits: usize) -> ribbit::Packed<Self> {
         validate_eq!(bits & 0b111, 0);
 

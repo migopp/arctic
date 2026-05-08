@@ -35,11 +35,6 @@ impl Key for Vec<u8> {
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
         writer.0
     }
-
-    #[inline]
-    fn len(slice: &Self::Borrowed) -> Self::Len {
-        Len(slice.len())
-    }
 }
 
 impl Key for String {
@@ -66,11 +61,6 @@ impl Key for String {
         if_validate!(String::from_utf8(writer.0).unwrap(), unsafe {
             String::from_utf8_unchecked(writer.0)
         })
-    }
-
-    #[inline]
-    fn len(string: &Self::Borrowed) -> Self::Len {
-        Len(string.len())
     }
 }
 
