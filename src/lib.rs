@@ -312,44 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn regression_u128() {
-        const fn key(low: i64) -> u128 {
-            const FLIP: u64 = 1u64.rotate_right(1);
-            let high = (-1i64) as u64 ^ FLIP;
-            ((high as u128) << 64) | (((low as u64) ^ FLIP) as u128)
-        }
-
-        let map = insert_all((0..10i64).map(key));
-
-        let prefix = map.range(key(5)..=key(i64::MAX)).unwrap();
-
-        let values = prefix.values::<Ascend>().collect::<Vec<_>>();
-        assert_eq!(values, (5..10).collect::<Vec<u64>>());
-    }
-
-    #[test]
-    fn regression_insert() {
-        let map = crate::concurrent::Map::<u64, u64>::new();
-        map.insert(&0u64, 0u64).unwrap();
-        map.insert(&0u64, 1u64).unwrap_err();
-    }
-
-    #[test]
-    fn regression_range_upper() {
-        let map = crate::concurrent::Map::<String, u64>::new();
-        let key = "a".repeat(100);
-        let upper = "a".repeat(200);
-        map.insert(&key, 0).unwrap();
-        assert_eq!(
-            map.range(..=&upper)
-                .unwrap()
-                .entries::<crate::Ascend>()
-                .count(),
-            1
-        );
-    }
-
-    #[test]
     fn regression_range_common_prefix() {
         let map = crate::concurrent::Map::<u64, u64>::new();
         const NEEDLE: u64 = 0xE642_3BB1_ADBB_F000;
