@@ -559,7 +559,7 @@ where
                         ControlFlow::Break(()) => {
                             return Ok(Upsert::Break {
                                 old: old
-                                    .as_value()
+                                    .into_value()
                                     .map(|old| unsafe { Shared::<K, V, S>::wrap(guard, old) }),
                                 initial,
                             });

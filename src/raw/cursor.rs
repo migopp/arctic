@@ -76,6 +76,11 @@ where
     }
 
     #[inline]
+    pub(crate) unsafe fn as_value_unchecked(&self) -> NonNull<u64> {
+        unsafe { Edge::as_value_unchecked(self.edge) }
+    }
+
+    #[inline]
     pub(crate) fn len(&self) -> R::Len {
         self.len
     }

@@ -14,7 +14,6 @@ pub use value::Value;
 use core::cell::Cell;
 use core::marker::PhantomData;
 use core::ops::RangeFull;
-use core::ptr::NonNull;
 
 use ribbit::Atomic;
 
@@ -62,23 +61,17 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: &K::Borrowed) -> Option<&V::Target> {
+    pub fn get(&self, key: &K::Borrowed) -> Option<&V> {
         let mut cursor = self.cursor(key);
         cursor.traverse_get()?;
-        unsafe {
-            let value = Edge::as_value_unchecked(NonNull::from(cursor.edge()));
-            Some(V::target_from_raw(value))
-        }
+        Some(unsafe { cursor.as_value_unchecked().cast::<V>().as_ref() })
     }
 
     #[inline]
-    pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V::Target> {
+    pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V> {
         let mut cursor = self.cursor(key);
         cursor.traverse_get()?;
-        unsafe {
-            let value = Edge::as_value_mut_unchecked(NonNull::from(cursor.edge()));
-            Some(V::target_mut_from_raw(value))
-        }
+        Some(unsafe { cursor.as_value_unchecked().cast::<V>().as_mut() })
     }
 
     #[inline]
@@ -100,7 +93,7 @@ where
                 old_value: Some(_),
                 old: _,
             } => Entry::Occupied(entry::Occupied {
-                edge: unsafe { cursor.edge_mut() },
+                value: unsafe { cursor.as_value_unchecked().cast::<V>() },
                 _value: PhantomData,
             }),
             raw::cursor::Insert::Value {
@@ -180,7 +173,7 @@ where
     K: Key,
     V: Value,
 {
-    type Item = (K, &'g V::Target);
+    type Item = (K, &'g V);
     type IntoIter = EntryIter<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all().entries::<Ascend>()
@@ -192,7 +185,7 @@ where
     K: Key,
     V: Value,
 {
-    type Item = (K, &'g mut V::Target);
+    type Item = (K, &'g mut V);
     type IntoIter = EntryIterMut<'static, 'g, K, V, RangeFull, Ascend>;
     fn into_iter(self) -> Self::IntoIter {
         self.all_mut().entries_mut::<Ascend>()
