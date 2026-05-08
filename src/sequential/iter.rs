@@ -271,7 +271,7 @@ mod tests {
         let mut map = Map::<u64, _>::default();
 
         for i in 0..1024 {
-            map.upsert(&i, Box::new(i));
+            map.upsert(&i, Box::new(i)).unwrap();
         }
 
         map.all_mut()
@@ -294,7 +294,7 @@ mod tests {
         let mut map = Map::<u64, _>::default();
 
         for i in 0..1024 {
-            map.upsert(&i, i);
+            map.upsert(&i, i).unwrap();
         }
 
         map.all_mut()

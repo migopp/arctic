@@ -19,6 +19,7 @@ where
 }
 
 impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
+    #[inline]
     pub fn or_insert(self, default: V) -> &'g mut V {
         match self {
             Self::Occupied(entry) => entry.into_mut(),
@@ -26,6 +27,7 @@ impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
         }
     }
 
+    #[inline]
     pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'g mut V {
         match self {
             Self::Occupied(entry) => entry.into_mut(),
@@ -33,6 +35,7 @@ impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
         }
     }
 
+    #[inline]
     pub fn and_modify<F>(self, modify: F) -> Self
     where
         F: FnOnce(&mut V),
@@ -48,6 +51,7 @@ impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
 }
 
 impl<'g, 'k, K: Key, V: Value + Default + 'g> Entry<'g, 'k, K, V> {
+    #[inline]
     pub fn or_default(self) -> &'g mut V {
         self.or_insert_with(V::default)
     }
@@ -64,7 +68,12 @@ pub struct Occupied<'g, V: Value + 'g> {
 }
 
 impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
-    pub fn insert(mut self, value: V) -> &'g mut V {
+    #[inline]
+    pub fn insert(self, value: V) -> &'g mut V {
+        self.insert_entry(value).into_mut()
+    }
+
+    pub fn insert_entry(mut self, value: V) -> Occupied<'g, V> {
         let new_value = V::into_raw(value);
         loop {
             match self.cursor.traverse_insert() {
@@ -75,7 +84,10 @@ impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
                             validate!(old_value.is_none());
                             unsafe {
                                 self.cursor.edge_mut().set_packed(new);
-                                return self.cursor.as_value_unchecked().cast::<V>().as_mut();
+                                return Occupied {
+                                    value: self.cursor.as_value_unchecked().cast::<V>(),
+                                    _value: PhantomData,
+                                };
                             };
                         }
                     }
@@ -94,22 +106,27 @@ impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
 }
 
 impl<'g, V: Value> Occupied<'g, V> {
+    #[inline]
     pub fn get(&self) -> &V {
         unsafe { self.value.as_ref() }
     }
 
+    #[inline]
     pub fn get_mut(&mut self) -> &mut V {
         unsafe { self.value.as_mut() }
     }
 
-    pub fn insert(mut self, value: V) -> V {
+    #[inline]
+    pub fn insert(&mut self, value: V) -> V {
         unsafe { core::mem::replace(self.value.as_mut(), value) }
     }
 
+    #[inline]
     pub fn into_mut(mut self) -> &'g mut V {
         unsafe { self.value.as_mut() }
     }
 
+    #[inline]
     pub fn and_modify<F: FnOnce(&mut V)>(mut self, modify: F) {
         modify(unsafe { self.value.as_mut() })
     }
