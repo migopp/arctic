@@ -15,20 +15,15 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::ops::RangeFull;
 
-use ribbit::Atomic;
-
 use crate::Ascend;
 use crate::Key;
 use crate::raw;
-use crate::raw::Cursor;
-use crate::raw::Edge;
 use crate::raw::cursor::path;
-use crate::raw::iter::PostorderIter;
 use crate::stat;
 
 #[repr(transparent)]
 pub struct Map<K: Key, V: Value> {
-    root: Atomic<Edge<K::Edge>>,
+    pub(crate) raw: raw::Map<K>,
     _not_sync: PhantomData<Cell<()>>,
     _value: PhantomData<V>,
 }
@@ -40,7 +35,7 @@ where
 {
     fn default() -> Self {
         Self {
-            root: Atomic::new_packed(Edge::DEFAULT),
+            raw: raw::Map::default(),
             _not_sync: PhantomData,
             _value: PhantomData,
         }
@@ -56,19 +51,14 @@ where
         Self::default()
     }
 
-    #[inline]
-    pub(crate) fn root(&self) -> &Atomic<Edge<K::Edge>> {
-        &self.root
-    }
-
     pub fn get(&self, key: &K::Borrowed) -> Option<&V> {
-        let mut cursor = self.cursor(key);
+        let mut cursor = unsafe { self.raw.cursor::<path::Discard>(key) };
         cursor.traverse_get()?;
         Some(unsafe { cursor.as_value_unchecked().cast::<V>().as_ref() })
     }
 
     pub fn get_mut(&mut self, key: &K::Borrowed) -> Option<&mut V> {
-        let mut cursor = self.cursor(key);
+        let mut cursor = unsafe { self.raw.cursor::<path::Discard>(key) };
         cursor.traverse_get()?;
         Some(unsafe { cursor.as_value_unchecked().cast::<V>().as_mut() })
     }
@@ -101,7 +91,7 @@ where
     }
 
     pub fn entry<'k>(&mut self, key: &'k K::Borrowed) -> Entry<'_, 'k, K, V> {
-        let mut cursor = self.cursor(key);
+        let mut cursor = unsafe { self.raw.cursor::<path::Discard>(key) };
 
         match cursor.traverse_insert() {
             raw::cursor::Insert::Value {
@@ -122,33 +112,34 @@ where
         }
     }
 
+    #[inline]
     pub fn all(&self) -> Prefix<'static, '_, K, V, RangeFull> {
-        unsafe { Prefix::new(raw::iter::Prefix::<K>::new_all(self.root())) }
+        unsafe { Prefix::new(self.raw.all()) }
     }
 
+    #[inline]
     pub fn prefix<'k>(
         &self,
         prefix: impl Into<K::Read<'k>>,
     ) -> Option<Prefix<'k, '_, K, V, RangeFull>> {
-        let prefix = prefix.into();
-        let prefix = unsafe { raw::iter::Prefix::<K>::new_prefix(self.root(), prefix) }?;
-        Some(unsafe { Prefix::new(prefix) })
+        Some(unsafe { Prefix::new(self.raw.prefix(prefix)?) })
     }
 
+    #[inline]
     pub fn range<'k, R>(&self, range: R) -> Option<Prefix<'k, '_, K, V, R>>
     where
         R: raw::iter::Range<K::Read<'k>>,
     {
         let prefix = range.common_prefix();
-        Some(unsafe {
-            iter::Prefix::new(raw::iter::Prefix::new_range(self.root(), range, prefix)?)
-        })
+        Some(unsafe { iter::Prefix::new(self.raw.range(range, prefix)?) })
     }
 
+    #[inline]
     pub fn all_mut(&mut self) -> PrefixMut<'static, '_, K, V, RangeFull> {
         unsafe { PrefixMut::new(self.all()) }
     }
 
+    #[inline]
     pub fn prefix_mut<'k>(
         &mut self,
         prefix: impl Into<K::Read<'k>>,
@@ -156,20 +147,12 @@ where
         Some(unsafe { PrefixMut::new(self.prefix(prefix)?) })
     }
 
+    #[inline]
     pub fn range_mut<'k, R>(&mut self, range: R) -> Option<PrefixMut<'k, '_, K, V, R>>
     where
         R: raw::iter::Range<K::Read<'k>>,
     {
         Some(unsafe { PrefixMut::new(self.range(range)?) })
-    }
-
-    pub(crate) fn postorder<'g>(&'g self) -> PostorderIter<'g, K::Edge> {
-        unsafe { PostorderIter::new(&self.root) }
-    }
-
-    #[inline]
-    fn cursor<'k>(&self, key: &'k K::Borrowed) -> Cursor<K::Read<'k>, path::Discard> {
-        unsafe { Cursor::<_, path::Discard>::new(self.root(), K::Read::from(key)) }
     }
 }
 
@@ -217,7 +200,7 @@ where
     V: Value,
 {
     fn drop(&mut self) {
-        self.postorder().for_each_internal(|edge, _| unsafe {
+        self.raw.postorder().for_each_internal(|edge, _| unsafe {
             edge.deallocate(|value| drop(V::from_raw(value)), stat::Counter::FreeDrop);
         })
     }
