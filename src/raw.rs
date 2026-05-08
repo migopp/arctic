@@ -17,7 +17,7 @@ pub(crate) mod cursor;
 pub(crate) mod edge;
 mod int;
 pub(crate) mod iter;
-pub(crate) mod key;
+pub mod key;
 pub(crate) mod map;
 pub(crate) mod node;
 
