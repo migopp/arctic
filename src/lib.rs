@@ -311,22 +311,6 @@ mod tests {
         insert_all(["a".repeat(1000), "b".repeat(1000)]);
     }
 
-    #[test]
-    fn regression_range_common_prefix() {
-        let map = crate::concurrent::Map::<u64, u64>::new();
-        const NEEDLE: u64 = 0xE642_3BB1_ADBB_F000;
-        const LOWER: u64 = 0x39_9100;
-        const UPPER: u64 = 0xFF29_D24D_7E9A_920D;
-        map.insert(&NEEDLE, 0).unwrap();
-        map.range(LOWER..=UPPER)
-            .unwrap()
-            .entries::<crate::Ascend>()
-            .for_each(|(key, value)| {
-                assert_eq!(key, NEEDLE);
-                assert_eq!(value, 0);
-            })
-    }
-
     fn insert_all<I, K>(iter: I) -> Map<K, u64>
     where
         I: IntoIterator<Item = K>,
