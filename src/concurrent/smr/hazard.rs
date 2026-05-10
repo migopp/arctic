@@ -459,11 +459,13 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         #[cfg(feature = "opt-batch")]
         {
-            // First, unconditionally push batch to the condemned queue.
-            let batch = batch::Batch::new(batch);
-            if let Err(mut batch) = global.condemned.push(batch) {
-                // No space in condemned queue. Must deallocate now.
-                batch.deallocate();
+            // First, push batch to the condemned queue.
+            if !batch.is_empty() {
+                let batch = batch::Batch::new(batch);
+                if let Err(mut batch) = global.condemned.push(batch) {
+                    // No space in condemned queue. Must deallocate now.
+                    batch.deallocate();
+                }
             }
 
             // Deallocate a batch, if we can.
