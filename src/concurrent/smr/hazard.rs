@@ -117,7 +117,6 @@ unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Send for Global<P, V> {}
 unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Sync for Global<P, V> {}
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
-    #[cfg(feature = "opt-hazard-epochs")]
     fn default() -> Self {
         Self {
             garbage: AtomicU64::new(0),
@@ -126,7 +125,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
                 ))
             }),
+            #[cfg(feature = "opt-hazard-epochs")]
             global_epoch: Cache(AtomicUsize::new(0)),
+            #[cfg(feature = "opt-hazard-epochs")]
             epochs: core::array::from_fn(|_| Cache(AtomicUsize::new(usize::MAX))),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
@@ -140,57 +141,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             membarrier: AtomicBool::new(false),
             reclaim_threshold: 64,
-            value: PhantomData,
-        }
-    }
-
-    #[cfg(feature = "opt-batch")]
-    fn default() -> Self {
-        Self {
-            garbage: AtomicU64::new(0),
-            hazards: core::array::from_fn(|_| {
-                Cache(ribbit::Atomic::new_packed(
-                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
-                ))
-            }),
-            locals: core::array::from_fn(|_| {
-                UnsafeCell::new(Local {
-                    garbage: 0,
-                    cycle: 0,
-                    snapshot: Vec::new(),
-                    retired: VecDeque::new(),
-                    retired_count: 0,
-                    _value: PhantomData,
-                })
-            }),
-            membarrier: AtomicBool::new(false),
-            reclaim_threshold: 64,
+            #[cfg(feature = "opt-batch")]
             condemned: ArrayQueue::new(smr::thread::MAX),
-            value: PhantomData,
-        }
-    }
-
-    #[cfg(not(any(feature = "opt-hazard-epochs", feature = "opt-batch")))]
-    fn default() -> Self {
-        Self {
-            garbage: AtomicU64::new(0),
-            hazards: core::array::from_fn(|_| {
-                Cache(ribbit::Atomic::new_packed(
-                    <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
-                ))
-            }),
-            locals: core::array::from_fn(|_| {
-                UnsafeCell::new(Local {
-                    garbage: 0,
-                    cycle: 0,
-                    snapshot: Vec::new(),
-                    retired: VecDeque::new(),
-                    retired_count: 0,
-                    _value: PhantomData,
-                })
-            }),
-            membarrier: AtomicBool::new(false),
-            reclaim_threshold: 64,
             value: PhantomData,
         }
     }
