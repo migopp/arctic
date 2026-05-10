@@ -76,7 +76,7 @@ use crate::concurrent::smr;
 use crate::raw::node;
 use crate::stat;
 
-#[cfg(feature = "opt-hazard-epochs")]
+#[cfg(feature = "opt-epoch")]
 use core::sync::atomic::AtomicUsize;
 
 #[cfg(feature = "opt-batch")]
@@ -101,9 +101,9 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
 
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
-    #[cfg(feature = "opt-hazard-epochs")]
+    #[cfg(feature = "opt-epoch")]
     global_epoch: Cache<AtomicUsize>,
-    #[cfg(feature = "opt-hazard-epochs")]
+    #[cfg(feature = "opt-epoch")]
     epochs: [Cache<AtomicUsize>; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
@@ -125,9 +125,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
                 ))
             }),
-            #[cfg(feature = "opt-hazard-epochs")]
+            #[cfg(feature = "opt-epoch")]
             global_epoch: Cache(AtomicUsize::new(0)),
-            #[cfg(feature = "opt-hazard-epochs")]
+            #[cfg(feature = "opt-epoch")]
             epochs: core::array::from_fn(|_| Cache(AtomicUsize::new(usize::MAX))),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
@@ -162,7 +162,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     /// Eagerly reclaim all retired allocations
-    #[cfg(feature = "opt-hazard-epochs")]
+    #[cfg(feature = "opt-epoch")]
     pub fn reclaim(&mut self) {
         self.locals
             .iter_mut()
@@ -175,7 +175,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
     }
 
     /// Eagerly reclaim all retired allocations
-    #[cfg(not(feature = "opt-hazard-epochs"))]
+    #[cfg(not(feature = "opt-epoch"))]
     pub fn reclaim(&mut self) {
         self.locals
             .iter_mut()
@@ -224,7 +224,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         let hazard = &self.hazards[id].0;
         let local = &self.locals[id];
 
-        #[cfg(feature = "opt-hazard-epochs")]
+        #[cfg(feature = "opt-epoch")]
         {
             let global_epoch = self.global_epoch.0.load(Ordering::Relaxed);
             self.epochs[id].0.store(global_epoch, Ordering::Relaxed);
@@ -246,10 +246,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
     }
 }
 
-#[cfg(feature = "opt-hazard-epochs")]
+#[cfg(feature = "opt-epoch")]
 type Retired<P, V> = (Batch<P, V>, usize);
 
-#[cfg(not(feature = "opt-hazard-epochs"))]
+#[cfg(not(feature = "opt-epoch"))]
 type Retired<P, V> = (ribbit::Packed<P>, u64, PhantomData<V>);
 
 #[repr(align(64))]
@@ -274,7 +274,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
         membarrier::slow(global.membarrier.load(Ordering::Relaxed));
 
-        #[cfg(feature = "opt-hazard-epochs")]
+        #[cfg(feature = "opt-epoch")]
         let global_epoch = {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
@@ -308,7 +308,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let mut batch = Vec::new();
 
         local.retired.retain_mut(|retired| {
-            #[cfg(feature = "opt-hazard-epochs")]
+            #[cfg(feature = "opt-epoch")]
             {
                 let retired_batch = &mut retired.0.inner;
                 let retired_batch_epoch = retired.1;
@@ -378,7 +378,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 }
             }
 
-            #[cfg(not(feature = "opt-hazard-epochs"))]
+            #[cfg(not(feature = "opt-epoch"))]
             {
                 let prefix = &mut retired.0;
                 let raw = &mut retired.1;
@@ -514,14 +514,14 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             }
         }
 
-        #[cfg(not(feature = "opt-hazard-epochs"))]
+        #[cfg(not(feature = "opt-epoch"))]
         {
             local
                 .retired
                 .push_back((prefix, node.raw().get(), PhantomData));
         }
 
-        #[cfg(feature = "opt-hazard-epochs")]
+        #[cfg(feature = "opt-epoch")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             if let Some((batch, epoch)) = local.retired.back_mut() {
@@ -569,12 +569,12 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             }
         }
 
-        #[cfg(not(feature = "opt-hazard-epochs"))]
+        #[cfg(not(feature = "opt-epoch"))]
         {
             local.retired.push_back((prefix, value, PhantomData));
         }
 
-        #[cfg(feature = "opt-hazard-epochs")]
+        #[cfg(feature = "opt-epoch")]
         {
             let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             if let Some((batch, epoch)) = local.retired.back_mut() {
@@ -598,7 +598,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
         self.hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
 
-        #[cfg(feature = "opt-hazard-epochs")]
+        #[cfg(feature = "opt-epoch")]
         {
             let id = usize::from(smr::thread::Id::current());
             self.global.epochs[id]
@@ -644,13 +644,13 @@ fn deallocate<P: ribbit::Pack<Packed: Prefix>, V: Value>(
     }
 }
 
-#[cfg(any(feature = "opt-batch", feature = "opt-hazard-epochs"))]
+#[cfg(any(feature = "opt-batch", feature = "opt-epoch"))]
 struct Batch<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     inner: Vec<(ribbit::Packed<P>, u64)>,
     _value: PhantomData<V>,
 }
 
-#[cfg(any(feature = "opt-batch", feature = "opt-hazard-epochs"))]
+#[cfg(any(feature = "opt-batch", feature = "opt-epoch"))]
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Batch<P, V> {
     fn deallocate(batch: &mut Batch<P, V>) {
         batch
