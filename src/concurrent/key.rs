@@ -63,7 +63,7 @@ impl Key for u64 {
 
     #[inline]
     fn hazard(reader: Self::Read<'_>) -> ribbit::Packed<Self::Prefix> {
-        let len = reader.bytes();
+        let len = reader.len().bytes().min(7);
         let reader = reader.buffer;
         let mut buffer = [0u8; 8];
         buffer[..len].copy_from_slice(&reader[..len]);

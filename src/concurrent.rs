@@ -10,8 +10,6 @@ use core::sync::atomic::Ordering;
 use smr::Global as _;
 use smr::Guard as _;
 
-use crate::raw;
-use crate::raw::Cursor;
 use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::cursor;
@@ -39,7 +37,7 @@ pub type Upserted<'g, K, V, S> = value::Upserted<Guard<'g, K, V, S>, V>;
 
 pub struct Map<K: Key, V: Value, S: Smr = smr::Hazard> {
     smr: S::Global<K::Prefix, V>,
-    inner: sequential::Map<K, V>,
+    seq: sequential::Map<K, V>,
 }
 
 unsafe impl<K: Key, V: Value + Send + Sync, S: Smr> Sync for Map<K, V, S> {}
@@ -48,7 +46,7 @@ impl<K: crate::Key, V: Value, S: Smr> Default for Map<K, V, S> {
     fn default() -> Self {
         Self {
             smr: S::Global::default(),
-            inner: sequential::Map::<K, V>::default(),
+            seq: sequential::Map::<K, V>::default(),
         }
     }
 }
@@ -61,13 +59,13 @@ impl<K: Key, V: Value, S: Smr> Map<K, V, S> {
     pub fn with_smr(smr: S::Global<K::Prefix, V>) -> Self {
         Self {
             smr,
-            inner: sequential::Map::<K, V>::default(),
+            seq: sequential::Map::<K, V>::default(),
         }
     }
 
     #[inline]
     pub fn as_sequential(&mut self) -> &mut sequential::Map<K, V> {
-        &mut self.inner
+        &mut self.seq
     }
 
     #[inline]
@@ -134,7 +132,10 @@ where
         let reader = K::Read::from(key);
         let guard = self.smr.guard(K::hazard(reader));
         let value = unsafe {
-            Cursor::<K::Read<'_>, path::Discard>::new(self.inner.root(), reader).traverse_get()?
+            self.seq
+                .raw
+                .cursor::<path::Discard>(reader)
+                .traverse_get()?
         };
         Some(unsafe { Shared::<'_, K, V, S>::wrap(guard, value) })
     }
@@ -215,7 +216,7 @@ where
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { self.seq.raw.cursor::<P>(reader) };
 
         loop {
             let old = match cursor.traverse_update() {
@@ -337,7 +338,7 @@ where
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { self.seq.raw.cursor::<P>(reader) };
 
         let old = loop {
             let old = match cursor.traverse_update() {
@@ -544,7 +545,7 @@ where
     {
         let reader = K::Read::from(key);
         let mut guard = self.smr.guard(K::hazard(reader));
-        let mut cursor = unsafe { Cursor::<_, P>::new(self.inner.root(), reader) };
+        let mut cursor = unsafe { self.seq.raw.cursor::<P>(reader) };
 
         loop {
             match cursor.traverse_insert() {
@@ -559,7 +560,7 @@ where
                         ControlFlow::Break(()) => {
                             return Ok(Upsert::Break {
                                 old: old
-                                    .as_value()
+                                    .into_value()
                                     .map(|old| unsafe { Shared::<K, V, S>::wrap(guard, old) }),
                                 initial,
                             });
@@ -633,8 +634,7 @@ where
 
     pub fn all(&self) -> iter::Prefix<'static, '_, K, V, RangeFull, Guard<'_, K, V, S>> {
         let guard = self.smr.guard(K::hazard(K::Read::default()));
-        let prefix = unsafe { raw::iter::Prefix::<K>::new_all(self.inner.root()) };
-        unsafe { Prefix::new(guard, prefix) }
+        unsafe { Prefix::new(guard, self.seq.raw.all()) }
     }
 
     pub fn prefix<'k>(
@@ -643,8 +643,7 @@ where
     ) -> Option<iter::Prefix<'k, '_, K, V, RangeFull, Guard<'_, K, V, S>>> {
         let prefix = prefix.into();
         let guard = self.smr.guard(K::hazard(prefix));
-        let prefix = unsafe { raw::iter::Prefix::<K>::new_prefix(self.inner.root(), prefix) }?;
-        Some(unsafe { Prefix::new(guard, prefix) })
+        Some(unsafe { Prefix::new(guard, self.seq.raw.prefix(prefix)?) })
     }
 
     pub fn range<'k, R>(
@@ -656,12 +655,7 @@ where
     {
         let prefix = range.common_prefix();
         let guard = self.smr.guard(K::hazard(prefix));
-        Some(unsafe {
-            Prefix::new(
-                guard,
-                raw::iter::Prefix::new_range(self.inner.root(), range, prefix)?,
-            )
-        })
+        Some(unsafe { Prefix::new(guard, self.seq.raw.range(range, prefix)?) })
     }
 }
 
@@ -672,10 +666,10 @@ where
     S: Smr,
 {
     #[inline]
-    fn from(inner: sequential::Map<K, V>) -> Self {
+    fn from(seq: sequential::Map<K, V>) -> Self {
         Self {
             smr: S::Global::default(),
-            inner,
+            seq,
         }
     }
 }
@@ -688,6 +682,6 @@ where
 {
     #[inline]
     fn from(map: Map<K, V, S>) -> sequential::Map<K, V> {
-        map.inner
+        map.seq
     }
 }

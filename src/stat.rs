@@ -29,6 +29,7 @@ pub fn process<K: Key, V: Value, S: Smr>(map: &mut crate::concurrent::Map<K, V, 
     let mut node_256 = Histogram::default();
 
     map.as_sequential()
+        .raw
         .postorder()
         .for_each_internal(|edge, depth_| {
             let Some(child) = edge.child() else {

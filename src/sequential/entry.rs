@@ -2,7 +2,6 @@ use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use crate::raw::Cursor;
-use crate::raw::Edge;
 use crate::raw::Frozen;
 use crate::raw::Key;
 use crate::raw::cursor::path;
@@ -16,27 +15,30 @@ where
     V: Value + 'g,
 {
     Vacant(Vacant<'g, 'k, K, V>),
-    Occupied(Occupied<'g, K, V>),
+    Occupied(Occupied<'g, V>),
 }
 
 impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
-    pub fn or_insert(self, default: V) -> &'g mut V::Target {
+    #[inline]
+    pub fn or_insert(self, default: V) -> &'g mut V {
         match self {
             Self::Occupied(entry) => entry.into_mut(),
             Self::Vacant(entry) => entry.insert(default),
         }
     }
 
-    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'g mut V::Target {
+    #[inline]
+    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'g mut V {
         match self {
             Self::Occupied(entry) => entry.into_mut(),
             Self::Vacant(entry) => entry.insert(default()),
         }
     }
 
+    #[inline]
     pub fn and_modify<F>(self, modify: F) -> Self
     where
-        F: FnOnce(&mut V::Target),
+        F: FnOnce(&mut V),
     {
         match self {
             Self::Occupied(mut entry) => {
@@ -49,7 +51,8 @@ impl<'g, 'k, K: Key, V: Value + 'g> Entry<'g, 'k, K, V> {
 }
 
 impl<'g, 'k, K: Key, V: Value + Default + 'g> Entry<'g, 'k, K, V> {
-    pub fn or_default(self) -> &'g mut V::Target {
+    #[inline]
+    pub fn or_default(self) -> &'g mut V {
         self.or_insert_with(V::default)
     }
 }
@@ -59,13 +62,18 @@ pub struct Vacant<'g, 'k, K: Key, V: Value + 'g> {
     pub(super) _value: PhantomData<&'g V>,
 }
 
-pub struct Occupied<'g, K: Key, V: Value + 'g> {
-    pub(super) edge: &'g mut ribbit::Atomic<Edge<K::Edge>>,
-    pub(super) _value: PhantomData<&'g V>,
+pub struct Occupied<'g, V: Value + 'g> {
+    pub(super) value: NonNull<V>,
+    pub(super) _value: PhantomData<&'g mut V>,
 }
 
 impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
-    pub fn insert(mut self, value: V) -> &'g mut V::Target {
+    #[inline]
+    pub fn insert(self, value: V) -> &'g mut V {
+        self.insert_entry(value).into_mut()
+    }
+
+    pub fn insert_entry(mut self, value: V) -> Occupied<'g, V> {
         let new_value = V::into_raw(value);
         loop {
             match self.cursor.traverse_insert() {
@@ -75,11 +83,11 @@ impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
                         Ok(new) => {
                             validate!(old_value.is_none());
                             unsafe {
-                                let edge = self.cursor.edge_mut();
-                                edge.set_packed(new);
-                                return V::target_mut_from_raw(Edge::as_value_mut_unchecked(
-                                    NonNull::from(edge),
-                                ));
+                                self.cursor.edge_mut().set_packed(new);
+                                return Occupied {
+                                    value: self.cursor.as_value_unchecked().cast::<V>(),
+                                    _value: PhantomData,
+                                };
                             };
                         }
                     }
@@ -97,35 +105,29 @@ impl<'g, 'k, K: Key, V: Value + 'g> Vacant<'g, 'k, K, V> {
     }
 }
 
-impl<'g, K: Key, V: Value> Occupied<'g, K, V> {
-    pub fn get(&self) -> &V::Target {
-        unsafe { V::target_from_raw(Edge::as_value_unchecked(NonNull::from(&*self.edge))) }
+impl<'g, V: Value> Occupied<'g, V> {
+    #[inline]
+    pub fn get(&self) -> &V {
+        unsafe { self.value.as_ref() }
     }
 
-    pub fn get_mut(&mut self) -> &mut V::Target {
-        unsafe {
-            V::target_mut_from_raw(Edge::as_value_mut_unchecked(NonNull::from(&mut *self.edge)))
-        }
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut V {
+        unsafe { self.value.as_mut() }
     }
 
-    pub fn insert(self, value: V) -> V {
-        let new = V::into_raw(value);
-        unsafe {
-            let old = self.edge.get_packed();
-            self.edge.set_packed(Edge::new_value(old.meta(), new));
-            V::from_raw(old.into_value_unchecked())
-        }
+    #[inline]
+    pub fn insert(&mut self, value: V) -> V {
+        unsafe { core::mem::replace(self.value.as_mut(), value) }
     }
 
-    pub fn into_mut(self) -> &'g mut V::Target {
-        unsafe {
-            V::target_mut_from_raw(Edge::as_value_mut_unchecked(NonNull::from(&mut *self.edge)))
-        }
+    #[inline]
+    pub fn into_mut(mut self) -> &'g mut V {
+        unsafe { self.value.as_mut() }
     }
 
-    pub fn and_modify<F: FnOnce(&mut V::Target)>(self, modify: F) {
-        modify(unsafe {
-            V::target_mut_from_raw(Edge::as_value_mut_unchecked(NonNull::from(&*self.edge)))
-        })
+    #[inline]
+    pub fn and_modify<F: FnOnce(&mut V)>(mut self, modify: F) {
+        modify(unsafe { self.value.as_mut() })
     }
 }

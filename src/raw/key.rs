@@ -36,8 +36,6 @@ pub trait Key: Borrow<Self::Borrowed> {
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self;
 
     fn clone_from_borrow(borrowed: &Self::Borrowed) -> Self;
-
-    fn len(borrowed: &Self::Borrowed) -> Self::Len;
 }
 
 pub(crate) trait Read: Copy + fmt::Debug + Default + Eq {
@@ -109,6 +107,7 @@ pub(crate) trait Write<R: Read>: fmt::Debug + Default {
     fn replace(&mut self, start: Self::Len, node: u8, edge: ribbit::Packed<R::Edge>) -> Self::Len;
 }
 
+#[expect(private_bounds)]
 pub trait Len<L: edge::Len>:
     Sized
     + Copy

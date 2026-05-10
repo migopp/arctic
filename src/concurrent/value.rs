@@ -4,35 +4,79 @@ use core::ops::Deref;
 
 use crate::concurrent::smr;
 use crate::concurrent::smr::Guard as _;
+use crate::sequential;
 
-pub unsafe trait Value: Sized + crate::sequential::Value {
+pub unsafe trait Value: Sized + sequential::Value {
+    type Target;
+
     type Guard<G>: smr::Guard<Self> + From<G>
     where
         G: smr::Guard<Self>;
+
+    fn as_target(&self) -> &Self::Target;
+
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target;
 }
 
 unsafe impl<T> Value for Box<T> {
+    type Target = T;
+
     type Guard<G>
         = G
     where
         G: smr::Guard<Self>;
+
+    #[inline]
+    fn as_target(&self) -> &Self::Target {
+        self
+    }
+
+    #[inline]
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+        let borrow = unsafe { (*raw as *const T).as_ref() };
+        if_validate!(borrow.unwrap(), unsafe { borrow.unwrap_unchecked() })
+    }
 }
 
 unsafe impl<'v, T: 'v + Sized> Value for &'v T {
+    type Target = Self;
+
     type Guard<G>
         = smr::no_op::Guard<G, Self>
     where
         G: smr::Guard<Self>;
+
+    #[inline]
+    fn as_target(&self) -> &Self::Target {
+        self
+    }
+
+    #[inline]
+    unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+        unsafe { core::mem::transmute::<&u64, &Self>(raw) }
+    }
 }
 
 macro_rules! impl_trivial {
     ($($ty:ty),*) => {
         $(
             unsafe impl Value for $ty {
+                type Target = Self;
+
                 type Guard<G>
                     = smr::no_op::Guard<G, Self>
                 where
                     G: smr::Guard<Self>;
+
+                #[inline]
+                fn as_target(&self) -> &Self::Target {
+                    self
+                }
+
+                #[inline]
+                unsafe fn target_from_raw(raw: &u64) -> &Self::Target {
+                    unsafe { core::mem::transmute::<&u64, &Self>(raw) }
+                }
             }
         )*
     };

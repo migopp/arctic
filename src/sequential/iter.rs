@@ -97,22 +97,22 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(&K::Borrowed, &'g V::Target)> {
+    pub fn lend(&mut self) -> Option<(&K::Borrowed, &'g V)> {
         self.inner.lend().map(|(key, _, edge)| {
             (key, unsafe {
-                V::target_from_raw(Edge::as_value_unchecked(edge))
+                Edge::as_value_unchecked(edge).cast::<V>().as_ref()
             })
         })
     }
 
     #[inline]
-    pub fn for_each_internal<F: FnMut((&K::Borrowed, &'g V::Target)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((&K::Borrowed, &'g V)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
         self.inner.for_each_internal(|(key, _, edge)| {
             apply((key, unsafe {
-                V::target_from_raw(Edge::as_value_unchecked(edge))
+                Edge::as_value_unchecked(edge).cast::<V>().as_ref()
             }))
         })
     }
@@ -125,7 +125,7 @@ where
     R: raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = (K, &'g V::Target);
+    type Item = (K, &'g V);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -147,22 +147,22 @@ where
     O: Order,
 {
     #[inline]
-    pub fn lend(&mut self) -> Option<(&K::Borrowed, &'g mut V::Target)> {
+    pub fn lend(&mut self) -> Option<(&K::Borrowed, &'g mut V)> {
         self.inner.lend().map(|(key, _, edge)| {
             (key, unsafe {
-                V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge))
+                Edge::as_value_unchecked(edge).cast::<V>().as_mut()
             })
         })
     }
 
     #[inline]
-    pub fn for_each_internal<F: FnMut((&K::Borrowed, &'g mut V::Target)) -> ControlFlow<()>>(
+    pub fn for_each_internal<F: FnMut((&K::Borrowed, &'g mut V)) -> ControlFlow<()>>(
         self,
         mut apply: F,
     ) {
         self.inner.for_each_internal(|(key, _, edge)| {
             apply((key, unsafe {
-                V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge))
+                Edge::as_value_unchecked(edge).cast::<V>().as_mut()
             }))
         })
     }
@@ -175,7 +175,7 @@ where
     R: raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = (K, &'g mut V::Target);
+    type Item = (K, &'g mut V);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -197,9 +197,9 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each_internal<F: FnMut(&'g V::Target) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each_internal<F: FnMut(&'g V) -> ControlFlow<()>>(self, mut apply: F) {
         self.inner.for_each_internal(|(_, edge)| {
-            apply(unsafe { V::target_from_raw(Edge::as_value_unchecked(edge)) })
+            apply(unsafe { Edge::as_value_unchecked(edge).cast::<V>().as_ref() })
         })
     }
 }
@@ -211,13 +211,13 @@ where
     R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = &'g V::Target;
+    type Item = &'g V;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .lend()
-            .map(|(_, edge)| unsafe { V::target_from_raw(Edge::as_value_unchecked(edge)) })
+            .map(|(_, edge)| unsafe { Edge::as_value_unchecked(edge).cast::<V>().as_ref() })
     }
 }
 
@@ -234,9 +234,9 @@ where
     O: Order,
 {
     #[inline]
-    pub fn for_each_internal<F: FnMut(&'g mut V::Target) -> ControlFlow<()>>(self, mut apply: F) {
+    pub fn for_each_internal<F: FnMut(&'g mut V) -> ControlFlow<()>>(self, mut apply: F) {
         self.inner.for_each_internal(|(_, edge)| {
-            apply(unsafe { V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge)) })
+            apply(unsafe { Edge::as_value_unchecked(edge).cast::<V>().as_mut() })
         })
     }
 }
@@ -248,13 +248,13 @@ where
     R: crate::raw::iter::Range<K::Read<'k>>,
     O: Order,
 {
-    type Item = &'g mut V::Target;
+    type Item = &'g mut V;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .lend()
-            .map(|(_, edge)| unsafe { V::target_mut_from_raw(Edge::as_value_mut_unchecked(edge)) })
+            .map(|(_, edge)| unsafe { Edge::as_value_unchecked(edge).cast::<V>().as_mut() })
     }
 }
 
@@ -271,20 +271,20 @@ mod tests {
         let mut map = Map::<u64, _>::default();
 
         for i in 0..1024 {
-            map.upsert(&i, Box::new(i));
+            map.upsert(&i, Box::new(i)).unwrap();
         }
 
         map.all_mut()
             .values_mut::<Ascend>()
             .for_each_internal(|value| {
-                *value += 1;
+                **value += 1;
                 ControlFlow::Continue(())
             });
 
         map.all()
             .entries::<Descend>()
             .for_each_internal(|(key, value)| {
-                assert_eq!(key + 1, *value);
+                assert_eq!(key + 1, **value);
                 ControlFlow::Continue(())
             });
     }
@@ -294,7 +294,7 @@ mod tests {
         let mut map = Map::<u64, _>::default();
 
         for i in 0..1024 {
-            map.upsert(&i, i);
+            map.upsert(&i, i).unwrap();
         }
 
         map.all_mut()

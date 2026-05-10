@@ -38,11 +38,6 @@ macro_rules! impl_key {
                 unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
                     writer.0
                 }
-
-                #[inline]
-                fn len(_: &Self::Borrowed) -> Self::Len {
-                    Len(<$ty as Int>::BITS)
-                }
             }
 
             impl From<$ty> for Reader<$ty> {

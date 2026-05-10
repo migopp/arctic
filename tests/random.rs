@@ -3,7 +3,6 @@ use core::hash::Hasher as _;
 use std::sync::Barrier;
 
 use arctic::raw::Key;
-use arctic::sequential::Value;
 
 mod u64 {
     use arctic::raw::Key;
@@ -45,7 +44,7 @@ mod u64 {
             &self,
             index: usize,
             key: &<Self::Key as Key>::Borrowed,
-            value: &<Self::Value as arctic::sequential::Value>::Target,
+            value: &<Self::Value as arctic::concurrent::Value>::Target,
         ) {
             assert_eq!(index as u64, *key);
             assert_eq!(index as u64, *value);
@@ -161,7 +160,7 @@ mod vec {
             &self,
             index: usize,
             key: &<Self::Key as Key>::Borrowed,
-            value: &<Self::Value as arctic::sequential::Value>::Target,
+            value: &<Self::Value as arctic::concurrent::Value>::Target,
         ) {
             assert_eq!(key, self.key(index));
             assert_eq!(*value, index as u64);
@@ -217,7 +216,7 @@ mod array {
             &self,
             index: usize,
             key: &<Self::Key as Key>::Borrowed,
-            value: &<Self::Value as arctic::sequential::Value>::Target,
+            value: &<Self::Value as arctic::concurrent::Value>::Target,
         ) {
             assert_eq!(*key, self.key(index));
             assert_eq!(*value, index as u64);
@@ -238,14 +237,14 @@ trait Workload: Sized + Sync {
         &self,
         index: usize,
         key: &<Self::Key as Key>::Borrowed,
-        value: &<Self::Value as arctic::sequential::Value>::Target,
+        value: &<Self::Value as arctic::concurrent::Value>::Target,
     );
 }
 
 fn test_map<'k, K: Workload>(key_set: &'k K, thread_count: usize, key_count: usize, hash: bool)
 where
     for<'a> &'a <K::Key as Key>::Borrowed: Sync + core::fmt::Debug,
-    <K::Value as Value>::Target: core::fmt::Debug,
+    <K::Value as arctic::concurrent::Value>::Target: core::fmt::Debug,
 {
     assert_eq!(key_count % thread_count, 0);
 

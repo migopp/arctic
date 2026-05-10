@@ -7,9 +7,9 @@ use crate::raw::key;
 use crate::raw::key::Len as _;
 
 #[cfg(feature = "opt-no-int")]
-impl Key for u64 {
+impl crate::raw::Key for u64 {
     type Read<'k> = Reader;
-    type Write = key::vec::Writer;
+    type Write = key::array::Writer<8>;
     type Borrowed = Self;
     type Edge = edge::Le;
     type Len = key::vec::Len;
@@ -28,11 +28,6 @@ impl Key for u64 {
     unsafe fn from_writer_unchecked(writer: Self::Write) -> Self {
         let buffer: [u8; 8] = writer.0.try_into().unwrap();
         u64::from_be_bytes(buffer)
-    }
-
-    #[inline]
-    fn len(_: &Self::Borrowed) -> usize {
-        (<u64 as crate::raw::Int>::BITS >> 3) as usize
     }
 }
 
@@ -78,7 +73,12 @@ impl key::Read for Reader {
 
     #[inline]
     fn get_byte(&self, index: u6) -> Option<u8> {
-        self.buffer.get(index.bytes()).copied()
+        let index = index.bytes();
+        if index < self.len.bytes() {
+            self.buffer.get(index).copied()
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -87,9 +87,9 @@ impl key::Read for Reader {
             self.buffer
                 .into_iter()
                 .zip(edge)
-                .take(self.len.0)
+                .take(self.len.bytes())
                 .position(|(l, r)| l != r)
-                .unwrap_or(self.len.0),
+                .unwrap_or(self.len.bytes()),
         )
     }
 
@@ -101,7 +101,7 @@ impl key::Read for Reader {
     #[inline]
     fn prefix(self, end: Self::Len) -> Self {
         let mut buffer = [0u8; 8];
-        buffer[..end.0].copy_from_slice(&self.buffer[..end.0]);
+        buffer[..end.bytes()].copy_from_slice(&self.buffer[..end.bytes()]);
         Self { buffer, len: end }
     }
 
@@ -109,21 +109,21 @@ impl key::Read for Reader {
     fn suffix(self, start: Self::Len) -> Self {
         let mut buffer = [0u8; 8];
         let len = self.len - start;
-        buffer[..len.0].copy_from_slice(&self.buffer[start.0..]);
+        buffer[..len.bytes()].copy_from_slice(&self.buffer[start.bytes()..][..len.bytes()]);
         Self { buffer, len }
     }
 
     #[inline]
     fn common_prefix(self, other: Self) -> Self {
         let len = self.len.min(other.len);
-        let len_prefix = self.buffer[..len.0]
+        let len_prefix = self.buffer[..len.bytes()]
             .iter()
-            .zip(&other.buffer[..len.0])
+            .zip(&other.buffer[..len.bytes()])
             .position(|(l, r)| l != r)
             .map(key::vec::Len)
             .unwrap_or(len);
         let mut buffer = [0u8; 8];
-        buffer[..len_prefix.0].copy_from_slice(&self.buffer[..len_prefix.0]);
+        buffer[..len_prefix.bytes()].copy_from_slice(&self.buffer[..len_prefix.bytes()]);
         Self {
             buffer,
             len: len_prefix,
@@ -150,17 +150,19 @@ impl key::Read for Reader {
         validate!(self.len > len_match);
         let len_start = u6::new(len_match.bits() as u8);
         let len_middle = len_start + const { u6::new(8) };
-        let len_end = u6::new((self.len().bits() - len_middle.bits()) as u8);
+        let len_end = u6::new((edge.len().bits() - len_middle.bits()) as u8);
+
+        let edge = u64::to_le_bytes(edge.raw());
 
         let mut start = [0u8; 8];
-        start[..len_start.bytes()].copy_from_slice(&self.buffer[..len_start.bytes()]);
+        start[..len_start.bytes()].copy_from_slice(&edge[..len_start.bytes()]);
         let start = edge::Le::new(u64::from_le_bytes(start), len_start);
 
-        let old_middle = (edge.raw() >> len_start.bits()) as u8;
+        let old_middle = edge[len_start.bytes()];
         let new_middle = self.buffer[len_start.bytes()];
 
         let mut end = [0u8; 8];
-        end[..len_end.bytes()].copy_from_slice(&self.buffer[len_middle.bytes()..]);
+        end[..len_end.bytes()].copy_from_slice(&edge[len_middle.bytes()..][..len_end.bytes()]);
         let end = edge::Le::new(u64::from_le_bytes(end), len_end);
 
         Ok((start, old_middle, new_middle, end))
@@ -176,5 +178,35 @@ impl From<u64> for Reader {
 impl<'k> From<&'k u64> for Reader {
     fn from(key: &'k u64) -> Self {
         unsafe { Reader::new_unchecked(*key, 64) }
+    }
+}
+
+impl key::Write<Reader> for key::array::Writer<8> {
+    type Len = key::vec::Len;
+
+    #[inline]
+    fn new(prefix: Reader, key: ribbit::Packed<edge::Le>) -> (Self, Self::Len) {
+        let len = prefix.len + key.len().into();
+        let mut buffer = [0u8; 8];
+        buffer[..prefix.len.bytes()].copy_from_slice(&prefix.buffer[..prefix.len.bytes()]);
+        buffer[prefix.len.bytes()..]
+            .iter_mut()
+            .zip(key)
+            .for_each(|(out, r#in)| {
+                *out = r#in;
+            });
+        (key::array::Writer(buffer), len)
+    }
+
+    #[inline]
+    fn replace(&mut self, start: Self::Len, node: u8, edge: ribbit::Packed<edge::Le>) -> Self::Len {
+        self.0[start.bytes()] = node;
+        self.0[start.bytes() + 1..]
+            .iter_mut()
+            .zip(edge)
+            .for_each(|(out, r#in)| {
+                *out = r#in;
+            });
+        start + key::vec::Len::BYTE + edge.len().into()
     }
 }

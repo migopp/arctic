@@ -56,7 +56,13 @@ features = ["libc"]
 # version = "0.5.1"
 
 [dev-dependencies]
+criterion = { version = "0.8.2", default-features = false }
+mimalloc = "0.1.50"
 proptest = "1.9.0"
 proptest-state-machine = "0.6.0"
 rand = "0.9"
 rapidhash = "4.0.0"
+
+[[bench]]
+name = "sequential"
+harness = false

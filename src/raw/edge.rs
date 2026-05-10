@@ -37,28 +37,21 @@ impl<M: ribbit::Pack<Packed: Meta>> Edge<M> {
         ribbit::Packed::<Self>::new(<M::Packed as Meta>::DEFAULT, 0);
 
     #[inline]
-    pub(crate) unsafe fn as_value_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g u64 {
+    pub(crate) unsafe fn as_value_unchecked(edge: NonNull<Atomic<Self>>) -> NonNull<u64> {
         unsafe {
-            if cfg!(target_endian = "little") {
-                edge.byte_add(8)
-            } else {
-                edge
-            }
-            .cast::<u64>()
-            .as_ref()
-        }
-    }
+            validate!(
+                edge.as_ref()
+                    .load_packed(Ordering::Relaxed)
+                    .meta()
+                    .is_value()
+            );
 
-    #[inline]
-    pub(crate) unsafe fn as_value_mut_unchecked<'g>(edge: NonNull<Atomic<Self>>) -> &'g mut u64 {
-        unsafe {
             if cfg!(target_endian = "little") {
                 edge.byte_add(8)
             } else {
                 edge
             }
             .cast::<u64>()
-            .as_mut()
         }
     }
 
@@ -146,7 +139,7 @@ impl<M: ribbit::Pack<Packed: Meta>> EdgePacked<M> {
     }
 
     #[inline]
-    pub(crate) fn as_value(self) -> Option<u64> {
+    pub(crate) fn into_value(self) -> Option<u64> {
         self.meta().is_value().then(|| self.child_raw())
     }
 
