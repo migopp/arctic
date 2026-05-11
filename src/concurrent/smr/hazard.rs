@@ -546,7 +546,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
                 }
             }
 
-            let mut batch = epoch::EpochBatch::new(global_epoch);
+            let mut batch = epoch::EpochBatch::new(global_epoch, self.global.reclaim_threshold);
             batch.push((prefix, node.raw().get()));
             local.retired.push_back(batch);
         }
@@ -597,7 +597,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
                 }
             }
 
-            let mut batch = epoch::EpochBatch::new(global_epoch);
+            let mut batch = epoch::EpochBatch::new(global_epoch, self.global.reclaim_threshold);
             batch.push((prefix, value));
             local.retired.push_back(batch);
         }

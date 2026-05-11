@@ -13,9 +13,9 @@ pub struct EpochBatch<P: ribbit::Pack<Packed: Prefix>, V: Value> {
 }
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> EpochBatch<P, V> {
-    pub fn new(epoch: usize) -> Self {
+    pub fn new(epoch: usize, sz_hint: usize) -> Self {
         Self {
-            batch: Vec::new(),
+            batch: Vec::with_capacity(sz_hint),
             epoch,
             _value: PhantomData,
         }
