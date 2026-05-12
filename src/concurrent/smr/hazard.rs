@@ -110,7 +110,7 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     #[cfg(feature = "opt-epoch")]
     global_epoch: Cache<AtomicUsize>,
     #[cfg(feature = "opt-epoch")]
-    epochs: [Cache<AtomicUsize>; smr::thread::MAX],
+    epochs: [AtomicUsize; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
@@ -134,7 +134,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             #[cfg(feature = "opt-epoch")]
             global_epoch: Cache(AtomicUsize::new(0)),
             #[cfg(feature = "opt-epoch")]
-            epochs: core::array::from_fn(|_| Cache(AtomicUsize::new(usize::MAX))),
+            epochs: core::array::from_fn(|_| AtomicUsize::new(usize::MAX)),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
                     garbage: 0,
@@ -226,7 +226,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         #[cfg(feature = "opt-epoch")]
         {
             let global_epoch = self.global_epoch.0.load(Ordering::Relaxed);
-            self.epochs[id].0.store(global_epoch, Ordering::Relaxed);
+            self.epochs[id].store(global_epoch, Ordering::Relaxed);
         }
 
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
@@ -279,7 +279,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
             let advance_epoch = (0..smr::thread::count())
-                .all(|i| global.epochs[i].0.load(Ordering::Relaxed) >= global_epoch);
+                .all(|i| global.epochs[i].load(Ordering::Relaxed) >= global_epoch);
             if advance_epoch {
                 global_epoch = match global.global_epoch.0.compare_exchange(
                     global_epoch,
@@ -613,9 +613,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
         #[cfg(feature = "opt-epoch")]
         {
             let id = usize::from(smr::thread::Id::current());
-            self.global.epochs[id]
-                .0
-                .store(usize::MAX, Ordering::Relaxed);
+            self.global.epochs[id].store(usize::MAX, Ordering::Relaxed);
         }
 
         let local = unsafe { &mut *self.local.get() };
