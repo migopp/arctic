@@ -115,6 +115,8 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     slots: [Cache<Slot<P>>; smr::thread::MAX],
     #[cfg(feature = "opt-epoch")]
     global_epoch: Cache<AtomicUsize>,
+    #[cfg(feature = "opt-epoch")]
+    flushes: Cache<AtomicUsize>,
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
@@ -127,6 +129,9 @@ unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Send for Global<P, V> {}
 unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Sync for Global<P, V> {}
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
+    #[cfg(feature = "opt-epoch")]
+    const FLUSHES_PER_EPOCH_UPDATE: usize = 128;
+
     fn default() -> Self {
         Self {
             garbage: AtomicU64::new(0),
@@ -141,6 +146,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             #[cfg(feature = "opt-epoch")]
             global_epoch: Cache(AtomicUsize::new(0)),
+            #[cfg(feature = "opt-epoch")]
+            flushes: Cache(AtomicUsize::new(0)),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
                     garbage: 0,
@@ -289,19 +296,22 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let global_epoch = {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
-            let advance_epoch = global.slots[..smr::thread::count()]
-                .iter()
-                .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
-            if advance_epoch {
-                global_epoch = match global.global_epoch.0.compare_exchange(
-                    global_epoch,
-                    global_epoch + 1,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => global_epoch + 1,
-                    Err(e) => e,
-                };
+            let flushes = global.flushes.0.fetch_add(1, Ordering::Relaxed);
+            if flushes % Global::FLUSHES_PER_EPOCH_UPDATE == 0 {
+                let advance_epoch = global.slots[..smr::thread::count()]
+                    .iter()
+                    .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
+                if advance_epoch {
+                    global_epoch = match global.global_epoch.0.compare_exchange(
+                        global_epoch,
+                        global_epoch + 1,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => global_epoch + 1,
+                        Err(e) => e,
+                    };
+                }
             }
             global_epoch
         };
