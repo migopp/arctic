@@ -129,9 +129,6 @@ unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Send for Global<P, V> {}
 unsafe impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Sync for Global<P, V> {}
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
-    #[cfg(feature = "opt-epoch")]
-    const FLUSHES_PER_EPOCH_UPDATE: usize = 128;
-
     fn default() -> Self {
         Self {
             garbage: AtomicU64::new(0),
@@ -168,6 +165,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
 }
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
+    #[cfg(feature = "opt-epoch")]
+    const FLUSHES_PER_EPOCH_UPDATE: usize = 128;
+
     #[inline]
     #[must_use]
     pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
@@ -297,7 +297,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
             let flushes = global.flushes.0.fetch_add(1, Ordering::Relaxed);
-            if flushes % Global::FLUSHES_PER_EPOCH_UPDATE == 0 {
+            if flushes % Global::<P, V>::FLUSHES_PER_EPOCH_UPDATE == 0 {
                 let advance_epoch = global.slots[..smr::thread::count()]
                     .iter()
                     .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
