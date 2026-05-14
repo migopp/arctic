@@ -240,10 +240,9 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         let local = &self.locals[id];
 
         #[cfg(feature = "opt-epoch")]
-        {
-            let global_epoch = self.global_epoch.0.load(Ordering::Relaxed);
-            epoch.store(global_epoch, Ordering::Relaxed);
-        }
+        let guard_epoch = self.global_epoch.0.load(Ordering::Relaxed);
+        #[cfg(feature = "opt-epoch")]
+        epoch.store(guard_epoch, membarrier::fast_store_ordering(membarrier));
 
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
         hazard.store_packed(prefix, membarrier::fast_store_ordering(membarrier));
@@ -253,6 +252,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
             hazard,
             #[cfg(feature = "opt-epoch")]
             epoch,
+            #[cfg(feature = "opt-epoch")]
+            guard_epoch,
             local,
             global: self,
         }
@@ -512,6 +513,8 @@ pub struct Guard<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> {
     hazard: &'g ribbit::Atomic<P>,
     #[cfg(feature = "opt-epoch")]
     epoch: &'g AtomicUsize,
+    #[cfg(feature = "opt-epoch")]
+    guard_epoch: usize,
     local: &'g UnsafeCell<Local<P, V>>,
     global: &'g Global<P, V>,
 }
@@ -560,15 +563,15 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         #[cfg(feature = "opt-epoch")]
         {
-            let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             if let Some(batch) = local.retired.back_mut() {
-                if batch.epoch == global_epoch {
+                debug_assert!(batch.epoch <= self.guard_epoch);
+                if batch.epoch == self.guard_epoch {
                     batch.push((prefix, node.raw().get()));
                     return;
                 }
             }
 
-            let mut batch = epoch::EpochBatch::new(global_epoch, self.global.reclaim_threshold);
+            let mut batch = epoch::EpochBatch::new(self.guard_epoch, self.global.reclaim_threshold);
             batch.push((prefix, node.raw().get()));
             local.retired.push_back(batch);
         }
@@ -609,15 +612,15 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
 
         #[cfg(feature = "opt-epoch")]
         {
-            let global_epoch = self.global.global_epoch.0.load(Ordering::Relaxed);
             if let Some(batch) = local.retired.back_mut() {
-                if batch.epoch == global_epoch {
+                debug_assert!(batch.epoch <= self.guard_epoch);
+                if batch.epoch == self.guard_epoch {
                     batch.push((prefix, value));
                     return;
                 }
             }
 
-            let mut batch = epoch::EpochBatch::new(global_epoch, self.global.reclaim_threshold);
+            let mut batch = epoch::EpochBatch::new(self.guard_epoch, self.global.reclaim_threshold);
             batch.push((prefix, value));
             local.retired.push_back(batch);
         }
