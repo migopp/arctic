@@ -294,6 +294,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let global_epoch = {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
+            local.flushes += 1;
             if local.flushes % 128 == 0 {
                 let advance_epoch = global.slots[..smr::thread::count()]
                     .iter()
