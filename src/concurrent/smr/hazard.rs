@@ -115,8 +115,6 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     slots: [Cache<Slot<P>>; smr::thread::MAX],
     #[cfg(feature = "opt-epoch")]
     global_epoch: Cache<AtomicUsize>,
-    #[cfg(feature = "opt-epoch")]
-    flushes: Cache<AtomicUsize>,
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
@@ -143,12 +141,12 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
             }),
             #[cfg(feature = "opt-epoch")]
             global_epoch: Cache(AtomicUsize::new(0)),
-            #[cfg(feature = "opt-epoch")]
-            flushes: Cache(AtomicUsize::new(0)),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
                     garbage: 0,
                     cycle: 0,
+                    #[cfg(feature = "opt-epoch")]
+                    flushes: 0,
                     snapshot: Vec::new(),
                     retired: VecDeque::new(),
                     retired_count: 0,
@@ -165,9 +163,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
 }
 
 impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
-    #[cfg(feature = "opt-epoch")]
-    const FLUSHES_PER_EPOCH_UPDATE: usize = 128;
-
     #[inline]
     #[must_use]
     pub fn with_reclaim_threshold(mut self, reclaim_threshold: usize) -> Self {
@@ -274,6 +269,8 @@ type Retired<P, V> = (ribbit::Packed<P>, u64, PhantomData<V>);
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     garbage: i32,
     cycle: usize,
+    #[cfg(feature = "opt-epoch")]
+    flushes: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: VecDeque<Retired<P, V>>,
     retired_count: usize,
@@ -297,8 +294,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let global_epoch = {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
-            let flushes = global.flushes.0.fetch_add(1, Ordering::Relaxed);
-            if flushes % Global::<P, V>::FLUSHES_PER_EPOCH_UPDATE == 0 {
+            if local.flushes % 128 == 0 {
                 let advance_epoch = global.slots[..smr::thread::count()]
                     .iter()
                     .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
