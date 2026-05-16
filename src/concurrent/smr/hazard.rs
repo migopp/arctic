@@ -499,15 +499,11 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             // Deallocate a batch, if we can.
             //
             // Goal here is to limit parallel frees.
-            if !global.condemned.is_empty() {
-                for _ in 0..8 {
-                    if freed < freed_cap
-                        && let Some(mut batch) = global.condemned.pop()
-                    {
-                        freed += batch.batch.len();
-                        batch.deallocate();
-                    }
-                }
+            while !global.condemned.is_empty() && freed < freed_cap {
+                // Safety: Verified above.
+                let mut batch = unsafe { global.condemned.pop().unwrap_unchecked() };
+                freed += batch.batch.len();
+                batch.deallocate();
             }
         }
 
