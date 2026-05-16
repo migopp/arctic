@@ -145,8 +145,6 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                 UnsafeCell::new(Local {
                     garbage: 0,
                     cycle: 0,
-                    #[cfg(feature = "opt-epoch")]
-                    flushes: 0,
                     snapshot: Vec::new(),
                     retired: VecDeque::new(),
                     retired_count: 0,
@@ -269,8 +267,6 @@ type Retired<P, V> = (ribbit::Packed<P>, u64, PhantomData<V>);
 pub struct Local<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     garbage: i32,
     cycle: usize,
-    #[cfg(feature = "opt-epoch")]
-    flushes: usize,
     snapshot: Vec<ribbit::Packed<P>>,
     retired: VecDeque<Retired<P, V>>,
     retired_count: usize,
@@ -294,22 +290,19 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         let global_epoch = {
             // https://github.com/kaist-cp/crossbeam/blob/master/crossbeam-epoch/src/internal.rs#L228
             let mut global_epoch = global.global_epoch.0.load(Ordering::Relaxed);
-            local.flushes += 1;
-            if local.flushes % 128 == 0 {
-                let advance_epoch = global.slots[..smr::thread::count()]
-                    .iter()
-                    .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
-                if advance_epoch {
-                    global_epoch = match global.global_epoch.0.compare_exchange(
-                        global_epoch,
-                        global_epoch + 1,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => global_epoch + 1,
-                        Err(e) => e,
-                    };
-                }
+            let advance_epoch = global.slots[..smr::thread::count()]
+                .iter()
+                .all(|slot| slot.0.epoch.load(Ordering::Relaxed) >= global_epoch);
+            if advance_epoch {
+                global_epoch = match global.global_epoch.0.compare_exchange(
+                    global_epoch,
+                    global_epoch + 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => global_epoch + 1,
+                    Err(e) => e,
+                };
             }
             global_epoch
         };
