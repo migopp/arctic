@@ -384,58 +384,13 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             }
         }
 
-        #[cfg(feature = "opt-batch")]
-        let mut batch = Vec::with_capacity(global.reclaim_threshold);
+        if freed < freed_cap {
+            #[cfg(feature = "opt-batch")]
+            let mut batch = Vec::with_capacity(global.reclaim_threshold);
 
-        local.retired.retain_mut(|retired| {
-            #[cfg(not(feature = "opt-epoch"))]
-            {
-                let prefix = &mut retired.0;
-                let raw = &mut retired.1;
-
-                if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
-                    stat::increment(stat::Counter::HazardMatch);
-                    if cfg!(feature = "stat") {
-                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
-                    }
-                    return true;
-                } else if freed >= freed_cap {
-                    return true;
-                }
-
-                if cfg!(feature = "stat") {
-                    stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
-                }
-                #[cfg(not(feature = "opt-batch"))]
+            local.retired.retain_mut(|retired| {
+                #[cfg(not(feature = "opt-epoch"))]
                 {
-                    freed += 1;
-                }
-
-                validate!(prefix.is_value() ^ prefix.is_node());
-
-                if cfg!(feature = "stat") {
-                    if let Some(record) = match prefix.bytes() {
-                        0 => Some(stat::Record::ReclaimAge0),
-                        1 => Some(stat::Record::ReclaimAge1),
-                        2 => Some(stat::Record::ReclaimAge2),
-                        3 => Some(stat::Record::ReclaimAge3),
-                        _ => None,
-                    } {
-                        stat::record(record, prefix.age() as u64 + 1);
-                    }
-                }
-
-                #[cfg(feature = "opt-batch")]
-                batch.push((*prefix, *raw));
-
-                #[cfg(not(feature = "opt-batch"))]
-                deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
-                false
-            }
-
-            #[cfg(feature = "opt-epoch")]
-            {
-                retired.batch.retain_mut(|retired| {
                     let prefix = &mut retired.0;
                     let raw = &mut retired.1;
 
@@ -476,34 +431,81 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
                     #[cfg(not(feature = "opt-batch"))]
                     deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
-
                     false
-                });
-                !retired.batch.is_empty()
-            }
-        });
+                }
 
-        #[cfg(feature = "opt-batch")]
-        {
-            // First, push batch to the condemned queue.
-            if !batch.is_empty() {
-                let batch = batch::Batch::new(batch);
-                if let Err(mut batch) = global.condemned.push(batch) {
-                    // No space in condemned queue. Must deallocate now, even if that means
-                    // violating the deallocation cap.
+                #[cfg(feature = "opt-epoch")]
+                {
+                    retired.batch.retain_mut(|retired| {
+                        let prefix = &mut retired.0;
+                        let raw = &mut retired.1;
+
+                        if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
+                            stat::increment(stat::Counter::HazardMatch);
+                            if cfg!(feature = "stat") {
+                                *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                            }
+                            return true;
+                        } else if freed >= freed_cap {
+                            return true;
+                        }
+
+                        if cfg!(feature = "stat") {
+                            stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
+                        }
+                        #[cfg(not(feature = "opt-batch"))]
+                        {
+                            freed += 1;
+                        }
+
+                        validate!(prefix.is_value() ^ prefix.is_node());
+
+                        if cfg!(feature = "stat") {
+                            if let Some(record) = match prefix.bytes() {
+                                0 => Some(stat::Record::ReclaimAge0),
+                                1 => Some(stat::Record::ReclaimAge1),
+                                2 => Some(stat::Record::ReclaimAge2),
+                                3 => Some(stat::Record::ReclaimAge3),
+                                _ => None,
+                            } {
+                                stat::record(record, prefix.age() as u64 + 1);
+                            }
+                        }
+
+                        #[cfg(feature = "opt-batch")]
+                        batch.push((*prefix, *raw));
+
+                        #[cfg(not(feature = "opt-batch"))]
+                        deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+
+                        false
+                    });
+                    !retired.batch.is_empty()
+                }
+            });
+
+            #[cfg(feature = "opt-batch")]
+            {
+                // First, push batch to the condemned queue.
+                if !batch.is_empty() {
+                    let batch = batch::Batch::new(batch);
+                    if let Err(mut batch) = global.condemned.push(batch) {
+                        // No space in condemned queue. Must deallocate now, even if that means
+                        // violating the deallocation cap.
+                        freed += batch.batch.len();
+                        batch.deallocate();
+                    }
+                }
+
+                // Deallocate a batch, if we can.
+                //
+                // Goal here is to limit parallel frees.
+                while !global.condemned.is_empty() && freed < freed_cap {
+                    // Safety: Verified above.
+                    let mut batch = unsafe { global.condemned.pop().unwrap_unchecked() };
                     freed += batch.batch.len();
                     batch.deallocate();
                 }
-            }
-
-            // Deallocate a batch, if we can.
-            //
-            // Goal here is to limit parallel frees.
-            while !global.condemned.is_empty() && freed < freed_cap {
-                // Safety: Verified above.
-                let mut batch = unsafe { global.condemned.pop().unwrap_unchecked() };
-                freed += batch.batch.len();
-                batch.deallocate();
             }
         }
 
