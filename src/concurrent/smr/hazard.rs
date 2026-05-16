@@ -237,7 +237,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         #[cfg(feature = "opt-epoch")]
         let guard_epoch = self.global_epoch.0.load(Ordering::Relaxed);
         #[cfg(feature = "opt-epoch")]
-        epoch.store(guard_epoch, membarrier::fast_store_ordering(membarrier));
+        epoch.store(guard_epoch, Ordering::Relaxed);
 
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
         hazard.store_packed(prefix, membarrier::fast_store_ordering(membarrier));
