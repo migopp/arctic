@@ -24,3 +24,13 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Batch<P, V> {
         });
     }
 }
+
+// FIXME: figure out if there a way to parameterize based on being collectable into a vector?
+// Could use `Into<Vec<...>>`, but that is not implemented for `std::vec::Drain`...
+impl<'a, P: ribbit::Pack<Packed: Prefix>, V: Value>
+    From<std::vec::Drain<'a, (ribbit::Packed<P>, u64)>> for Batch<P, V>
+{
+    fn from(batch: std::vec::Drain<'a, (ribbit::Packed<P>, u64)>) -> Self {
+        Self::new(batch.collect())
+    }
+}
