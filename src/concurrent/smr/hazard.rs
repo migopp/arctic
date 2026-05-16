@@ -331,7 +331,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             //
             // If the epoch is sufficiently old, we can skip any prefix checking and just add it to
             // the global batch list right here, right now.
-            if local
+            while local
                 .retired
                 .front_mut()
                 .is_some_and(|batch| global_epoch >= batch.epoch + 2)
