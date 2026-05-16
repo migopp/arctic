@@ -2,9 +2,11 @@ use core::marker::PhantomData;
 
 use crate::concurrent::Value;
 use crate::concurrent::smr::hazard;
-use crate::concurrent::smr::hazard::batch::Batch;
 use crate::concurrent::smr::hazard::prefix::Prefix;
 use crate::stat;
+
+#[cfg(feature = "opt-batch")]
+use crate::concurrent::smr::hazard::batch::Batch;
 
 pub struct EpochBatch<P: ribbit::Pack<Packed: Prefix>, V: Value> {
     pub batch: Vec<(ribbit::Packed<P>, u64)>,
@@ -26,6 +28,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> EpochBatch<P, V> {
         self.batch.push(retiree)
     }
 
+    #[cfg(feature = "opt-batch")]
     pub fn into_batches(&mut self, batch_size: usize) -> Vec<Batch<P, V>> {
         // FIXME: find a more efficient way to do this
         self.batch

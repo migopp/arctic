@@ -331,7 +331,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             //
             // If the epoch is sufficiently old, we can skip any prefix checking and just add it to
             // the global batch list right here, right now.
-            while local
+            if local
                 .retired
                 .front_mut()
                 .is_some_and(|batch| global_epoch >= batch.epoch + 2)
@@ -359,14 +359,22 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     }
                 });
 
-                // Since this epoch likely contains many retired nodes/values, we split them up
-                // into batches as to not deallocate too much at once and cause strange
-                // allocator behavior.
-                for batch in batch.into_batches(global.reclaim_threshold) {
-                    if let Err(mut batch) = global.condemned.push(batch) {
-                        // No space in condemned queue. Must deallocate now.
-                        batch.deallocate();
+                #[cfg(feature = "opt-batch")]
+                {
+                    // Since this epoch likely contains many retired nodes/values, we split them up
+                    // into batches as to not deallocate too much at once and cause strange
+                    // allocator behavior.
+                    for batch in batch.into_batches(global.reclaim_threshold) {
+                        if let Err(mut batch) = global.condemned.push(batch) {
+                            // No space in condemned queue. Must deallocate now.
+                            batch.deallocate();
+                        }
                     }
+                }
+
+                #[cfg(not(feature = "opt-batch"))]
+                {
+                    batch.deallocate();
                 }
             }
         }
@@ -452,7 +460,12 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                         }
                     }
 
+                    #[cfg(feature = "opt-batch")]
                     batch.push((*prefix, *raw));
+
+                    #[cfg(not(feature = "opt-batch"))]
+                    deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+
                     false
                 });
                 !retired.batch.is_empty()
