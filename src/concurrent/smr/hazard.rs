@@ -312,8 +312,15 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 .map(|slot| slot.0.hazard.load_packed(Ordering::Relaxed)),
         );
 
+        // `freed` allocations are deemed safe to deallocate.
         let mut freed = 0usize;
-        let freed_cap = global.reclaim_threshold;
+        // `deallocd` allocations are actually relinquished to the allocator.
+        //
+        // This is important because `freed` and `local.garbage` are local counts.
+        // In the case of `opt-batch` it doesn't make sense to decrement the local garbage count
+        // when we free a batch of things from the `condemned` queue.
+        let mut deallocd = 0usize;
+        let deallocd_cap = 2 * global.reclaim_threshold;
         let (chunks, leftover) = local.snapshot.as_chunks::<4>();
         validate!(leftover.is_empty());
 
@@ -328,22 +335,19 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 .retired
                 .front_mut()
                 .is_some_and(|batch| global_epoch >= batch.epoch + 2)
-                && freed < freed_cap
+                && deallocd < deallocd_cap
             {
                 // Safety: Verified by above check to be present.
                 let front = unsafe { local.retired.front_mut().unwrap_unchecked() };
-                let free_amt = freed_cap - freed;
-                let removed = front.drain_last(free_amt).collect::<Vec<_>>();
+                let dealloc_amt = deallocd_cap - deallocd;
+                let removed = front.drain_last(dealloc_amt).collect::<Vec<_>>();
 
                 #[allow(unused_variables)]
                 removed.iter().for_each(|(prefix, raw)| {
                     if cfg!(feature = "stat") {
                         stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                     }
-                    #[cfg(not(feature = "opt-batch"))]
-                    {
-                        freed += 1;
-                    }
+                    freed += 1;
 
                     validate!(prefix.is_value() ^ prefix.is_node());
 
@@ -360,7 +364,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     }
 
                     #[cfg(not(feature = "opt-batch"))]
-                    deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                    {
+                        deallocd += 1;
+                        deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                    }
                 });
 
                 #[cfg(feature = "opt-batch")]
@@ -369,7 +376,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     if let Err(mut batch) = global.condemned.push(batch) {
                         // No space in condemned queue. Must deallocate now, even if that means
                         // violating the deallocation cap.
-                        freed += batch.batch.len();
+                        deallocd += batch.batch.len();
                         batch.deallocate();
                     }
                 }
@@ -383,7 +390,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             }
         }
 
-        if freed < freed_cap {
+        if deallocd < deallocd_cap {
             #[cfg(feature = "opt-batch")]
             let mut batch = Vec::with_capacity(global.reclaim_threshold);
 
@@ -399,17 +406,14 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                             *prefix = prefix.with_age(prefix.age().saturating_add(1));
                         }
                         return true;
-                    } else if freed >= freed_cap {
+                    } else if deallocd >= deallocd_cap {
                         return true;
                     }
 
                     if cfg!(feature = "stat") {
                         stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                     }
-                    #[cfg(not(feature = "opt-batch"))]
-                    {
-                        freed += 1;
-                    }
+                    freed += 1;
 
                     validate!(prefix.is_value() ^ prefix.is_node());
 
@@ -429,7 +433,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     batch.push((*prefix, *raw));
 
                     #[cfg(not(feature = "opt-batch"))]
-                    deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                    {
+                        deallocd += 1;
+                        deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                    }
                     false
                 }
 
@@ -445,17 +452,14 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                                 *prefix = prefix.with_age(prefix.age().saturating_add(1));
                             }
                             return true;
-                        } else if freed >= freed_cap {
+                        } else if deallocd >= deallocd_cap {
                             return true;
                         }
 
                         if cfg!(feature = "stat") {
                             stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                         }
-                        #[cfg(not(feature = "opt-batch"))]
-                        {
-                            freed += 1;
-                        }
+                        freed += 1;
 
                         validate!(prefix.is_value() ^ prefix.is_node());
 
@@ -475,7 +479,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                         batch.push((*prefix, *raw));
 
                         #[cfg(not(feature = "opt-batch"))]
-                        deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                        {
+                            deallocd += 1;
+                            deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                        }
 
                         false
                     });
@@ -491,7 +498,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     if let Err(mut batch) = global.condemned.push(batch) {
                         // No space in condemned queue. Must deallocate now, even if that means
                         // violating the deallocation cap.
-                        freed += batch.batch.len();
+                        deallocd += batch.batch.len();
                         batch.deallocate();
                     }
                 }
@@ -499,10 +506,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 // Deallocate a batch, if we can.
                 //
                 // Goal here is to limit parallel frees.
-                while freed < freed_cap
+                while deallocd < deallocd_cap
                     && let Some(mut batch) = global.condemned.pop()
                 {
-                    freed += batch.batch.len();
+                    deallocd += batch.batch.len();
                     batch.deallocate();
                 }
             }
