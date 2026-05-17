@@ -334,10 +334,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 // Safety: Verified by above check to be present.
                 let front = unsafe { local.retired.front_mut().unwrap_unchecked() };
                 let free_amt = freed_cap - freed;
-                let mut removed = front.drain_last(free_amt);
+                let removed = front.drain_last(free_amt).collect::<Vec<_>>();
 
                 #[allow(unused_variables)]
-                for (prefix, raw) in &mut removed {
+                removed.iter().for_each(|(prefix, raw)| {
                     if cfg!(feature = "stat") {
                         stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                     }
@@ -361,12 +361,12 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                     }
 
                     #[cfg(not(feature = "opt-batch"))]
-                    deallocate::<P, V>(prefix, raw, stat::Counter::FreeRetire);
-                }
+                    deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                });
 
                 #[cfg(feature = "opt-batch")]
                 {
-                    let batch = Into::<batch::Batch<P, V>>::into(removed);
+                    let batch = batch::Batch::new(removed);
                     if let Err(mut batch) = global.condemned.push(batch) {
                         // No space in condemned queue. Must deallocate now, even if that means
                         // violating the deallocation cap.
