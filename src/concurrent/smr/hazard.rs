@@ -198,8 +198,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             // Also free the global condemned allocations.
             //
             // FIXME: This is buns. Doesn't implement `drain` or `iter_mut`, though...
-            while !self.condemned.is_empty() {
-                let mut batch = unsafe { self.condemned.pop().unwrap_unchecked() };
+            while let Some(mut batch) = self.condemned.pop() {
                 batch.deallocate();
             }
         }
