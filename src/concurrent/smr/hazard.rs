@@ -93,6 +93,8 @@ pub struct Global<P: ribbit::Pack<Packed: Prefix>, V: Value> {
 
     // FIXME: jagged/triangular array
     hazards: [Cache<ribbit::Atomic<P>>; smr::thread::MAX],
+    #[cfg(feature = "opt-epoch")]
+    epochs: [Cache<AtomicU64>; smr::thread::MAX],
     locals: [UnsafeCell<Local<P, V>>; smr::thread::MAX],
     membarrier: AtomicBool,
     reclaim_threshold: usize,
@@ -111,6 +113,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Default for Global<P, V> {
                     <<P as ribbit::Pack>::Packed as Prefix>::HAZARD_NULL,
                 ))
             }),
+            #[cfg(feature = "opt-epoch")]
+            epochs: core::array::from_fn(|_| Cache(AtomicU64::new(0))),
             locals: core::array::from_fn(|_| {
                 UnsafeCell::new(Local {
                     garbage: 0,
@@ -147,7 +151,7 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
             .take(smr::thread::count())
             .map(|local| local.get_mut())
             .flat_map(|local| local.retired.drain(..))
-            .for_each(|(prefix, raw)| {
+            .for_each(|(prefix, raw, _)| {
                 deallocate::<P, V>(prefix, raw, stat::Counter::FreeReclaim);
             })
     }
@@ -174,6 +178,10 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
         let id = usize::from(smr::thread::Id::current());
         let membarrier = self.membarrier.load(Ordering::Relaxed);
         let hazard = &self.hazards[id].0;
+        #[cfg(feature = "opt-epoch")]
+        let epoch = &self.epochs[id].0;
+        #[cfg(feature = "opt-epoch")]
+        epoch.fetch_add(1, Ordering::Relaxed);
         let local = &self.locals[id];
 
         validate!(!hazard.load_packed(Ordering::Relaxed).is_active());
@@ -182,6 +190,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Global<P, V> for Box<Global
 
         Guard {
             hazard,
+            #[cfg(feature = "opt-epoch")]
+            epoch,
             local,
             global: self,
         }
@@ -197,7 +207,10 @@ pub struct Local<P: ribbit::Pack<Packed: Prefix>, V> {
     garbage: i32,
     cycle: usize,
     snapshot: Vec<ribbit::Packed<P>>,
-    retired: Vec<(ribbit::Packed<P>, u64)>,
+    #[cfg(not(feature = "opt-epoch"))]
+    retired: Vec<(ribbit::Packed<P>, u64, ())>,
+    #[cfg(feature = "opt-epoch")]
+    retired: Vec<(ribbit::Packed<P>, u64, u64)>,
     _value: PhantomData<V>,
 }
 
@@ -218,13 +231,30 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
                 .iter()
                 .map(|hazard| hazard.0.load_packed(Ordering::Relaxed)),
         );
+        #[cfg(feature = "opt-epoch")]
+        let min_epoch = global.epochs[..smr::thread::count()]
+            .iter()
+            .map(|epoch| epoch.0.load(Ordering::Relaxed))
+            .min()
+            .unwrap();
 
         let mut freed = 0;
         let (chunks, leftover) = local.snapshot.as_chunks::<4>();
         validate!(leftover.is_empty());
 
-        local.retired.retain_mut(|(prefix, raw)| {
+        #[allow(unused_variables)]
+        local.retired.retain_mut(|(prefix, raw, retired_epoch)| {
+            #[cfg(not(feature = "opt-epoch"))]
             if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
+                stat::increment(stat::Counter::HazardMatch);
+                if cfg!(feature = "stat") {
+                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                }
+                return true;
+            }
+
+            #[cfg(feature = "opt-epoch")]
+            if *retired_epoch <= min_epoch && chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
                 stat::increment(stat::Counter::HazardMatch);
                 if cfg!(feature = "stat") {
                     *prefix = prefix.with_age(prefix.age().saturating_add(1));
@@ -280,6 +310,8 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
 
 pub struct Guard<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> {
     hazard: &'g ribbit::Atomic<P>,
+    #[cfg(feature = "opt-epoch")]
+    epoch: &'g AtomicU64,
     local: &'g UnsafeCell<Local<P, V>>,
     global: &'g Global<P, V>,
 }
@@ -298,6 +330,12 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
+        #[cfg(feature = "opt-epoch")]
+        let min_epoch = self.global.epochs[..smr::thread::count()]
+            .iter()
+            .map(|epoch| epoch.0.load(Ordering::Relaxed))
+            .min()
+            .unwrap();
 
         let local = unsafe { &mut *self.local.get() };
 
@@ -320,7 +358,11 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             }
         }
 
-        local.retired.push((prefix, node.raw().get()));
+        #[cfg(not(feature = "opt-epoch"))]
+        local.retired.push((prefix, node.raw().get(), ()));
+
+        #[cfg(feature = "opt-epoch")]
+        local.retired.push((prefix, node.raw().get(), min_epoch));
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -330,6 +372,12 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .hazard
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
+        #[cfg(feature = "opt-epoch")]
+        let min_epoch = self.global.epochs[..smr::thread::count()]
+            .iter()
+            .map(|epoch| epoch.0.load(Ordering::Relaxed))
+            .min()
+            .unwrap();
 
         let local = unsafe { &mut *self.local.get() };
 
@@ -352,7 +400,11 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             }
         }
 
-        local.retired.push((prefix, value));
+        #[cfg(not(feature = "opt-epoch"))]
+        local.retired.push((prefix, value, ()));
+
+        #[cfg(feature = "opt-epoch")]
+        local.retired.push((prefix, value, min_epoch));
     }
 }
 
@@ -360,6 +412,8 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> Drop for Guard<'g, P, V> {
     fn drop(&mut self) {
         self.hazard
             .store_packed(ribbit::Packed::<P>::HAZARD_NULL, Ordering::Relaxed);
+        #[cfg(feature = "opt-epoch")]
+        self.epoch.fetch_add(1, Ordering::Relaxed);
 
         let local = unsafe { &mut *self.local.get() };
         if local.retired.len() < self.global.reclaim_threshold {

@@ -20,6 +20,7 @@ opt-no-expand = []
 opt-membarrier = ["dep:libc", "seize/fast-barrier"]
 opt-no-path = []
 opt-no-dispatch = []
+opt-epoch = []
 
 smr-disable = []
 # FIXME: make these dependencies optional
