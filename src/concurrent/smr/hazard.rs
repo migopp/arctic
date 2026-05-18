@@ -243,47 +243,51 @@ impl<P: ribbit::Pack<Packed: Prefix>, V: Value> Global<P, V> {
         validate!(leftover.is_empty());
 
         #[allow(unused_variables)]
-        local.retired.retain_mut(|(prefix, raw, retired_epoch)| {
-            #[cfg(not(feature = "opt-epoch"))]
-            if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
-                stat::increment(stat::Counter::HazardMatch);
+        local
+            .retired
+            .retain_mut(|(prefix, raw, retirement_max_epoch)| {
+                #[cfg(not(feature = "opt-epoch"))]
+                if chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
+                    stat::increment(stat::Counter::HazardMatch);
+                    if cfg!(feature = "stat") {
+                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    }
+                    return true;
+                }
+
+                #[cfg(feature = "opt-epoch")]
+                if *retirement_max_epoch >= min_epoch
+                    && chunks.iter().any(|chunk| prefix.is_conflict(chunk))
+                {
+                    stat::increment(stat::Counter::HazardMatch);
+                    if cfg!(feature = "stat") {
+                        *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    }
+                    return true;
+                }
+
                 if cfg!(feature = "stat") {
-                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
                 }
-                return true;
-            }
+                freed += 1;
 
-            #[cfg(feature = "opt-epoch")]
-            if *retired_epoch <= min_epoch && chunks.iter().any(|chunk| prefix.is_conflict(chunk)) {
-                stat::increment(stat::Counter::HazardMatch);
+                validate!(prefix.is_value() ^ prefix.is_node());
+
                 if cfg!(feature = "stat") {
-                    *prefix = prefix.with_age(prefix.age().saturating_add(1));
+                    if let Some(record) = match prefix.bytes() {
+                        0 => Some(stat::Record::ReclaimAge0),
+                        1 => Some(stat::Record::ReclaimAge1),
+                        2 => Some(stat::Record::ReclaimAge2),
+                        3 => Some(stat::Record::ReclaimAge3),
+                        _ => None,
+                    } {
+                        stat::record(record, prefix.age() as u64 + 1);
+                    }
                 }
-                return true;
-            }
 
-            if cfg!(feature = "stat") {
-                stat::record(stat::Record::ReclaimDepth, prefix.bytes() as u64);
-            }
-            freed += 1;
-
-            validate!(prefix.is_value() ^ prefix.is_node());
-
-            if cfg!(feature = "stat") {
-                if let Some(record) = match prefix.bytes() {
-                    0 => Some(stat::Record::ReclaimAge0),
-                    1 => Some(stat::Record::ReclaimAge1),
-                    2 => Some(stat::Record::ReclaimAge2),
-                    3 => Some(stat::Record::ReclaimAge3),
-                    _ => None,
-                } {
-                    stat::record(record, prefix.age() as u64 + 1);
-                }
-            }
-
-            deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
-            false
-        });
+                deallocate::<P, V>(*prefix, *raw, stat::Counter::FreeRetire);
+                false
+            });
 
         if cfg!(feature = "stat-garbage") {
             local.garbage -= freed;
@@ -331,10 +335,10 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(false, Some(_bits));
         #[cfg(feature = "opt-epoch")]
-        let min_epoch = self.global.epochs[..smr::thread::count()]
+        let max_epoch = self.global.epochs[..smr::thread::count()]
             .iter()
             .map(|epoch| epoch.0.load(Ordering::Relaxed))
-            .min()
+            .max()
             .unwrap();
 
         let local = unsafe { &mut *self.local.get() };
@@ -362,7 +366,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         local.retired.push((prefix, node.raw().get(), ()));
 
         #[cfg(feature = "opt-epoch")]
-        local.retired.push((prefix, node.raw().get(), min_epoch));
+        local.retired.push((prefix, node.raw().get(), max_epoch));
     }
 
     unsafe fn retire_value(&mut self, value: u64) {
@@ -373,10 +377,10 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
             .load_packed(Ordering::Relaxed)
             .into_prefix(true, None);
         #[cfg(feature = "opt-epoch")]
-        let min_epoch = self.global.epochs[..smr::thread::count()]
+        let max_epoch = self.global.epochs[..smr::thread::count()]
             .iter()
             .map(|epoch| epoch.0.load(Ordering::Relaxed))
-            .min()
+            .max()
             .unwrap();
 
         let local = unsafe { &mut *self.local.get() };
@@ -404,7 +408,7 @@ impl<'g, P: ribbit::Pack<Packed: Prefix>, V: Value> smr::Guard<V> for Guard<'g, 
         local.retired.push((prefix, value, ()));
 
         #[cfg(feature = "opt-epoch")]
-        local.retired.push((prefix, value, min_epoch));
+        local.retired.push((prefix, value, max_epoch));
     }
 }
 
